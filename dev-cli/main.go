@@ -1,21 +1,70 @@
 package main
 
 import (
-  "fmt"
+	"context"
+	"errors"
+	"fmt"
+	"os"
 )
 
-//TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
-// the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
+const cliVersion = "1.1.0"
 
 func main() {
-  //TIP <p>Press <shortcut actionId="ShowIntentionActions"/> when your caret is at the underlined text
-  // to see how GoLand suggests fixing the warning.</p><p>Alternatively, if available, click the lightbulb to view possible fixes.</p>
-  s := "gopher"
-  fmt.Printf("Hello and welcome, %s!\n", s)
+	if err := run(context.Background(), os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "playmesh-cli:", err)
+		os.Exit(1)
+	}
+}
 
-  for i := 1; i <= 5; i++ {
-	//TIP <p>To start your debugging session, right-click your code in the editor and select the Debug option.</p> <p>We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-	// for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.</p>
-	fmt.Println("i =", 100/i)
-  }
+func run(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		printUsage()
+		return nil
+	}
+	switch args[0] {
+	case "version", "--version", "-v":
+		if len(args) != 1 {
+			return errors.New("用法：playmesh-cli --version")
+		}
+		fmt.Printf("playmesh-cli %s\n", cliVersion)
+		return nil
+	case "to":
+		return commandTo(ctx, args[1:])
+	case "get":
+		return commandGet(ctx, args[1:])
+	case "push":
+		if len(args) != 1 {
+			return errors.New("用法：playmesh-cli push")
+		}
+		_, err := pushProject(ctx)
+		return err
+	case "dev":
+		if len(args) != 1 {
+			return errors.New("用法：playmesh-cli dev")
+		}
+		return commandDev(ctx)
+	case "sdk":
+		if len(args) != 1 {
+			return errors.New("用法：playmesh-cli sdk")
+		}
+		return commandSDK(ctx)
+	case "help", "--help", "-h":
+		printUsage()
+		return nil
+	default:
+		return fmt.Errorf("未知命令 %q；使用 playmesh-cli help 查看帮助", args[0])
+	}
+}
+
+func printUsage() {
+	fmt.Print(`Playmesh developer CLI
+
+用法：
+  playmesh-cli to <workspace-url>  连接并切换目标 App
+  playmesh-cli get <project-id>    拉取项目和统一 SDK
+  playmesh-cli sdk                 更新当前项目 SDK
+  playmesh-cli push                上传、校验并原子提交，不运行
+  playmesh-cli dev                 push 后切换运行项目并附加日志
+  playmesh-cli --version           输出 CLI 版本
+`)
 }

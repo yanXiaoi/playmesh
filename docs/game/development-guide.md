@@ -14,6 +14,22 @@ Playmesh 游戏是由 App 托管的 HTML/CSS/JavaScript 应用。Flutter 负责�
 
 游戏代码不能直接访问 Bridge、Core 地址、内部 token 或任意文件系统。
 
+## IDEA 与 CLI 开发
+
+Playmesh CLI 允许在 IDEA 中编辑本地副本、在目标 Windows 或 Android App 中运行，同一套命令和目录结构跨平台使用。先在 App 设置中开启开发者模式并复制完整工作区链接，然后执行：
+
+```powershell
+playmesh-cli to "http://<app-ip>:16666/dev/<workspace-id>/workspace?token=<token>"
+mkdir my-game
+cd my-game
+playmesh-cli get <project-id>
+playmesh-cli dev
+```
+
+`get` 拉取包内 `main.json`、`capabilities.json`、`app/`，并把目标 App 构建时生成的两套 SDK 与 `.d.ts` 放入 `playmesh/sdk/`。项目根的 `app/` 与 `playmesh/` 直接镜像运行时 `/app/...` 与 `/playmesh/...` 两个 URL 空间，IDEA 能解析 HTML、JavaScript、CSS 中的绝对引用。`playmesh/` 只属于本地开发副本，不会出现在 App 安装目录或上传包中。
+
+`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新 `playmesh/sdk/` 到目标 App 当前版本，不支持选择历史版本。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。完整命令、目录和安全边界见 `dev-cli/README.md`。
+
 ## 开发者工作区快速操作
 
 Playmesh 不提供独立的 App 文件编辑器。电脑浏览器与 App 内置 WebView 均打开同一个开发者工作区，AI 可以生成分段文本供用户粘贴到工作区的快速操作面板。面板不执行自然语言命令，只解析以下固定操作：
@@ -49,7 +65,7 @@ export const ActionTypes = {};
 
 需要重置调试存档时，先退出正在运行的游戏，再使用工作区“清理游戏数据”按钮。该操作只删除当前项目的 `data/`，不会清理 `cache/`、项目源码或开发历史。
 
-浏览器工作区继续使用 SSE 接收实时事件；不方便维护流式连接的 API Agent 可调用 `GET /dev/api/logs?limit=50` 获取最近最多 50 条运行日志，并调用 `GET /dev/api/projects/{projectId}/run` 轮询运行状态。日志接口返回时间正序的结构化 `runtime.log` 项，底层内存缓存仍最多保留 500 条且不写磁盘。
+浏览器工作区继续使用 SSE 接收实时事件；不方便维护流式连接的 API Agent 可调用 `GET /dev/api/logs?limit=50` 获取最近最多 50 条运行日志，并调用 `GET /dev/api/projects/{projectId}/run` 轮询运行状态。日志接口接受可选的 `projectId` 和 `runId` 查询参数，仅返回指定运行实例；每条日志包含稳定的 `eventId`，可用于合并缓存回放与 SSE 时去重。底层内存缓存最多保留 500 条且不写磁盘。
 
 API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久工作区 token 的全部接口、鉴权、SDK Manifest、OpenAPI 和 Schema。主工作区点击“AI”直接进入统一页面，接口文档作为只读项与提示模板同页展示。纯聊天 AI 使用 `/dev/api/projects/{projectId}/chat-prompt.txt`，可直接调用接口的 Agent 使用 `/dev/api/projects/{projectId}/agent-prompt.txt`。`GET /dev/api/status` 的 `baseUrls` 枚举当前设备可用的 HTTP 地址；Agent 端点接受可选 `baseUrl` 查询参数，但只允许使用该枚举中的地址。平台按当前 `main.json.modes/displayModes` 只拼接相关 SDK、角色语义、强制文件和当前项目源码；公共“自定义想法”同时合入两类文本，Agent 文本额外包含所选 Gateway 地址、Bearer token 与项目文件、校验、运行/重启、日志轮询和可选 SSE 接口。两份最终文件固定为 UTF-8 BOM TXT，并都在醒目的“获取项目提示词”入口中复制或下载；手机端应为 Agent 选择电脑端 AI 能访问的局域网 Base URL。模板覆盖保存在 `playmesh-library/developer/ai-prompts/`；项目本体统一保存在 `playmesh-library/packages/{gameId}/`。平台不内置游戏 Demo。
 
@@ -87,7 +103,7 @@ API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久
     developer/local-history/
 ```
 
-开发者工作区的项目根对应 `packages/{gameId}/`，主页面路径由 `entries.game` 决定，默认 `app/index.html`。WebView 只映射其中的 `app/` 公开目录；`data/`、`cache/` 和 `.playmesh/` 均由平台管理，不显示在普通项目树中，也不参与静态映射。
+开发者工作区的项目根对应 `packages/{gameId}/`，主页面路径由 `entries.game` 决定，默认 `app/index.html`。WebView 只映射其中的 `app/` 公开目录；`data/` 和 `cache/` 由平台管理，不显示在普通项目树中，也不参与静态映射。App 安装目录只保存正式发布内容和平台管理数据；CLI 本地的 `playmesh/` 只是 `/playmesh/` 公共 URL 空间的开发镜像，永不上传或安装。
 
 | 层 | 允许职责 | 禁止职责 |
 |---|---|---|
@@ -103,7 +119,7 @@ API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久
 
 ```html
 <script src="/playmesh/sdk/v1/playmesh.js"></script>
-<script type="module" src="/game/static/js/player/index.js"></script>
+<script type="module" src="/app/static/js/player/index.js"></script>
 ```
 
 ```js
@@ -113,7 +129,7 @@ const session = playmesh.session.getCurrent();
 const player = playmesh.player.getCurrent();
 ```
 
-游戏只显式引入 `playmesh.js`。Playmesh App 会自动在它之前注入本机桥接 `playmesh-app.js`，普通浏览器不会加载该文件；两种环境都可通过 `playmesh.app.isAvailable()` 做能力判断。主机 SDK 始终负责日志、会话、联机和游戏存储，本机 App SDK 只负责 App 持久化身份与已声明的硬件能力，游戏不得手动设置玩家 ID。
+游戏只显式引入 `playmesh.js`。Playmesh App 会自动在它之前注入本机桥接 `playmesh-app.js`，普通浏览器不会加载该文件；两种环境都可通过 `playmesh.app.isAvailable()` 做能力判断。主机 SDK 负责会话、联机和游戏存储，本机 App SDK 只负责 App 持久化身份与已声明的硬件能力；Console 由当前页面的宿主在本设备捕获，游戏不得手动设置玩家 ID。
 
 大屏公共显示端的 `player` 为 `null`。页面必须允许该值为空，不能把 Authority 自动加入玩家集合。
 
@@ -219,7 +235,7 @@ if (playmesh.app.device.getCapabilities().includes('sensor.accelerometer')) {
 ## 开发检查清单
 
 - `main.json.id` 与包目录名一致，版本使用 `MAJOR.MINOR.PATCH`。
-- 每次准备发布游戏内容时，按 `PATCH` 修复、`MINOR` 兼容新增、`MAJOR` 不兼容变更升级 `main.json.version`；若所需 Game SDK 变化，同步更新 `sdkVersion`。工作区通过“项目设置”或 manifest API 修改清单，普通文件接口仍只读，项目 `id` 永远不能修改。
+- 每次准备发布游戏内容时，按 `PATCH` 修复、`MINOR` 兼容新增、`MAJOR` 不兼容变更升级 `main.json.version`；内置工作区同步维护 SDK 字段，CLI 则在发布前按本地生成文件自动覆盖 `sdkVersion/appSdkVersion`。工作区通过“项目设置”或 manifest API 修改清单，普通文件接口仍只读，项目 `id` 永远不能修改。
 - `orientation` 明确为 `landscape` 或 `portrait`。
 - `entries.game` 解析出的 HTML 存在；大屏模式同时存在 `entries.controller` 解析出的 HTML。
 - 多人游戏声明合法的 `authority.entry`。

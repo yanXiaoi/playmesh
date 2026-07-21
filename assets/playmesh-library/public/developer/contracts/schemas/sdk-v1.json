@@ -5,67 +5,175 @@
   "$defs": {
     "JsonValue": {
       "oneOf": [
-        { "type": "null" },
-        { "type": "boolean" },
-        { "type": "number" },
-        { "type": "string" },
-        { "type": "array", "items": { "$ref": "#/$defs/JsonValue" } },
-        { "type": "object", "additionalProperties": { "$ref": "#/$defs/JsonValue" } }
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        }
       ]
     },
     "Player": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "nickname", "role", "connected"],
+      "required": [
+        "id",
+        "nickname",
+        "role",
+        "connected"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "nickname": { "type": "string" },
-        "role": { "enum": ["authority", "authority_player", "player"] },
-        "connected": { "type": "boolean" }
+        "id": {
+          "type": "string"
+        },
+        "nickname": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "authority",
+            "authority_player",
+            "player"
+          ]
+        },
+        "connected": {
+          "type": "boolean"
+        }
       }
     },
     "AppIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["userId", "nickname", "source"],
+      "required": [
+        "userId",
+        "nickname",
+        "source"
+      ],
       "properties": {
-        "userId": { "type": "string", "pattern": "^u_" },
-        "nickname": { "type": "string" },
-        "source": { "const": "playmesh_app" }
+        "userId": {
+          "type": "string",
+          "pattern": "^u_"
+        },
+        "nickname": {
+          "type": "string"
+        },
+        "source": {
+          "const": "playmesh_app"
+        }
       }
     },
     "DeviceSensorData": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "x", "y", "z", "timestamp", "unit"],
+      "required": [
+        "type",
+        "x",
+        "y",
+        "z",
+        "timestamp",
+        "unit"
+      ],
       "properties": {
-        "type": { "enum": ["accelerometer", "gyroscope"] },
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "z": { "type": "number" },
-        "timestamp": { "type": "number", "description": "Sensor event timestamp in milliseconds" },
-        "unit": { "enum": ["m/s^2", "rad/s"] }
+        "type": {
+          "enum": [
+            "accelerometer",
+            "gyroscope"
+          ]
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Sensor event timestamp in milliseconds"
+        },
+        "unit": {
+          "enum": [
+            "m/s^2",
+            "rad/s"
+          ]
+        }
       }
     },
     "SessionSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "joinCode", "gameId", "displayMode", "state", "minPlayers", "maxPlayers", "authorityClientId", "players"],
+      "required": [
+        "id",
+        "joinCode",
+        "gameId",
+        "displayMode",
+        "state",
+        "minPlayers",
+        "maxPlayers",
+        "authorityClientId",
+        "players"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "joinCode": { "type": "string" },
-        "gameId": { "type": "string" },
-        "displayMode": { "enum": ["multi_screen", "single_screen_multiplayer"] },
-        "state": { "enum": ["lobby", "running", "paused", "stopped"] },
-        "minPlayers": { "type": "integer", "minimum": 1 },
-        "maxPlayers": { "type": "integer", "minimum": 1 },
+        "id": {
+          "type": "string"
+        },
+        "joinCode": {
+          "type": "string"
+        },
+        "gameId": {
+          "type": "string"
+        },
+        "displayMode": {
+          "enum": [
+            "multi_screen",
+            "single_screen_multiplayer"
+          ]
+        },
+        "state": {
+          "enum": [
+            "lobby",
+            "running",
+            "paused",
+            "stopped"
+          ]
+        },
+        "minPlayers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxPlayers": {
+          "type": "integer",
+          "minimum": 1
+        },
         "authorityClientId": {
           "type": "string",
           "description": "Identity assigned to the App runtime that created and runs the session; never elected from player order"
         },
         "players": {
           "type": "array",
-          "items": { "$ref": "#/$defs/Player" },
+          "items": {
+            "$ref": "#/$defs/Player"
+          },
           "description": "Participating players only; array position and join order have no Authority meaning"
         }
       }
@@ -73,76 +181,210 @@
     "PlayerConnectionEvent": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["player", "session", "isCurrentPlayer"],
+      "required": [
+        "player",
+        "session",
+        "isCurrentPlayer"
+      ],
       "properties": {
-        "player": { "$ref": "#/$defs/Player" },
-        "session": { "$ref": "#/$defs/SessionSnapshot" },
-        "isCurrentPlayer": { "type": "boolean" }
+        "player": {
+          "$ref": "#/$defs/Player"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionSnapshot"
+        },
+        "isCurrentPlayer": {
+          "type": "boolean"
+        }
       }
     },
     "AuthorityContext": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["senderPlayerId", "session", "members"],
+      "required": [
+        "senderPlayerId",
+        "session",
+        "members"
+      ],
       "properties": {
-        "senderPlayerId": { "type": "string" },
-        "session": { "$ref": "#/$defs/SessionSnapshot" },
-        "members": { "type": "array", "items": { "$ref": "#/$defs/Player" } }
+        "senderPlayerId": {
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionSnapshot"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Player"
+          }
+        }
       }
     },
     "AuthorityResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["targetPlayerIds", "message"],
+      "required": [
+        "targetPlayerIds",
+        "message"
+      ],
       "properties": {
-        "targetPlayerIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "message": { "type": "object" }
+        "targetPlayerIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "message": {
+          "type": "object"
+        }
       }
     },
     "LifecycleEvent": {
       "type": "object",
-      "required": ["state"],
+      "required": [
+        "state"
+      ],
       "properties": {
-        "state": { "enum": ["ready", "pause", "resume", "exit", "closed", "error"] },
-        "error": { "type": ["string", "null"] }
+        "state": {
+          "enum": [
+            "ready",
+            "pause",
+            "resume",
+            "exit",
+            "closed",
+            "error"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "SyncSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["protocolVersion", "stateType", "full", "revision", "sequence", "timestamp", "sourceTick", "state"],
+      "required": [
+        "protocolVersion",
+        "stateType",
+        "full",
+        "revision",
+        "sequence",
+        "timestamp",
+        "sourceTick",
+        "state"
+      ],
       "properties": {
-        "protocolVersion": { "const": 1 },
-        "stateType": { "type": "string" },
-        "full": { "const": true },
-        "revision": { "type": "integer", "minimum": 0 },
-        "sequence": { "type": "integer", "minimum": 1 },
-        "timestamp": { "type": "integer", "minimum": 0 },
-        "sourceTick": { "type": "integer", "minimum": 0 },
-        "state": { "$ref": "#/$defs/JsonValue" }
+        "protocolVersion": {
+          "const": 1
+        },
+        "stateType": {
+          "type": "string"
+        },
+        "full": {
+          "const": true
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceTick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/JsonValue"
+        }
       }
     },
     "LatencyDiagnostics": {
       "type": "object",
-      "required": ["clientSentAt", "receivedAt", "authorityAvailable"],
+      "required": [
+        "clientSentAt",
+        "receivedAt",
+        "authorityAvailable"
+      ],
       "properties": {
-        "probeId": { "type": ["string", "null"] },
-        "clientSentAt": { "type": "integer" },
-        "serverReceivedAt": { "type": ["integer", "null"] },
-        "serverSentAt": { "type": ["integer", "null"] },
-        "receivedAt": { "type": "integer" },
-        "authorityAvailable": { "type": "boolean" },
-        "rawRttMs": { "type": "number", "minimum": 0 }
+        "probeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientSentAt": {
+          "type": "integer"
+        },
+        "serverReceivedAt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "serverSentAt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "receivedAt": {
+          "type": "integer"
+        },
+        "authorityAvailable": {
+          "type": "boolean"
+        },
+        "rawRttMs": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "SdkBootstrap": {
       "type": "object",
-      "required": ["sdkVersion", "isAuthority", "player", "session"],
+      "required": [
+        "sdkVersion",
+        "isAuthority",
+        "player",
+        "session"
+      ],
       "properties": {
-        "sdkVersion": { "const": "1.3.0" },
-        "isAuthority": { "type": "boolean" },
-        "player": { "oneOf": [{ "$ref": "#/$defs/Player" }, { "type": "null" }] },
-        "session": { "oneOf": [{ "$ref": "#/$defs/SessionSnapshot" }, { "type": "null" }] }
+        "sdkVersion": {
+          "const": "1.4.2"
+        },
+        "isAuthority": {
+          "type": "boolean"
+        },
+        "player": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Player"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SessionSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     }
   }

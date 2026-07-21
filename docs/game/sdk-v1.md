@@ -1,6 +1,6 @@
 # Game SDK v1
 
-本文记录仓库当前 `/playmesh/sdk/v1/playmesh.js` 已实现的公开 API。第四阶段开发者工作区中的规划能力不属于本页接口。
+本文记录 Game SDK `1.4.2` 与 App Bridge SDK `1.2.1` 的公开 API。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。生成的声明文件内置完整中文 JSDoc，IDEA 的补全、参数信息和悬浮文档无需联网即可显示中文用途、返回值、环境边界和限制；AI 提示词会嵌入两份完整声明，并以其作为唯一接口事实源。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -22,9 +22,9 @@
 
 ## 双 SDK 边界
 
-游戏代码始终只显式引入 `/playmesh/sdk/v1/playmesh.js`。该 SDK 连接创建对局的 Authority 主机，日志、会话、联机消息和 `playmesh.storage` 都以 Authority 主机为唯一可信来源。
+游戏代码始终只显式引入 `/playmesh/sdk/v1/playmesh.js`。该 SDK 连接创建对局的 Authority 主机，会话、联机消息和 `playmesh.storage` 都以 Authority 主机为唯一可信来源。App WebView 网关会在入口缺少该标签时补注入主 SDK，作为导入和开发运行的安全兜底。
 
-Playmesh App WebView 会在主 SDK 之前自动注入 `/playmesh/sdk/v1/playmesh-app.js`。它只提供当前设备能力和 App 本地身份，不接管主机日志、联机或游戏数据。游戏代码不得自行引入该文件，也不得手动设置 App 用户 ID。
+Playmesh App WebView 会在主 SDK 之前自动注入 `/playmesh/sdk/v1/playmesh-app.js`。它只提供当前设备能力和 App 本地身份，不接管联机或游戏数据。游戏代码不得自行引入该文件，也不得手动设置 App 用户 ID。
 
 普通浏览器不会下载或执行 `playmesh-app.js`。主 SDK 仍会提供安全的 `playmesh.app` 空实现，因此跨环境代码可以先检查能力而不会因为对象不存在而崩溃：
 
@@ -43,7 +43,7 @@ App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "1.3.0"
+console.log(playmesh.version); // "1.4.2"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若 `capabilities.json.required` 非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
@@ -347,8 +347,8 @@ FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工�
 - `capabilities.json.required` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；不支持项只做标注，不阻止同意后进入。
 - 浏览器主游戏页和控制器页都提供可选全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
 - 普通多人多屏分享加载 `main.json.entries.game`（默认 `app/index.html`），浏览器玩家加入 Session 并建立 WebSocket；只有单屏多人分享才加载 `entries.controller`（默认 `app/controller/index.html`）。
-- 单机分享加载 `entries.game`，只使用静态资源、HTTP 存储和日志通道，不调用加入接口且不建立 WebSocket；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
-- 自定义嵌套 HTML 入口由网关按入口所在目录设置页面基准 URL，页面内相对 CSS、脚本和图片仍解析到当前游戏的 `/game/...`，不会改变 SDK、会话或存储边界。
+- 单机分享加载 `entries.game`，只使用静态资源和 HTTP 存储，不调用加入接口且不建立 WebSocket；浏览器 Console 只保留在当前浏览器；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
+- 自定义嵌套 HTML 入口由网关按入口所在目录设置页面基准 URL，页面内相对 CSS、脚本和图片仍解析到当前游戏的 `/app/...`，不会改变 SDK、会话或存储边界。
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
 - 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。
 - 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线后，同 ID 重连可由游戏恢复准备状态和临时玩家状态。
@@ -372,7 +372,7 @@ try {
 
 订阅回调中的异常由游戏自己处理。Authority 处理器抛出的异常会作为生命周期 `error` 事件暴露给 Authority 页面。
 
-SDK 保留浏览器原生 Console 行为，同时转发 `console.log/info/warn/error/debug`、未捕获脚本异常、未处理 Promise 拒绝和资源加载失败。错误日志包含事件类型、文件、行列和可用堆栈。App 在内存中始终保留最近 500 条，即使游戏内日志面板没有打开；工作区和游戏内日志层都可一键复制最近日志。缓存不写磁盘，App 生命周期结束后清空。
+Console 日志由运行页面的宿主捕获，不经过 Game SDK 或游戏网关。Playmesh App 的 WebView 只把本设备当前页面的 `console.log/info/warn/error/debug` 写入本机运行日志流；其他 App 或浏览器玩家的日志不会传给 Authority。普通浏览器继续使用自身开发者工具查看本机 Console。App SDK 与 Game SDK 在各自全局对象赋值成功后，分别输出 `Playmesh App SDK 注入成功` 和 `Playmesh Game SDK 注入成功`；完成宿主握手后再输出对应的 `SDK 就绪` 日志，可直接区分“文件已注入”和“Bridge 已就绪”。单机 App 页面由本地 Game SDK Bridge 返回无多人 Session 的 bootstrap，并提供本地存储、性能和生命周期命令。Bridge 请求超过 15 秒会 reject 并产生未处理 Promise 日志，不会永久等待。App 在每次启动或重新开始游戏前清空旧缓存，并在本次运行期间保留最近 500 条本机日志，即使游戏内日志面板没有打开；工作区和游戏内日志层都可一键复制最近日志。缓存不写磁盘，App 生命周期结束后清空。
 
 ## AI 开发依据
 

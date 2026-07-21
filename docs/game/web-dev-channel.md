@@ -48,14 +48,14 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - 在项目树点击文本、图片或其他文档后，工作区必须自动切到编辑区；文本文件同时聚焦编辑器。
 - 项目树目录右键菜单支持新建文件、新建文件夹、删除文件夹和向当前目录多选上传文件，也支持把本机文件直接拖到根节点、文件夹或文件节点上传；拖到文件节点时使用该文件所在目录。文件右键支持删除。空文件夹必须保留并参与 SSE 同步，上传单文件上限为 2 MiB。
 - 项目根目录、文件夹和文件右键均可打开本地历史。本地历史只保存一份初始基线和每个时间操作的变更后快照；上一操作的变更后快照即下一操作的变更前版本。每次文件或目录变更更新当前快照，连续活动在 5 分钟滚动窗口内合并为一个时间操作，最多保留最近 100 个操作。清理最老操作时必须先将其快照提升为新基线。
-- 本地历史存储在当前游戏包根目录的 `cache/developer/local-history/`，与 `app/`、`data/` 同级。快照只包含平台清单和 `app/`，不复制 `data/`、`cache/` 或 `.playmesh/`；普通项目树和文件 API 不展示或修改 `data/cache`。清理游戏缓存会同时清除本地历史。
+- 本地历史存储在当前游戏包根目录的 `cache/developer/local-history/`，与 `app/`、`data/` 同级。快照只包含平台清单和 `app/`，不复制 `data/` 或 `cache/`；普通项目树和文件 API 不展示或修改 `data/cache`。CLI 本地开发副本中的 `playmesh/` 不属于安装内容或历史快照。清理游戏缓存会同时清除本地历史。
 - 本地历史按时间操作展示资源新增、修改、删除、文本前后内容、增删行数与二进制大小变化，并允许用该操作的变更前或变更后版本全量替换选中文件、文件夹或整个工作区。恢复前必须自动生成独立且不参与后续合并的历史操作；恢复整个工作区时继续保留平台管理的当前 `main.json`。
 - HTML/CSS/JavaScript 编辑区。编辑器提供 HTML 标签/属性、CSS 属性/值、JavaScript 和 `playmesh` SDK 方法补全；可用 `Ctrl+Space` 或 `Alt+/` 主动触发。
 - 开始、重启与停止操作；由 App 启动当前游戏，不在工作区嵌入主页面预览。重启只作用于当前 App 中运行的该项目实例，并保留已有联机码和分享链接；停止会关闭会话并返回游戏库。
 - 游戏运行状态、分享二维码和可复制链接。普通多人多屏与单机分享加载 `entries.game`（默认 `app/index.html`），单屏多人分享加载 `entries.controller`（默认 `app/controller/index.html`）；单机分享不加入 Session、不创建玩家且不建立 WebSocket。
 - 运行状态使用 `run.status` SSE 即时同步；内置 WebView 从游戏页返回后必须重新确认当前状态，不能继续显示已经退出的游戏仍在运行。
-- 由工作区启动的游戏在悬浮工具中提供按需开启的调试日志面板，输出统一通道收到的 App WebView 和浏览器控制器 `console` 日志。
-- SDK 同时捕获未处理脚本异常、Promise 拒绝和资源加载失败，保留文件、行列与堆栈；App 不依赖日志面板是否打开，始终在内存中缓存最近 500 条。工作区与游戏内日志层均提供一键复制最近日志。非流式 AI 可通过 `GET /dev/api/logs?limit=50` 按时间顺序读取最近最多 50 条，无需消费 SSE。
+- 由工作区启动的游戏在悬浮工具中提供按需开启的调试日志面板。日志由 App WebView 宿主层捕获，只包含当前设备页面的 `console` 输出，不通过 Game SDK 或游戏网关转发其他设备日志；普通浏览器在自身开发者工具查看本机 Console。
+- App 不依赖日志面板是否打开，始终在内存中缓存最近 500 条本机 WebView 日志。工作区与游戏内日志层均提供一键复制最近日志。非流式 AI 可通过 `GET /dev/api/logs?limit=50` 按时间顺序读取最近最多 50 条，无需消费 SSE。
 - SDK API、角色语义、参数、返回值、错误和数据类型 Schema 面板。
 - 纯聊天 AI 提示词固定导出为 UTF-8 BOM TXT，并按当前 `main.json.modes/displayModes` 只包含相关 SDK 函数契约、拓扑、强制文件和源码，同时动态附带当前 `capabilities.json.required` 与完整统一能力注册表；普通多屏不得混入控制器，单机不得混入 Authority，单屏多人必须包含控制器与 Authority 数据链。项目校验结果不混入提示词，校验弹窗可独立复制包含诊断码、路径行列、消息和修复建议的详情。
 - 主工作区的“AI”按钮直接进入统一 AI 开发页。API 接口、鉴权和 AI 可用性文档作为只读项与公共、游戏模式、显示模式模板位于同一棵树中；公共分类额外提供“自定义想法”，用户填写的玩法、视觉和交互要求同时加入对话与 Agent 最终提示词。模板支持独立保存覆盖、恢复系统默认；醒目的“获取项目提示词”集中提供两类最终文本的切换、复制和 TXT 下载。切换到 Agent 提示词时会枚举当前设备的 HTTP Base URL，用户应选择电脑端 AI 能访问的局域网地址；最终文本中的全部 Developer Gateway 接口统一使用该地址。
@@ -119,7 +119,7 @@ AI 应优先使用高层开发者 API，例如“创建项目”“修改文件�
 
 模板的 SDK 区域负责 WS、身份注入、动作转发和目标分发。`entries.game` 默认页面已经预先引入 service，并在初始化时根据 `playmesh.session.isAuthority()` 决定是否注册 `playmesh.authority.onService`；`entries.controller` 默认页面已经注册 `playmesh.game.onMessage`。AI 只需填写中文 TODO 标记的玩家 UI、权威规则和共享纯数据。工作区应在文件旁显示每个文件属于“玩家运行层”“权威处理层”还是“共享数据层”，并将完整调用链和接口 Schema 暴露给 AI。
 
-开发者工作区必须遵守安装库边界：项目发布结构是 `main.json + app/`，运行时数据写入同级 `data/`；只把当前项目 `app/` 映射为 `/game/...`，把平台 `playmesh-library/public/` 映射为 `/playmesh/...`。预览、文件 API 和 AI 工具都不得以相对路径跨出 `app/`，也不得直接读取 `data/`、其他项目或 App 私有文件。
+开发者工作区必须遵守安装库边界：项目发布结构是 `main.json + app/`，运行时数据写入同级 `data/`；只把当前项目 `app/` 映射为 `/app/...`，把平台 `playmesh-library/public/` 映射为 `/playmesh/...`。预览、文件 API 和 AI 工具都不得以相对路径跨出 `app/`，也不得直接读取 `data/`、其他项目或 App 私有文件。
 
 接口文档还必须声明每个操作的权限、风险等级、是否幂等、重试规则和是否需要用户确认，方便 AI 在调用前判断。
 
@@ -185,7 +185,7 @@ main.json 内容
 - 关闭开发者模式或 App 退出时现有工作区连接断开；重新开启后使用持久链接重新连接。Go Core 生命周期不改变开发者工作区身份。
 - 日志不记录完整 token，只记录 token 哈希或短标识。
 
-联机游戏分享链接和二维码使用另一类会话 token：关闭分享面板、浏览器玩家刷新和重新开始都不撤销；离开游戏、会话结束、App/Core 重启后失效。同一会话重新展示分享信息或重新开始时复用原 token，退出后创建的新会话不能复用旧链接或二维码。联机浏览器刷新会读取 `localStorage` 中由 SDK 管理的玩家 ID 和昵称重新加入；运行中的旧连接掉线后可用同 ID 恢复，在线同 ID 的后续连接会被拒绝。单机分享使用独立随机访问 token，只加载主 `index.html` 和 HTTP 资源/存储/日志通道，不调用 Core 加入接口。
+联机游戏分享链接和二维码使用另一类会话 token：关闭分享面板、浏览器玩家刷新和重新开始都不撤销；离开游戏、会话结束、App/Core 重启后失效。同一会话重新展示分享信息或重新开始时复用原 token，退出后创建的新会话不能复用旧链接或二维码。联机浏览器刷新会读取 `localStorage` 中由 SDK 管理的玩家 ID 和昵称重新加入；运行中的旧连接掉线后可用同 ID 恢复，在线同 ID 的后续连接会被拒绝。单机分享使用独立随机访问 token，只加载主 `index.html` 和 HTTP 资源/存储，不调用 Core 加入接口；其 Console 只保留在当前浏览器。
 
 开发运行时调用 `playmesh.storage` 必须写入当前 Authority 主机的 `packages/{gameId}/data/`。浏览器开发者工作区不能把游戏 Bucket 保存在浏览器 `localStorage`，其他加入端也不能建立独立副本。FPS 只能读取游戏通过 `playmesh.performance.reportFrame()` 上报的数据，不能用工作区自己的 RAF 估算游戏 FPS。
 
@@ -199,9 +199,9 @@ main.json 内容
 
 开发者工作区自身使用的前端第三方依赖统一放在 `assets/playmesh-library/public/developer/editor/`，通过该目录内的 `package.json` 与锁文件管理；不得把编辑器依赖散落到游戏模板或 Dart 网关。Flutter 资源清单只声明实际使用的依赖子目录。目前 CodeMirror 核心、语言模式、提示插件和括号插件均从 `editor/node_modules/codemirror/` 加载。
 
-游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用相对 `/game/...` 路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
+游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示，JavaScript 除语言提示外还通过 `additionalContext` 注入 SDK 1.3.0 的 `playmesh.app/session/player/game/authority/sync/lifecycle/performance/storage` 方法，其中 App SDK 包含 `DeviceType` 与 `onDevice`。SDK 补全仅用于开发体验，运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `1.4.2` 与 App Bridge SDK `1.2.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
 
 ## 第四阶段完成标准
 

@@ -21,7 +21,7 @@
 - `onPause`、`onResume`、`onExit` 由 App 主动通知，退出通知有有限等待；关闭运行时前执行最终存储 flush。
 - 游戏包从 `playmesh-library/packages/{gameId}/main.json` 自动扫描，校验目录名、清单、方向、模式、人数、Authority 和必需入口。
 - 游戏库页面提供手动后台扫描按钮。App 级仓库在刷新期间保留旧列表，成功后按 ID 去重并原子替换缓存；缓存记录 revision、刷新时间和搜索文本，并支持 offset/limit 查询，为后续分页与搜索提供数据源。
-- 游戏包公开内容只位于 `app/`；当前游戏通过 `/game/...` 暴露，平台公共 SDK 通过 `/playmesh/...` 暴露，`data/` 与其他包不可通过 URL 读取。
+- 游戏包公开内容只位于 `app/`；当前游戏通过 `/app/...` 暴露，平台公共 SDK 通过 `/playmesh/...` 暴露，`data/` 与其他包不可通过 URL 读取。
 - 持久化文件只位于开始游戏主机的 `packages/{gameId}/data/{bucket}.json`，不增加 `{userId}` 层。Authority WebView 直接访问主机存储，浏览器走受 token 保护的 HTTP 接口，其他 App 玩家经会话路由到 Authority；加入设备不创建独立副本。SDK 与 Flutter 双层校验 Bucket 名称，主机使用内存缓存、2 秒延迟写入和脏写阈值；WebView 重启、退出或会话关闭时由 App 完成最终落盘，游戏不暴露 flush。
 - 游戏详情页提供确认后的“清除游戏数据”，只删除当前游戏的 `data/`。
 - 游戏工具区可拖动并默认收纳，展开后提供返回、重新开始、退出、FPS 开关和更多操作；FPS 默认显示在左上角，未上报时显示 `-- FPS`。

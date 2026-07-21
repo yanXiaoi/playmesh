@@ -49,6 +49,17 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+# The Ninja release builder does not run Flutter's project-generation phase,
+# so its ephemeral generated_config.cmake can contain a previous app version.
+# Prefer the pubspec-derived values supplied by the release script.
+if(DEFINED PLAYMESH_FLUTTER_VERSION)
+  set(FLUTTER_VERSION "${PLAYMESH_FLUTTER_VERSION}")
+  set(FLUTTER_VERSION_MAJOR "${PLAYMESH_FLUTTER_VERSION_MAJOR}")
+  set(FLUTTER_VERSION_MINOR "${PLAYMESH_FLUTTER_VERSION_MINOR}")
+  set(FLUTTER_VERSION_PATCH "${PLAYMESH_FLUTTER_VERSION_PATCH}")
+  set(FLUTTER_VERSION_BUILD "${PLAYMESH_FLUTTER_VERSION_BUILD}")
+endif()
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
@@ -71,6 +82,26 @@ add_custom_command(
 )
 add_custom_target(playmesh_go_core ALL DEPENDS "${GO_CORE_BINARY}")
 add_dependencies(${BINARY_NAME} playmesh_go_core)
+
+# Developer CLI 与桌面 App 一起构建，安装在 Go Core 同级目录。
+set(PLAYMESH_CLI_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../dev-cli")
+set(PLAYMESH_CLI_BINARY "${CMAKE_BINARY_DIR}/playmesh-cli.exe")
+file(GLOB PLAYMESH_CLI_SOURCES CONFIGURE_DEPENDS
+  "${PLAYMESH_CLI_SOURCE_DIR}/*.go"
+  "${PLAYMESH_CLI_SOURCE_DIR}/go.mod"
+  "${PLAYMESH_CLI_SOURCE_DIR}/go.sum"
+)
+add_custom_command(
+  OUTPUT "${PLAYMESH_CLI_BINARY}"
+  COMMAND "${GO_EXECUTABLE}" build -buildvcs=false -trimpath
+    -ldflags=-s\ -w -o "${PLAYMESH_CLI_BINARY}" .
+  DEPENDS ${PLAYMESH_CLI_SOURCES}
+  WORKING_DIRECTORY "${PLAYMESH_CLI_SOURCE_DIR}"
+  COMMENT "Building bundled Playmesh Developer CLI"
+  VERBATIM
+)
+add_custom_target(playmesh_dev_cli ALL DEPENDS "${PLAYMESH_CLI_BINARY}")
+add_dependencies(${BINARY_NAME} playmesh_dev_cli)
 
 # Windows WebView2 插件需要 NuGet 恢复原生 SDK。项目固定工具版本并校验哈希，
 # 避免要求用户全局安装 NuGet，也避免插件输出误导性的未安装提示。
@@ -153,6 +184,9 @@ install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(PROGRAMS "${GO_CORE_BINARY}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(PROGRAMS "${PLAYMESH_CLI_BINARY}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

@@ -11,6 +11,7 @@
     "remarks": { "type": "string" },
     "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
     "sdkVersion": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+    "appSdkVersion": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
     "orientation": { "enum": ["landscape", "portrait"] },
     "modes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["solo", "multiplayer"] } },
     "displayModes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["multi_screen", "single_screen_multiplayer"] } },

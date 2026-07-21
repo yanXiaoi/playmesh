@@ -46,3 +46,4 @@ app.*.map.json
 /assets/playmesh-library/public/developer/editor/node_modules/
 /android/.kotlin/
 /release/
+/dev-cli/playmesh-cli.exe

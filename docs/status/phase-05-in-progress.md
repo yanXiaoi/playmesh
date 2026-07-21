@@ -14,7 +14,7 @@
 - `authority.entry` 继续声明多人 Authority JavaScript，并限制为 `app/` 内 `.js` 或 `.mjs`。
 - 三类入口统一拒绝外部 URL、绝对路径、反斜杠、查询、片段、空段、`.` 与 `..`；页面入口只接受 `.html`。
 - Asset 包加载、文件游戏库扫描、开发项目校验、App WebView 启动和浏览器分享均读取同一份 Manifest 入口。
-- 浏览器分享自定义嵌套首页时按入口目录注入 `/game/.../` 基准路径，保留完整 HTML 小游戏的相对资源结构。
+- 浏览器分享自定义嵌套首页时按入口目录注入 `/app/.../` 基准路径，保留完整 HTML 小游戏的相对资源结构。
 - 文件扫描器补齐控制器和 Authority 文件存在性校验；非法或缺失入口在运行前失败。
 - 默认模板、Game Manifest Schema、SDK Manifest、OpenAPI、AI 提示词和游戏作者文档已同步入口命名。
 

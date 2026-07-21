@@ -13,7 +13,7 @@ globalThis.window = {
       const command = JSON.parse(message);
       commands.push(command);
       if (command.command === "sdk.ready") {
-        window.playmesh.__receive({
+        window.playmesh.__receive(JSON.stringify({
           type: "sdk.bootstrap",
           requestId: command.requestId,
           sdkVersion: "1.0.0",
@@ -23,7 +23,7 @@ globalThis.window = {
             id: "s-1", joinCode: "ABC123", state: "lobby",
             authorityClientId: "p-authority", players: [], minPlayers: 2,
           },
-        });
+        }));
       } else if (command.command === "performance.ping") {
         window.playmesh.__receive({
           type: "command.result", requestId: command.requestId, result: null,
@@ -41,6 +41,10 @@ globalThis.window = {
           },
         });
       } else if (command.command === "authority.result") {
+        window.playmesh.__receive({
+          type: "command.result", requestId: command.requestId, result: null,
+        });
+      } else if (command.command === "lifecycle.complete" || command.command === "performance.latency") {
         window.playmesh.__receive({
           type: "command.result", requestId: command.requestId, result: null,
         });
@@ -65,7 +69,7 @@ await window.playmesh.ready;
 assert.equal(window.playmesh.session.isAuthority(), true);
 assert.equal(window.playmesh.player.getCurrent(), null);
 assert.equal(window.playmesh.session.getCurrent().joinCode, "ABC123");
-assert.equal(window.playmesh.version, "1.3.0");
+assert.equal(window.playmesh.version, "1.4.2");
 assert.equal((await window.playmesh.session.finish()).state, "stopped");
 assert.equal(window.playmesh.performance.getLatency() >= 0, true);
 assert.equal(
@@ -167,5 +171,6 @@ await syncController.publish();
 assert.equal(syncController.getState().score, 3);
 assert.equal(window.playmesh.sync.getSnapshot().state.score, 3);
 syncController.stop();
+window.playmesh.__receive({ type: "transport.closed" });
 
 console.log("Game SDK bridge contract passed");

@@ -40,7 +40,7 @@ Game Package
 - Domain 负责用户、游戏声明、会话、玩家和输入事件的规则。
 - Go Handler 只负责解析请求、鉴权、调用服务和生成响应，不直接修改会话内部状态。
 - Game SDK 是游戏访问平台能力的唯一入口，游戏页面不直接调用 Flutter、Go、原生桥接或任意端口。
-- SDK 分为权威主机运行时 `playmesh.js` 与 App 本机桥接 `playmesh-app.js`。前者唯一负责日志、会话、联机和主机存储；后者只负责当前 App 的身份与本机能力，由 App 自动注入，不得持久化游戏能力授权。普通浏览器不得加载 App SDK，主 SDK 必须提供安全的 `playmesh.app` 空实现。
+- SDK 分为权威主机运行时 `playmesh.js` 与 App 本机桥接 `playmesh-app.js`。前者负责会话、联机和主机存储；后者只负责当前 App 的身份与本机能力，由 App 自动注入，不得持久化游戏能力授权。Console 必须由 WebView/浏览器宿主在底层捕获并只保留在当前设备，禁止经 SDK 或游戏网关跨设备转发。普通浏览器不得加载 App SDK，主 SDK 必须提供安全的 `playmesh.app` 空实现。
 - 游戏可以自带引擎或工具库，但必须放在自己的游戏包内并通过包校验流程管理；不得因为使用第三方引擎而绕过 SDK 的身份、存储和联机边界。
 - SDK 不额外设计启动回调，页面脚本执行就是启动；必须提供 `onPause`、`onResume` 和由 App 主动触发的 `onExit` 生命周期接口。
 - `onExit` 只作为退出前的最佳努力通知，必须幂等、有超时，不能作为唯一的数据持久化时机；重要数据应在状态变化后及时保存。
@@ -51,7 +51,7 @@ Game Package
 - `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。
 - 持久化数据的唯一落盘端是开始游戏的 Authority 主机。Authority WebView 直接访问主机存储服务；浏览器使用受本局 token 保护的主机 HTTP 接口；其他 App 玩家使用会话内保留消息路由到 Authority。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。
 - `packages/{gameId}/app/` 是 WebView 静态映射根，`packages/{gameId}/data/` 必须是同级且不可映射目录；任何资源服务、路径拼接和预览接口都必须拒绝跨到 `data/`。
-- 当前游戏的 `app/` 只通过 `/game/...` 暴露；SDK、平台头像等公共资源统一放在 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。游戏不得以相对路径越出 `app/`，也不得读取其他游戏包。
+- 当前游戏的 `app/` 只通过 `/app/...` 暴露；SDK、平台头像等公共资源统一放在 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。游戏不得以相对路径越出 `app/`，也不得读取其他游戏包。
 - 游戏详情页清除缓存/数据和删除游戏必须调用统一的数据清理流程；数据清理必须有用户确认、日志和明确的不可恢复提示。
 - 原始压缩包只存在于导入和分享的临时生命周期内，安装库不长期保存压缩包；分享包由已安装目录临时生成。
 - 平台不随构建产物内置游戏 Demo。工作区新建项目和用户导入项目统一进入 `packages/{gameId}/`，使用同一套扫描、校验、索引、运行和删除流程。
@@ -137,17 +137,18 @@ Game Package
 
 | 组件 | 当前版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `1.4.0+5` | `pubspec.yaml` |
+| Playmesh App | `1.6.1+8` | `pubspec.yaml` |
 | Go Core | `0.2.0` | `go-core/main.go`、`go-core/mobile/core.go` |
-| Game SDK | `1.3.0` | `playmesh.js`、SDK Manifest 与 Schema |
-| App Bridge SDK | `1.1.0` | `playmesh-app.js` 与 App 注入配置 |
-| Developer API / OpenAPI | `1.2.0` | Developer Gateway 契约 |
+| Game SDK | `1.4.2` | `sdk-src/playmesh.ts` 及生成的 JS、类型、Manifest 与 Schema |
+| App Bridge SDK | `1.2.1` | `sdk-src/playmesh-app.ts` 及生成的 JS、类型与 App 注入配置 |
+| Developer API / OpenAPI | `1.4.0` | Developer Gateway 契约 |
+| Developer CLI | `1.1.0` | `dev-cli/`、`playmesh-cli` 文件名、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
-游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 声明该包所要求的 Game SDK。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id` 始终不可修改，其他字段经完整清单校验后可保存。
+游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id` 始终不可修改，其他字段经完整清单校验后可保存。
 
-一次版本变更必须同步更新代码常量、默认模板、机器契约、编辑器补全、测试断言和开发文档，并在阶段或验证记录中写明升级原因。App、SDK、默认骨架、示例契约、AI 提示词和项目校验器始终只维护一套当前版本；版本升级后，不提供旧 SDK 入口、兼容矩阵、字段适配、自动迁移或双写逻辑；已有开发数据如与当前结构冲突，可直接清理并由当前模板重新生成。
+Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library/sdk-src/playmesh.ts` 和 `playmesh-app.ts`。正式构建先执行 `tool/generate_sdk.ps1`，生成 `public/sdk/v1/` 下的 `.js`、`.d.ts` 以及 Dart 版本常量；运行时注入、IDEA 类型提示、Developer Gateway 下载和版本校验只能使用这些生成产物。一次版本变更必须同步更新代码常量、默认模板、机器契约、编辑器补全、测试断言和开发文档，并在版本或验证记录中写明升级原因。App、SDK、默认骨架、示例契约、AI 提示词和项目校验器始终只维护一套当前版本；版本升级后，不提供旧 SDK 入口、兼容矩阵、字段适配、自动迁移或双写逻辑。
 
 ## 错误和日志
 

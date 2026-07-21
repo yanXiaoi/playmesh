@@ -60,6 +60,32 @@ add_subdirectory("runner")
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
+# Developer CLI 与 Linux App 一起构建并安装到 bundle 根目录。
+# 该位置与桌面 Go Core/主程序同级，便于加入 PATH 或直接调用。
+find_program(GO_EXECUTABLE go)
+if(NOT GO_EXECUTABLE)
+  message(FATAL_ERROR "Go toolchain is required to build playmesh-cli")
+endif()
+set(PLAYMESH_CLI_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../dev-cli")
+set(PLAYMESH_CLI_BINARY "${CMAKE_BINARY_DIR}/playmesh-cli")
+file(GLOB PLAYMESH_CLI_SOURCES CONFIGURE_DEPENDS
+  "${PLAYMESH_CLI_SOURCE_DIR}/*.go"
+  "${PLAYMESH_CLI_SOURCE_DIR}/go.mod"
+  "${PLAYMESH_CLI_SOURCE_DIR}/go.sum"
+)
+add_custom_command(
+  OUTPUT "${PLAYMESH_CLI_BINARY}"
+  COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=0
+    "${GO_EXECUTABLE}" build -buildvcs=false -trimpath
+    -ldflags=-s\ -w -o "${PLAYMESH_CLI_BINARY}" .
+  DEPENDS ${PLAYMESH_CLI_SOURCES}
+  WORKING_DIRECTORY "${PLAYMESH_CLI_SOURCE_DIR}"
+  COMMENT "Building bundled Playmesh Developer CLI"
+  VERBATIM
+)
+add_custom_target(playmesh_dev_cli ALL DEPENDS "${PLAYMESH_CLI_BINARY}")
+add_dependencies(${BINARY_NAME} playmesh_dev_cli)
+
 # Only the install-generated bundle's copy of the executable will launch
 # correctly, since the resources must in the right relative locations. To avoid
 # people trying to run the unbundled copy, put it in a subdirectory instead of
@@ -92,6 +118,9 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(PROGRAMS "${PLAYMESH_CLI_BINARY}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

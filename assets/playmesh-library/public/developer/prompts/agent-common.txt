@@ -15,7 +15,7 @@ PLAYMESH API AGENT 游戏开发提示
 
 【公共项目规则】
 - 必须存在 main.json 的 entries.game 指向的 HTML；未声明 entries.game 时默认 app/index.html(这是游戏入口)。
-- 页面通过 /playmesh/sdk/v1/playmesh.js 引入 SDK，游戏资源使用 /game/...。
+- 页面通过 /playmesh/sdk/v1/playmesh.js 引入 SDK，游戏资源使用 /app/...。
 - 修改游戏内容后按当前语义版本规则评估 `main.json.version`，并只通过 manifest API 更新；`sdkVersion` 必须对应实际使用的 SDK，禁止修改 `id` 或通过普通文件 API 绕过校验。
 - 所有 SDK 调用前必须 await playmesh.ready。
 - 不得直接访问 PlaymeshBridge、chrome.webview、Core HTTP、WebSocket、内部 token、玩家凭证、data/、cache/ 或其他游戏包。
@@ -24,8 +24,9 @@ PLAYMESH API AGENT 游戏开发提示
 - UI 必须适配 main.json 指定方向和手机触控，不能溢出、遮挡或依赖 hover 才能操作。
 - 异步操作必须捕获并显示错误；可继续使用 console.log/info/warn/error/debug，平台会统一采集日志。
 
-【所有模式可用的 SDK】
-- playmesh.version: 当前 Game SDK 版本字符串，当前为 1.3.0。
+【SDK 使用边界与摘要】
+- 本提示随后附带目标 App 当前 SDK 同次构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`；它们是方法、参数、返回值、类型、版本与中文 JSDoc 的唯一接口事实源。以下内容仅总结运行边界；如摘要与声明冲突，以 `.d.ts` 为准，禁止臆造声明中不存在的成员。
+- playmesh.version: 当前 Game SDK 版本字符串，当前为 1.4.2。
 - playmesh.ready: SDK 就绪 Promise，resolve 为 { sdkVersion, isAuthority, player, session }；页面仍应通过对应 namespace 读取后续最新值。
 - playmesh.lifecycle.onChange/onPause/onResume/onExit(callback): 返回取消订阅函数。关键状态在变化时保存，onExit 只做业务清理；最终落盘由 App 负责。
 - playmesh.storage.getBucket(name): 返回 Bucket；Bucket 只提供 getData、setData、removeData、clearData。游戏没有 flush 接口。
@@ -38,7 +39,7 @@ PLAYMESH API AGENT 游戏开发提示
 - 声明非空时，主 SDK 会在 App 和浏览器每次进入游戏时弹出能力确认，不持久化结果。用户拒绝则退出；当前环境暂不支持的能力只做标注，用户同意后仍进入，游戏必须提供不影响主流程的降级行为。
 - 等待 `playmesh.ready` 后，先用 `playmesh.app.device.getCapabilities()` 判断当前可用能力，再使用 `playmesh.app.onDevice(playmesh.app.DeviceType.accelerometer, fps, callback)` 或 `gyroscope`；`device.onDevice` 是别名。fps 是 1 至 120 的整数，返回值是必须在退出或停用时调用的取消函数。
 - 回调数据为 `{ type, x, y, z, timestamp, unit }`；加速度计单位为 `m/s^2`，陀螺仪单位为 `rad/s`。App 保持最新样本并按各订阅者 fps tick 回调；不得绕过 SDK 直接访问原生 Bridge。
-- 会话、日志、联机和 playmesh.storage 始终使用 Authority 主机的 Game SDK；playmesh.app 只表示当前设备的身份与硬件，不能代替权威 SDK。
+- 会话、联机和 playmesh.storage 始终使用 Authority 主机的 Game SDK；Console 由当前设备的页面宿主采集，不经 SDK 跨设备转发；playmesh.app 只表示当前设备的身份与硬件，不能代替权威 SDK。
 
 【通用交付检查】
 - 只修改或创建当前项目真正需要的文件。

@@ -9,6 +9,8 @@ const source = fs.readFileSync(
 const commands = [];
 const window = {
   queueMicrotask,
+  setTimeout,
+  clearTimeout,
   PlaymeshAppBridge: {
     postMessage(rawMessage) {
       const command = JSON.parse(rawMessage);
@@ -40,6 +42,7 @@ window.window = window;
 vm.runInNewContext(source, window, { filename: "playmesh-app.js" });
 
 await window.playmeshApp.ready;
+assert.equal(window.playmeshApp.version, "1.2.1");
 assert.equal(window.playmeshApp.isAvailable(), true);
 assert.deepEqual(
   JSON.parse(JSON.stringify(window.playmeshApp.identity.getCurrent())),

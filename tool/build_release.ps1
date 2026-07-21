@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'generate_sdk.ps1')
 $pubspec = Get-Content -LiteralPath (Join-Path $repoRoot 'pubspec.yaml') -Encoding UTF8
 $versionLine = $pubspec | Where-Object { $_ -match '^version:\s*(\S+)\s*$' } | Select-Object -First 1
 if (-not $versionLine -or $versionLine -notmatch '^version:\s*([^+\s]+)\+(\d+)\s*$') {
@@ -90,6 +91,7 @@ if ($buildWindows) {
     foreach ($requiredEntry in @(
         'playmesh.exe',
         'playmesh-core.exe',
+        'playmesh-cli.exe',
         'flutter_windows.dll',
         'WebView2Loader.dll',
         'data/app.so',

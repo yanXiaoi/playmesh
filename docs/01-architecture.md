@@ -31,7 +31,7 @@ HTML Game Runtime
 
 ## 当前实现边界
 
-当前代码已完成第一至第六阶段并归档；第六阶段之后改用版本日志维护，当前正式基线为 Playmesh `1.4.0+5`。
+当前代码已完成第一至第六阶段并归档；第六阶段之后改用版本日志维护，当前正式基线为 Playmesh `1.6.1+8`。
 
 ```text
 已经完成：
@@ -39,6 +39,7 @@ Flutter 页面、游戏详情、跨平台本地 WebView、运行时刷新与屏�
 Go Core 生命周期、动态端口、HTTP/WS 会话、Authority 路由、Android AAR 和 Windows 内置进程
 Game SDK、`main.json` 校验、统一游戏目录扫描和浏览器控制器分享入口
 开发者模式独立固定端口、持久 token 与工作区路径、项目创建与编辑、项目级本地历史、运行入口、SSE 日志和机器可读文档
+Go Developer CLI、项目整包拉取/原子发布、同源 SDK/类型同步与外部 IDEA 日志跟随
 
 第五阶段已完成：
 可配置 game/controller/authority 入口、轻量权威状态同步、联机延迟、统一游戏包导入/导出、工作区文件管理、正式版响应式 App 与全平台游戏/控制器全屏
@@ -50,6 +51,10 @@ Game SDK、`main.json` 校验、统一游戏目录扫描和浏览器控制器分
 `go-core/` 已提供可启动、可停止的 HTTP 服务。宿主必须使用 `0.0.0.0:0` 请求系统分配空闲端口，并在启动成功后把实际端口上报给 Flutter；Flutter 本机连接时使用回环地址，分享时使用当前设备全部可用的局域网 IPv4 地址。页面不得猜测、缓存固定端口或自行拼接 Core 地址。
 
 网页开发者通道不复用或重绑 Core 端口。Flutter App 另行启动 `DeveloperWebGateway`，按当前产品决策绑定 `0.0.0.0`，默认端口为 `16666`，用户可在设置页修改；设置页只发布当前设备解析到的局域网 IPv4 链接。Developer API status 同时返回当前请求地址、解析到的局域网 IPv4 与回环地址，Agent 提示词只能从这些本机 HTTP Base URL 中选择一个嵌入接口清单，避免把持久开发者 token 指向任意外部地址。端口被占用时返回明确错误，不得通过重启 Core 解决。关闭开发者模式或 App 退出时只关闭开发者 Gateway，不中断现有 Core 会话。
+
+Developer CLI 是 Gateway 的客户端，不是第二个游戏运行时。CLI 从完整工作区 URL 解析 Base URL 和 token，通过标准包导出接口拉取 `main.json + capabilities.json + app/`，并通过 SDK bundle 接口建立 `playmesh/sdk/`。本地 `app/`、`playmesh/` 分别直接镜像运行时 `/app/`、`/playmesh/`，使 IDEA 能解析 JS/CSS/HTML 绝对路径。上传时只打包 `main.json + capabilities.json + app/`，`playmesh/` 永远排除，再复用应用正式游戏包导入器完成校验和提交。App 游戏安装目录不创建 CLI 辅助目录。
+
+CLI 二进制统一命名为 `playmesh-cli`（Windows 使用 `.exe`）。桌面平台构建将它作为 App 运行包的一部分：Windows/Linux 由 CMake 追踪 Go 源并安装到 bundle 根目录，macOS 由 Xcode Build Phase 放入 `Contents/MacOS/`；位置均与桌面 Go Core 的运行目录同级。Android/iOS 不编译或携带 CLI。
 
 ## Go Core 与游戏权威边界
 
@@ -325,7 +330,7 @@ window.playmesh.performance
 window.playmesh.app
 ```
 
-`playmesh.js` 是权威主机运行时 SDK，负责日志、会话、消息、生命周期和 Authority 主机存储。`playmesh-app.js` 是 App 本机桥接层，只由 App WebView 自动注入，负责 App 身份与本机设备能力，不属于权威主机 SDK。普通浏览器不加载 App SDK，但主 SDK 会提供 `playmesh.app` 安全空实现。当前 v1 的完整接口见 `docs/game/sdk-v1.md`；App SDK 已提供加速度计和陀螺仪订阅，其他尚未实现的本机能力不能写入游戏的必需调用链。
+`playmesh.js` 是权威主机运行时 SDK，负责会话、消息、生命周期和 Authority 主机存储。`playmesh-app.js` 是 App 本机桥接层，只由 App WebView 自动注入，负责 App 身份与本机设备能力，不属于权威主机 SDK。Console 日志由各设备的页面宿主在底层捕获，只进入本设备的运行日志流。普通浏览器不加载 App SDK，但主 SDK 会提供 `playmesh.app` 安全空实现。当前 v1 的完整接口见 `docs/game/sdk-v1.md`；App SDK 已提供加速度计和陀螺仪订阅，其他尚未实现的本机能力不能写入游戏的必需调用链。
 
 禁止 HTML 游戏直接接触：
 
@@ -407,7 +412,7 @@ AI 生成代码时只需要修改模板中的游戏规则区域和 UI 区域。�
 | 共享数据层 | `app/static/js/shared/` | 类型、常量、纯计算、协议载荷定义 | 保存会话状态、发送消息、执行玩家权限判断 |
 
 App 主机运行 `app/index.html` 与权威处理层，但二者是两个代码层。大屏模式下 `app/index.html` 只是公共显示页面，不是玩家页面；普通多屏模式下它可同时承载主机玩家 UI。两种模式都只能按 `playmesh.session.isAuthority()` 决定是否启动权威监听，不得从玩家顺序推断。
-- 当前游戏的 `app/` 固定映射为 `/game/...`；平台公共资源目录 `playmesh-library/public/` 固定映射为 `/playmesh/...`。资源服务必须拒绝路径穿越，且不能暴露 `data/`、其他游戏包、用户文件或 App 私有文件。Game SDK 使用 `/playmesh/sdk/v1/playmesh.js`，未来头像等公共资源也只能放入平台公共目录后统一暴露。
+- 当前游戏的 `app/` 固定映射为 `/app/...`；平台公共资源目录 `playmesh-library/public/` 固定映射为 `/playmesh/...`。资源服务必须拒绝路径穿越，且不能暴露 `data/`、其他游戏包、用户文件或 App 私有文件。Game SDK 使用 `/playmesh/sdk/v1/playmesh.js`，未来头像等公共资源也只能放入平台公共目录后统一暴露。
 
 ## 游戏包存储和安装
 
@@ -437,9 +442,8 @@ playmesh-library/
         static/          JS、CSS、图片等游戏公开资源
       data/              游戏自定义持久化数据，不含平台定义的用户层级
       cache/             App 可清理缓存；开发历史位于 developer/local-history/
-      .playmesh/         App 可选生成的索引、哈希和安装元数据
   public/
-    sdk/v1/             平台统一公开的 Game SDK
+    sdk/v1/             构建生成的 Game/App SDK 与类型声明
     avatars/            未来可选的平台公共头像资源
 ```
 
@@ -447,7 +451,7 @@ playmesh-library/
 
 `data/` 和 `cache/` 位于 `packages/{gameId}/` 下，但不属于游戏包文件，不能被打包分享，也不能由游戏通过路径直接访问。游戏只能通过 SDK 存取自己的持久化数据；`cache/` 由平台管理。
 
-`app/`、`data/` 和 `cache/` 必须保持同级，禁止将运行数据或缓存放入 `app/`。运行时只将当前 `packages/{gameId}/app/` 映射到 `/game/...`，并将平台 `playmesh-library/public/` 映射到 `/playmesh/...`；`data/` 和 `cache/` 不参与静态资源映射，不能通过相对路径或任意 HTTP URL 读取。
+`app/`、`data/` 和 `cache/` 必须保持同级，禁止将运行数据或缓存放入 `app/`。运行时只将当前 `packages/{gameId}/app/` 映射到 `/app/...`，并将平台 `playmesh-library/public/` 映射到 `/playmesh/...`；`data/` 和 `cache/` 不参与静态资源映射，不能通过相对路径或任意 HTTP URL 读取。
 
 ### 游戏数据存储 API
 
@@ -476,7 +480,7 @@ await profile.clearData();
 
 存储范围只自动绑定当前 `gameId` 和当前游戏库。平台不创建、推断或强制 `{userId}` 子目录；如游戏需要多用户存档，应由开发者在 Bucket 名称、key 或 JSON 内容中自行设计。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，即首字符为字母或数字，其余只能使用字母、数字、下划线和连字符，最长 64 个字符；SDK 与宿主存储层必须分别校验。SDK 还必须限制 key 格式、单值大小、单文件大小、总容量和 JSON 类型；写入采用临时文件加原子替换，异常时不能破坏已有数据。游戏数据与 `main.json`、游戏包文件、其他游戏数据和 App 用户资料隔离。
 
-游戏详情页必须提供“清除游戏数据”操作，并明确提示该操作会删除当前游戏的自定义存档。用户确认后只清理 `packages/{gameId}/data/`，不影响游戏本体与开发历史。清除缓存是独立操作，会删除 `cache/` 及其中的开发历史。卸载游戏时直接删除整个 `packages/{gameId}/` 目录，同时删除游戏文件、数据、缓存和 `.playmesh/` 元数据。
+游戏详情页必须提供“清除游戏数据”操作，并明确提示该操作会删除当前游戏的自定义存档。用户确认后只清理 `packages/{gameId}/data/`，不影响游戏本体与开发历史。清除缓存是独立操作，会删除 `cache/` 及其中的开发历史。卸载游戏时直接删除整个 `packages/{gameId}/` 目录，同时删除游戏文件、数据和缓存。
 
 ### 游戏库自动扫描
 
@@ -495,13 +499,13 @@ Flutter 没有一个在 Android、iOS、Windows 等平台路径完全相同的�
 
 游戏库页面还提供显式后台刷新。扫描期间继续展示 App 级仓库中的旧缓存，扫描成功后按 `gameId` 去重、稳定排序并原子替换，同时更新缓存 revision 和刷新时间；失败时不清空列表。仓库查询以缓存为数据源，支持后续搜索与 offset/limit 分页，不让页面直接重复扫描文件系统。
 
-扫描器只识别合法的 `{gameId}/main.json`，并要求清单中的 `id` 与目录名一致。发现新目录后自动校验并建立索引；目录缺失、校验失败或版本冲突时记录结构化错误，不阻塞其他游戏显示。游戏库索引可以缓存到包内 `.playmesh/` 或平台索引区，但游戏目录和 `main.json` 是实际来源，不能要求游戏包额外注册。
+扫描器只识别合法的 `{gameId}/main.json`，并要求清单中的 `id` 与目录名一致。发现新目录后自动校验并建立索引；目录缺失、校验失败或版本冲突时记录结构化错误，不阻塞其他游戏显示。游戏库索引属于 App 级仓库或平台索引区，游戏目录和 `main.json` 是实际来源，不能要求游戏包额外注册，也不能在安装目录创建 `.playmesh/` 元数据。
 
 ### 本机游戏源与在线游戏库
 
 Playmesh App 可以在独立固定端口启动 `GameCatalogServer`，把当前统一游戏库作为局域网游戏源分享。Catalog Gateway 与动态 Go Core、游戏会话分享网关和 Developer Gateway 分离，默认端口 `16668`，开关、端口与可选 Token 持久化到 `playmesh-library/catalog/settings.json`。Token 非空时 `/apps/*` 必须使用 Bearer 鉴权，留空时不鉴权。
 
-`GET /apps/list` 每次重新扫描统一游戏库，按名称、标签和描述过滤并分页返回完整 `GameManifest`；`GET /apps/download` 临时导出只含 `main.json` 与 `app/` 的标准包。服务不分享 `data/`、`cache/`、安装元数据、其他私有文件或内置资源游戏。
+`GET /apps/list` 每次重新扫描统一游戏库，按名称、标签和描述过滤并分页返回完整 `GameManifest`；`GET /apps/download` 临时导出只含 `main.json`、可选 `capabilities.json` 与 `app/` 的标准包。服务不分享 `data/`、`cache/`、其他私有文件或内置资源游戏。
 
 在线游戏库属于现有游戏库内部能力，不在首页增加第二个游戏库入口。它并发请求全部启用的 Host/Token 源，将各源返回按 `GameManifest.id` 去重后展示；单个源失败不阻断其他源。源配置支持手动输入、二维码导入、启用、禁用、编辑、删除和二维码分享。默认每源取 `5` 个，可配置为 `1` 至 `100`。
 
@@ -569,7 +573,7 @@ export const ActionTypes = {};
 
 连续变更按 5 分钟滚动窗口合并为一个时间操作，最多保留 100 个操作。淘汰最旧操作时，先将其变更后快照提升为新基线，确保后续 Diff 仍可还原。保存、上传、新建、删除、快速操作和历史恢复都进入同一条项目历史链；手动恢复会创建一个独立且封口的时间操作，不与后续编辑合并。
 
-历史快照排除 `data/`、`cache/` 和 `.playmesh/`，项目树与开发者文件 API 也不允许通过普通路径访问这些内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和删除差异，并用指定操作的变更前或变更后状态全量替换当前范围。恢复项目根时必须保留平台管理的 `main.json`。恢复完成后通过统一 SSE 通道发送 `workspace.restored`，使其他工作区刷新状态。
+历史快照排除 `data/` 和 `cache/`，项目树与开发者文件 API 也不允许通过普通路径访问这些内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和删除差异，并用指定操作的变更前或变更后状态全量替换当前范围。恢复项目根时必须保留平台管理的 `main.json`。恢复完成后通过统一 SSE 通道发送 `workspace.restored`，使其他工作区刷新状态。
 
 CodeMirror 负责当前编辑缓冲区尚未保存内容的即时撤销与重做。服务端不提供单文件 `/undo` 接口，也不维护独立的文件撤销栈。
 
@@ -621,7 +625,8 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
   "name": "多人抢答",
   "remarks": "局域网多人抢答游戏",
   "version": "0.1.0",
-  "sdkVersion": "1.3.0",
+  "sdkVersion": "1.4.2",
+  "appSdkVersion": "1.2.1",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "players": {
@@ -651,7 +656,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 - `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
 - `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。App 必须在创建游戏 WebView 前应用该方向，并在退出游戏后恢复系统方向。
-- `sdkVersion` 用于检查游戏和平台 SDK 的兼容性，当前模板使用 `1.3.0`。版本使用 `MAJOR.MINOR.PATCH`，升级规则统一遵循 `docs/06-engineering-standards.md`。
+- `sdkVersion` 和 `appSdkVersion` 用于检查游戏与两套平台 SDK 的兼容性，当前模板分别使用 `1.4.2`、`1.2.1`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。能力 ID 按功能命名，不绑定 App 或浏览器实现；平台按运行环境选择适配器。
 - 平台能力元数据统一维护在 `lib/models/game_capability_registry.dart`。每个 code 在这里映射中文名、用途说明、App 适配状态和 HTML 适配状态；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。新增能力时只在这里增加一项元数据，具体运行环境仍需单独实现对应适配器。
 - 当前支持声明 `sensor.accelerometer` 和 `sensor.gyroscope`。文件缺失或 `required` 为空时不弹确认框；非空时主 SDK 在 App 和浏览器每次加载游戏时展示全部所需能力，并等待用户“同意并进入”或“拒绝并退出”。当前平台不支持的能力显示“本平台暂不支持”，但不会阻止同意后进入。授权结果不持久化，也不写入权威主机。
@@ -666,7 +671,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 
 ## SDK 与组件版本策略
 
-后续所有更改都必须评估受影响组件并按需升级版本号，完整规则和当前版本矩阵见 `docs/06-engineering-standards.md`。App、Game SDK、默认项目骨架、Schema、Manifest、OpenAPI、AI 提示词和校验器始终只维护一套当前契约。`sdkVersion` 用于声明游戏需要的 Game SDK，不用于选择历史兼容层。
+后续所有更改都必须评估受影响组件并按需升级版本号，完整规则和当前版本矩阵见 `docs/06-engineering-standards.md`。Game SDK 与 App Bridge SDK 分别以 `sdk-src/playmesh.ts`、`sdk-src/playmesh-app.ts` 为唯一手写源，构建生成运行 JS、`.d.ts`、版本常量和关联契约。App、默认项目骨架、Schema、Manifest、OpenAPI、AI 提示词和校验器始终只维护一套当前契约。`sdkVersion/appSdkVersion` 不用于选择历史兼容层。
 
 规则：
 

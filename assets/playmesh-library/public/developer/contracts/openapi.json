@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Playmesh Developer Channel",
-    "version": "1.2.0",
+    "version": "1.4.0",
     "description": "Authenticated project, manifest, capability, file, validation, history, runtime, event and AI discovery APIs. main.json is edited only through the manifest endpoint, which preserves its immutable id. Raw file writes remain blocked."
   },
   "security": [{ "developerToken": [] }],
@@ -14,6 +14,35 @@
         "x-risk": "low",
         "x-idempotent": true,
         "responses": { "200": { "description": "Status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeveloperStatus" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/dev/api/sdk": {
+      "get": {
+        "summary": "Download the generated Game SDK, App SDK and declarations",
+        "x-permission": "sdk.read",
+        "x-risk": "low",
+        "x-idempotent": true,
+        "responses": { "200": { "description": "Base64 encoded playmesh.js, playmesh-app.js and matching declaration files" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/dev/api/run": {
+      "get": {
+        "summary": "Read the single active developer run",
+        "x-permission": "runtime.run",
+        "x-risk": "low",
+        "x-idempotent": true,
+        "responses": { "200": { "description": "Active run or null" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/dev/api/packages/import": {
+      "post": {
+        "summary": "Import or update a standard Playmesh package",
+        "description": "The existing package importer atomically replaces main.json, capabilities.json and app/ by main.json.id while preserving data/ and cache/.",
+        "x-permission": "project.write",
+        "x-risk": "medium",
+        "x-idempotent": false,
+        "requestBody": { "required": true, "content": { "application/zip": { "schema": { "type": "string", "format": "binary" } } } },
+        "responses": { "200": { "description": "Imported project" }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
       }
     },
     "/dev/api/projects": {
@@ -95,6 +124,16 @@
         "x-idempotent": true,
         "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
         "responses": { "200": { "description": "Tree entries", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FileTree" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/dev/api/projects/{projectId}/package": {
+      "get": {
+        "summary": "Export a project as a standard Playmesh ZIP",
+        "x-permission": "project.read",
+        "x-risk": "low",
+        "x-idempotent": true,
+        "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+        "responses": { "200": { "description": "ZIP containing main.json, optional capabilities.json and app/", "content": { "application/zip": { "schema": { "type": "string", "format": "binary" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
     "/dev/api/projects/{projectId}/manifest": {
@@ -411,7 +450,11 @@
         "x-permission": "log.read",
         "x-risk": "low",
         "x-idempotent": true,
-        "parameters": [{ "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 50 } }],
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 50 } },
+          { "name": "projectId", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Only return logs captured for this developer project" },
+          { "name": "runId", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Only return logs captured for this run" }
+        ],
         "responses": {
           "200": {
             "description": "Most recent logs in chronological order",

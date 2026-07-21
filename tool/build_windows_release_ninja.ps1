@@ -5,6 +5,19 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'generate_sdk.ps1')
+$pubspec = Get-Content -LiteralPath (Join-Path $repoRoot 'pubspec.yaml') -Encoding UTF8
+$versionLine = $pubspec | Where-Object { $_ -match '^version:\s*(\S+)\s*$' } | Select-Object -First 1
+if (-not $versionLine -or
+    $versionLine -notmatch '^version:\s*((\d+)\.(\d+)\.(\d+))\+(\d+)\s*$') {
+  throw 'pubspec.yaml version must use MAJOR.MINOR.PATCH+BUILD.'
+}
+$versionName = $matches[1]
+$versionMajor = $matches[2]
+$versionMinor = $matches[3]
+$versionPatch = $matches[4]
+$buildNumber = $matches[5]
+$version = "$versionName+$buildNumber"
 $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path -LiteralPath $vsWhere)) {
   throw "Missing Visual Studio Installer tool: $vsWhere"
@@ -68,7 +81,12 @@ if (Test-Path -LiteralPath $buildDir) {
   "-DCMAKE_C_COMPILER=$compiler" `
   "-DCMAKE_CXX_COMPILER=$compiler" `
   "-DCMAKE_INSTALL_PREFIX=$bundleDir" `
-  "-DFLUTTER_TARGET_PLATFORM=windows-x64"
+  "-DFLUTTER_TARGET_PLATFORM=windows-x64" `
+  "-DPLAYMESH_FLUTTER_VERSION=$version" `
+  "-DPLAYMESH_FLUTTER_VERSION_MAJOR=$versionMajor" `
+  "-DPLAYMESH_FLUTTER_VERSION_MINOR=$versionMinor" `
+  "-DPLAYMESH_FLUTTER_VERSION_PATCH=$versionPatch" `
+  "-DPLAYMESH_FLUTTER_VERSION_BUILD=$buildNumber"
 if ($LASTEXITCODE -ne 0) {
   throw "CMake configure failed: $LASTEXITCODE"
 }

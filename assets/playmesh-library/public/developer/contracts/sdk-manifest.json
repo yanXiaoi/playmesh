@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
-  "channelVersion": "1.1.0",
+  "version": "1.4.2",
+  "channelVersion": "1.2.1",
   "script": "/playmesh/sdk/v1/playmesh.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -35,11 +35,12 @@
     },
     {
       "id": "browser-solo",
-      "transport": "Static assets plus host-injected HTTP storage and logging endpoints",
+      "transport": "Static assets plus host-injected HTTP storage endpoint",
       "currentPlayer": "null",
       "notes": [
         "Loads app/index.html",
         "Does not join a Session, prompt for a nickname or open a WebSocket",
+        "Console logs remain in the current browser and are not uploaded to Authority",
         "session.getCurrent() and player.getCurrent() return null"
       ]
     }
@@ -70,6 +71,14 @@
   "projectValidationSchema": "/dev/schemas/project-validation.json",
   "developerLogging": {
     "transportEvent": "runtime.log",
+    "captureLayer": "App WebView host",
+    "scope": "local-device",
+    "browserLogsRemainInBrowser": true,
+    "eventIdentity": "eventId",
+    "runMetadata": [
+      "projectId",
+      "runId"
+    ],
     "nativeConsolePreserved": true,
     "capturedEvents": [
       "console",
@@ -106,7 +115,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "1.3.0"
+          "value": "1.4.2"
         },
         {
           "name": "ready",
@@ -211,7 +220,11 @@
           "name": "start",
           "signature": "start(): Promise<SessionSnapshot>",
           "availability": "Authority Client",
-          "errors": ["not_authority", "too_few_players", "session_started"]
+          "errors": [
+            "not_authority",
+            "too_few_players",
+            "session_started"
+          ]
         },
         {
           "name": "finish",
@@ -399,7 +412,7 @@
     "capabilityConsent": "When capabilities.json.required is non-empty, the main SDK prompts on every App/browser game load. Rejection exits; unsupported capabilities are labeled but never block entry after consent; results are not persisted",
     "publicRoot": "app/",
     "sdkImport": "/playmesh/sdk/v1/playmesh.js",
-    "gameUrlRoot": "/game/",
+    "appUrlRoot": "/app/",
     "gameEntry": "main.json entries.game; defaults to app/index.html",
     "controllerEntry": "main.json entries.controller; defaults to app/controller/index.html and is required by single_screen_multiplayer",
     "authorityEntry": "main.json authority.entry; must point to an app/ JavaScript file for multiplayer games",

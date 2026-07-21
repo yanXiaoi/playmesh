@@ -3,16 +3,29 @@
   "name": "New Game",
   "remarks": "Playmesh multiplayer game",
   "version": "0.1.0",
-  "sdkVersion": "1.3.0",
+  "sdkVersion": "1.4.2",
+  "appSdkVersion": "1.2.1",
   "orientation": "landscape",
-  "modes": ["multiplayer"],
-  "displayModes": ["multi_screen", "single_screen_multiplayer"],
-  "players": { "min": 2, "max": 5 },
+  "modes": [
+    "multiplayer"
+  ],
+  "displayModes": [
+    "multi_screen",
+    "single_screen_multiplayer"
+  ],
+  "players": {
+    "min": 2,
+    "max": 5
+  },
   "entries": {
     "game": "app/index.html",
     "controller": "app/controller/index.html"
   },
-  "authority": { "entry": "app/static/js/service/index.js" },
-  "tags": ["multiplayer"],
+  "authority": {
+    "entry": "app/static/js/service/index.js"
+  },
+  "tags": [
+    "multiplayer"
+  ],
   "permissions": []
 }

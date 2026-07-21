@@ -74,7 +74,7 @@ Flutter App
 
 ## 当前开发建议
 
-第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。当前维护 Playmesh `1.4.0+5`、Go Core `0.2.0`、Game SDK `1.3.0`、App Bridge SDK `1.1.0`、Developer API / OpenAPI `1.2.0`、Catalog API `1.1.0` 正式基线。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。当前维护 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。外部 IDEA 通过全局 CLI 拉取项目和同源 SDK/类型，发布与运行仍以目标 App 为权威。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
 
 建议顺序：
 
@@ -90,7 +90,9 @@ lib/main.dart                         Playmesh App 入口
 lib/features/games/                   游戏库与游戏详情页
 lib/features/game/                    全屏游戏页、Launcher 和本地 WebView
 assets/playmesh-library/packages/     直接按 `{gameId}/main.json` 存放游戏包
-assets/playmesh-library/public/       平台统一公开资源，包含 Game SDK
+assets/playmesh-library/sdk-src/      Game SDK 与 App Bridge SDK 的 TypeScript 唯一手写源
+assets/playmesh-library/public/       平台统一公开资源，包含生成的 JS 与 .d.ts
+dev-cli/                              Go Developer CLI
 test/widget_test.dart                 首页、导航、启动、刷新、返回和退出测试
 docs/status/phase-01-flutter-webview.md  第一阶段事实归档
 docs/status/phase-02-go-core.md          第二阶段事实归档
@@ -126,7 +128,7 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 游戏声明文件使用 `displayModes` 声明唯一显示模式：`single_screen_multiplayer`（大屏模式）或 `multi_screen`（普通模式）。当前不允许同时声明两者。
 - 大屏模式下主机使用 `app/index.html` 作为公共显示端与 Authority Client，不属于 `players`；所有玩家使用 `app/controller/index.html`。
 - 普通模式下主机、其他 App 设备和普通浏览器都使用 `app/index.html`；创建会话的 App 主机固定为 Authority Client，并可同时作为一个 Player，任何玩家进入顺序都不参与 Authority 判定。
-- 游戏运行时只公开当前游戏的 `app/` 和平台 `public/` 资源；分别通过 `/game/...` 与 `/playmesh/...` 访问，`data/`、其他游戏包和 App 私有文件不可通过 URL 读取。
+- 游戏运行时只公开当前游戏的 `app/` 和平台 `public/` 资源；分别通过 `/app/...` 与 `/playmesh/...` 访问，`data/`、其他游戏包和 App 私有文件不可通过 URL 读取。
 - 游戏持久化目录固定为 `packages/{gameId}/data/`，不生成 `{userId}` 子目录；游戏开发者通过合法 Bucket 名称和 JSON 内容自行组织数据。
 - 所有 SDK 持久化数据统一写入开始游戏的 Authority 主机；浏览器经受 token 保护的主机接口读写，其他 App 玩家经会话路由到主机，不能写入加入设备自己的游戏库。
 - FPS 默认显示在游戏页左上角，可在悬浮工具坞关闭。SDK 只统计游戏在实际渲染完成处调用 `playmesh.performance.reportFrame()` 上报的帧；未接入时显示 `-- FPS`。

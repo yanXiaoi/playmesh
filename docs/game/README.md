@@ -5,7 +5,7 @@
 ## 阅读顺序
 
 1. AI 提示词：主工作区点击“AI”直接进入统一 AI 开发页，API 接口文档与公共、游戏模式、显示模式模板位于同一页面。公共“自定义想法”会同时合入对话和 Agent 提示词；醒目的“获取项目提示词”集中切换、复制或下载两份 UTF-8 TXT，最终文本包含当前模式相关契约、当前能力声明、统一能力注册表、SDK、角色语义、强制文件和项目源码。Agent 类型还可从本机 IP 枚举中选择电脑端 AI 能访问的 Base URL，用于从电脑接管手机上的开发工作区。
-2. [游戏开发指南](development-guide.md)：运行模式、页面职责、Authority 边界和开发流程。
+2. [游戏开发指南](development-guide.md)：内置工作区与 IDEA/CLI 开发流程、运行模式、页面职责和 Authority 边界。
 3. [游戏包与 main.json](package-format.md)：目录结构、公开资源、清单字段、安装与数据目录。
 4. [Game SDK v1](sdk-v1.md)：当前 `playmesh.js` 已实现的 API、设备能力回调、存储和 FPS 上报。
 5. [网页开发者通道](web-dev-channel.md)：第四阶段工作区规格；单机/联机项目创建、`main.json` 与能力声明可视化编辑、IDEA 风格文件树、项目级本地历史、结构化校验、运行入口、SSE 同步、统一日志以及 AI 可读的 SDK、接口和 Schema。
@@ -13,10 +13,11 @@
 
 ## 当前版本
 
-- Game SDK：`1.3.0`
-- App Bridge SDK：`1.1.0`
+- Game SDK：`1.4.2`
+- App Bridge SDK：`1.2.1`
+- Developer CLI：`1.1.0`
 - SDK 地址：`/playmesh/sdk/v1/playmesh.js`
-- 游戏公开资源：`/game/...`
+- 游戏公开资源：`/app/...`
 - 游戏包根目录：`playmesh-library/packages/{gameId}/`
 - 平台不内置游戏 Demo；开发者工作区新建的项目直接进入统一游戏库。
 - 页面入口：`entries.game` 默认 `app/index.html`；`entries.controller` 默认 `app/controller/index.html`；多人权威 JavaScript 使用 `authority.entry`。

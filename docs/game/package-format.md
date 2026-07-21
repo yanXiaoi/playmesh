@@ -18,9 +18,11 @@ playmesh-library/
         {bucket}.json
       cache/
         developer/local-history/...
-      .playmesh/
   public/
     sdk/v1/playmesh.js
+    sdk/v1/playmesh-app.js
+    sdk/v1/playmesh.d.ts
+    sdk/v1/playmesh-app.d.ts
     avatars/...
 ```
 
@@ -30,9 +32,9 @@ Android 与 iOS 使用系统应用支持目录中的 `playmesh-library`。所有
 
 ## 公开资源边界
 
-- `app/` 是当前游戏唯一映射到 WebView 的目录，对应 `/game/...`。
+- `app/` 是当前游戏唯一映射到 WebView 的目录，对应 `/app/...`。
 - `playmesh-library/public/` 是平台公共资源目录，对应 `/playmesh/...`。
-- `data/` 与 `app/` 同级，不参与静态映射，不能通过 URL、相对路径或 `/game/...` 读取。
+- `data/` 与 `app/` 同级，不参与静态映射，不能通过 URL、相对路径或 `/app/...` 读取。
 - `cache/` 与 `app/`、`data/` 同级，由平台管理，同样不参与静态映射。
 - 游戏不能读取其他包、用户资料或 App 私有文件。
 - SDK 固定从 `/playmesh/sdk/v1/playmesh.js` 引入，禁止使用 `../../../sdk/...` 一类跨目录路径。
@@ -51,7 +53,7 @@ game-package/
     static/...
 ```
 
-`data/`、`cache/`、`.playmesh/` 和原始安装压缩包不参与分享。安装时先在临时目录解压和校验，再原子移动到 `packages/{gameId}/`。卸载游戏删除整个游戏目录；“清除游戏数据”只删除该目录下的 `data/`，“清除缓存”则删除 `cache/` 及其中的开发历史。
+`data/`、`cache/` 和原始安装压缩包不参与分享。App 安装目录不创建 CLI 辅助目录；CLI 本地开发副本保留包内 `app/` 并直接映射 `/app/`，使用 `playmesh/` 映射平台公共 `/playmesh/` URL 空间。安装时先在临时目录解压和校验，再原子移动到 `packages/{gameId}/`。卸载游戏删除整个游戏目录；“清除游戏数据”只删除该目录下的 `data/`，“清除缓存”则删除 `cache/` 及其中的开发历史。
 
 ## main.json 示例
 
@@ -62,7 +64,8 @@ game-package/
   "name": "派对游戏",
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "1.3.0",
+  "sdkVersion": "1.4.2",
+  "appSdkVersion": "1.2.1",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "displayModes": ["single_screen_multiplayer"],
@@ -85,7 +88,8 @@ game-package/
 | `name` | 是 | 非空展示名称 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；当前模板为 `1.3.0`，App 支持 `1.x` |
+| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `1.4.2`，App 支持 `1.x` |
+| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `1.2.1`；旧包缺省按 `1.0.0` 读取，CLI 发布时总会写入当前值 |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
 | `displayModes` | 是 | 单元素数组，值为 `multi_screen` 或 `single_screen_multiplayer` |
@@ -150,7 +154,7 @@ packages/{gameId}/cache/developer/local-history/
 
 该目录由平台管理，不属于发布包，也不能通过游戏 URL 或开发者普通文件 API 访问。历史采用初始基线加逐时间操作的变更后快照；连续变更按 5 分钟滚动窗口合并，默认最多保留 100 个操作。最旧操作被淘汰时，其变更后快照提升为新基线。
 
-历史只覆盖游戏项目文件，排除 `data/`、`cache/` 和 `.playmesh/`。清除游戏数据不会删除历史；清除缓存会删除历史；卸载游戏会随整个游戏目录一起删除。
+历史只覆盖游戏发布文件，排除 `data/` 和 `cache/`。清除游戏数据不会删除历史；清除缓存会删除历史；卸载游戏会随整个游戏目录一起删除。
 
 ## 扫描与安装校验
 
@@ -168,6 +172,6 @@ App 级游戏库仓库缓存排序后的清单元数据、搜索文本、`revisi
 
 应用游戏库只导入 Playmesh ZIP 游戏包，不把任意 HTML 目录识别为可安装游戏。压缩包根目录必须直接包含 `main.json` 和 `app/`，不能外包一层目录；内容只允许根 `main.json`、可选 `capabilities.json` 与 `app/**`。完整 HTML 小游戏应进入开发者工作区，通过上传、ZIP 解压、移动、复制和粘贴整理，再由项目校验确认结构。
 
-当前导入限制为：压缩文件 64 MiB、解压总量 256 MiB、单文件 32 MiB、文件数 4096。导入拒绝绝对路径、目录穿越、重复路径、符号链接、系统脚本、可执行文件与原生动态库。全部校验和暂存写入成功后才原子替换同 ID 游戏；失败会恢复旧目录。安装来源、时间、游戏 ID 和版本记录在 `.playmesh/install.json`，该元数据不进入导出包。
+当前导入限制为：压缩文件 64 MiB、解压总量 256 MiB、单文件 32 MiB、文件数 4096。导入拒绝绝对路径、目录穿越、重复路径、符号链接、系统脚本、可执行文件与原生动态库。`main.json.id` 不存在时新增游戏；同 ID 已存在时只原子替换 `main.json`、`capabilities.json` 与 `app/`，不覆盖或移动 `data/`、`cache/` 和其他运行内容，失败会恢复旧发布文件。安装过程不创建实体 `.playmesh/` 元数据目录。
 
-导出只打包当前安装目录的 `main.json`、可选 `capabilities.json` 与 `app/`，明确排除 `data/`、`cache/` 和 `.playmesh/`。应用通过系统保存位置输出 `{gameId}-{version}.playmesh.zip`，导出的包可再次导入并保持清单与入口一致。
+导出只打包当前安装目录的 `main.json`、可选 `capabilities.json` 与 `app/`，明确排除 `data/` 和 `cache/`。游戏详情页建议输出 `{游戏名称}-v{版本}.zip`，导出的包可再次导入并保持清单与入口一致；CLI `push/dev` 使用相同发布边界，直接上传本地 `app/`。
