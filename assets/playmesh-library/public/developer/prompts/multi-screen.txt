@@ -1,0 +1,39 @@
+【当前显示类型：普通多人多屏】
+所有设备都加载 main.json 的 entries.game（未声明时使用平台默认主入口）。创建并运行当前游戏会话的 App 主机端固定为 Authority Client；Authority 不是从玩家进入顺序中选举的。主机 App 可以同时作为一个实际 Player，因此 playmesh.player.getCurrent() 非空且角色为 authority_player，但它在 session.players 中的位置没有 Authority 语义；后续加入者为普通 Player。
+
+强制禁止：
+- 不得创建、引用或实现 entries.controller。
+- 不得使用 session.players[0]、数组顺序、“第一个进入的玩家”或本地玩家顺序判断 Authority；只能使用 playmesh.session.isAuthority()，服务端校验只能比较 session.authorityClientId。
+
+页面最小结构：
+
+import { startAuthoritySync } from "../service/index.js";
+await playmesh.ready;
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+
+try {
+  if (playmesh.session.isAuthority()) {
+    startAuthoritySync();
+  }
+} catch (error) {
+  showError(error);
+}
+
+playmesh.session.onStateChange(renderSession);
+playmesh.sync.observe((snapshot) => render(snapshot.state));
+
+document.querySelector("#action").addEventListener("click", async () => {
+  try {
+    await playmesh.sync.submitAction({ type: "state.increment" });
+  } catch (error) {
+    showError(error);
+  }
+});
+
+同一个 entries.game 页面必须同时兼容 App 主机玩家和加入者。Authority 同步启动必须有 isAuthority 判断，任何加入端无论进入顺序都不能启动 Authority runtime。

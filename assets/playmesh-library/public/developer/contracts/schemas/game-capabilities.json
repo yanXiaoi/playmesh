@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://playmesh.local/schemas/game-capabilities.json",
+  "title": "Playmesh capabilities.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "required": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+$",
+        "description": "Must exist in GET /dev/api/capabilities; runtime validation uses the central capability registry."
+      },
+      "default": []
+    }
+  }
+}

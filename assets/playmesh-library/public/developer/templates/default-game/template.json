@@ -1,0 +1,10 @@
+{
+  "id": "default-game",
+  "templateVersion": 1,
+  "packageRoot": "package",
+  "managedFiles": ["main.json"],
+  "variables": {
+    "id": "com.example.new-game",
+    "name": "New Game"
+  }
+}

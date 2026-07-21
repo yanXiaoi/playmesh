@@ -1,0 +1,408 @@
+{
+  "version": "1.3.0",
+  "channelVersion": "1.1.0",
+  "script": "/playmesh/sdk/v1/playmesh.js",
+  "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
+  "global": "playmesh",
+  "language": "JavaScript",
+  "initialization": {
+    "required": "await playmesh.ready",
+    "failure": "Promise rejects with Error when the host transport or browser join fails",
+    "rule": "Do not call session, player, game, authority or storage methods before ready resolves"
+  },
+  "environments": [
+    {
+      "id": "app-webview",
+      "transport": "Flutter or Windows WebView bridge",
+      "currentPlayer": "the participating App host player in multi_screen; null for the single_screen_multiplayer public display",
+      "notes": [
+        "The App runtime that creates and runs the session is the fixed Authority Client",
+        "Authority is never elected from session.players or player join order"
+      ]
+    },
+    {
+      "id": "browser-multiplayer-player",
+      "transport": "Host-injected HTTP and WebSocket endpoints",
+      "currentPlayer": "the persistent browser player stored for this origin",
+      "notes": [
+        "multi_screen loads app/index.html; single_screen_multiplayer loads app/controller/index.html",
+        "The SDK owns nickname input and nickname editing UI",
+        "The SDK stores playerId and nickname in localStorage and reuses them after refresh",
+        "A playerId can have only one online WebSocket; reconnect is allowed after disconnection",
+        "playmesh.app is an unavailable empty implementation because playmesh-app.js is not loaded",
+        "Game code must not construct Core URLs, tokens or WebSocket frames"
+      ]
+    },
+    {
+      "id": "browser-solo",
+      "transport": "Static assets plus host-injected HTTP storage and logging endpoints",
+      "currentPlayer": "null",
+      "notes": [
+        "Loads app/index.html",
+        "Does not join a Session, prompt for a nickname or open a WebSocket",
+        "session.getCurrent() and player.getCurrent() return null"
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "id": "multi_screen_app_host_authority_player",
+      "isAuthority": true,
+      "playerIsNull": false,
+      "description": "The App host is the fixed Authority Client and separately participates as a member of session.players; its player position has no Authority meaning"
+    },
+    {
+      "id": "single_screen_public_display",
+      "isAuthority": true,
+      "playerIsNull": true,
+      "description": "The public display is Authority Client but is not a player"
+    },
+    {
+      "id": "player",
+      "isAuthority": false,
+      "playerIsNull": false,
+      "description": "App or browser player that submits actions and receives messages"
+    }
+  ],
+  "typesSchema": "/dev/schemas/sdk-v1.json",
+  "gameManifestSchema": "/dev/schemas/game-manifest.json",
+  "gameCapabilitiesSchema": "/dev/schemas/game-capabilities.json",
+  "projectValidationSchema": "/dev/schemas/project-validation.json",
+  "developerLogging": {
+    "transportEvent": "runtime.log",
+    "nativeConsolePreserved": true,
+    "capturedEvents": [
+      "console",
+      "uncaught.error",
+      "unhandled.rejection",
+      "resource.error"
+    ],
+    "capturedConsoleLevels": [
+      "log",
+      "info",
+      "warn",
+      "error",
+      "debug"
+    ],
+    "errorMetadata": [
+      "filename",
+      "line",
+      "column",
+      "stack"
+    ],
+    "appMemoryCacheEntries": 500,
+    "cacheRequiresVisibleLogPanel": false,
+    "diskPersistence": false,
+    "copyAvailableIn": [
+      "developer-workspace",
+      "in-game-debug-overlay"
+    ]
+  },
+  "namespaces": [
+    {
+      "name": "playmesh",
+      "members": [
+        {
+          "name": "version",
+          "kind": "property",
+          "type": "string",
+          "value": "1.3.0"
+        },
+        {
+          "name": "ready",
+          "kind": "property",
+          "type": "Promise<SdkBootstrap>"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.app",
+      "members": [
+        {
+          "name": "DeviceType",
+          "type": "{ accelerometer: 'accelerometer', gyroscope: 'gyroscope' }",
+          "behavior": "Provider-neutral sensor enum used by onDevice"
+        },
+        {
+          "name": "onDevice",
+          "signature": "onDevice(type: DeviceType, fps: 1..120, callback: (data: DeviceSensorData) => void): Unsubscribe",
+          "availability": "Playmesh App WebView after capabilities.json declaration and user consent",
+          "behavior": "One native stream keeps the latest sample; each listener receives that snapshot on its requested fps tick"
+        },
+        {
+          "name": "isAvailable",
+          "signature": "isAvailable(): boolean",
+          "behavior": "True only when playmesh-app.js is injected by a Playmesh App WebView"
+        },
+        {
+          "name": "identity.getCurrent",
+          "signature": "identity.getCurrent(): AppIdentity | null",
+          "behavior": "Returns the App-owned persistent userId and nickname; browser empty implementation returns null"
+        },
+        {
+          "name": "device.getPlatform",
+          "signature": "device.getPlatform(): string"
+        },
+        {
+          "name": "device.getCapabilities",
+          "signature": "device.getCapabilities(): string[]",
+          "behavior": "Returns capabilities declared by the game and currently available on this App device; use it before subscribing"
+        },
+        {
+          "name": "device.getDeclaredCapabilities",
+          "signature": "device.getDeclaredCapabilities(): string[]",
+          "behavior": "Returns the current game's capabilities.json declaration even when an adapter is unavailable"
+        },
+        {
+          "name": "device.haptic",
+          "signature": "device.haptic(style: string): Promise<null>",
+          "availability": "Playmesh App WebView with haptics capability"
+        },
+        {
+          "name": "device.setFullscreen",
+          "signature": "device.setFullscreen(enabled: boolean): Promise<null>",
+          "availability": "Playmesh App WebView with fullscreen capability"
+        },
+        {
+          "name": "device.onInput",
+          "signature": "device.onInput(callback: (input: JsonObject) => void): Unsubscribe",
+          "availability": "Playmesh App WebView when an input capability is declared"
+        },
+        {
+          "name": "device.onDevice",
+          "signature": "device.onDevice(type: DeviceType, fps: 1..120, callback: (data: DeviceSensorData) => void): Unsubscribe",
+          "status": "Alias of playmesh.app.onDevice"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.session",
+      "members": [
+        {
+          "name": "getCurrent",
+          "signature": "getCurrent(): SessionSnapshot | null",
+          "returns": "The latest immutable-by-convention session snapshot; null before ready"
+        },
+        {
+          "name": "onStateChange",
+          "signature": "onStateChange(callback: (session: SessionSnapshot) => void): Unsubscribe",
+          "behavior": "Immediately emits the current snapshot after ready, then emits membership and state changes"
+        },
+        {
+          "name": "onPlayerJoin",
+          "signature": "onPlayerJoin(callback: (event: PlayerConnectionEvent) => void): Unsubscribe",
+          "behavior": "Emits when a player id establishes its first WebSocket connection in the session"
+        },
+        {
+          "name": "onPlayerLeave",
+          "signature": "onPlayerLeave(callback: (event: PlayerConnectionEvent) => void): Unsubscribe",
+          "behavior": "Emits when an online player becomes disconnected; the persistent player remains in the session snapshot"
+        },
+        {
+          "name": "onPlayerReconnect",
+          "signature": "onPlayerReconnect(callback: (event: PlayerConnectionEvent) => void): Unsubscribe",
+          "behavior": "Emits when a previously connected persistent player id establishes a new WebSocket connection"
+        },
+        {
+          "name": "isAuthority",
+          "signature": "isAuthority(): boolean"
+        },
+        {
+          "name": "start",
+          "signature": "start(): Promise<SessionSnapshot>",
+          "availability": "Authority Client",
+          "errors": ["not_authority", "too_few_players", "session_started"]
+        },
+        {
+          "name": "finish",
+          "signature": "finish(): Promise<SessionSnapshot>",
+          "availability": "Authority Client",
+          "behavior": "Sets state to stopped and automatically prunes disconnected players; connected players remain for the next round"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.player",
+      "members": [
+        {
+          "name": "getCurrent",
+          "signature": "getCurrent(): Player | null",
+          "rule": "Returns the App host player in multi_screen and null on the single_screen_multiplayer public display; this value must not be used to elect Authority"
+        },
+        {
+          "name": "setNickname",
+          "signature": "setNickname(nickname: string): Promise<Player>",
+          "availability": "Browser multiplayer player only; unavailable in App WebView and browser solo",
+          "constraints": "Trimmed length 1 to 32 Unicode characters"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.game",
+      "members": [
+        {
+          "name": "submitAction",
+          "signature": "submitAction(action: JsonObject): Promise<null>",
+          "rule": "Submit business intent only. Never trust a player id, score, answer or result supplied by the action payload"
+        },
+        {
+          "name": "onMessage",
+          "signature": "onMessage(callback: (message: JsonObject) => void): Unsubscribe",
+          "behavior": "Receives messages accepted and routed by Authority"
+        },
+        {
+          "name": "onEvent",
+          "signature": "onEvent(callback: (message: JsonObject) => void): Unsubscribe",
+          "status": "Alias of onMessage; new code should use onMessage"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.authority",
+      "members": [
+        {
+          "name": "onService",
+          "signature": "onService(handler: (action: JsonObject, context: AuthorityContext) => AuthorityResult | AuthorityResult[] | null | Promise<AuthorityResult | AuthorityResult[] | null>): Unsubscribe",
+          "availability": "The App session host only; browser players and App joiners can never register Authority",
+          "rule": "Use context.senderPlayerId and context.members[].id as trusted identities. targetPlayerIds normally contains Player.id values; include context.session.authorityClientId when the single-screen public display must also receive the message. Remove duplicate ids",
+          "invalidResult": "Results without targetPlayerIds array or message object are ignored"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.lifecycle",
+      "members": [
+        {
+          "name": "onChange",
+          "signature": "onChange(callback: (event: LifecycleEvent) => void): Unsubscribe"
+        },
+        {
+          "name": "onPause",
+          "signature": "onPause(callback: (event: LifecycleEvent) => void | Promise<void>): Unsubscribe"
+        },
+        {
+          "name": "onResume",
+          "signature": "onResume(callback: (event: LifecycleEvent) => void | Promise<void>): Unsubscribe"
+        },
+        {
+          "name": "onExit",
+          "signature": "onExit(callback: (event: LifecycleEvent) => void | Promise<void>): Unsubscribe",
+          "rule": "The host waits only for a limited time; save important state when it changes and use onExit only for business cleanup. The App owns final persistence."
+        }
+      ]
+    },
+    {
+      "name": "playmesh.sync",
+      "members": [
+        {
+          "name": "startAuthority",
+          "signature": "startAuthority(options: {initialState: JsonValue, stateType?: string, tickRate?: 1..20, onInput?: Function, onTick?: Function}): SyncAuthorityController",
+          "availability": "Authority Client only",
+          "behavior": "Runs an Authority tick, merges continuous inputs and publishes versioned full snapshots"
+        },
+        {
+          "name": "submitAction",
+          "signature": "submitAction(payload: JsonValue): Promise<string>"
+        },
+        {
+          "name": "submitState",
+          "signature": "submitState(key: string, value: JsonValue, options?: {rateHz?: 1..20}): Promise<null>",
+          "behavior": "Rate-limits and merges the latest continuous input per key"
+        },
+        {
+          "name": "requestSnapshot",
+          "signature": "requestSnapshot(): Promise<string>"
+        },
+        {
+          "name": "getSnapshot",
+          "signature": "getSnapshot(): SyncSnapshot | null"
+        },
+        {
+          "name": "observe",
+          "signature": "observe(callback: (snapshot: SyncSnapshot) => void): Unsubscribe"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.storage",
+      "members": [
+        {
+          "name": "getBucket",
+          "signature": "getBucket(bucket: string): StorageBucket",
+          "constraints": "bucket matches ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$; key matches ^[A-Za-z0-9._-]+$ and is 1 to 128 characters",
+          "storageAuthority": "All clients read and write the Authority host copy",
+          "bucketMembers": [
+            "getData(key): Promise<JsonValue | null>",
+            "setData(key, value): Promise<null>",
+            "removeData(key): Promise<null>",
+            "clearData(): Promise<null>"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "playmesh.performance",
+      "members": [
+        {
+          "name": "reportFrame",
+          "signature": "reportFrame(timestamp?: number): number | null",
+          "rule": "Call only after a real visual frame is rendered"
+        },
+        {
+          "name": "getFps",
+          "signature": "getFps(): number | null"
+        },
+        {
+          "name": "onFps",
+          "signature": "onFps(callback: (fps: number | null) => void): Unsubscribe"
+        },
+        {
+          "name": "getLatency",
+          "signature": "getLatency(): number | null"
+        },
+        {
+          "name": "getLatencyDiagnostics",
+          "signature": "getLatencyDiagnostics(): LatencyDiagnostics | null"
+        },
+        {
+          "name": "onLatency",
+          "signature": "onLatency(callback: (latencyMs: number | null) => void): Unsubscribe"
+        },
+        {
+          "name": "setVisible",
+          "signature": "setVisible(visible: boolean): void",
+          "rule": "Normally controlled by the App tool dock; available to browser integrations"
+        }
+      ]
+    }
+  ],
+  "authoritativeDataFlow": [
+    "Preferred: game starts playmesh.sync on Authority, players submit semantic input, and SDK publishes versioned full snapshots",
+    "The App runtime that creates and runs the session is assigned authorityClientId before any player-order logic",
+    "Player calls playmesh.game.submitAction(action)",
+    "The platform attaches senderPlayerId and the current SessionSnapshot",
+    "Authority handler validates the action and updates authoritative state",
+    "Authority returns targetPlayerIds using Player.id values and optionally SessionSnapshot.authorityClientId for the single-screen public display",
+    "Target pages receive the message through playmesh.game.onMessage"
+  ],
+  "securityRules": [
+    "Determine Authority only with playmesh.session.isAuthority() or SessionSnapshot.authorityClientId; never use players[0], join order or a first-player convention",
+    "Do not access PlaymeshBridge, chrome.webview, Core HTTP, WebSocket, share tokens or player credentials directly",
+    "Do not trust identity or final results supplied by action payloads",
+    "Do not store credentials, player ids or game buckets in localStorage",
+    "Do not read data/, cache/, .playmesh/ or another game package",
+    "Do not register authority service from a controller page"
+  ],
+  "projectRules": {
+    "managedManifest": "main.json is edited through the visual manifest endpoint; id is immutable and raw file writes remain blocked",
+    "capabilityRegistry": "/dev/api/capabilities is the single metadata source for capability code, Chinese name, description, and App/HTML adapter status; generated AI prompts include this registry and the current declaration",
+    "capabilityConsent": "When capabilities.json.required is non-empty, the main SDK prompts on every App/browser game load. Rejection exits; unsupported capabilities are labeled but never block entry after consent; results are not persisted",
+    "publicRoot": "app/",
+    "sdkImport": "/playmesh/sdk/v1/playmesh.js",
+    "gameUrlRoot": "/game/",
+    "gameEntry": "main.json entries.game; defaults to app/index.html",
+    "controllerEntry": "main.json entries.controller; defaults to app/controller/index.html and is required by single_screen_multiplayer",
+    "authorityEntry": "main.json authority.entry; must point to an app/ JavaScript file for multiplayer games",
+    "validationEndpoint": "/dev/api/projects/{projectId}/validate"
+  }
+}

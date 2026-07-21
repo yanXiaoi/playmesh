@@ -1,0 +1,35 @@
+{
+    "name": "Playmesh",
+    "short_name": "Playmesh",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#F3F7F4",
+    "theme_color": "#087F6D",
+    "description": "局域网优先的 HTML 游戏平台",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

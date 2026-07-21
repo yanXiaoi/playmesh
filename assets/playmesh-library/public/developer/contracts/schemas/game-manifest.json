@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://playmesh.local/schemas/game-manifest.json",
+  "title": "Playmesh main.json",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "name", "version", "sdkVersion", "orientation", "modes", "displayModes", "players"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "remarks": { "type": "string" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "sdkVersion": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+    "orientation": { "enum": ["landscape", "portrait"] },
+    "modes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["solo", "multiplayer"] } },
+    "displayModes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["multi_screen", "single_screen_multiplayer"] } },
+    "players": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "integer", "minimum": 1 },
+        "max": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "entries": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "game": { "$ref": "#/$defs/htmlEntry" },
+        "controller": { "$ref": "#/$defs/htmlEntry" }
+      },
+      "default": {
+        "game": "app/index.html",
+        "controller": "app/controller/index.html"
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry"],
+      "properties": { "entry": { "$ref": "#/$defs/javascriptEntry" } }
+    },
+    "icon": { "type": "string", "pattern": "^app/" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "permissions": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "modes": { "contains": { "const": "multiplayer" } } }, "required": ["modes"] },
+      "then": { "required": ["authority"] }
+    },
+    {
+      "if": { "properties": { "displayModes": { "contains": { "const": "single_screen_multiplayer" } } }, "required": ["displayModes"] },
+      "then": { "description": "entries.controller or its default app/controller/index.html must exist" }
+    }
+  ],
+  "$defs": {
+    "packagePath": {
+      "type": "string",
+      "pattern": "^app/(?:[^/]+/)*[^/]+$",
+      "not": { "pattern": "(^|/)\\.{1,2}(/|$)|[\\\\?#]" }
+    },
+    "htmlEntry": {
+      "allOf": [
+        { "$ref": "#/$defs/packagePath" },
+        { "pattern": "\\.html$" }
+      ]
+    },
+    "javascriptEntry": {
+      "allOf": [
+        { "$ref": "#/$defs/packagePath" },
+        { "pattern": "\\.(?:js|mjs)$" }
+      ]
+    }
+  }
+}

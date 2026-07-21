@@ -1,0 +1,22 @@
+# Playmesh
+
+Playmesh 1.0 是一个局域网优先的 HTML 游戏平台。Flutter App 负责游戏库、用户资料、会话与 WebView 容器，Go Core 负责本机联机会话，Game SDK 为单机与多人游戏提供统一能力。
+
+## 产品能力
+
+- 导入、导出和管理根目录包含 `main.json` 的 Playmesh 游戏包。
+- 创建或加入局域网对局，支持邀请二维码与浏览器控制器。
+- 游戏与控制器 HTML 立即加载；应用会尝试进入全屏，也允许玩家保持窗口模式，全屏失败只提示而不阻断游戏。
+- Android 可从系统“打开方式/分享至”接收 Playmesh 压缩包或单个 HTML；压缩包进入安装流程，HTML 在不注入 SDK 的独立 WebView 中运行。
+- 为 HTML/CSS/JavaScript 游戏提供存储、生命周期、状态同步与性能接口。
+- 提供适配桌面与移动端的网页开发者工作台，包含文件管理、代码编辑、Diff、日志、校验、运行、AI 接口文档和可选择局域网地址的项目 Agent 提示词。
+- 用户资料、开发者工作区配置和游戏数据均保存在本机。
+
+## 开始使用
+
+```powershell
+flutter pub get
+flutter run
+```
+
+游戏作者从 [游戏开发文档](docs/game/README.md) 开始。开发环境与工程约束见 [开发环境记录](docs/04-dev-env.md) 和 [工程规范](docs/06-engineering-standards.md)。

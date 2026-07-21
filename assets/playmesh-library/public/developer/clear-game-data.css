@@ -1,0 +1,15 @@
+.toolbar .danger-action {
+  color: #ffaaa2;
+  border-color: #844b4b;
+  background: #482c2e;
+}
+
+.toolbar .danger-action:hover {
+  color: #fff;
+  background: #65363a;
+}
+
+.toolbar .danger-action:disabled {
+  color: #b07d78;
+  background: #3b2d2e;
+}

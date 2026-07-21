@@ -1,0 +1,55 @@
+【当前显示类型：单屏多人】
+主机加载 main.json 的 entries.game（未声明时使用平台默认主入口），作为公共显示端与 Authority Client；所有玩家加载 entries.controller（未声明时使用平台默认控制器入口）。公共显示端不属于 session.players，playmesh.player.getCurrent() 必须按 null 处理。
+
+强制交付：
+- entries.game：只负责公共显示、会话展示、Authority 注册和权威消息展示，不提供玩家输入。
+- entries.controller：负责玩家输入、submitAction 和接收同步快照。
+- Authority service：通过 playmesh.sync 处理控制器输入并更新权威状态；SDK 自动把快照发给公共显示端和玩家。
+
+强制禁止：
+- 控制器页面不得导入或注册 Authority service。
+- 公共显示端不得假设 player 非空，不得把主机加入 players。
+- 不得生成普通多屏“所有设备都运行同一游戏入口”的流程。
+- 不得生成单机专用流程。
+
+公共显示端最小结构：
+
+import { startAuthoritySync } from "../service/index.js";
+await playmesh.ready;
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+
+try {
+  if (playmesh.session.isAuthority()) {
+    startAuthoritySync();
+  }
+} catch (error) {
+  showError(error);
+}
+playmesh.session.onStateChange(renderSession);
+playmesh.sync.observe((snapshot) => render(snapshot.state));
+
+控制器最小结构：
+
+await playmesh.ready;
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+document.querySelector("#action").addEventListener("click", async () => {
+  try {
+    await playmesh.sync.submitAction({ type: "state.increment" });
+  } catch (error) {
+    showError(error);
+  }
+});
+playmesh.sync.observe((snapshot) => render(snapshot.state));
+
+单屏多人没有公共显示端供玩家手动点击的“开始游戏”按钮。玩家从控制器提交准备状态；Authority 在权威 onInput/onTick 中确认人数和准备状态满足条件后调用并捕获 playmesh.session.start() 的错误。不得假设 SDK 存在 readyPlayer、setReady 等未声明方法。

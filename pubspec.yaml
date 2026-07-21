@@ -1,0 +1,58 @@
+name: playmesh
+description: "Local-first party game launcher built with Flutter."
+publish_to: 'none'
+
+version: 1.4.0+5
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.5.0
+  webview_flutter: ^4.13.0
+  webview_flutter_windows: ^1.0.0
+  web_socket_channel: 3.0.3
+  qr_flutter: 4.1.0
+  qr: 3.0.2
+  path_provider: ^2.1.6
+  mobile_scanner: ^7.2.1
+  archive: 3.6.1
+  file_selector: ^1.1.0
+  flutter_fullscreen: ^1.2.0
+  window_manager: ^0.5.2
+  share_plus: ^13.2.1
+  sensors_plus: ^7.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/branding/
+    - assets/playmesh-library/public/sdk/v1/
+    - assets/playmesh-library/public/developer/
+    - assets/playmesh-library/public/developer/prompts/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/lib/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/theme/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/mode/xml/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/mode/css/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/mode/javascript/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/hint/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/edit/
+    - assets/playmesh-library/public/developer/templates/default-game/
+    - assets/playmesh-library/public/developer/templates/default-game/package/
+    - assets/playmesh-library/public/developer/templates/default-game/package/app/
+    - assets/playmesh-library/public/developer/templates/default-game/package/app/controller/
+    - assets/playmesh-library/public/developer/templates/default-game/package/app/static/css/
+    - assets/playmesh-library/public/developer/templates/default-game/package/app/static/js/player/
+    - assets/playmesh-library/public/developer/templates/default-game/package/app/static/js/service/
+    - assets/playmesh-library/public/developer/templates/default-game/package/app/static/js/shared/
+    - assets/playmesh-library/public/developer/templates/default-game/variants/solo/
+    - assets/playmesh-library/public/developer/contracts/
+    - assets/playmesh-library/public/developer/contracts/schemas/
