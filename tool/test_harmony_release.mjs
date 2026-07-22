@@ -16,6 +16,13 @@ assert.match(
 );
 assert.match(releaseScript, /build hap --release --target-platform ohos-arm64/);
 assert.match(releaseScript, /HarmonySigningProfile/);
+assert.match(releaseScript, /AndroidFlutter/);
+assert.match(releaseScript, /PLAYMESH_ANDROID_FLUTTER/);
+assert.match(releaseScript, /D:\\KaiFaTool\\runtime\\flutter/);
+assert.match(releaseScript, /Android builds require the standard Flutter SDK/);
+assert.match(releaseScript, /flutter\.sdk=/);
+assert.match(releaseScript, /harmonyEnvironmentSnapshot/);
+assert.match(releaseScript, /SetEnvironmentVariable/);
 assert.match(releaseScript, /HarmonyNdk/);
 assert.match(releaseScript, /HarmonyGo/);
 assert.match(releaseScript, /ohos-sdk-windows_linux-public/);
@@ -189,5 +196,19 @@ assert.match(
   /9367B8281CFF5E099B43D03016C3B2565C0DB7BC88EB2F1D99369815667ADCEE/,
 );
 assert.match(harmonyVerification, /尚未执行 OpenHarmony\/HarmonyOS 真机安装/);
+
+const allBuildVerification = read(
+  'docs/verification/playmesh-1.6.2-all-build-2026-07-22.md',
+);
+for (const artifactHash of [
+  '109D998D312B5FBF4A6A95A45C5458E89CFB556443CAF1BF5FC4E77A7F236EDD',
+  '1EDB6719AA2F8801FFDF24740606954251C9075F13C73395620D627A9EDD4A05',
+  '4EB65939D6514ECC5C8EAFF77CB51191F71988C9D3E58C4481C6FAD129A355F9',
+]) {
+  assert.match(allBuildVerification, new RegExp(artifactHash));
+}
+assert.match(allBuildVerification, /unable to resolve class groovy\.xml\.QName/);
+assert.match(allBuildVerification, /-Target all -AllowDebugSigning/);
+assert.match(allBuildVerification, /尚未执行 Android 或 OpenHarmony\/HarmonyOS 真机安装/);
 
 console.log('Harmony release configuration checks passed.');

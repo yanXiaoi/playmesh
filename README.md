@@ -22,6 +22,6 @@ flutter run
 
 游戏作者从 [游戏开发文档](docs/game/README.md) 开始。开发环境与工程约束见 [开发环境记录](docs/04-dev-env.md) 和 [工程规范](docs/06-engineering-standards.md)。
 
-统一发布脚本支持 `harmony`、`android`、`windows` 和 `all` 目标；鸿蒙构建会把 OpenHarmony arm64 Go Core 与 N-API 桥一并写入 HAP。运行时目录、签名方式和验证项见 [HarmonyOS 构建与适配](docs/harmony-release.md)。
+统一发布脚本支持 `harmony`、`android`、`windows` 和 `all` 目标；鸿蒙构建会把 OpenHarmony arm64 Go Core 与 N-API 桥一并写入 HAP。Android/Windows 使用标准 Flutter，鸿蒙使用 OpenHarmony Flutter fork，`all` 构建会隔离两套工具链。运行时目录、签名方式和验证项见 [HarmonyOS 构建与适配](docs/harmony-release.md)。
 
 外部 IDE 开发从 [Developer CLI](dev-cli/README.md) 开始。先在 App 开启开发者模式并复制完整工作区链接，再执行 `playmesh-cli to <workspace-url>`；CLI 会自行解析地址与 token。进入空目录后可执行 `playmesh-cli create` 交互式创建并下载项目。

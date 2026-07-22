@@ -3,6 +3,7 @@ param(
   [ValidateSet('all', 'harmony', 'android', 'windows')]
   [string]$Target = 'all',
   [switch]$AllowDebugSigning,
+  [string]$AndroidFlutter,
   [string]$HarmonyFlutter,
   [string]$HarmonySdk,
   [string]$HarmonyHvigor,
@@ -33,6 +34,46 @@ $buildAndroid = $Target -in @('all', 'android')
 $buildHarmony = $Target -in @('all', 'harmony')
 $buildWindows = $Target -in @('all', 'windows')
 $artifacts = [System.Collections.Generic.List[string]]::new()
+
+function Resolve-AndroidFlutter {
+  param([string]$ConfiguredPath)
+
+  $candidate = $ConfiguredPath
+  if (-not $candidate) {
+    $candidate = $env:PLAYMESH_ANDROID_FLUTTER
+  }
+  if (-not $candidate) {
+    $officialRuntimeSdk = 'D:\KaiFaTool\runtime\flutter'
+    if (Test-Path -LiteralPath $officialRuntimeSdk -PathType Container) {
+      $candidate = $officialRuntimeSdk
+    }
+  }
+  if (-not $candidate) {
+    $command = Get-Command flutter.bat -ErrorAction SilentlyContinue
+    if ($command) {
+      $candidate = $command.Source
+    }
+  }
+  if (-not $candidate) {
+    throw 'Standard Flutter was not found. Pass -AndroidFlutter or set PLAYMESH_ANDROID_FLUTTER.'
+  }
+
+  if (Test-Path -LiteralPath $candidate -PathType Container) {
+    $candidate = Join-Path $candidate 'bin\flutter.bat'
+  }
+  if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+    throw "Standard Flutter executable was not found: $candidate"
+  }
+
+  $flutterSdkRoot = Split-Path -Parent (Split-Path -Parent $candidate)
+  $ohosEngineMarker = Join-Path $flutterSdkRoot 'bin\internal\engine.ohos.version'
+  $hapCommand = Join-Path $flutterSdkRoot 'packages\flutter_tools\lib\src\commands\build_hap.dart'
+  if ((Test-Path -LiteralPath $ohosEngineMarker -PathType Leaf) -or
+      (Test-Path -LiteralPath $hapCommand -PathType Leaf)) {
+    throw "Android builds require the standard Flutter SDK, not the OpenHarmony fork: $flutterSdkRoot"
+  }
+  return (Resolve-Path -LiteralPath $candidate).Path
+}
 
 function Resolve-HarmonyFlutter {
   param([string]$ConfiguredPath)
@@ -98,8 +139,37 @@ if ($buildAndroid) {
     throw 'Missing android/key.properties. Use a production key or explicitly pass -AllowDebugSigning for an internal build.'
   }
 
-  $flutter = (Get-Command flutter.bat -ErrorAction Stop).Source
-  & $flutter build apk --release --no-pub
+  $androidFlutterExecutable = Resolve-AndroidFlutter $AndroidFlutter
+  $androidFlutterRoot = Split-Path -Parent (Split-Path -Parent $androidFlutterExecutable)
+  $androidLocalPropertiesPath = Join-Path $repoRoot 'android\local.properties'
+  $androidLocalProperties = if (Test-Path -LiteralPath $androidLocalPropertiesPath) {
+    [IO.File]::ReadAllText($androidLocalPropertiesPath)
+  } else {
+    ''
+  }
+  $flutterSdkProperty = 'flutter.sdk=' + ($androidFlutterRoot -replace '\\', '/')
+  if ($androidLocalProperties -match '(?m)^flutter\.sdk=.*$') {
+    $androidLocalProperties = [Regex]::Replace(
+      $androidLocalProperties,
+      '(?m)^flutter\.sdk=.*$',
+      $flutterSdkProperty,
+      1
+    )
+  } else {
+    if ($androidLocalProperties.Length -gt 0 -and
+        -not $androidLocalProperties.EndsWith("`n")) {
+      $androidLocalProperties += [Environment]::NewLine
+    }
+    $androidLocalProperties += $flutterSdkProperty + [Environment]::NewLine
+  }
+  [IO.File]::WriteAllText(
+    $androidLocalPropertiesPath,
+    $androidLocalProperties,
+    [Text.UTF8Encoding]::new($false)
+  )
+
+  Write-Output "Android Flutter: $androidFlutterExecutable"
+  & $androidFlutterExecutable build apk --release --no-pub
   if ($LASTEXITCODE -ne 0) {
     throw "Android release build failed: $LASTEXITCODE"
   }
@@ -141,6 +211,28 @@ if ($buildHarmony) {
   if ((-not $HarmonySigningProfile) -and (-not $AllowDebugSigning)) {
     throw 'Harmony production builds require -HarmonySigningProfile <build-profile.json5>. Pass -AllowDebugSigning only for internal test HAPs.'
   }
+
+  $harmonyEnvironmentNames = @(
+    'OS',
+    'OHOS_BASE_SDK_HOME',
+    'OHOS_SDK_HOME',
+    'HOS_SDK_HOME',
+    'DEVECO_SDK_HOME',
+    'PLAYMESH_HVIGOR_HOME',
+    'GIT_CONFIG_COUNT',
+    'GIT_CONFIG_KEY_0',
+    'GIT_CONFIG_VALUE_0',
+    'FLUTTER_GIT_URL',
+    'NODE_HOME',
+    'Path'
+  )
+  $harmonyEnvironmentSnapshot = @{}
+  foreach ($environmentName in $harmonyEnvironmentNames) {
+    $harmonyEnvironmentSnapshot[$environmentName] =
+      [Environment]::GetEnvironmentVariable($environmentName, 'Process')
+  }
+
+  try {
 
   $runtimeRoot = 'D:\KaiFaTool\runtime'
   $harmonySdkRoot = $HarmonySdk
@@ -319,6 +411,15 @@ if ($buildHarmony) {
     $hapArchive.Dispose()
   }
   $artifacts.Add($hapArtifact)
+  } finally {
+    foreach ($environmentName in $harmonyEnvironmentNames) {
+      [Environment]::SetEnvironmentVariable(
+        $environmentName,
+        $harmonyEnvironmentSnapshot[$environmentName],
+        'Process'
+      )
+    }
+  }
 }
 
 if ($buildWindows) {

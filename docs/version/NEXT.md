@@ -12,6 +12,7 @@
 - 鸿蒙构建使用隔离依赖清单；WebView、文件选择和路径插件固定到明确提交，系统分享由自研 HAR 适配。OpenHarmony Public SDK 不含 HMS `ScanKit`，扫码使用明确的手动输入回退。
 - 新增 ArkTS 能力 HAR，接入全屏、触觉、加速度计和陀螺仪；Go Core 通过 C ABI、异步 N-API 和 `NativePlaymeshHarmonyCoreAdapter` 实际注入鸿蒙应用。
 - 鸿蒙生产发布要求外部签名配置；脚本验证 HAP 关键运行时入口并输出 SHA-256。已在 API 12 Public SDK 上实际生成包含 Go Core 的 arm64 内部测试 HAP，证据见 [构建验证记录](../verification/playmesh-1.6.2-harmony-build-2026-07-22.md)。
+- `all` 构建现在严格隔离标准 Flutter 与 OpenHarmony Flutter：Android 固定使用标准 SDK、拒绝 OHOS fork 并修正 `android/local.properties`，鸿蒙阶段结束后恢复进程环境。Android、OpenHarmony、Windows 三类内部测试产物已实际构建通过，见 [全平台构建验证](../verification/playmesh-1.6.2-all-build-2026-07-22.md)。
 
 ## 开发者工具
 

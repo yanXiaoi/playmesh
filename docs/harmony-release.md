@@ -46,6 +46,8 @@ $env:PLAYMESH_HARMONY_NDK = 'F:\sdk\harmony\native'
 $env:PLAYMESH_HARMONY_GO = 'D:\KaiFaTool\runtime\go\go-1.24.5-openharmony'
 ```
 
+`-Target all` 会为 Android 使用标准 Flutter `D:\KaiFaTool\runtime\flutter`，为鸿蒙使用 `D:\KaiFaTool\runtime\flutter-oh-3.22.3`。两套 Flutter 不得互换；Android 阶段会主动重写 `android/local.properties` 的 `flutter.sdk`，因此当前终端的 `PATH` 或上一次鸿蒙构建不会污染 Android Gradle included build。
+
 首次准备 Go 工具链时执行：
 
 ```powershell
@@ -132,4 +134,4 @@ go test ./...
 5. 退出游戏和退出 App 后端口释放。
 6. 连续启动/停止 100 次无崩溃、线程泄漏或残留监听端口。
 
-本机已用上述默认运行时完成真实 arm64 HAP 构建及包内条目校验，产物大小、SHA-256、原生库和未执行项目见 [Playmesh 1.6.2 OpenHarmony 构建验证](verification/playmesh-1.6.2-harmony-build-2026-07-22.md)。该结果不替代目标设备上的签名安装、网络、传感器、分享和 Core 生命周期验证。
+本机已用上述默认运行时完成真实 arm64 HAP 构建及包内条目校验，产物大小、SHA-256、原生库和未执行项目见 [Playmesh 1.6.2 OpenHarmony 构建验证](verification/playmesh-1.6.2-harmony-build-2026-07-22.md)。同时已实际执行 `-Target all`，验证标准 Flutter 与 OpenHarmony Flutter 隔离后 Android、鸿蒙和 Windows 可连续构建，见 [Playmesh 1.6.2 全平台构建验证](verification/playmesh-1.6.2-all-build-2026-07-22.md)。这些结果不替代目标设备上的签名安装、网络、传感器、分享和 Core 生命周期验证。
