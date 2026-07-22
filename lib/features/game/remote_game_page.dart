@@ -144,7 +144,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           NavigationDelegate(
             onPageStarted: (_) {
               _messageQueue.pause(clearPending: true);
-              unawaited(_appBridge?.resetDeviceSubscriptions());
+              unawaited(_appBridge?.resetCapabilities());
             },
             onPageFinished: (_) {
               unawaited(
@@ -307,7 +307,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   void _reload() {
     developerEventHub.beginRuntime();
     _messageQueue.pause(clearPending: true);
-    unawaited(_appBridge?.resetDeviceSubscriptions());
+    unawaited(_appBridge?.resetCapabilities());
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       setState(() {
         _error = null;

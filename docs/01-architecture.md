@@ -641,8 +641,8 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
   "name": "多人抢答",
   "remarks": "局域网多人抢答游戏",
   "version": "0.1.0",
-  "sdkVersion": "1.4.2",
-  "appSdkVersion": "1.2.1",
+  "sdkVersion": "2.0.0",
+  "appSdkVersion": "2.0.0",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "players": {
@@ -672,11 +672,11 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 - `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
 - `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。App 必须在创建游戏 WebView 前应用该方向，并在退出游戏后恢复系统方向。
-- `sdkVersion` 和 `appSdkVersion` 用于检查游戏与两套平台 SDK 的兼容性，当前模板分别使用 `1.4.2`、`1.2.1`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。
+- `sdkVersion` 和 `appSdkVersion` 用于检查游戏与两套平台 SDK 的兼容性，当前模板均使用 `2.0.0`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。能力 ID 按功能命名，不绑定 App 或浏览器实现；平台按运行环境选择适配器。
-- 平台能力元数据统一维护在 `lib/models/game_capability_registry.dart`。每个 code 在这里映射中文名、用途说明、App 适配状态和 HTML 适配状态；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。新增能力时只在这里增加一项元数据，具体运行环境仍需单独实现对应适配器。
+- 平台能力由 `lib/core/capabilities/` 下的插件注册表统一维护。每个能力拥有独立目录，并在同一插件中定义描述符、`apiVersion`、方法、事件、可用性、实例创建、自检与释放；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。Flutter 不支持运行时目录扫描，新增插件后只需在默认注册入口增加该插件，不再维护平行元数据或测试适配器。
 - 当前支持声明 `sensor.accelerometer` 和 `sensor.gyroscope`。文件缺失或 `required` 为空时不弹确认框；非空时主 SDK 在 App 和浏览器每次加载游戏时展示全部所需能力，并等待用户“同意并进入”或“拒绝并退出”。当前平台不支持的能力显示“本平台暂不支持”，但不会阻止同意后进入。授权结果不持久化，也不写入权威主机。
-- 游戏只能通过 `playmesh.app.onDevice(type, fps, callback)` 订阅已声明且当前设备可用的能力。原生层维护最新采样，SDK 按每个订阅者请求的频率触发回调；最后一个订阅取消或页面退出时释放原生流。
+- 游戏只能通过 `playmesh.app.capabilities.create(code, options)` 创建已声明、已确认且当前设备可用的插件实例，再以 `invoke/on/onError/dispose` 操作。运行时不假设能力一定是订阅：插件可以实现用户主动触发的异步 `start/stop`，也可以持续发送事件。最后一个实例释放或页面退出时必须释放底层资源。
 - `displayModes` 是单元素数组，必须且只能声明 `multi_screen` 或 `single_screen_multiplayer`。声明 `single_screen_multiplayer` 时，游戏包必须提供 `app/controller/index.html`。
 - `authority.entry` 声明权威处理端入口路径。支持多人联机的游戏必须提供该入口；单机游戏可以省略。入口必须位于游戏包内，安装时校验路径不能越界，且不能是可执行文件或外部网络地址。
 - `authority.entry` 指向的代码只由创建会话的 App 主机 Authority Runtime 加载，不会被普通玩家页面加载，也不会由 Go Core 解析。

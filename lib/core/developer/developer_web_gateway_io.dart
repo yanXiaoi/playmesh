@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:qr/qr.dart';
 
 import '../../models/game_capabilities.dart';
-import '../../models/game_capability_registry.dart';
 import '../../models/game_summary.dart';
 import '../game_package/game_package_transfer_service.dart';
 import '../game_sdk/generated_sdk_versions.dart';
@@ -349,7 +348,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     if (request.method == 'GET' && route == '/dev/api/capabilities') {
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
-        'capabilities': gameCapabilityDefinitions
+        'capabilities': capabilityTests.registry.descriptors
             .map((definition) => definition.toJson())
             .toList(),
       });
@@ -961,15 +960,23 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
       ..writeln(
         '当前 capabilities.json.required：'
         '${declaredCapabilities.isEmpty ? '未声明' : declaredCapabilities.join(', ')}',
-      )
-      ..writeln('平台统一能力注册表（code | 中文名 | App | HTML | 说明）：');
-    for (final definition in gameCapabilityDefinitions) {
-      output.writeln(
-        '- ${definition.code} | ${definition.name} | '
-        '${definition.appSupported ? '已适配' : '暂未适配'} | '
-        '${definition.htmlSupported ? '已适配' : '暂未适配'} | '
-        '${definition.description}',
       );
+    if (!isAgent) {
+      final selectedDefinitions = capabilityTests.registry.descriptors
+          .where((definition) => declaredCapabilities.contains(definition.code))
+          .map((definition) => definition.toJson())
+          .toList(growable: false);
+      output
+        ..writeln()
+        ..writeln('当前项目已勾选能力的完整声明（对话 AI 能力上下文）：')
+        ..writeln('这里只提供 capabilities.json.required 已声明的能力，不包含未勾选的平台注册能力。');
+      if (selectedDefinitions.isEmpty) {
+        output.writeln('未声明平台能力。');
+      } else {
+        output.writeln(
+          const JsonEncoder.withIndent('  ').convert(selectedDefinitions),
+        );
+      }
     }
     if (isAgent) {
       final origin = await _promptBaseUrl(request);
@@ -994,8 +1001,18 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         ..writeln(
           'GET|PUT ${endpoint('/dev/api/projects/$projectId/capabilities')}',
         )
-        ..writeln('GET ${endpoint('/dev/api/capabilities')}')
-        ..writeln('GET|POST ${endpoint('/dev/api/capability-tests')}')
+        ..writeln(
+          'GET ${endpoint('/dev/api/capabilities')} '
+          '(读取当前全平台注册能力列表及每项完整声明：code、apiVersion、平台状态、optionsSchema、methods、events)',
+        )
+        ..writeln(
+          'GET ${endpoint('/dev/api/capability-tests')} '
+          '(读取当前全平台能力测试项与可测试状态)',
+        )
+        ..writeln(
+          'POST ${endpoint('/dev/api/capability-tests')} '
+          '(执行能力测试；JSON: {"codes":["能力 code"],"timeoutMs":3000}；codes 省略或为空时测试全部)',
+        )
         ..writeln(
           'GET|PUT|PATCH|DELETE '
           '${endpoint('/dev/api/projects/$projectId/file')}?path={path}',
@@ -2051,6 +2068,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   @override
   Future<void> close() async {
     await server.close(force: true);
+    await capabilityTests.dispose();
   }
 }
 
@@ -2596,7 +2614,7 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 - `GET /dev/api/projects/{projectId}/package`（导出标准 Playmesh ZIP）
 - `GET|PUT /dev/api/projects/{projectId}/manifest`（`id` 永久只读）
 - `GET|PUT /dev/api/projects/{projectId}/capabilities`
-- `GET /dev/api/capabilities`（能力中文名、介绍和 App/HTML 适配状态）
+- `GET /dev/api/capabilities`（全平台注册插件的版本、方法、事件和平台状态）
 - `GET|POST /dev/api/capability-tests`（读取自检项；测试全部或指定能力并返回首个样本/错误）
 - `GET /dev/api/projects/{projectId}/chat-prompt.txt`
 - `GET /dev/api/projects/{projectId}/agent-prompt.txt?baseUrl={baseUrl}`（`baseUrl` 必须来自 status 枚举）
@@ -2629,7 +2647,9 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 
 快速操作支持 `create_file`、`replace_file`、`insert_lines` 和 `replace_lines`。普通路径相对于项目的 `app/`，固定路径 `capabilities.json` 指向项目根能力声明。`create_file` 只创建新文件，`replace_file` 为完整文本 upsert；二者都会递归创建缺失的父目录。行操作要求目标已存在或在同一批操作中先创建。必须先调用预览接口取得 `baseRevisions`，再确认应用；批量修改以同一事务提交。
 
-平台能力 code、中文名、说明和 App/HTML 适配状态以 `GET /dev/api/capabilities` 为唯一元数据来源。`GET /dev/api/capability-tests` 从同一注册表生成测试清单，`POST` 的 `codes` 为空或省略时测试全部能力；新增能力必须同时注册自检 adapter。游戏能力声明使用 `GET|PUT /dev/api/projects/{projectId}/capabilities`；AI 不得维护平行硬编码列表。声明非空时主 SDK 在 App 与浏览器每次进入游戏时弹出确认，拒绝则退出；不支持项只做标注，不阻塞用户同意后进入。
+平台能力 code、中文名、说明、apiVersion、方法、事件和平台状态以 `GET /dev/api/capabilities` 为唯一元数据来源。`GET /dev/api/capability-tests` 始终返回全平台注册表并调用插件自带自检，`POST` 的 `codes` 为空或省略时测试全部插件；不得按当前项目声明过滤测试页。游戏能力声明使用 `GET|PUT /dev/api/projects/{projectId}/capabilities`；AI 不得维护平行硬编码列表。声明非空时主 SDK 在 App 与浏览器每次进入游戏时弹出确认，拒绝则退出；不支持项只做标注，不阻塞用户同意后进入。
+
+对话提示词只内嵌当前项目已勾选能力的完整插件声明，不包含未勾选能力。Agent 提示词不内嵌全量注册表，而是写入使用所选 Base URL 的 `GET /dev/api/capabilities`、`GET /dev/api/capability-tests` 和 `POST /dev/api/capability-tests`，由 Agent 按需读取实时契约与执行测试。工作区“复制全平台能力”独立调用注册表 API，与当前项目勾选无关。
 
 工作区直接编辑 UTF-8 文本，并可预览 PNG、JPEG、GIF、WebP 和 SVG。其他二进制文件会显示在文件树中但不提供页面预览。`PUT file` 的 `encoding` 默认为 `utf8`；传 `base64` 时可以完整替换图片或其他二进制资源。`PATCH file` 只支持文本。
 
@@ -2642,7 +2662,7 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 
 Map<String, Object?> _openApi() => {
   'openapi': '3.1.0',
-  'info': {'title': 'Playmesh Developer Channel', 'version': '1.4.0'},
+  'info': {'title': 'Playmesh Developer Channel', 'version': '1.5.0'},
   'paths': {
     '/dev/api/status': {'get': _operation('读取开发者通道状态')},
     '/dev/api/sdk': {'get': _operation('读取统一生成的 SDK 与类型声明')},

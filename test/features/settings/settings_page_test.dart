@@ -27,7 +27,7 @@ void main() {
 
     expect(find.text('Playmesh 1.6.2 更新'), findsOneWidget);
     expect(find.textContaining('主机与扫码加入页'), findsOneWidget);
-    expect(find.text('构建 9'), findsOneWidget);
+    expect(find.text('构建 10'), findsOneWidget);
   });
 
   testWidgets('shows online Core version and request ID', (tester) async {

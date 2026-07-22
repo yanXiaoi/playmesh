@@ -10,10 +10,10 @@ import 'package:playmesh/core/developer/developer_event_hub.dart';
 import 'package:playmesh/core/developer/developer_project_catalog.dart';
 import 'package:playmesh/core/developer/developer_preferences.dart';
 import 'package:playmesh/core/developer/developer_run_controller.dart';
+import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_package/asset_game_library_scanner.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/lifecycle/go_core_host.dart';
-import 'package:playmesh/core/platform/app_sensor_service.dart';
 import 'package:playmesh/core/network/go_core_client.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_runtime.dart';
@@ -52,7 +52,7 @@ void main() {
       developerPreferences: DeveloperPreferences(libraryRoot: promptRoot),
       developerRunController: runController,
       developerCapabilityTests: DeveloperCapabilityTestService(
-        sensorSource: _UnavailableSensorSource(),
+        motionSource: const _UnavailableMotionSource(),
       ),
     );
     addTearDown(runtime.close);
@@ -96,6 +96,7 @@ void main() {
     expect(workspace.body, contains('id="diffLeftFile"'));
     expect(workspace.body, contains('addon/hint/javascript-hint.js'));
     expect(workspace.body, contains('✨ 获取项目提示词'));
+    expect(workspace.body, contains('id="copyPlatformCapabilities"'));
     expect(workspace.body, contains('id="agentBaseUrl"'));
 
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
@@ -107,6 +108,7 @@ void main() {
     expect(workspaceScript.body, contains('openProjectPicker()'));
     expect(workspaceScript.body, contains('appendCapabilityTestResults'));
     expect(workspaceScript.body, contains('while(generation==='));
+    expect(workspaceScript.body, contains('copyPlatformCapabilities'));
     final status = await http.get(
       base.resolve('/dev/api/status?token=custom-dev-token'),
     );
@@ -117,16 +119,16 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '1.4.3');
-    expect(statusJson['appSdkVersion'], '1.2.1');
+    expect(statusJson['gameSdkVersion'], '2.0.0');
+    expect(statusJson['appSdkVersion'], '2.0.0');
 
     final sdkBundle = await http.get(
       base.resolve('/dev/api/sdk?token=custom-dev-token'),
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '1.4.3');
-    expect(sdkBundleJson['appSdkVersion'], '1.2.1');
+    expect(sdkBundleJson['gameSdkVersion'], '2.0.0');
+    expect(sdkBundleJson['appSdkVersion'], '2.0.0');
     expect(
       (sdkBundleJson['files'] as Map).keys,
       containsAll([
@@ -149,6 +151,10 @@ void main() {
     );
     expect(capabilityItems, everyElement(contains('appSupported')));
     expect(capabilityItems, everyElement(contains('htmlSupported')));
+    expect(capabilityItems, everyElement(contains('apiVersion')));
+    expect(capabilityItems, everyElement(contains('optionsSchema')));
+    expect(capabilityItems, everyElement(contains('methods')));
+    expect(capabilityItems, everyElement(contains('events')));
     final capabilityTestCatalog = await http.get(
       base.resolve('/dev/api/capability-tests?token=custom-dev-token'),
     );
@@ -272,7 +278,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "1.4.3"'));
+    expect(aiPrompt.body, contains('readonly version: "2.0.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -283,7 +289,7 @@ void main() {
     expect(aiPrompt.body, contains('playmesh.sync.startAuthority(options)'));
     expect(aiPrompt.body, contains('playmesh.sync.observe'));
     expect(aiPrompt.body, contains('playmesh.app.isAvailable()'));
-    expect(aiPrompt.body, contains('playmesh.app.device.getCapabilities()'));
+    expect(aiPrompt.body, contains('playmesh.app.capabilities.create'));
     expect(aiPrompt.body, contains('onPlayerReconnect(callback)'));
     expect(aiPrompt.body, contains('playmesh.session.finish()'));
     expect(
@@ -306,6 +312,9 @@ void main() {
     expect(aiPrompt.body, contains('Authority 入口当前存在：false'));
     expect(aiPrompt.body, contains('static/js/service/index.js'));
     expect(aiPrompt.body, contains('===== BEGIN WORKSPACE FILE: main.json'));
+    expect(aiPrompt.body, contains('当前项目已勾选能力的完整声明'));
+    expect(aiPrompt.body, contains('未声明平台能力。'));
+    expect(aiPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
 
     final takeoverBaseUrl = baseUrls.first;
     final agentPrompt = await http.get(
@@ -345,10 +354,19 @@ void main() {
     expect(agentPrompt.body, contains('/dev/api/projects/demo/manifest'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/capabilities'));
     expect(agentPrompt.body, contains('/dev/api/capabilities'));
+    expect(agentPrompt.body, contains('读取当前全平台注册能力列表及每项完整声明'));
+    expect(
+      agentPrompt.body,
+      contains('GET $takeoverBaseUrl/dev/api/capability-tests'),
+    );
+    expect(
+      agentPrompt.body,
+      contains('POST $takeoverBaseUrl/dev/api/capability-tests'),
+    );
+    expect(agentPrompt.body, contains('"timeoutMs":3000'));
     expect(agentPrompt.body, contains('当前 capabilities.json.required：未声明'));
-    expect(agentPrompt.body, contains('平台统一能力注册表'));
-    expect(agentPrompt.body, contains('sensor.accelerometer | 加速度计'));
-    expect(agentPrompt.body, contains('sensor.gyroscope | 陀螺仪'));
+    expect(agentPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
+    expect(agentPrompt.body, isNot(contains('平台统一能力注册表（code')));
     expect(agentPrompt.body, contains('playmesh.app.*'));
     expect(agentPrompt.body, contains('entries.game: app/index.html'));
     expect(
@@ -511,7 +529,7 @@ body { color: white; }
     );
     expect(sdkManifest.statusCode, HttpStatus.ok);
     expect(sdkManifest.body, contains('playmesh.authority'));
-    expect(sdkManifest.body, contains('device.getDeclaredCapabilities'));
+    expect(sdkManifest.body, contains('capabilities.getDeclared'));
     expect(sdkManifest.body, contains('capabilityConsent'));
 
     final openApi = await http.get(
@@ -915,7 +933,7 @@ body { color: white; }
       endpoint('capabilities'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'required': ['sensor.accelerometer', 'sensor.gyroscope'],
+        'required': ['sensor.accelerometer'],
         'baseRevision': 0,
       }),
     );
@@ -925,10 +943,26 @@ body { color: white; }
     expect(capabilityPrompt.statusCode, HttpStatus.ok);
     expect(
       capabilityPrompt.body,
-      contains(
-        '当前 capabilities.json.required：sensor.accelerometer, sensor.gyroscope',
-      ),
+      contains('当前 capabilities.json.required：sensor.accelerometer'),
     );
+    expect(
+      capabilityPrompt.body,
+      isNot(contains('"code": "sensor.accelerometer"')),
+    );
+    final capabilityChatPrompt = await http.get(endpoint('chat-prompt.txt'));
+    expect(capabilityChatPrompt.statusCode, HttpStatus.ok);
+    expect(capabilityChatPrompt.body, contains('当前项目已勾选能力的完整声明'));
+    expect(
+      capabilityChatPrompt.body,
+      contains('"code": "sensor.accelerometer"'),
+    );
+    expect(
+      capabilityChatPrompt.body,
+      isNot(contains('"code": "sensor.gyroscope"')),
+    );
+    expect(capabilityChatPrompt.body, contains('"optionsSchema"'));
+    expect(capabilityChatPrompt.body, contains('"methods"'));
+    expect(capabilityChatPrompt.body, contains('"events"'));
     final capabilityRevision =
         (jsonDecode(savedCapabilities.body) as Map)['revision'];
     final removedCapabilities = await http.put(
@@ -1138,15 +1172,22 @@ class _FakeCatalog implements DeveloperProjectCatalog {
   );
 }
 
-class _UnavailableSensorSource implements AppSensorSource {
-  @override
-  Set<AppSensorType> get availableTypes => const {};
+class _UnavailableMotionSource implements MotionSensorSource {
+  const _UnavailableMotionSource();
 
   @override
-  Stream<AppSensorSample> events(
-    AppSensorType type, {
-    required Duration samplingPeriod,
-  }) => Stream.error(UnsupportedError('测试环境无传感器'));
+  bool get accelerometerAvailable => false;
+
+  @override
+  bool get gyroscopeAvailable => false;
+
+  @override
+  Stream<MotionSample> accelerometerEvents(Duration samplingPeriod) =>
+      Stream.error(UnsupportedError('测试环境无加速度计'));
+
+  @override
+  Stream<MotionSample> gyroscopeEvents(Duration samplingPeriod) =>
+      Stream.error(UnsupportedError('测试环境无陀螺仪'));
 }
 
 class _StubHost implements GoCoreHost {

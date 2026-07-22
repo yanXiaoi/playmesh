@@ -5,13 +5,14 @@ PLAYMESH API AGENT 游戏开发提示
 【Agent 执行规则】
 1. 直接使用本文提供的 HTTP API 读取和修改项目，不要只返回代码片段或快速操作文本。
 2. main.json 不能通过普通文件接口修改；需要调整清单时只能使用项目 manifest API。`id` 是不可修改的稳定标识，其他字段可在校验通过后更新。
-3. 添加或删除平台能力前，先读取 `GET /dev/api/capabilities` 的统一能力注册表，再通过项目 capabilities API 修改声明；不要通过普通文件接口写 capabilities.json，也不能臆造能力 code。排查能力输入时读取并调用 `GET/POST /dev/api/capability-tests`，不要用静态支持标记代替真实自检。
-4. 修改前读取文件及 X-Playmesh-Revision；完整保存使用 PUT，精确修改使用 PATCH，批量文本修改可使用快速操作预览与应用接口。
-5. 创建、删除文件夹或文件后重新读取项目树；删除操作必须严格限制在当前项目内。
-6. 完成后调用项目校验并修复全部 error。项目尚未运行时调用运行接口；已经运行时优先调用重启接口，使修改立即生效并保留当前分享信息。
-7. AI 不需要维持 SSE 长连接：轮询运行状态接口，直到进入 running 或 error，再调用最近日志接口读取最多 50 条结构化日志并完成诊断；SSE 仅作为可选实时通道。
-8. 代码必须完整可运行，不能使用省略号、TODO 或伪代码。
-9. 只有用户明确要求重置游戏数据时，才可调用 DELETE /dev/api/projects/{projectId}/data；调用前必须确认游戏已退出。该接口只删除 data，不能删除 cache。
+3. Agent 提示词不内嵌全平台注册表。添加、删除或实现平台能力前，必须先调用提示词“Developer Gateway 接口”段给出的全量能力注册表 API；该响应提供当前所有能力及每项完整声明（code、apiVersion、平台状态、optionsSchema、methods、events）。再通过项目 capabilities API 修改声明；不要通过普通文件接口写 capabilities.json，也不能臆造能力 code。
+4. 排查能力输入时，必须调用提示词中给出的能力测试 API：GET 读取全平台测试项，POST 测试全部或指定 code。不要用注册表中的静态支持标记代替真实自检结果。
+5. 修改前读取文件及 X-Playmesh-Revision；完整保存使用 PUT，精确修改使用 PATCH，批量文本修改可使用快速操作预览与应用接口。
+6. 创建、删除文件夹或文件后重新读取项目树；删除操作必须严格限制在当前项目内。
+7. 完成后调用项目校验并修复全部 error。项目尚未运行时调用运行接口；已经运行时优先调用重启接口，使修改立即生效并保留当前分享信息。
+8. AI 不需要维持 SSE 长连接：轮询运行状态接口，直到进入 running 或 error，再调用最近日志接口读取最多 50 条结构化日志并完成诊断；SSE 仅作为可选实时通道。
+9. 代码必须完整可运行，不能使用省略号、TODO 或伪代码。
+10. 只有用户明确要求重置游戏数据时，才可调用 DELETE /dev/api/projects/{projectId}/data；调用前必须确认游戏已退出。该接口只删除 data，不能删除 cache。
 
 【公共项目规则】
 - 必须存在 main.json 的 entries.game 指向的 HTML；未声明 entries.game 时默认 app/index.html(这是游戏入口)。
@@ -26,7 +27,7 @@ PLAYMESH API AGENT 游戏开发提示
 
 【SDK 使用边界与摘要】
 - 本提示随后附带目标 App 当前 SDK 同次构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`；它们是方法、参数、返回值、类型、版本与中文 JSDoc 的唯一接口事实源。以下内容仅总结运行边界；如摘要与声明冲突，以 `.d.ts` 为准，禁止臆造声明中不存在的成员。
-- playmesh.version: 当前 Game SDK 版本字符串，当前为 1.4.3。
+- playmesh.version: 当前 Game SDK 版本字符串，当前为 2.0.0。
 - playmesh.ready: SDK 就绪 Promise，resolve 为 { sdkVersion, isAuthority, player, session }；页面仍应通过对应 namespace 读取后续最新值。
 - playmesh.lifecycle.onChange/onPause/onResume/onExit(callback): 返回取消订阅函数。关键状态在变化时保存，onExit 只做业务清理；最终落盘由 App 负责。
 - playmesh.storage.getBucket(name): 返回 Bucket；Bucket 只提供 getData、setData、removeData、clearData。游戏没有 flush 接口。
@@ -34,10 +35,10 @@ PLAYMESH API AGENT 游戏开发提示
 - setData 只写入可 JSON 序列化值；Promise 完成表示宿主已接收修改。宿主自动批量落盘，并在 WebView 重启、退出或会话关闭前完成最终写入，游戏不得自行 flush。
 - playmesh.performance.reportFrame(timestamp?)、getFps()、onFps(callback)、getLatency()、getLatencyDiagnostics()、onLatency(callback)。只有真实视觉帧完成后才能 reportFrame；联机延迟由 SDK 自动测量，游戏不得自行 ping。
 - playmesh.performance.setVisible(boolean) 是宿主/浏览器集成开关，普通游戏通常不要主动调用。
-- playmesh.app 是本机 App Bridge。App WebView 会自动注入持久 App 身份与当前可用硬件能力；普通浏览器不加载 playmesh-app.js，只得到安全空实现。先检查 playmesh.app.isAvailable() 和 playmesh.app.device.getCapabilities()，暂不支持的能力必须有不影响主流程的降级行为。
-- 项目根可选 `capabilities.json` 格式为 `{ "required": [能力ID] }`。能力 code、中文名、说明与 App/HTML 适配状态以 `GET /dev/api/capabilities` 及本文附带的统一能力注册表为准；当前包含 `sensor.accelerometer`、`sensor.gyroscope`。游戏未声明时不得订阅。
+- playmesh.app 是本机 App Bridge。App WebView 会自动注入持久 App 身份与平台注册能力插件；普通浏览器不加载 playmesh-app.js，只得到安全空实现。先检查 playmesh.app.isAvailable() 和 playmesh.app.capabilities.getAvailable()，暂不支持的能力必须有不影响主流程的降级行为。
+- 项目根可选 `capabilities.json` 格式为 `{ "required": [能力ID] }`。能力 code、apiVersion、方法、事件、参数 Schema 与 App/HTML 适配状态只能以提示词中全量能力注册表 API 的实时响应为准；提示词本身不附带全量声明。游戏未声明时不得订阅。
 - 声明非空时，主 SDK 会在 App 和浏览器每次进入游戏时弹出能力确认，不持久化结果。用户拒绝则退出；当前环境暂不支持的能力只做标注，用户同意后仍进入，游戏必须提供不影响主流程的降级行为。
-- 等待 `playmesh.ready` 后，先用 `playmesh.app.device.getCapabilities()` 判断当前可用能力，再使用 `playmesh.app.onDevice(playmesh.app.DeviceType.accelerometer, fps, callback)` 或 `gyroscope`；`device.onDevice` 是别名。fps 是 1 至 120 的整数，返回值是必须在退出或停用时调用的取消函数。
+- 等待 `playmesh.ready` 后，用 `playmesh.app.capabilities.getRegistry/getDeclared/getAvailable` 读取插件契约与状态，再用 `await playmesh.app.capabilities.create(code, options)` 创建实例。实例统一使用 `invoke(method, args)`、`on(event, callback)`、`onError(callback)` 和 `dispose()`；不得臆造插件方法或事件。加速度计和陀螺仪实例使用 `start/stop` 与 `reading` 事件，fps 在 create options 中传入。
 - 回调数据为 `{ type, x, y, z, timestamp, unit }`；加速度计单位为 `m/s^2`，陀螺仪单位为 `rad/s`。App 保持最新样本并按各订阅者 fps tick 回调；不得绕过 SDK 直接访问原生 Bridge。
 - 会话、联机和 playmesh.storage 始终使用 Authority 主机的 Game SDK；Console 由当前设备的页面宿主采集，不经 SDK 跨设备转发；playmesh.app 只表示当前设备的身份与硬件，不能代替权威 SDK。
 

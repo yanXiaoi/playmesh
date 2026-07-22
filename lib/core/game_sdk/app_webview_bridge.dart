@@ -3,9 +3,11 @@ import 'dart:convert';
 
 import 'generated_sdk_versions.dart';
 
+import '../capabilities/capability_registry.dart';
+import '../capabilities/capability_runtime.dart';
+import '../capabilities/default_capability_plugins.dart';
+import '../capabilities/support/motion_sensor_source.dart';
 import '../platform/app_device_service.dart';
-import '../platform/app_sensor_service.dart';
-import '../../models/game_capability_registry.dart';
 
 class AppWebViewBridge {
   AppWebViewBridge({
@@ -14,9 +16,17 @@ class AppWebViewBridge {
     this.gameName = 'Playmesh 游戏',
     this.declaredCapabilities = const [],
     this.deviceService = const AppDeviceService(),
-    AppSensorSource? sensorSource,
+    MotionSensorSource? motionSource,
+    CapabilityRegistry? capabilityRegistry,
     this.onExitRequested,
-  }) : _sensorHub = AppSensorHub(source: sensorSource);
+  }) : capabilityRegistry =
+           capabilityRegistry ??
+           createDefaultCapabilityRegistry(motionSource: motionSource) {
+    _capabilityRuntime = CapabilityRuntime(
+      registry: this.capabilityRegistry,
+      declaredCapabilities: declaredCapabilities,
+    );
+  }
 
   final String userId;
   final String nickname;
@@ -24,8 +34,8 @@ class AppWebViewBridge {
   final List<String> declaredCapabilities;
   final AppDeviceService deviceService;
   final Future<void> Function()? onExitRequested;
-  final AppSensorHub _sensorHub;
-  bool _capabilitiesConfirmed = false;
+  final CapabilityRegistry capabilityRegistry;
+  late final CapabilityRuntime _capabilityRuntime;
 
   Future<void> handleJavaScriptMessage(
     String rawMessage,
@@ -45,10 +55,14 @@ class AppWebViewBridge {
       final result = switch (command['command']) {
         'app.bootstrap' => _bootstrap(),
         'app.capabilities.confirm' => _confirmCapabilities(),
+        'app.capability.create' => await _capabilityRuntime.create(
+          payload,
+          (message) => send(jsonEncode(message)),
+        ),
+        'app.capability.invoke' => await _capabilityRuntime.invoke(payload),
+        'app.capability.dispose' => await _disposeCapability(payload),
         'app.device.haptic' => await _haptic(payload),
         'app.device.fullscreen' => await _fullscreen(payload),
-        'app.device.sensor.subscribe' => await _subscribeSensor(payload, send),
-        'app.device.sensor.unsubscribe' => await _unsubscribeSensor(payload),
         'app.game.exit' => _requestExit(),
         _ => throw FormatException('未知 App SDK 命令：${command['command']}'),
       };
@@ -78,7 +92,6 @@ class AppWebViewBridge {
   }
 
   Map<String, Object?> _bootstrap() {
-    _capabilitiesConfirmed = false;
     return {
       'available': true,
       'sdkVersion': generatedAppSdkVersion,
@@ -88,31 +101,21 @@ class AppWebViewBridge {
         'source': 'playmesh_app',
       },
       'game': {'name': gameName, 'requiredCapabilities': declaredCapabilities},
-      'capabilityRegistry': gameCapabilityDefinitions
+      'capabilityRegistry': capabilityRegistry.descriptors
           .map((definition) => definition.toJson())
           .toList(),
       'device': {
         'platform': deviceService.platform,
-        'capabilities': [
-          ...deviceService.capabilities,
-          ..._declaredAvailableSensors.map((type) => type.permission),
-        ],
+        'capabilities': _capabilityRuntime.availableDeclaredCodes.toList(),
         'declaredCapabilities': declaredCapabilities,
       },
     };
   }
 
   Object? _confirmCapabilities() {
-    _capabilitiesConfirmed = true;
+    _capabilityRuntime.confirm();
     return null;
   }
-
-  Iterable<AppSensorType> get _declaredAvailableSensors =>
-      AppSensorType.values.where(
-        (type) =>
-            declaredCapabilities.contains(type.permission) &&
-            _sensorHub.availableTypes.contains(type),
-      );
 
   Future<Object?> _haptic(Map<String, Object?> payload) async {
     final style = payload['style'];
@@ -130,58 +133,8 @@ class AppWebViewBridge {
     return null;
   }
 
-  Future<Object?> _subscribeSensor(
-    Map<String, Object?> payload,
-    Future<void> Function(String message) send,
-  ) async {
-    final subscriptionId = _requiredString(payload, 'subscriptionId');
-    final type = AppSensorType.fromSdkValue(_requiredString(payload, 'type'));
-    if (!declaredCapabilities.contains(type.permission)) {
-      throw StateError('当前游戏未在 capabilities.json 声明 ${type.permission}');
-    }
-    if (!_capabilitiesConfirmed) {
-      throw StateError('请先完成本次游戏能力确认');
-    }
-    final rawFps = payload['fps'];
-    if (rawFps is! num ||
-        !rawFps.isFinite ||
-        rawFps != rawFps.roundToDouble() ||
-        rawFps < 1 ||
-        rawFps > 120) {
-      throw const FormatException('fps 必须是 1 到 120 的整数');
-    }
-    await _sensorHub.subscribe(
-      subscriptionId: subscriptionId,
-      type: type,
-      fps: rawFps.toInt(),
-      onData: (sample) {
-        unawaited(
-          send(
-            jsonEncode({
-              'type': 'app.device.data',
-              'subscriptionId': subscriptionId,
-              'data': sample.toJson(),
-            }),
-          ),
-        );
-      },
-      onError: (error) {
-        unawaited(
-          send(
-            jsonEncode({
-              'type': 'app.device.error',
-              'subscriptionId': subscriptionId,
-              'error': error.toString(),
-            }),
-          ),
-        );
-      },
-    );
-    return null;
-  }
-
-  Future<Object?> _unsubscribeSensor(Map<String, Object?> payload) async {
-    await _sensorHub.unsubscribe(_requiredString(payload, 'subscriptionId'));
+  Future<Object?> _disposeCapability(Map<String, Object?> payload) async {
+    await _capabilityRuntime.disposeInstance(payload);
     return null;
   }
 
@@ -193,21 +146,12 @@ class AppWebViewBridge {
     return null;
   }
 
-  Future<void> resetDeviceSubscriptions() {
-    _capabilitiesConfirmed = false;
-    return _sensorHub.clear();
+  Future<void> resetCapabilities() {
+    return _capabilityRuntime.reset();
   }
 
-  Future<void> close() {
-    _capabilitiesConfirmed = false;
-    return _sensorHub.clear();
+  Future<void> close() async {
+    await _capabilityRuntime.reset();
+    await capabilityRegistry.dispose();
   }
-}
-
-String _requiredString(Map<String, Object?> payload, String key) {
-  final value = payload[key];
-  if (value is! String || value.isEmpty) {
-    throw FormatException('$key 必须是非空字符串');
-  }
-  return value;
 }

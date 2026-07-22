@@ -1,6 +1,6 @@
 {
-  "version": "1.4.3",
-  "channelVersion": "1.2.1",
+  "version": "2.0.0",
+  "channelVersion": "2.0.0",
   "script": "/playmesh/sdk/v1/playmesh.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -115,7 +115,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "1.4.3"
+          "value": "2.0.0"
         },
         {
           "name": "ready",
@@ -127,17 +127,6 @@
     {
       "name": "playmesh.app",
       "members": [
-        {
-          "name": "DeviceType",
-          "type": "{ accelerometer: 'accelerometer', gyroscope: 'gyroscope' }",
-          "behavior": "Provider-neutral sensor enum used by onDevice"
-        },
-        {
-          "name": "onDevice",
-          "signature": "onDevice(type: DeviceType, fps: 1..120, callback: (data: DeviceSensorData) => void): Unsubscribe",
-          "availability": "Playmesh App WebView after capabilities.json declaration and user consent",
-          "behavior": "One native stream keeps the latest sample; each listener receives that snapshot on its requested fps tick"
-        },
         {
           "name": "isAvailable",
           "signature": "isAvailable(): boolean",
@@ -153,14 +142,25 @@
           "signature": "device.getPlatform(): string"
         },
         {
-          "name": "device.getCapabilities",
-          "signature": "device.getCapabilities(): string[]",
-          "behavior": "Returns capabilities declared by the game and currently available on this App device; use it before subscribing"
+          "name": "capabilities.getRegistry",
+          "signature": "capabilities.getRegistry(): CapabilityDefinition[]",
+          "behavior": "Returns metadata, apiVersion, methods and events for every plugin in the platform registry"
         },
         {
-          "name": "device.getDeclaredCapabilities",
-          "signature": "device.getDeclaredCapabilities(): string[]",
+          "name": "capabilities.getAvailable",
+          "signature": "capabilities.getAvailable(): string[]",
+          "behavior": "Returns plugins declared by this game and currently available on the App host"
+        },
+        {
+          "name": "capabilities.getDeclared",
+          "signature": "capabilities.getDeclared(): string[]",
           "behavior": "Returns the current game's capabilities.json declaration even when an adapter is unavailable"
+        },
+        {
+          "name": "capabilities.create",
+          "signature": "capabilities.create(code: string, options?: JsonObject): Promise<CapabilityHandle>",
+          "availability": "Playmesh App WebView after declaration and per-load user consent",
+          "behavior": "Creates a stateful plugin instance with invoke, on, onError and dispose"
         },
         {
           "name": "device.haptic",
@@ -176,11 +176,6 @@
           "name": "device.onInput",
           "signature": "device.onInput(callback: (input: JsonObject) => void): Unsubscribe",
           "availability": "Playmesh App WebView when an input capability is declared"
-        },
-        {
-          "name": "device.onDevice",
-          "signature": "device.onDevice(type: DeviceType, fps: 1..120, callback: (data: DeviceSensorData) => void): Unsubscribe",
-          "status": "Alias of playmesh.app.onDevice"
         }
       ]
     },

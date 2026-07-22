@@ -43,7 +43,7 @@ Authorization: Bearer optional-token
       "remarks": "游戏描述",
       "version": "1.0.0",
       "sdkVersion": "1.4.2",
-      "appSdkVersion": "1.2.1",
+      "appSdkVersion": "2.0.0",
       "orientation": "landscape",
       "modes": ["multiplayer"],
       "displayModes": ["multi_screen"],

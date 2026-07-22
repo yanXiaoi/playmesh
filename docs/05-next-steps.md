@@ -74,7 +74,7 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 
 第六阶段已于 2026-07-18 完成。加入 App 不再要求预装游戏，而是直接加载权威主机提供的当前入口；游戏与控制器的全屏请求不再参与运行前置条件，失败时只提示，并可在 WebView 悬浮工具中按需进入或退出。Android 已接通系统文件打开/分享入口：压缩包复用 Playmesh 包导入，单个 HTML 使用无 SDK 的独立 WebView，游戏包导出交给系统保存或分享。
 
-运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份，以及当前游戏已声明、用户本次确认且设备可用的硬件能力。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现，并在自身 `localStorage` 持久化随机玩家 ID 和昵称。Core 拒绝同一 ID 的并发在线连接，仅在旧连接离线后允许同 ID 重连；当前 Game SDK `1.4.2` 暴露 `onPlayerJoin`、`onPlayerLeave`、`onPlayerReconnect`、`session.finish()` 与 `app.onDevice()`。
+运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。当前 Game SDK 与 App Bridge SDK 均为 `2.0.0`；能力统一通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`，旧 `DeviceType/onDevice` 接口已移除。
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 

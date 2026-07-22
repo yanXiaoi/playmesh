@@ -52,14 +52,14 @@ class DeveloperAiPromptTemplateStore {
   static const descriptors = <DeveloperAiPromptTemplateDescriptor>[
     DeveloperAiPromptTemplateDescriptor(
       id: 'common',
-      name: '对话 AI 公共规则与快速操作',
+      name: '对话 AI 公共规则（仅项目能力）',
       category: 'common',
       categoryName: '公共',
       assetPath: 'assets/playmesh-library/public/developer/prompts/common.txt',
     ),
     DeveloperAiPromptTemplateDescriptor(
       id: 'agent-common',
-      name: 'Agent 公共规则与接口操作',
+      name: 'Agent 公共规则（能力与测试 API）',
       category: 'common',
       categoryName: '公共',
       assetPath:

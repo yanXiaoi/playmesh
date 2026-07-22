@@ -1,6 +1,6 @@
-# Game SDK v1
+# Game SDK / App 能力插件 API
 
-本文记录 Game SDK `1.4.3` 与 App Bridge SDK `1.2.1` 的公开 API。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。生成的声明文件内置完整中文 JSDoc，IDEA 的补全、参数信息和悬浮文档无需联网即可显示中文用途、返回值、环境边界和限制；AI 提示词会嵌入两份完整声明，并以其作为唯一接口事实源。
+本文记录 Game SDK `2.0.0` 与 App Bridge SDK `2.0.0` 的公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -33,17 +33,17 @@ await playmesh.ready;
 
 if (playmesh.app.isAvailable()) {
   const identity = playmesh.app.identity.getCurrent();
-  const capabilities = playmesh.app.device.getCapabilities();
+  const capabilities = playmesh.app.capabilities.getAvailable();
 }
 ```
 
-App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持久化 `{ userId, nickname, source }`。`playmesh.app.device` 当前提供 `getPlatform()`、`getCapabilities()`、`getDeclaredCapabilities()`、`haptic(style)`、`setFullscreen(enabled)`、`onInput(callback)` 和 `onDevice(...)`；`getDeclaredCapabilities()` 返回游戏声明，`getCapabilities()` 只返回本设备当前真正可用的能力，只有后者包含的能力才可订阅。普通浏览器中 `isAvailable()` 为 `false`、身份为 `null`、可用能力列表为空，原生操作返回明确的不可用错误。
+App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持久化 `{ userId, nickname, source }`。`playmesh.app.capabilities` 提供 `getRegistry()`、`getDeclared()`、`getAvailable()` 与 `create(code, options)`；`device` 只保留平台、触感、全屏和统一输入等非插件宿主操作。普通浏览器中 `isAvailable()` 为 `false`、身份为 `null`、能力列表为空，创建插件实例会返回明确的不可用错误。
 
 浏览器玩家由主 SDK 生成 `p_...` ID，并把 ID 写入浏览器 `localStorage` 的 `playmesh.player-id.v1`；昵称写入 `playmesh.nickname.v1`。同一来源刷新后会复用这两项，但不持久化玩家凭证或游戏 Bucket。App 玩家使用 App 自己的 `u_...` ID 和资料，不读写浏览器 ID。服务端只允许同一玩家 ID 存在一条在线 WebSocket；旧连接在线时新连接被拒绝，旧连接掉线后才允许同 ID 重新加入。
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "1.4.3"
+console.log(playmesh.version); // "2.0.0"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若 `capabilities.json.required` 非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
@@ -57,29 +57,31 @@ const unsubscribe = playmesh.session.onStateChange(renderSession);
 unsubscribe();
 ```
 
-## App 设备传感器
+## App 能力插件
 
-游戏先在根 `capabilities.json` 的 `required` 中声明 `sensor.accelerometer` 或 `sensor.gyroscope`。主 SDK 在 App 和普通浏览器中统一请求用户确认；普通浏览器会把这两个能力标为“本平台暂不支持”，但同意后仍进入游戏，其安全空实现不会产生传感器回调。
+游戏先在根 `capabilities.json` 的 `required` 中声明能力 code。主 SDK 在 App 和普通浏览器中统一请求用户确认；普通浏览器会把不可用能力标为“本平台暂不支持”，但同意后仍进入游戏。能力不是“订阅函数”的同义词：每个插件可以拥有自己的创建参数、状态、异步方法、事件和返回值，因此录音类插件可以实现由用户操作触发的 `start/stop`，传感器插件则可以持续发送 `reading` 事件。
 
-弹窗中的中文名、用途说明和当前环境支持状态来自平台统一能力注册表，不由 SDK 维护另一份名称映射。开发工具也从同一注册表动态生成 `capabilities.json` 选项，因此后续新增能力无需同步修改这些页面。
+弹窗、开发者工作区的项目设置和能力测试都读取同一份平台注册表。注册表公开 code、中文说明、插件 `apiVersion`、方法、事件和平台状态；工作区能力测试始终显示全平台注册表，不按当前项目声明过滤。
 
 ```js
 await playmesh.ready;
 
-const off = playmesh.app.onDevice(
-  playmesh.app.DeviceType.accelerometer,
-  30,
-  ({ x, y, z, timestamp, unit }) => {
-    updateTilt({ x, y, z, timestamp, unit });
-  },
-);
+if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
+  const accelerometer = await playmesh.app.capabilities.create(
+    'sensor.accelerometer',
+    { fps: 30 },
+  );
+  const offReading = accelerometer.on('reading', updateTilt);
+  await accelerometer.invoke('start');
 
-off();
+  // 页面退出或不再使用时：
+  await accelerometer.invoke('stop');
+  offReading();
+  await accelerometer.dispose();
+}
 ```
 
-`playmesh.app.device.onDevice` 是同一方法的别名。`fps` 必须是 `1` 至 `120` 的整数。加速度计单位为 `m/s^2`（包含重力），陀螺仪单位为 `rad/s`；`timestamp` 为毫秒时间戳。
-
-同一种传感器只保持一条原生采集流，原生采样频率取当前监听器的最高 fps；原始事件只更新唯一最新快照，每个监听器再按自己的 fps tick 收到该快照。最后一个监听器取消、页面重载或退出后，App 自动停止采集。
+通用实例固定提供 `invoke(method, args)`、`on(event, callback)`、`onError(callback)` 和 `dispose()`；具体方法、事件与语义以插件 `apiVersion` 为准。当前加速度计与陀螺仪插件均为 `1.0.0`，创建参数 `fps` 必须是 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。加速度计单位为 `m/s^2`（包含重力），陀螺仪单位为 `rad/s`；`timestamp` 为毫秒时间戳。同一种传感器插件共享一条原生采集流，最后一个实例停止、页面重载或退出后自动释放。
 
 ## 会话
 

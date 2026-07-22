@@ -47,20 +47,20 @@ void main() {
   });
 
   test('拒绝不兼容的 SDK 主版本', () {
-    final json = validManifest()..['sdkVersion'] = '2.0.0';
+    final json = validManifest()..['sdkVersion'] = '3.0.0';
 
     expect(() => GameManifest.fromJson(json), throwsFormatException);
   });
 
   test('解析 App SDK 版本并兼容旧清单缺省值', () {
-    final current = validManifest()..['appSdkVersion'] = '1.2.0';
+    final current = validManifest()..['appSdkVersion'] = '2.0.0';
 
-    expect(GameManifest.fromJson(current).appSdkVersion, '1.2.0');
+    expect(GameManifest.fromJson(current).appSdkVersion, '2.0.0');
     expect(GameManifest.fromJson(validManifest()).appSdkVersion, '1.0.0');
   });
 
   test('拒绝不兼容的 App SDK 主版本', () {
-    final json = validManifest()..['appSdkVersion'] = '2.0.0';
+    final json = validManifest()..['appSdkVersion'] = '3.0.0';
 
     expect(() => GameManifest.fromJson(json), throwsFormatException);
   });

@@ -126,7 +126,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
             },
             onPageStarted: (_) {
               _messageQueue.pause(clearPending: true);
-              unawaited(_appBridge.resetDeviceSubscriptions());
+              unawaited(_appBridge.resetCapabilities());
             },
             onPageFinished: (_) {
               unawaited(

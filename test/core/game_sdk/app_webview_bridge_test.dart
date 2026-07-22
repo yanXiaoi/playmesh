@@ -1,219 +1,190 @@
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_sdk/app_webview_bridge.dart';
-import 'package:playmesh/core/platform/app_sensor_service.dart';
 
 void main() {
-  test('App 桥接自动返回当前 App 身份和设备能力', () async {
+  test('bootstrap 返回项目声明、平台注册表和当前可用插件', () async {
     final bridge = AppWebViewBridge(
       userId: 'u-current-app',
       nickname: '本机玩家',
       gameName: '体感测试',
       declaredCapabilities: const ['sensor.accelerometer'],
+      motionSource: _FakeMotionSource(),
     );
-    String? response;
+    addTearDown(bridge.close);
 
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({
-        'command': 'app.bootstrap',
-        'requestId': 'app-1',
-        'payload': <String, Object?>{},
-      }),
-      (message) async => response = message,
-    );
-
-    final decoded = jsonDecode(response!) as Map<String, Object?>;
-    final result = decoded['result']! as Map<String, Object?>;
+    final response = await _command(bridge, 'app.bootstrap', 'bootstrap');
+    final result = response['result']! as Map<String, Object?>;
     final identity = result['identity']! as Map<String, Object?>;
     final device = result['device']! as Map<String, Object?>;
-    final game = result['game']! as Map<String, Object?>;
+    final registry = result['capabilityRegistry']! as List<Object?>;
+
     expect(result['available'], isTrue);
     expect(identity['userId'], 'u-current-app');
-    expect(identity['nickname'], '本机玩家');
-    expect(device['capabilities'], containsAll(['fullscreen', 'haptics']));
-    expect(game['name'], '体感测试');
-    expect(game['requiredCapabilities'], ['sensor.accelerometer']);
+    expect(device['capabilities'], ['sensor.accelerometer']);
+    expect(device['declaredCapabilities'], ['sensor.accelerometer']);
+    expect(registry, hasLength(2));
+    expect(registry, everyElement(contains('methods')));
   });
 
-  test('SDK 拒绝能力请求后可要求 App 退出当前游戏', () async {
+  test('通用能力实例通过 create/invoke/event/dispose 工作', () async {
+    final source = _FakeMotionSource();
+    final bridge = AppWebViewBridge(
+      userId: 'u-sensor',
+      nickname: '体感玩家',
+      declaredCapabilities: const ['sensor.accelerometer'],
+      motionSource: source,
+    );
+    addTearDown(bridge.close);
+    final messages = <Map<String, Object?>>[];
+
+    await _command(bridge, 'app.capabilities.confirm', 'confirm');
+    final create = await _command(
+      bridge,
+      'app.capability.create',
+      'create',
+      payload: {
+        'code': 'sensor.accelerometer',
+        'options': {'fps': 20},
+      },
+      messages: messages,
+    );
+    final instanceId =
+        (create['result']! as Map<String, Object?>)['instanceId']! as String;
+
+    await _command(
+      bridge,
+      'app.capability.invoke',
+      'start',
+      payload: {
+        'instanceId': instanceId,
+        'method': 'start',
+        'arguments': <String, Object?>{},
+      },
+      messages: messages,
+    );
+    source.add(
+      MotionSample(
+        x: 1,
+        y: 2,
+        z: 3,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(123),
+        unit: 'm/s^2',
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 65));
+
+    final event = messages.firstWhere(
+      (message) => message['type'] == 'app.capability.event',
+    );
+    expect(event['instanceId'], instanceId);
+    expect(event['event'], 'reading');
+    expect(event['data'], containsPair('unit', 'm/s^2'));
+    expect(
+      source.accelerometerPeriods.single,
+      const Duration(milliseconds: 50),
+    );
+
+    await _command(
+      bridge,
+      'app.capability.dispose',
+      'dispose',
+      payload: {'instanceId': instanceId},
+    );
+  });
+
+  test('未声明或未确认时拒绝创建插件实例', () async {
+    final bridge = AppWebViewBridge(
+      userId: 'u-sensor',
+      nickname: '玩家',
+      declaredCapabilities: const ['sensor.gyroscope'],
+      motionSource: _FakeMotionSource(),
+    );
+    addTearDown(bridge.close);
+
+    final undeclared = await _command(
+      bridge,
+      'app.capability.create',
+      'undeclared',
+      payload: {'code': 'sensor.accelerometer', 'options': <String, Object?>{}},
+    );
+    expect(undeclared['type'], 'app.command.error');
+    expect(undeclared['error'], contains('sensor.accelerometer'));
+
+    final unconfirmed = await _command(
+      bridge,
+      'app.capability.create',
+      'unconfirmed',
+      payload: {'code': 'sensor.gyroscope', 'options': <String, Object?>{}},
+    );
+    expect(unconfirmed['type'], 'app.command.error');
+    expect(unconfirmed['error'], contains('能力确认'));
+  });
+
+  test('网页请求退出时通知宿主', () async {
     final exitRequested = Completer<void>();
     final bridge = AppWebViewBridge(
       userId: 'u-exit',
       nickname: '玩家',
       onExitRequested: () async => exitRequested.complete(),
     );
-    String? response;
+    addTearDown(bridge.close);
 
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({'command': 'app.game.exit', 'requestId': 'exit-1'}),
-      (message) async => response = message,
-    );
+    final response = await _command(bridge, 'app.game.exit', 'exit');
 
-    expect(
-      jsonDecode(response!) as Map<String, Object?>,
-      containsPair('type', 'app.command.result'),
-    );
+    expect(response['type'], 'app.command.result');
     await exitRequested.future.timeout(const Duration(seconds: 1));
-  });
-
-  test('只向网页开放游戏已声明且设备可用的传感器', () async {
-    final source = _FakeSensorSource();
-    final bridge = AppWebViewBridge(
-      userId: 'u-sensor',
-      nickname: '体感玩家',
-      declaredCapabilities: const ['sensor.accelerometer'],
-      sensorSource: source,
-    );
-    addTearDown(bridge.close);
-    String? response;
-
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({'command': 'app.bootstrap', 'requestId': 'app-bootstrap'}),
-      (message) async => response = message,
-    );
-
-    final decoded = jsonDecode(response!) as Map<String, Object?>;
-    final result = decoded['result']! as Map<String, Object?>;
-    final device = result['device']! as Map<String, Object?>;
-    expect(device['capabilities'], contains('sensor.accelerometer'));
-    expect(device['capabilities'], isNot(contains('sensor.gyroscope')));
-    expect(device['declaredCapabilities'], ['sensor.accelerometer']);
-  });
-
-  test('按 fps tick 把最新传感器快照回调给 App SDK', () async {
-    final source = _FakeSensorSource();
-    final bridge = AppWebViewBridge(
-      userId: 'u-sensor',
-      nickname: '体感玩家',
-      declaredCapabilities: const ['sensor.accelerometer'],
-      sensorSource: source,
-    );
-    addTearDown(bridge.close);
-    final messages = <Map<String, Object?>>[];
-
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({
-        'command': 'app.capabilities.confirm',
-        'requestId': 'confirm-1',
-      }),
-      (message) async {
-        messages.add(Map<String, Object?>.from(jsonDecode(message) as Map));
-      },
-    );
-
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({
-        'command': 'app.device.sensor.subscribe',
-        'requestId': 'subscribe-1',
-        'payload': {
-          'subscriptionId': 'sensor-1',
-          'type': 'accelerometer',
-          'fps': 20,
-        },
-      }),
-      (message) async {
-        messages.add(Map<String, Object?>.from(jsonDecode(message) as Map));
-      },
-    );
-    source.add(
-      AppSensorSample(
-        type: AppSensorType.accelerometer,
-        x: 1,
-        y: 2,
-        z: 3,
-        timestamp: DateTime.fromMillisecondsSinceEpoch(123),
-      ),
-    );
-    await Future<void>.delayed(const Duration(milliseconds: 65));
-
-    final dataMessage = messages.firstWhere(
-      (message) => message['type'] == 'app.device.data',
-    );
-    final data = dataMessage['data']! as Map<String, Object?>;
-    expect(data, containsPair('type', 'accelerometer'));
-    expect(data, containsPair('x', 1.0));
-    expect(data, containsPair('unit', 'm/s^2'));
-    expect(source.samplingPeriods.single, const Duration(milliseconds: 50));
-  });
-
-  test('拒绝订阅 capabilities.json 未声明的传感器', () async {
-    final source = _FakeSensorSource();
-    final bridge = AppWebViewBridge(
-      userId: 'u-sensor',
-      nickname: '体感玩家',
-      sensorSource: source,
-    );
-    addTearDown(bridge.close);
-    String? response;
-
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({
-        'command': 'app.device.sensor.subscribe',
-        'requestId': 'subscribe-denied',
-        'payload': {
-          'subscriptionId': 'sensor-denied',
-          'type': 'gyroscope',
-          'fps': 30,
-        },
-      }),
-      (message) async => response = message,
-    );
-
-    final decoded = jsonDecode(response!) as Map<String, Object?>;
-    expect(decoded['type'], 'app.command.error');
-    expect(decoded['error'], contains('sensor.gyroscope'));
-    expect(source.samplingPeriods, isEmpty);
-  });
-
-  test('已声明传感器仍需先完成本次 SDK 能力确认', () async {
-    final source = _FakeSensorSource();
-    final bridge = AppWebViewBridge(
-      userId: 'u-sensor',
-      nickname: '体感玩家',
-      declaredCapabilities: const ['sensor.gyroscope'],
-      sensorSource: source,
-    );
-    addTearDown(bridge.close);
-    String? response;
-
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({
-        'command': 'app.device.sensor.subscribe',
-        'requestId': 'subscribe-before-confirm',
-        'payload': {
-          'subscriptionId': 'sensor-before-confirm',
-          'type': 'gyroscope',
-          'fps': 30,
-        },
-      }),
-      (message) async => response = message,
-    );
-
-    final decoded = jsonDecode(response!) as Map<String, Object?>;
-    expect(decoded['type'], 'app.command.error');
-    expect(decoded['error'], contains('能力确认'));
-    expect(source.samplingPeriods, isEmpty);
   });
 }
 
-class _FakeSensorSource implements AppSensorSource {
-  final StreamController<AppSensorSample> _events =
-      StreamController<AppSensorSample>.broadcast(sync: true);
-  final List<Duration> samplingPeriods = [];
+Future<Map<String, Object?>> _command(
+  AppWebViewBridge bridge,
+  String command,
+  String requestId, {
+  Map<String, Object?> payload = const {},
+  List<Map<String, Object?>>? messages,
+}) async {
+  Map<String, Object?>? response;
+  await bridge.handleJavaScriptMessage(
+    jsonEncode({
+      'command': command,
+      'requestId': requestId,
+      'payload': payload,
+    }),
+    (message) async {
+      final decoded = Map<String, Object?>.from(jsonDecode(message) as Map);
+      messages?.add(decoded);
+      if (decoded['requestId'] == requestId) response = decoded;
+    },
+  );
+  return response!;
+}
+
+class _FakeMotionSource implements MotionSensorSource {
+  final StreamController<MotionSample> _accelerometer =
+      StreamController<MotionSample>.broadcast(sync: true);
+  final StreamController<MotionSample> _gyroscope =
+      StreamController<MotionSample>.broadcast(sync: true);
+  final List<Duration> accelerometerPeriods = [];
 
   @override
-  Set<AppSensorType> get availableTypes => AppSensorType.values.toSet();
-
-  void add(AppSensorSample sample) => _events.add(sample);
+  bool get accelerometerAvailable => true;
 
   @override
-  Stream<AppSensorSample> events(
-    AppSensorType type, {
-    required Duration samplingPeriod,
-  }) {
-    samplingPeriods.add(samplingPeriod);
-    return _events.stream.where((sample) => sample.type == type);
+  bool get gyroscopeAvailable => true;
+
+  void add(MotionSample sample) => _accelerometer.add(sample);
+
+  @override
+  Stream<MotionSample> accelerometerEvents(Duration samplingPeriod) {
+    accelerometerPeriods.add(samplingPeriod);
+    return _accelerometer.stream;
   }
+
+  @override
+  Stream<MotionSample> gyroscopeEvents(Duration samplingPeriod) =>
+      _gyroscope.stream;
 }

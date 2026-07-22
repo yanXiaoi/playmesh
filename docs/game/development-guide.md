@@ -68,7 +68,7 @@ export const ActionTypes = {};
 
 浏览器工作区继续使用 SSE 接收实时事件；不方便维护流式连接的 API Agent 可调用 `GET /dev/api/logs?limit=50` 获取最近最多 50 条运行日志，并调用 `GET /dev/api/projects/{projectId}/run` 轮询运行状态。日志接口接受可选的 `projectId` 和 `runId` 查询参数，仅返回指定运行实例；每条日志包含稳定的 `eventId`，可用于合并缓存回放与 SSE 时去重。底层内存缓存最多保留 500 条且不写磁盘。
 
-API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久工作区 token 的全部接口、鉴权、SDK Manifest、OpenAPI 和 Schema。主工作区点击“AI”直接进入统一页面，接口文档作为只读项与提示模板同页展示。纯聊天 AI 使用 `/dev/api/projects/{projectId}/chat-prompt.txt`，可直接调用接口的 Agent 使用 `/dev/api/projects/{projectId}/agent-prompt.txt`。`GET /dev/api/status` 的 `baseUrls` 枚举当前设备可用的 HTTP 地址；Agent 端点接受可选 `baseUrl` 查询参数，但只允许使用该枚举中的地址。平台按当前 `main.json.modes/displayModes` 只拼接相关 SDK、角色语义、强制文件和当前项目源码；公共“自定义想法”同时合入两类文本，Agent 文本额外包含所选 Gateway 地址、Bearer token 与项目文件、校验、运行/重启、日志轮询和可选 SSE 接口。两份最终文件固定为 UTF-8 BOM TXT，并都在醒目的“获取项目提示词”入口中复制或下载；手机端应为 Agent 选择电脑端 AI 能访问的局域网 Base URL。模板覆盖保存在 `playmesh-library/developer/ai-prompts/`；项目本体统一保存在 `playmesh-library/packages/{gameId}/`。平台不内置游戏 Demo。
+API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久工作区 token 的全部接口、鉴权、SDK Manifest、OpenAPI 和 Schema。主工作区点击“AI”直接进入统一页面，接口文档作为只读项与提示模板同页展示。纯聊天 AI 使用 `/dev/api/projects/{projectId}/chat-prompt.txt`，其能力上下文只包含当前项目已勾选能力的完整声明；可直接调用接口的 Agent 使用 `/dev/api/projects/{projectId}/agent-prompt.txt`，不内嵌全量能力声明，而是明确提供 `GET /dev/api/capabilities` 全量注册表 API 与 `GET/POST /dev/api/capability-tests` 测试 API。`GET /dev/api/status` 的 `baseUrls` 枚举当前设备可用的 HTTP 地址；Agent 端点接受可选 `baseUrl` 查询参数，但只允许使用该枚举中的地址。平台按当前 `main.json.modes/displayModes` 只拼接相关 SDK、角色语义、强制文件和当前项目源码；公共“自定义想法”同时合入两类文本，Agent 文本额外包含所选 Gateway 地址、Bearer token 与项目文件、校验、运行/重启、日志轮询和可选 SSE 接口。两份最终文件固定为 UTF-8 BOM TXT，并都在醒目的“获取项目提示词”入口中复制或下载；工作区还可通过“复制全平台能力”独立调用注册表 API，复制与项目勾选无关的全部完整声明。手机端应为 Agent 选择电脑端 AI 能访问的局域网 Base URL。模板覆盖保存在 `playmesh-library/developer/ai-prompts/`；项目本体统一保存在 `playmesh-library/packages/{gameId}/`。平台不内置游戏 Demo。
 
 ## 运行模式
 
@@ -206,9 +206,9 @@ requestAnimationFrame(render);
 
 Canvas/WebGL 游戏应在实际绘制或提交完成后调用。非逐帧渲染游戏可以不接入，宿主显示 `-- FPS`。
 
-## 设备能力与传感器
+## 平台能力插件
 
-需要平台设备能力时，在 `main.json` 同级创建可选 `capabilities.json`。不要把传感器写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都可视化编辑该文件，Agent 可先读取 `GET /dev/api/capabilities`，再调用项目 capabilities API 保存声明。排查设备输入时调用 `GET /dev/api/capability-tests` 查看测试项，再用 `POST` 测试全部或指定能力；单次请求中，传感器通过时返回首个 X/Y/Z 样本。工作区测试窗口会循环请求并持续输出每轮状态、耗时和样本数据，手动关闭窗口后才停止。
+需要平台能力时，在 `main.json` 同级创建可选 `capabilities.json`。不要把能力写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都从平台注册表生成选项。`GET /dev/api/capabilities` 返回每个插件的 code、`apiVersion`、方法、事件和平台状态。工作区“能力测试”显示并测试全平台注册表，不按当前项目声明过滤；项目声明只控制该游戏可创建哪些插件实例。
 
 ```json
 {
@@ -221,17 +221,18 @@ Canvas/WebGL 游戏应在实际绘制或提交完成后调用。非逐帧渲染�
 ```js
 await playmesh.ready;
 
-if (playmesh.app.device.getCapabilities().includes('sensor.accelerometer')) {
-  const off = playmesh.app.onDevice(
-    playmesh.app.DeviceType.accelerometer,
-    30,
-    ({ x, y, z, timestamp, unit }) => updateTilt({ x, y, z, timestamp, unit }),
+if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
+  const sensor = await playmesh.app.capabilities.create(
+    'sensor.accelerometer',
+    { fps: 30 },
   );
-  playmesh.lifecycle.onExit(off);
+  sensor.on('reading', updateTilt);
+  await sensor.invoke('start');
+  playmesh.lifecycle.onExit(() => sensor.dispose());
 }
 ```
 
-`fps` 必须为 `1` 至 `120` 的整数。App 只维护一条对应原生流和最新样本，各订阅者按自己的 fps tick 收到回调；返回的取消函数应在不再使用时调用。加速度计单位为 `m/s^2`，陀螺仪单位为 `rad/s`。当前两项仅 App 已适配，普通局域网 HTML 环境使用安全空实现。
+能力实例统一提供 `invoke/on/onError/dispose`，具体方法和事件必须以注册表中对应插件的 `apiVersion` 契约为准。加速度计与陀螺仪插件的 `fps` 必须为 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。App 为同种传感器共享一条原生流；实例停止、释放或页面退出后清理。当前两项仅 App 已适配，普通局域网 HTML 环境使用安全空实现。
 
 ## 开发检查清单
 

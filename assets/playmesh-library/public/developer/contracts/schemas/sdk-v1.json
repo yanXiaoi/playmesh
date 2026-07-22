@@ -80,42 +80,41 @@
         }
       }
     },
-    "DeviceSensorData": {
+    "CapabilityDefinition": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
-        "type",
-        "x",
-        "y",
-        "z",
-        "timestamp",
-        "unit"
+        "code",
+        "name",
+        "description",
+        "apiVersion",
+        "methods",
+        "events"
       ],
       "properties": {
-        "type": {
-          "enum": [
-            "accelerometer",
-            "gyroscope"
-          ]
+        "code": {
+          "type": "string"
         },
-        "x": {
-          "type": "number"
+        "name": {
+          "type": "string"
         },
-        "y": {
-          "type": "number"
+        "description": {
+          "type": "string"
         },
-        "z": {
-          "type": "number"
+        "apiVersion": {
+          "type": "string"
         },
-        "timestamp": {
-          "type": "number",
-          "description": "Sensor event timestamp in milliseconds"
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         },
-        "unit": {
-          "enum": [
-            "m/s^2",
-            "rad/s"
-          ]
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     },
@@ -360,7 +359,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "1.4.3"
+          "const": "2.0.0"
         },
         "isAuthority": {
           "type": "boolean"

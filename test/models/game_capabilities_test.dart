@@ -1,22 +1,21 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/capabilities/default_capability_plugins.dart';
 import 'package:playmesh/models/game_capabilities.dart';
-import 'package:playmesh/models/game_capability_registry.dart';
 
 void main() {
-  test('缺少文件时使用无权限能力定义', () {
+  test('缺少文件时使用空能力声明', () {
     expect(const GameCapabilities().isEmpty, isTrue);
   });
 
-  test('解析统一的必需能力 ID', () {
+  test('解析统一的必需能力 code', () {
     final capabilities = GameCapabilities.fromJson({
       'required': ['sensor.accelerometer', 'sensor.gyroscope'],
     });
 
     expect(capabilities.required, {'sensor.accelerometer', 'sensor.gyroscope'});
-    expect(capabilities.sensors, GameSensorCapability.values.toSet());
   });
 
-  test('拒绝当前版本未知、重复或结构错误的能力', () {
+  test('拒绝未注册、重复或结构错误的能力声明', () {
     expect(
       () => GameCapabilities.fromJson({
         'required': ['media.camera'],
@@ -35,15 +34,16 @@ void main() {
     );
   });
 
-  test('能力注册表集中提供中文说明和 App HTML 适配状态', () {
+  test('插件描述符 code 唯一并公开方法、事件和平台状态', () {
     expect(
-      gameCapabilityDefinitions.map((definition) => definition.code).toSet(),
-      hasLength(gameCapabilityDefinitions.length),
+      defaultCapabilityDescriptors.map((item) => item.code).toSet(),
+      hasLength(defaultCapabilityDescriptors.length),
     );
     final accelerometer =
-        gameCapabilityRegistry[GameCapabilityCodes.accelerometer]!;
+        defaultCapabilityDescriptorRegistry['sensor.accelerometer']!;
     expect(accelerometer.name, '加速度计');
-    expect(accelerometer.description, isNotEmpty);
+    expect(accelerometer.methods.map((item) => item.name), ['start', 'stop']);
+    expect(accelerometer.events.single.name, 'reading');
     expect(accelerometer.appSupported, isTrue);
     expect(accelerometer.htmlSupported, isFalse);
   });

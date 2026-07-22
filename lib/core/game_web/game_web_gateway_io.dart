@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import '../network/lan_endpoint_resolver.dart';
 import '../storage/game_storage_service.dart';
 import '../../models/game_manifest.dart';
-import '../../models/game_capability_registry.dart';
+import '../capabilities/default_capability_plugins.dart';
 import 'game_web_gateway_contract.dart';
 
 Future<GameWebGateway> startGameWebGateway({
@@ -140,7 +140,7 @@ class _IoGameWebGateway implements GameWebGateway {
         'gameId': gameId,
         'gameName': gameName,
         'required': requiredCapabilities,
-        'capabilityRegistry': gameCapabilityDefinitions
+        'capabilityRegistry': defaultCapabilityDescriptors
             .map((definition) => definition.toJson())
             .toList(),
       });
@@ -298,11 +298,11 @@ class _IoGameWebGateway implements GameWebGateway {
       'shareToken': shareToken,
       'gameName': gameName,
       'requiredCapabilities': requiredCapabilities,
-      'availableCapabilities': gameCapabilityDefinitions
+      'availableCapabilities': defaultCapabilityDescriptors
           .where((definition) => definition.htmlSupported)
           .map((definition) => definition.code)
           .toList(),
-      'capabilityRegistry': gameCapabilityDefinitions
+      'capabilityRegistry': defaultCapabilityDescriptors
           .map((definition) => definition.toJson())
           .toList(),
       'storageEndpoint': '/api/storage',

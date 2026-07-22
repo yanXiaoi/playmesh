@@ -64,8 +64,8 @@ game-package/
   "name": "派对游戏",
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "1.4.3",
-  "appSdkVersion": "1.2.1",
+  "sdkVersion": "2.0.0",
+  "appSdkVersion": "2.0.0",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "displayModes": ["single_screen_multiplayer"],
@@ -88,8 +88,8 @@ game-package/
 | `name` | 是 | 非空展示名称 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `1.4.3`，App 支持 `1.x` |
-| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `1.2.1`；旧包缺省按 `1.0.0` 读取，CLI 发布时总会写入当前值 |
+| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `2.0.0` |
+| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `2.0.0`；旧包缺省按 `1.0.0` 读取，CLI 发布时总会写入当前值 |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
 | `displayModes` | 是 | 单元素数组，值为 `multi_screen` 或 `single_screen_multiplayer` |
@@ -126,7 +126,7 @@ game-package/
 ```
 
 - 能力 ID 与实现环境解耦。当前两个传感器能力由 App 适配器提供；未来摄像头、麦克风等通用能力可由 App 和 HTTPS 浏览器分别实现同一 ID。
-- 平台统一能力注册表把每个 code 映射为中文名、用途说明以及 App/HTML 适配状态。能力确认弹窗、开发者工作区的新建/项目设置选项、能力声明校验和能力测试清单均以该注册表为准；可通过 `GET /dev/api/capabilities` 读取当前清单，并通过 `GET/POST /dev/api/capability-tests` 读取或执行能力自检。
+- 平台统一能力插件注册表把每个 code 映射为中文名、用途、`apiVersion`、方法、事件以及 App/HTML 适配状态。能力确认弹窗、开发者工作区的新建/项目设置选项和能力声明校验均以该注册表为准；工作区能力测试展示全平台注册表并调用各插件自带的自检，不按当前项目声明过滤。
 - 主 SDK 在 App WebView 和普通浏览器每次加载游戏时展示全部所需能力。用户只能“同意并进入”或“拒绝并退出”；授权结果不写入房主或本机文件。
 - 普通浏览器当前局域网 HTTP 分享不可靠支持运动传感器，因此这两个能力显示“本平台暂不支持”。该标记不阻止用户同意后进入，游戏必须在能力不可用时保持主流程可玩。
 

@@ -3,8 +3,8 @@
   "name": "New Game",
   "remarks": "Playmesh multiplayer game",
   "version": "0.1.0",
-  "sdkVersion": "1.4.3",
-  "appSdkVersion": "1.2.1",
+  "sdkVersion": "2.0.0",
+  "appSdkVersion": "2.0.0",
   "orientation": "landscape",
   "modes": [
     "multiplayer"

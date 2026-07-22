@@ -7,7 +7,7 @@ import 'package:archive/archive.dart';
 import '../../models/game_summary.dart';
 import '../../models/game_manifest.dart';
 import '../../models/game_capabilities.dart';
-import '../../models/game_capability_registry.dart';
+import '../capabilities/default_capability_plugins.dart';
 import '../../models/local_game_entry.dart';
 import '../game_package/game_library_repository.dart';
 import '../library/playmesh_library_root.dart';
@@ -259,7 +259,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       throw const FormatException('标签最多 20 个，且每个标签长度必须为 1 到 64 个字符');
     }
     for (final capability in draft.requiredCapabilities) {
-      if (!gameCapabilityRegistry.containsKey(capability)) {
+      if (!defaultCapabilityDescriptorRegistry.containsKey(capability)) {
         throw FormatException('未知能力 code：$capability');
       }
     }

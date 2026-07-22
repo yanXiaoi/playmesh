@@ -146,6 +146,8 @@ Game Package
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
+当前未发布开发线在 `docs/version/NEXT.md` 维护；其中 Game SDK 与 App Bridge SDK 已因能力插件协议的破坏性更新升级到 `2.0.0`，不得继续按上表正式基线生成新项目。
+
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id` 始终不可修改，其他字段经完整清单校验后可保存。
 
 Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library/sdk-src/playmesh.ts` 和 `playmesh-app.ts`。正式构建先执行 `tool/generate_sdk.ps1`，生成 `public/sdk/v1/` 下的 `.js`、`.d.ts` 以及 Dart 版本常量；运行时注入、IDEA 类型提示、Developer Gateway 下载和版本校验只能使用这些生成产物。一次版本变更必须同步更新代码常量、默认模板、机器契约、编辑器补全、测试断言和开发文档，并在版本或验证记录中写明升级原因。App、SDK、默认骨架、示例契约、AI 提示词和项目校验器始终只维护一套当前版本；版本升级后，不提供旧 SDK 入口、兼容矩阵、字段适配、自动迁移或双写逻辑。
@@ -230,10 +232,10 @@ feat(session): add browser join identity step
 ## 安全和权限
 
 - 游戏需要的平台能力只在与 `main.json` 同级的可选 `capabilities.json` 中声明；能力 ID 按功能命名，不绑定具体 App 或浏览器实现。
-- 能力 code、中文名、用途说明及 App/HTML 适配状态必须集中维护在 `game_capability_registry.dart`。SDK 弹窗、开发者工作区、Schema/运行时校验和 API 输出不得再维护平行的硬编码清单；新增能力元数据只改注册表，新增真实能力实现时再增加相应 App 或 HTML 适配器。
-- 开发者工作区的能力测试必须显示实际返回数据日志，并持续执行到用户手动关闭测试窗口；一次 `POST /dev/api/capability-tests` 仍只返回该轮结果，持续行为由工作区循环调用实现，不新增平行测试协议。
+- 能力 code、中文名、用途、`apiVersion`、方法、事件、平台状态、实例工厂、自检和资源释放必须集中在 `lib/core/capabilities/{capability}/` 的插件内。SDK 弹窗、开发者工作区、Schema/运行时校验和 API 输出不得维护平行硬编码清单；新增能力只增加独立插件目录并注册插件。
+- 开发者工作区的能力测试必须展示全平台注册表，不按当前项目的 `capabilities.json` 过滤；项目声明只控制项目授权和运行时可创建范围。测试页显示插件版本、方法、事件、平台状态与实际返回数据，并持续执行到用户手动关闭窗口；一次 `POST /dev/api/capability-tests` 仍只返回该轮结果。
 - `required` 非空时，主 SDK 在 App 与浏览器每次加载游戏时都必须展示全部能力并等待用户确认；拒绝则退出，结果不得持久化或写入 Authority 主机。文件缺失或列表为空时不弹窗。
-- 当前平台不支持的能力必须在 SDK 弹窗中标注“本平台暂不支持”，但不能阻止用户同意后进入。游戏应通过 `getCapabilities()` 做非阻塞降级；SDK 仍只允许订阅已经声明且当前设备可用的能力。
+- 当前平台不支持的能力必须在 SDK 弹窗中标注“本平台暂不支持”，但不能阻止用户同意后进入。游戏应通过 `playmesh.app.capabilities.getAvailable()` 做非阻塞降级；SDK 只允许创建已经声明、用户本次确认且当前设备可用的插件。
 - 浏览器玩家必须由 SDK 读取或生成 `p_...` 玩家 ID 并确认昵称后，才能调用加入接口获得短期凭证。分享 URL 不得携带昵称或玩家 ID；`localStorage` 只允许保存 SDK 管理的 `playmesh.player-id.v1` 与昵称偏好，不得保存玩家凭证或游戏 Bucket。
 - Core 必须保留掉线玩家的稳定 ID 和 `connected: false` 状态；同 ID 在线时拒绝后续 Join 和 WebSocket，旧连接掉线并撤销旧凭据后才允许同 ID 重新签发凭据。游戏通过 SDK 连接事件处理等待、中途加入和状态恢复。
 - SDK 必须在浏览器环境统一提供昵称修改悬浮入口，使用当前玩家凭证更新会话；App WebView 不显示也不需要该入口。
@@ -253,18 +255,21 @@ Android 与 iOS 的 `playmesh-library` 位于系统应用支持目录。Windows�
 
 导入压缩包只在临时目录中存在；安装元数据保存 `gameId`、版本、内容哈希、解压路径和校验结果，用于问题定位和一致性检查。解压目录必须只读。安装失败不得覆盖已安装游戏。用户安装库只负责扫描、存储、加载、卸载和清理，不负责开发者版本回滚、版本决策或自动切换旧版本。卸载时直接删除整个 `packages/{gameId}/` 目录。
 
-## 高频输入和传感器
+## 能力插件与高频传感器
 
-高频传感器由 App SDK 负责正常使用体验，游戏代码不直接处理原生采样或 WebSocket tick：
+能力宿主采用有状态实例协议，不把所有能力约束为订阅。公开桥接命令固定为 `app.capability.create/invoke/dispose`，异步输出固定为 `app.capability.event/error`；公开 SDK 通过 `playmesh.app.capabilities.create()` 返回 `invoke/on/onError/dispose` 实例。具体方法和事件由插件 `apiVersion` 定义，录音、语音转写等能力可以要求用户主动调用 `start/stop`。
+
+高频传感器由对应插件负责正常使用体验，游戏代码不直接处理原生采样：
 
 ```text
 capabilities.json：声明 sensor.accelerometer / sensor.gyroscope
   -> SDK 初始化：App/浏览器每次展示能力确认，拒绝则退出
-  -> Native Adapter：单一硬件流和最新样本
-  -> App SDK：按各订阅者 fps 触发 callback
+  -> capabilities.create(code, {fps})：创建实例
+  -> instance.invoke('start')：启动插件
+  -> instance.on('reading')：接收采样
 ```
 
-公开接口固定为 `playmesh.app.onDevice(type, fps, callback)`，并返回取消订阅函数。内部每种传感器只建立一条原生流，原生采样频率取该传感器全部订阅者请求频率的最大值；最新样本保存在 App 内存中，每个订阅者用自己的 tick 频率收到回调。最后一个订阅取消、页面重载或退出时必须释放原生流。当前支持加速度计和陀螺仪，频率范围为每秒 `1` 至 `120` 次。
+当前加速度计与陀螺仪各自位于独立插件目录，插件 API 版本均为 `1.0.0`，方法为 `start/stop`，事件为 `reading`。内部每种传感器只建立一条原生流，原生采样频率取该插件全部运行实例请求频率的最大值；最后一个实例停止、页面重载或退出时必须释放原生流。频率范围为每秒 `1` 至 `120` 次。
 
 能力 ID 与提供方解耦，后续摄像头、麦克风等能力可以由 App 原生适配器或浏览器标准 API 提供。当前局域网浏览器分享使用 HTTP，加速度计和陀螺仪只由 App SDK 提供；普通浏览器将两项标为暂不支持，但用户同意后仍可进入游戏，游戏不得把传感器回调设为不可降级的主流程前提。
 

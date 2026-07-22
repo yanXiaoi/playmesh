@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/developer/developer_capability_test_service.dart';
-import 'package:playmesh/core/platform/app_sensor_service.dart';
 
 void main() {
-  test('能力测试清单与统一能力注册表对齐', () {
+  test('能力测试清单来自完整平台注册表', () {
     final service = DeveloperCapabilityTestService(
-      sensorSource: _CapabilitySensorSource(),
+      motionSource: const _CapabilityMotionSource(),
     );
 
     final items = service.describe();
@@ -15,11 +15,13 @@ void main() {
       'sensor.gyroscope',
     ]);
     expect(items.every((item) => item['testable'] == true), isTrue);
+    expect(items.every((item) => item['apiVersion'] == '1.0.0'), isTrue);
+    expect(items.every((item) => item['methods'] is List), isTrue);
   });
 
-  test('测试全部能力并返回首个传感器样本', () async {
+  test('省略 codes 时测试全平台注册表并返回插件测试结果', () async {
     final service = DeveloperCapabilityTestService(
-      sensorSource: _CapabilitySensorSource(),
+      motionSource: const _CapabilityMotionSource(),
     );
 
     final results = await service.run();
@@ -31,7 +33,7 @@ void main() {
 
   test('平台不可用能力返回 unavailable', () async {
     final service = DeveloperCapabilityTestService(
-      sensorSource: _CapabilitySensorSource(availableTypes: const {}),
+      motionSource: const _CapabilityMotionSource(available: false),
     );
 
     final results = await service.run(codes: ['sensor.accelerometer']);
@@ -41,7 +43,7 @@ void main() {
 
   test('未知能力 code 拒绝执行', () async {
     final service = DeveloperCapabilityTestService(
-      sensorSource: _CapabilitySensorSource(),
+      motionSource: const _CapabilityMotionSource(),
     );
 
     await expectLater(
@@ -51,28 +53,30 @@ void main() {
   });
 }
 
-class _CapabilitySensorSource implements AppSensorSource {
-  _CapabilitySensorSource({
-    this.availableTypes = const {
-      AppSensorType.accelerometer,
-      AppSensorType.gyroscope,
-    },
-  });
+class _CapabilityMotionSource implements MotionSensorSource {
+  const _CapabilityMotionSource({this.available = true});
+
+  final bool available;
 
   @override
-  final Set<AppSensorType> availableTypes;
+  bool get accelerometerAvailable => available;
 
   @override
-  Stream<AppSensorSample> events(
-    AppSensorType type, {
-    required Duration samplingPeriod,
-  }) => Stream.value(
-    AppSensorSample(
-      type: type,
-      x: 1,
-      y: 2,
-      z: 3,
-      timestamp: DateTime.fromMillisecondsSinceEpoch(1234),
-    ),
+  bool get gyroscopeAvailable => available;
+
+  @override
+  Stream<MotionSample> accelerometerEvents(Duration samplingPeriod) =>
+      Stream.value(_sample('m/s^2'));
+
+  @override
+  Stream<MotionSample> gyroscopeEvents(Duration samplingPeriod) =>
+      Stream.value(_sample('rad/s'));
+
+  MotionSample _sample(String unit) => MotionSample(
+    x: 1,
+    y: 2,
+    z: 3,
+    timestamp: DateTime.fromMillisecondsSinceEpoch(1234),
+    unit: unit,
   );
 }

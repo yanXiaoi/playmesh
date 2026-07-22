@@ -41,8 +41,8 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - 顶部只保留项目选择、运行、保存、快速操作和 AI 等高频入口；新建、重启、停止、校验、Diff、删除和数据清理收纳到 IDEA 风格的“更多”二级菜单，避免窄屏下按钮被截断。
 - 项目选择使用独立弹窗，列出统一游戏库中的全部项目，可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，选择弹窗不可关闭。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
 - IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑，除稳定 `id` 外其他字段均可修改，并提供可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
-- 能力选项必须由 `GET /dev/api/capabilities` 返回的统一能力注册表动态生成，展示中文名、用途说明以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
-- “更多 → 能力测试”从同一注册表动态生成测试项。`GET /dev/api/capability-tests` 读取清单；`POST /dev/api/capability-tests` 省略 `codes` 或传空数组时测试全部能力，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。工作区持续调用该接口，并在独立日志区逐次回显状态、耗时和实际返回数据，直到用户手动关闭测试窗口。
+- 能力选项必须由 `GET /dev/api/capabilities` 返回的统一插件注册表动态生成，展示中文名、用途、`apiVersion`、方法、事件以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
+- “更多 → 能力测试”始终展示全平台注册表，不按当前项目的 `capabilities.json` 过滤。`GET /dev/api/capability-tests` 读取插件自检清单；`POST` 省略 `codes` 或传空数组时测试全部插件，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。工作区持续调用并回显插件版本、状态、耗时和实际结果，直到用户手动关闭测试窗口。
 - 新建项目弹窗与项目设置都必须提供标签和能力编辑。新建请求的 `tags` 写入 `main.json.tags`，`requiredCapabilities` 非空时创建 `capabilities.json`，不能要求用户创建后再二次修改。
 - 编辑器文件标签栏右侧提供“复制文件”操作，复制 CodeMirror 中当前显示的完整文本（包括尚未保存的编辑），便于直接发送给 AI；图片和二进制文件禁用该操作。手机端按钮缩写为“复制”并固定保留在编辑视图内。
 - 在项目树点击文本、图片或其他文档后，工作区必须自动切到编辑区；文本文件同时聚焦编辑器。
@@ -57,8 +57,8 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - 由工作区启动的游戏在悬浮工具中提供按需开启的调试日志面板。日志由 App WebView 宿主层捕获，只包含当前设备页面的 `console` 输出，不通过 Game SDK 或游戏网关转发其他设备日志；普通浏览器在自身开发者工具查看本机 Console。
 - App 不依赖日志面板是否打开，始终在内存中缓存最近 500 条本机 WebView 日志。工作区与游戏内日志层均提供一键复制最近日志。非流式 AI 可通过 `GET /dev/api/logs?limit=50` 按时间顺序读取最近最多 50 条，无需消费 SSE。
 - SDK API、角色语义、参数、返回值、错误和数据类型 Schema 面板。
-- 纯聊天 AI 提示词固定导出为 UTF-8 BOM TXT，并按当前 `main.json.modes/displayModes` 只包含相关 SDK 函数契约、拓扑、强制文件和源码，同时动态附带当前 `capabilities.json.required` 与完整统一能力注册表；普通多屏不得混入控制器，单机不得混入 Authority，单屏多人必须包含控制器与 Authority 数据链。项目校验结果不混入提示词，校验弹窗可独立复制包含诊断码、路径行列、消息和修复建议的详情。
-- 主工作区的“AI”按钮直接进入统一 AI 开发页。API 接口、鉴权和 AI 可用性文档作为只读项与公共、游戏模式、显示模式模板位于同一棵树中；公共分类额外提供“自定义想法”，用户填写的玩法、视觉和交互要求同时加入对话与 Agent 最终提示词。模板支持独立保存覆盖、恢复系统默认；醒目的“获取项目提示词”集中提供两类最终文本的切换、复制和 TXT 下载。切换到 Agent 提示词时会枚举当前设备的 HTTP Base URL，用户应选择电脑端 AI 能访问的局域网地址；最终文本中的全部 Developer Gateway 接口统一使用该地址。
+- 纯聊天 AI 提示词固定导出为 UTF-8 BOM TXT，并按当前 `main.json.modes/displayModes` 只包含相关 SDK 函数契约、拓扑、强制文件和源码。能力上下文只附带当前 `capabilities.json.required` 已勾选能力的完整插件声明，不暴露未勾选的平台注册能力；普通多屏不得混入控制器，单机不得混入 Authority，单屏多人必须包含控制器与 Authority 数据链。项目校验结果不混入提示词，校验弹窗可独立复制包含诊断码、路径行列、消息和修复建议的详情。
+- 主工作区的“AI”按钮直接进入统一 AI 开发页。API 接口、鉴权和 AI 可用性文档作为只读项与公共、游戏模式、显示模式模板位于同一棵树中；公共分类额外提供“自定义想法”，用户填写的玩法、视觉和交互要求同时加入对话与 Agent 最终提示词。模板支持独立保存覆盖、恢复系统默认；醒目的“获取项目提示词”集中提供两类最终文本的切换、复制和 TXT 下载。“复制全平台能力”会单独调用平台注册表 API 并复制全部完整声明。切换到 Agent 提示词时会枚举当前设备的 HTTP Base URL，用户应选择电脑端 AI 能访问的局域网地址；Agent 文本不内嵌全平台注册表，而是写入带所选 Base URL 的全量能力注册表 API 与 GET/POST 能力测试 API，供 Agent 按需读取和执行。
 - 事件流、结构化错误、权限、连接状态和 Console 日志。
 - 单机、普通多屏和单屏多人所需的 SDK、角色和数据流契约。
 - 游戏包校验和开发副本临时加载。
@@ -166,7 +166,7 @@ main.json 内容
 当前页面角色
 可用 SDK API
 允许的 permissions
-当前 capabilities.json.required 与统一能力注册表
+当前 capabilities.json.required；对话为已勾选能力完整声明，Agent 为全量注册表与测试 API
 当前运行角色与项目校验报告
 最近一次结构化错误
 ```
@@ -201,7 +201,7 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `1.4.3` 与 App Bridge SDK `1.2.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.0.0` 与 App Bridge SDK `2.0.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
 
 ## 第四阶段完成标准
 

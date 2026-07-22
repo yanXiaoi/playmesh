@@ -197,9 +197,13 @@ function createPage(appIdentity = null, reconnected = false) {
       ready: Promise.resolve({ available: true }),
       isAvailable: () => true,
       identity: { getCurrent: () => ({ ...appIdentity }) },
+      capabilities: {
+        getRegistry: () => [],
+        getAvailable: () => [],
+        getDeclared: () => [],
+      },
       device: {
         getPlatform: () => "android",
-        getCapabilities: () => ["fullscreen", "haptics"],
       },
     };
   }

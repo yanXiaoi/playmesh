@@ -65,14 +65,14 @@ class GameManifest {
     final name = _requiredString(json, 'name');
     final version = _requiredVersion(json, 'version');
     final sdkVersion = _requiredVersion(json, 'sdkVersion');
-    if (!sdkVersion.startsWith('1.')) {
-      throw const FormatException('当前 App 只支持 1.x Game SDK');
+    if (!sdkVersion.startsWith('1.') && !sdkVersion.startsWith('2.')) {
+      throw const FormatException('当前 App 只支持 1.x 或 2.x Game SDK');
     }
     final appSdkVersion = json['appSdkVersion'] == null
         ? '1.0.0'
         : _requiredVersion(json, 'appSdkVersion');
-    if (!appSdkVersion.startsWith('1.')) {
-      throw const FormatException('当前 App 只支持 1.x App SDK');
+    if (!appSdkVersion.startsWith('1.') && !appSdkVersion.startsWith('2.')) {
+      throw const FormatException('当前 App 只支持 1.x 或 2.x App SDK');
     }
 
     final orientation = GameOrientation.fromManifestValue(

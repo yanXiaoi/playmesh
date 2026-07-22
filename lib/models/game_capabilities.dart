@@ -1,15 +1,4 @@
-import 'game_capability_registry.dart';
-
-enum GameSensorCapability {
-  accelerometer('accelerometer', GameCapabilityCodes.accelerometer),
-  gyroscope('gyroscope', GameCapabilityCodes.gyroscope);
-
-  const GameSensorCapability(this.jsonValue, this.sdkCapability);
-
-  final String jsonValue;
-  final String sdkCapability;
-  String get label => gameCapabilityRegistry[sdkCapability]!.name;
-}
+import '../core/capabilities/default_capability_plugins.dart';
 
 class GameCapabilities {
   const GameCapabilities({this.required = const {}});
@@ -31,7 +20,7 @@ class GameCapabilities {
       if (rawCapability is! String) {
         throw const FormatException('capabilities.json.required 只能包含字符串');
       }
-      if (!gameCapabilityRegistry.containsKey(rawCapability)) {
+      if (!defaultCapabilityDescriptorRegistry.containsKey(rawCapability)) {
         throw FormatException('当前平台版本不支持游戏能力: $rawCapability');
       }
       if (!required.add(rawCapability)) {
@@ -46,12 +35,6 @@ class GameCapabilities {
   final Set<String> required;
 
   bool get isEmpty => required.isEmpty;
-
-  Set<GameSensorCapability> get sensors => Set.unmodifiable(
-    GameSensorCapability.values.where(
-      (sensor) => required.contains(sensor.sdkCapability),
-    ),
-  );
 
   Map<String, Object?> toJson() => {'required': required.toList()};
 }

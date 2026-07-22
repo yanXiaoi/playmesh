@@ -24,8 +24,10 @@ const developerSources = [
 
 assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
-assert.match(game, /readonly version: "1\.4\.3"/);
-assert.match(game, /readonly version: "1\.2\.1"/);
+assert.match(game, /readonly version: "2\.0\.0"/);
+assert.match(game, /interface PlaymeshCapabilityHandle/);
+assert.match(game, /capabilities\.create/);
+assert.doesNotMatch(game, /onDevice\(/);
 assert.match(app, /reference path="\.\/playmesh\.d\.ts"/);
 assert.match(
   game,
@@ -35,7 +37,7 @@ assert.match(game, /onChange\(callback: \(event: PlaymeshLifecycleEvent\) => voi
 assert.match(game, /当前会话中的玩家/);
 assert.match(game, /固定 Authority Client/);
 assert.match(game, /Authority 主机上的持久 JSON Bucket/);
-assert.match(app, /游戏业务通常使用 `playmesh\.app`/);
+assert.match(app, /游戏业务使用 playmesh\.app/);
 assert.equal(sdkManifest.projectRules.appUrlRoot, "/app/");
 assert.equal("gameUrlRoot" in sdkManifest.projectRules, false);
 for (const source of developerSources) {
