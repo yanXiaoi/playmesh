@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const cliVersion = "1.1.0"
+const cliVersion = "1.2.0"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
@@ -32,6 +32,11 @@ func run(ctx context.Context, args []string) error {
 		return commandTo(ctx, args[1:])
 	case "get":
 		return commandGet(ctx, args[1:])
+	case "create":
+		if len(args) != 1 {
+			return errors.New("用法：playmesh-cli create")
+		}
+		return commandCreate(ctx)
 	case "push":
 		if len(args) != 1 {
 			return errors.New("用法：playmesh-cli push")
@@ -62,6 +67,7 @@ func printUsage() {
 用法：
   playmesh-cli to <workspace-url>  连接并切换目标 App
   playmesh-cli get <project-id>    拉取项目和统一 SDK
+  playmesh-cli create              交互式创建项目并拉取到当前目录
   playmesh-cli sdk                 更新当前项目 SDK
   playmesh-cli push                上传、校验并原子提交，不运行
   playmesh-cli dev                 push 后切换运行项目并附加日志

@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Playmesh HarmonyOS client"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Playmesh"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Playmesh"
+    }
+  ]
+}

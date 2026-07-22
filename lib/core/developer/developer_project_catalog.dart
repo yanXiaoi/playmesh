@@ -24,12 +24,14 @@ class DeveloperProject {
     required this.version,
     required this.rootAssetPath,
     required this.readOnly,
+    this.rootFilePath,
   });
 
   final String id;
   final String name;
   final String version;
   final String rootAssetPath;
+  final String? rootFilePath;
   final bool readOnly;
 
   Map<String, Object?> toJson() => {
@@ -221,14 +223,14 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (repository.cachedGames.isEmpty) await repository.refresh();
     final projects = <DeveloperProject>[
       for (final game in repository.cachedGames)
-        if (game.entry.packageRootAssetPath case final rootAssetPath?)
-          DeveloperProject(
-            id: game.id,
-            name: game.name,
-            version: game.version,
-            rootAssetPath: rootAssetPath,
-            readOnly: false,
-          ),
+        DeveloperProject(
+          id: game.id,
+          name: game.name,
+          version: game.version,
+          rootAssetPath: game.entry.packageRootAssetPath ?? _templateRoot,
+          rootFilePath: game.entry.packageRootFilePath,
+          readOnly: false,
+        ),
     ];
     final known = projects.map((project) => project.id).toSet();
     for (final project in await _customProjects()) {
@@ -1110,6 +1112,16 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (await manifestFile.exists() && await appDirectory.exists()) {
       return directory;
     }
+    final sourcePath = project.rootFilePath;
+    if (sourcePath != null) {
+      final source = Directory(sourcePath);
+      if (await source.exists() &&
+          source.absolute.path != directory.absolute.path) {
+        await directory.create(recursive: true);
+        await _copyDirectoryContents(source, directory);
+        return directory;
+      }
+    }
     await directory.create(recursive: true);
     final files = await _sourceFiles(project);
     for (final relative in files) {
@@ -1123,6 +1135,24 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       );
     }
     return directory;
+  }
+
+  Future<void> _copyDirectoryContents(
+    Directory source,
+    Directory destination,
+  ) async {
+    await for (final entity in source.list(followLinks: false)) {
+      final name = entity.path.split(Platform.pathSeparator).last;
+      if (name == 'data' || name == 'cache' || name == '.playmesh') continue;
+      final targetPath = '${destination.path}${Platform.pathSeparator}$name';
+      if (entity is Directory) {
+        final target = Directory(targetPath);
+        await target.create(recursive: true);
+        await _copyDirectoryContents(entity, target);
+      } else if (entity is File) {
+        await entity.copy(targetPath);
+      }
+    }
   }
 
   Stream<FileSystemEntity> _visibleWorkspaceEntities(

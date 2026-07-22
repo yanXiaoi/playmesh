@@ -11,6 +11,7 @@ Flutter App
 Native Adapters
   - Android: Kotlin
   - iOS: Swift
+  - HarmonyOS: ArkTS capability HAR + OHOS Flutter plugins
   - Desktop: native bridge later
   |
   v
@@ -46,13 +47,27 @@ Go Developer CLI、项目整包拉取/原子发布、同源 SDK/类型同步与�
 
 第六阶段已完成：
 可选且不阻塞运行的全屏、Android 外部文件与导出链路、无需预装游戏的 App 加入、Game SDK/App Bridge 双层边界、App/浏览器持久身份、单 ID 连接约束、离线成员与重连事件、移动工作区和界面切换性能收口
+
+当前发布能力：
+统一发布脚本接受 `harmony`、`android`、`windows` 和 `all` 目标，分别生成 OpenHarmony arm64 HAP、Android 通用 APK 和 Windows x64 便携 ZIP。鸿蒙构建使用 API 12 Public SDK 与独立依赖清单，避免改变 Android/Windows 的稳定依赖解析；本地能力 HAR 提供全屏、触觉、加速度计、陀螺仪、系统分享和 Go Core Host。发布脚本使用固定的 OpenHarmony SIG Go 与 OHOS Native SDK，以 `GOOS=openharmony`、`GOARCH=arm64` 将 `go-core/mobile` 交叉编译为 AArch64 ELF，通过异步 N-API 桥接并注入 `NativePlaymeshHarmonyCoreAdapter`。
+```
+
+鸿蒙端当前可以运行游戏库、WebView、系统分享、设备能力和内置 Go Core 多人主机。`EntryAbility` 必须显式注入 `NativePlaymeshHarmonyCoreAdapter`，插件通过 `AbilityAware` 获取 `UIAbilityContext`；构建必须同时包含 `libplaymesh_core.so` 和 `libplaymesh_core_napi.so`，任何一项缺失都拒绝发布。Public SDK 不含 HMS `@kit.ScanKit`，因此扫码页面只提供手动输入回退；Android 的 `ACTION_VIEW` 外部文件接收能力也不在鸿蒙清单中冒充支持。完整构建和签名说明见 [HarmonyOS 构建与适配](harmony-release.md)。
+
+```text
+Flutter GoCoreRuntime
+  -> MethodChannel: playmesh/go_core_host
+  -> NativePlaymeshHarmonyCoreAdapter (ArkTS)
+  -> libplaymesh_core_napi.so (异步 Node-API)
+  -> libplaymesh_core.so (OpenHarmony arm64 Go c-shared)
+  -> go-core/mobile
 ```
 
 `go-core/` 已提供可启动、可停止的 HTTP 服务。宿主必须使用 `0.0.0.0:0` 请求系统分配空闲端口，并在启动成功后把实际端口上报给 Flutter；Flutter 本机连接时使用回环地址，分享时使用当前设备全部可用的局域网 IPv4 地址。页面不得猜测、缓存固定端口或自行拼接 Core 地址。
 
 网页开发者通道不复用或重绑 Core 端口。Flutter App 另行启动 `DeveloperWebGateway`，按当前产品决策绑定 `0.0.0.0`，默认端口为 `16666`，用户可在设置页修改；设置页只发布当前设备解析到的局域网 IPv4 链接。Developer API status 同时返回当前请求地址、解析到的局域网 IPv4 与回环地址，Agent 提示词只能从这些本机 HTTP Base URL 中选择一个嵌入接口清单，避免把持久开发者 token 指向任意外部地址。端口被占用时返回明确错误，不得通过重启 Core 解决。关闭开发者模式或 App 退出时只关闭开发者 Gateway，不中断现有 Core 会话。
 
-Developer CLI 是 Gateway 的客户端，不是第二个游戏运行时。CLI 从完整工作区 URL 解析 Base URL 和 token，通过标准包导出接口拉取 `main.json + capabilities.json + app/`，并通过 SDK bundle 接口建立 `playmesh/sdk/`。本地 `app/`、`playmesh/` 分别直接镜像运行时 `/app/`、`/playmesh/`，使 IDEA 能解析 JS/CSS/HTML 绝对路径。上传时只打包 `main.json + capabilities.json + app/`，`playmesh/` 永远排除，再复用应用正式游戏包导入器完成校验和提交。App 游戏安装目录不创建 CLI 辅助目录。
+Developer CLI 是 Gateway 的客户端，不是第二个游戏运行时。CLI 从完整工作区 URL 解析 Base URL 和 token，通过标准包导出接口拉取 `main.json + capabilities.json + app/`，并通过 SDK bundle 接口建立 `playmesh/sdk/`。`create` 命令从统一能力注册表读取选项，交互式收集与网页工作区一致的项目字段，调用现有项目创建接口后继续走同一套项目包与 SDK 下载链路。本地 `app/`、`playmesh/` 分别直接镜像运行时 `/app/`、`/playmesh/`，使 IDEA 能解析 JS/CSS/HTML 绝对路径。上传时只打包 `main.json + capabilities.json + app/`，`playmesh/` 永远排除，再复用应用正式游戏包导入器完成校验和提交。App 游戏安装目录不创建 CLI 辅助目录。
 
 CLI 二进制统一命名为 `playmesh-cli`（Windows 使用 `.exe`）。桌面平台构建将它作为 App 运行包的一部分：Windows/Linux 由 CMake 追踪 Go 源并安装到 bundle 根目录，macOS 由 Xcode Build Phase 放入 `Contents/MacOS/`；位置均与桌面 Go Core 的运行目录同级。Android/iOS 不编译或携带 CLI。
 
@@ -197,19 +212,17 @@ SDK、App 中转和 Go Core 负责在同一连接内完成消息复用、角色�
 
 Android 主 Activity 声明接收 `ACTION_VIEW` 和 `ACTION_SEND`。原生层取得系统授予的 `content://` 读取权限后，将文件复制到应用缓存并通过 `playmesh/open_file` MethodChannel 交给 Flutter：压缩包复用 Playmesh 游戏包导入校验；单个 HTML 使用独立 WebView 执行，不注入 SDK、Bridge、存储或联机能力。游戏 WebView、扫码远程 WebView 和独立 HTML WebView 的右上角悬浮工具均提供进入与退出全屏按钮。
 
-游戏页使用全屏 WebView，让游戏内容占据整个可用区域。App 相关操作使用可拖动、可展开/收纳的窄悬浮工具坞，例如：
+游戏页使用全屏 WebView，让游戏内容占据整个可用区域。主机与 App 扫码加入页复用可拖动、可展开/收纳的窄悬浮工具区；扫码加入不显示分享入口，例如：
 
 - 返回游戏详情
 - 重新开始并刷新 WebView
-- 退出到游戏库
 - 打开联机信息
-- 获取/复制二维码和链接
+- 主机获取/复制二维码和链接（一级入口）
 - 打开游戏设置
-- 离开游戏
 
-工具坞默认收纳，展开后显示图标命令，并允许拖到不影响游戏内容的位置；不应使用固定的大型工具栏占据游戏区域。按钮必须保持稳定尺寸，并提供无障碍语义和悬停/长按提示。FPS 默认显示在左上角，工具坞提供开关；未收到游戏帧上报时显示 `-- FPS`。
+工具区默认收纳，展开后显示图标命令，并允许拖到不影响游戏内容的位置；只保留返回，不再提供与返回语义重复的独立“退出游戏”按钮。二级菜单、游戏信息和运行日志显式使用固定高对比度配色，不继承游戏颜色；不应使用固定的大型工具栏占据游戏区域。按钮必须保持稳定尺寸，并提供无障碍语义和悬停/长按提示。FPS 默认显示在左上角，工具区提供开关；未收到游戏帧上报时显示 `-- FPS`。
 
-FPS 和联机延迟展示都属于 Game SDK 的网页能力，由 SDK 在当前游戏网页内部自动创建性能悬浮层并渲染，不由 Flutter App 原生层直接绘制。App 运行时的悬浮工具坞只提供显示/隐藏开关和相关设置入口，并通过 SDK 控制网页悬浮层；普通浏览器运行时没有 App 工具坞，由 SDK 自己创建可收纳、可展开的悬浮组件。浏览器组件同时提供当前玩家昵称修改入口。
+FPS 和联机延迟展示都属于 Game SDK 的网页能力，由 SDK 在当前游戏网页内部自动创建性能悬浮层并渲染，不由 Flutter App 原生层直接绘制。App 运行时的悬浮工具区只提供显示/隐藏开关和相关设置入口，并通过 SDK 控制网页悬浮层；普通浏览器由 SDK 创建对应的可收纳功能区，提供刷新、性能、全屏、信息和昵称修改，不模拟 App 返回、退出游戏或分享能力。App 扫码加入时由原生共用工具区接管操作，SDK 不重复创建浏览器功能区。
 
 FPS 由 Game SDK 统计游戏主动上报的真实渲染帧：DOM/CSS 游戏可以在自己的视觉更新循环上报，Canvas/WebGL 游戏应在实际 `draw`/present 完成后调用 `playmesh.performance.reportFrame()`。SDK 提供 `getFps()` 和 `onFps()`；平台不得额外启动独立的 `requestAnimationFrame` 并把显示器刷新回调次数冒充游戏 FPS。SDK 性能层负责网页内显示，游戏代码不负责创建 FPS 或延迟组件。
 
@@ -223,6 +236,7 @@ FPS 由 Game SDK 统计游戏主动上报的真实渲染帧：DOM/CSS 游戏可�
 | 本地核心 | Go | HTTP、WebSocket、房间与协议 |
 | Flutter/Native 桥接 | Pigeon 或 Platform Channel | 类型安全调用原生能力 |
 | Android 原生 | Kotlin | 手柄、摄像头、权限、传感器 |
+| HarmonyOS 原生 | ArkTS HAR + N-API + Go ELF | 全屏、触觉、传感器、系统分享与内置 Playmesh Core；扫码手动回退 |
 | iOS 原生 | Swift | GameController、摄像头、本地网络权限 |
 | 游戏容器 | webview_flutter + webview_flutter_windows | 移动端/Apple 平台 WebView 与 Windows WebView2 |
 | Game SDK | TypeScript | HTML 游戏访问房间、输入、生命周期 |
@@ -514,6 +528,8 @@ Playmesh App 可以在独立固定端口启动 `GameCatalogServer`，把当前�
 ### 统一开发者工作区中新建和编辑游戏
 
 游戏文件管理和编辑统一由开发者工作区提供。桌面浏览器通过局域网地址进入，App 端在开启开发者模式后使用内置 WebView 打开同一个地址和同一套界面，不再实现独立 App 文件编辑器。游戏库中的每个游戏都必须能在工作区中查看、编辑、保存和运行，包括用户导入包和工作区新建的游戏；平台不内置游戏 Demo。
+
+工作区按浏览器来源持久化最近打开的项目。再次进入时仅在该项目仍存在于统一游戏库时自动恢复；首次进入或项目已删除时必须打开不可跳过的项目选择层，选定或新建项目后才能进入编辑。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
 
 新建游戏时，用户只需要在开发者工作区填写必要信息：
 

@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../platform/app_platform.dart';
+
 class PlaymeshLibraryRoot {
   const PlaymeshLibraryRoot._();
 
@@ -10,7 +12,8 @@ class PlaymeshLibraryRoot {
     String? executablePath,
     Directory? applicationSupportDirectory,
   }) async {
-    final useMobileRoot = mobile ?? (Platform.isAndroid || Platform.isIOS);
+    final useMobileRoot =
+        mobile ?? (Platform.isAndroid || Platform.isIOS || isHarmonyOS);
     final Directory root;
     if (useMobileRoot) {
       final support =

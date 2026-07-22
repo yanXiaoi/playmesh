@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../core/platform/app_device_service.dart';
+import '../../core/platform/app_platform.dart';
 import '../../models/game_summary.dart';
 
 abstract interface class GameOrientationController {
@@ -26,9 +27,7 @@ class SystemGameOrientationController
   bool _listening = false;
 
   bool get _supportsOrientationLock {
-    return !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
+    return isMobileAppPlatform;
   }
 
   bool get _supportsDesktopFullscreen {
@@ -52,6 +51,13 @@ class SystemGameOrientationController
       return;
     }
 
+    if (isHarmonyOS) {
+      await const AppDeviceService().setFullscreen(true);
+      _wasFullScreen ??= false;
+      await _setPreferredOrientation(orientation);
+      return;
+    }
+
     _wasFullScreen ??= FullScreen.isFullScreen;
     if (!FullScreen.isFullScreen && !FullScreen.isFullScreenForced) {
       if (!_listening) {
@@ -72,8 +78,11 @@ class SystemGameOrientationController
       );
     }
 
-    if (_supportsOrientationLock) {
-      await SystemChrome.setPreferredOrientations(switch (orientation) {
+    if (_supportsOrientationLock) await _setPreferredOrientation(orientation);
+  }
+
+  Future<void> _setPreferredOrientation(GameOrientation orientation) =>
+      SystemChrome.setPreferredOrientations(switch (orientation) {
         GameOrientation.landscape => const [
           DeviceOrientation.landscapeLeft,
           DeviceOrientation.landscapeRight,
@@ -83,8 +92,6 @@ class SystemGameOrientationController
           DeviceOrientation.portraitDown,
         ],
       });
-    }
-  }
 
   Future<bool> _waitForDesktopFullscreen() async {
     for (var attempt = 0; attempt < 10; attempt += 1) {
@@ -106,6 +113,12 @@ class SystemGameOrientationController
 
     final wasFullScreen = _wasFullScreen;
     _wasFullScreen = null;
+    if (isHarmonyOS) {
+      if (wasFullScreen != null) {
+        await const AppDeviceService().setFullscreen(wasFullScreen);
+      }
+      return;
+    }
     if (_supportsDesktopFullscreen) {
       if (wasFullScreen != null) {
         await windowManager.setFullScreen(wasFullScreen);

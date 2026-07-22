@@ -1,0 +1,50 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const game = fs.readFileSync(
+  "assets/playmesh-library/public/sdk/v1/playmesh.d.ts",
+  "utf8",
+);
+const app = fs.readFileSync(
+  "assets/playmesh-library/public/sdk/v1/playmesh-app.d.ts",
+  "utf8",
+);
+const sdkManifest = JSON.parse(
+  fs.readFileSync(
+    "assets/playmesh-library/public/developer/contracts/sdk-manifest.json",
+    "utf8",
+  ),
+);
+const developerSources = [
+  "assets/playmesh-library/public/developer/prompts/common.txt",
+  "assets/playmesh-library/public/developer/prompts/agent-common.txt",
+  "assets/playmesh-library/public/developer/templates/default-game/package/app/index.html",
+  "assets/playmesh-library/public/developer/templates/default-game/package/app/controller/index.html",
+].map((path) => fs.readFileSync(path, "utf8"));
+
+assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
+assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
+assert.match(game, /readonly version: "1\.4\.3"/);
+assert.match(game, /readonly version: "1\.2\.1"/);
+assert.match(app, /reference path="\.\/playmesh\.d\.ts"/);
+assert.match(
+  game,
+  /submitState\(key: string, value: PlaymeshJson, options\?: \{ rateHz\?: number \}\): Promise<null>/,
+);
+assert.match(game, /onChange\(callback: \(event: PlaymeshLifecycleEvent\) => void\)/);
+assert.match(game, /当前会话中的玩家/);
+assert.match(game, /固定 Authority Client/);
+assert.match(game, /Authority 主机上的持久 JSON Bucket/);
+assert.match(app, /游戏业务通常使用 `playmesh\.app`/);
+assert.equal(sdkManifest.projectRules.appUrlRoot, "/app/");
+assert.equal("gameUrlRoot" in sdkManifest.projectRules, false);
+for (const source of developerSources) {
+  assert(!source.includes("/game/"), "开发模板或提示词仍包含旧 /game/ 路径");
+}
+
+const completionMarkers = game.match(/@playmesh-completion\s+[A-Za-z0-9_.]+/g) ?? [];
+assert(completionMarkers.length >= 40, "SDK 补全标记数量异常");
+const chineseCharacters = (game + app).match(/[\u3400-\u9fff]/g) ?? [];
+assert(chineseCharacters.length >= 500, "中文 JSDoc 内容不完整");
+
+console.log("Playmesh SDK 中文声明与精确签名校验通过");

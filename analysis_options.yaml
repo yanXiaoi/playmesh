@@ -9,6 +9,12 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # This directory is a staging package template. Its paths only become valid
+  # after build_release.ps1 copies it beside the application lib/assets trees.
+  exclude:
+    - tool/harmony/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

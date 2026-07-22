@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../models/game_capability_registry.dart';
+import 'app_platform.dart';
 
 enum AppSensorType {
   accelerometer('accelerometer', GameCapabilityCodes.accelerometer, 'm/s^2'),
@@ -62,9 +62,7 @@ class NativeAppSensorSource implements AppSensorSource {
 
   @override
   Set<AppSensorType> get availableTypes {
-    if (kIsWeb ||
-        (defaultTargetPlatform != TargetPlatform.android &&
-            defaultTargetPlatform != TargetPlatform.iOS)) {
+    if (!isMobileAppPlatform) {
       return const {};
     }
     return AppSensorType.values.toSet();

@@ -13,22 +13,30 @@ let joins = 0;
 function createPage(appIdentity = null, reconnected = false) {
   const elements = Object.fromEntries([
     ".panel", ".fps", ".latency", ".edit", ".overlay", ".enter", ".card", "form", "h2", "input", ".error", ".close", ".save",
+    ".performance", ".expand", ".tools", ".collapse", ".reload", ".enter-fullscreen", ".exit-fullscreen", ".more", ".menu", ".info", ".logs", ".info-overlay", ".info-close", ".info-title", ".game-name", ".session-info",
   ].map((selector) => [selector, {
     hidden: false, textContent: "", value: "", disabled: false,
     focus() {}, insertBefore() {}, onclick: null, onsubmit: null,
+    classList: { toggle() {} }, setAttribute() {},
   }]));
   elements[".edit"].hidden = true;
   elements[".latency"].hidden = true;
   elements[".overlay"].hidden = true;
+  elements[".expand"].hidden = true;
+  elements[".menu"].hidden = true;
+  elements[".info-overlay"].hidden = true;
+  const mountedHosts = [];
+  const shadowHtml = [];
   const shadowRoot = {
-    innerHTML: "",
+    set innerHTML(value) { shadowHtml.push(value); },
+    get innerHTML() { return shadowHtml.at(-1) || ""; },
     appendChild() {},
     querySelector(selector) {
       return elements[selector];
     },
   };
   const document = {
-    body: { appendChild() {} },
+    body: { appendChild(element) { mountedHosts.push(element.id); } },
     fullscreenElement: null,
     addEventListener() {},
     createElement(tagName) {
@@ -44,6 +52,9 @@ function createPage(appIdentity = null, reconnected = false) {
     async requestFullscreen() {
       document.fullscreenElement = document.documentElement;
     },
+  };
+  document.exitFullscreen = async () => {
+    document.fullscreenElement = null;
   };
   let currentPlayerId = null;
   let currentNickname = null;
@@ -107,6 +118,7 @@ function createPage(appIdentity = null, reconnected = false) {
       setItem: (key, value) => browserLocalStorage.set(key, value),
     },
     document,
+    location: { reload() {} },
     fetch: async (url, options) => {
       if (url === "/api/storage") {
         const command = JSON.parse(options.body);
@@ -194,6 +206,8 @@ function createPage(appIdentity = null, reconnected = false) {
   window.window = window;
   vm.runInNewContext(source, window, { filename: "playmesh.js" });
   window.__ui = elements;
+  window.__mountedHosts = mountedHosts;
+  window.__shadowHtml = shadowHtml;
   return window;
 }
 
@@ -219,6 +233,26 @@ assert.equal(joins, 1);
 assert.equal(firstPage.playmesh.app.isAvailable(), false);
 assert.equal(firstPage.playmesh.app.identity.getCurrent(), null);
 assert.equal(firstPage.playmesh.session.isAuthority(), false);
+assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-profile"), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("更多游戏操作")), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("运行日志")), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏设置")), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("返回游戏")), false);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("退出游戏")), false);
+firstPage.__ui[".performance"].onclick();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(firstPage.__ui[".panel"].hidden, true, "浏览器工具区应能切换性能信息");
+firstPage.__ui[".collapse"].onclick();
+assert.equal(firstPage.__ui[".tools"].hidden, true);
+assert.equal(firstPage.__ui[".expand"].hidden, false);
+firstPage.__ui[".expand"].onclick();
+firstPage.__ui[".more"].onclick();
+assert.equal(firstPage.__ui[".menu"].hidden, false);
+firstPage.__ui[".info"].onclick();
+assert.equal(firstPage.__ui[".info-overlay"].hidden, false);
+assert.equal(firstPage.__ui[".game-name"].textContent, "Playmesh 游戏");
+firstPage.__ui[".performance"].onclick();
+await new Promise((resolve) => setTimeout(resolve, 0));
 const persistedBrowserId = browserLocalStorage.get("playmesh.player-id.v1");
 assert.match(persistedBrowserId, /^p_[a-f0-9]{32}$/);
 assert.equal(firstPage.playmesh.player.getCurrent().id, persistedBrowserId);
@@ -254,6 +288,8 @@ assert.equal(appPage.playmesh.app.isAvailable(), true);
 assert.equal(joinCommands.at(-1).playerId, "u-current-app");
 assert.equal(joinCommands.at(-1).nickname, "App 玩家");
 assert.equal(appPage.__ui[".edit"].hidden, true);
+assert.equal(appPage.__mountedHosts.includes("playmesh-browser-profile"), false);
+assert.equal(appPage.__mountedHosts.includes("playmesh-performance"), true);
 assert.equal(firstPage.__ui[".panel"].hidden, false);
 assert.equal(firstPage.__ui[".latency"].hidden, false);
 assert.equal(firstPage.playmesh.performance.getLatency() >= 0, true);

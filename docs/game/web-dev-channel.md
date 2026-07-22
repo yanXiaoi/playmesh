@@ -39,10 +39,10 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 工作区至少包含：
 
 - 顶部只保留项目选择、运行、保存、快速操作和 AI 等高频入口；新建、重启、停止、校验、Diff、删除和数据清理收纳到 IDEA 风格的“更多”二级菜单，避免窄屏下按钮被截断。
-- 项目选择使用独立弹窗，可按项目名、ID 或版本搜索；新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
+- 项目选择使用独立弹窗，列出统一游戏库中的全部项目，可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，选择弹窗不可关闭。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
 - IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑，除稳定 `id` 外其他字段均可修改，并提供可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
 - 能力选项必须由 `GET /dev/api/capabilities` 返回的统一能力注册表动态生成，展示中文名、用途说明以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
-- “更多 → 能力测试”从同一注册表动态生成测试项。`GET /dev/api/capability-tests` 读取清单；`POST /dev/api/capability-tests` 省略 `codes` 或传空数组时测试全部能力，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。
+- “更多 → 能力测试”从同一注册表动态生成测试项。`GET /dev/api/capability-tests` 读取清单；`POST /dev/api/capability-tests` 省略 `codes` 或传空数组时测试全部能力，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。工作区持续调用该接口，并在独立日志区逐次回显状态、耗时和实际返回数据，直到用户手动关闭测试窗口。
 - 新建项目弹窗与项目设置都必须提供标签和能力编辑。新建请求的 `tags` 写入 `main.json.tags`，`requiredCapabilities` 非空时创建 `capabilities.json`，不能要求用户创建后再二次修改。
 - 编辑器文件标签栏右侧提供“复制文件”操作，复制 CodeMirror 中当前显示的完整文本（包括尚未保存的编辑），便于直接发送给 AI；图片和二进制文件禁用该操作。手机端按钮缩写为“复制”并固定保留在编辑视图内。
 - 在项目树点击文本、图片或其他文档后，工作区必须自动切到编辑区；文本文件同时聚焦编辑器。
@@ -201,7 +201,7 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `1.4.2` 与 App Bridge SDK `1.2.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `1.4.3` 与 App Bridge SDK `1.2.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
 
 ## 第四阶段完成标准
 

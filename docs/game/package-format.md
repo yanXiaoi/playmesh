@@ -64,7 +64,7 @@ game-package/
   "name": "派对游戏",
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "1.4.2",
+  "sdkVersion": "1.4.3",
   "appSdkVersion": "1.2.1",
   "orientation": "landscape",
   "modes": ["multiplayer"],
@@ -88,7 +88,7 @@ game-package/
 | `name` | 是 | 非空展示名称 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `1.4.2`，App 支持 `1.x` |
+| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `1.4.3`，App 支持 `1.x` |
 | `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `1.2.1`；旧包缺省按 `1.0.0` 读取，CLI 发布时总会写入当前值 |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |

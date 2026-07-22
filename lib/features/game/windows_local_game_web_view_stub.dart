@@ -11,6 +11,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
     required this.title,
     this.bridge,
     this.appBridge,
+    this.onRunJavaScriptReady,
   });
 
   final String assetPath;
@@ -18,6 +19,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
   final String title;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
+  final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();

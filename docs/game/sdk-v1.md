@@ -1,6 +1,6 @@
 # Game SDK v1
 
-本文记录 Game SDK `1.4.2` 与 App Bridge SDK `1.2.1` 的公开 API。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。生成的声明文件内置完整中文 JSDoc，IDEA 的补全、参数信息和悬浮文档无需联网即可显示中文用途、返回值、环境边界和限制；AI 提示词会嵌入两份完整声明，并以其作为唯一接口事实源。
+本文记录 Game SDK `1.4.3` 与 App Bridge SDK `1.2.1` 的公开 API。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。生成的声明文件内置完整中文 JSDoc，IDEA 的补全、参数信息和悬浮文档无需联网即可显示中文用途、返回值、环境边界和限制；AI 提示词会嵌入两份完整声明，并以其作为唯一接口事实源。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -43,7 +43,7 @@ App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "1.4.2"
+console.log(playmesh.version); // "1.4.3"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若 `capabilities.json.required` 非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
@@ -340,7 +340,7 @@ const off = playmesh.performance.onLatency((value) => console.log(value));
 
 `getLatency()` 在尚无有效样本或 Authority 不在线时返回 `null`。诊断对象包含客户端发送/接收时间、Core 接收/发送时间、Authority 可用状态和原始 RTT，供开发诊断使用；游戏规则不得依赖延迟数值决定胜负。
 
-FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工具坞只调用显示开关，不再原生重复绘制；浏览器悬浮组件同时包含性能信息和昵称修改入口。`setVisible(boolean)` 可供宿主集成使用，普通游戏通常不需要调用。
+FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工具坞只调用显示开关，不再原生重复绘制；普通浏览器由 SDK 创建与 App 游戏工具区对应的可收纳功能区，提供刷新、性能开关、进入/退出全屏、游戏信息、浏览器日志指引和昵称设置，但不模拟 App 导航、退出游戏或分享能力。`setVisible(boolean)` 可供宿主集成使用，普通游戏通常不需要调用。
 
 ## 浏览器行为
 
@@ -352,7 +352,7 @@ FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工�
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
 - 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。
 - 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线后，同 ID 重连可由游戏恢复准备状态和临时玩家状态。
-- SDK 在浏览器页面上提供隔离于游戏样式的性能/昵称悬浮组件；修改成功后更新 Core 会话和本地昵称偏好。App 环境只显示 SDK 性能层，不显示昵称按钮。
+- SDK 在普通浏览器页面上提供隔离于游戏样式的可收纳功能区和固定配色二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境只显示 SDK 性能层，由 App 自己的共用工具区提供返回、刷新、全屏、日志和设置，不重复显示浏览器工具区。
 - 旧浏览器连接断开后，其玩家从会话成员集合移除并释放人数名额；短暂的刷新竞态由 SDK 对 `session_full` 做有限重试。
 - 刷新继续使用本局分享 token；退出游戏、会话关闭、App/Core 重启后旧 token 失效。
 - 关闭分享面板和重新开始不会使 token 失效。

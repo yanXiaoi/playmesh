@@ -22,13 +22,14 @@ Playmesh CLI 允许在 IDEA 中编辑本地副本、在目标 Windows 或 Androi
 playmesh-cli to "http://<app-ip>:16666/dev/<workspace-id>/workspace?token=<token>"
 mkdir my-game
 cd my-game
-playmesh-cli get <project-id>
+playmesh-cli create
+# 或使用 playmesh-cli get <project-id> 拉取既有项目
 playmesh-cli dev
 ```
 
 `get` 拉取包内 `main.json`、`capabilities.json`、`app/`，并把目标 App 构建时生成的两套 SDK 与 `.d.ts` 放入 `playmesh/sdk/`。项目根的 `app/` 与 `playmesh/` 直接镜像运行时 `/app/...` 与 `/playmesh/...` 两个 URL 空间，IDEA 能解析 HTML、JavaScript、CSS 中的绝对引用。`playmesh/` 只属于本地开发副本，不会出现在 App 安装目录或上传包中。
 
-`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新 `playmesh/sdk/` 到目标 App 当前版本，不支持选择历史版本。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。完整命令、目录和安全边界见 `dev-cli/README.md`。
+`playmesh-cli create` 从统一能力注册表读取与网页 Dev Tool 相同的新建选项，调用现有 Developer API 创建项目后下载到当前空目录。`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新 `playmesh/sdk/` 到目标 App 当前版本，不支持选择历史版本。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。完整命令、目录和安全边界见 `dev-cli/README.md`。
 
 ## 开发者工作区快速操作
 
@@ -186,7 +187,7 @@ await save.setData("high_score", Math.max(score ?? 0, currentScore));
 - key 只允许字母、数字、点、下划线和连字符，长度为 1 至 128。
 - 平台只自动绑定当前 `gameId`，不创建 `{userId}` 目录。用户维度由游戏在 key 或 JSON 内容中设计。
 - 所有客户端读写 Authority 主机的同一份 Bucket。浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Bucket。
-- 浏览器昵称采集和修改由 SDK 统一提供。分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称；游戏也不应重复制作昵称悬浮控件。
+- 浏览器昵称采集、修改和普通浏览器游戏功能区由 SDK 统一提供。功能区模拟 App 可用的刷新、性能、全屏和信息操作，但不伪造 App 返回、退出或分享能力；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具或昵称悬浮控件。
 - 使用 `session.onPlayerJoin`、`session.onPlayerLeave` 和 `session.onPlayerReconnect` 处理首次连接、掉线和同 ID 重连。不要用昵称推断玩家身份。
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
 
@@ -207,7 +208,7 @@ Canvas/WebGL 游戏应在实际绘制或提交完成后调用。非逐帧渲染�
 
 ## 设备能力与传感器
 
-需要平台设备能力时，在 `main.json` 同级创建可选 `capabilities.json`。不要把传感器写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都可视化编辑该文件，Agent 可先读取 `GET /dev/api/capabilities`，再调用项目 capabilities API 保存声明。排查设备输入时调用 `GET /dev/api/capability-tests` 查看测试项，再用 `POST` 测试全部或指定能力；传感器通过时会返回首个 X/Y/Z 样本。
+需要平台设备能力时，在 `main.json` 同级创建可选 `capabilities.json`。不要把传感器写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都可视化编辑该文件，Agent 可先读取 `GET /dev/api/capabilities`，再调用项目 capabilities API 保存声明。排查设备输入时调用 `GET /dev/api/capability-tests` 查看测试项，再用 `POST` 测试全部或指定能力；单次请求中，传感器通过时返回首个 X/Y/Z 样本。工作区测试窗口会循环请求并持续输出每轮状态、耗时和样本数据，手动关闭窗口后才停止。
 
 ```json
 {

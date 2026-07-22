@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../core/platform/app_platform.dart';
 import '../game/windows_local_game_web_view.dart';
 
 class DeveloperWorkspacePage extends StatefulWidget {
@@ -20,11 +21,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
   Object? _error;
   int _windowsReloadKey = 0;
 
-  bool get _usesFlutterWebView =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.macOS);
+  bool get _usesFlutterWebView => supportsPlatformWebView;
 
   @override
   void initState() {

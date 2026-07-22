@@ -13,9 +13,9 @@
 
 ## 当前版本
 
-- Game SDK：`1.4.2`
+- Game SDK：`1.4.3`
 - App Bridge SDK：`1.2.1`
-- Developer CLI：`1.1.0`
+- Developer CLI：`1.2.0`（当前开发版本；正式基线 `1.1.0`）
 - SDK 地址：`/playmesh/sdk/v1/playmesh.js`
 - 游戏公开资源：`/app/...`
 - 游戏包根目录：`playmesh-library/packages/{gameId}/`

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
 
 import '../../models/game_summary.dart';
+import '../../core/platform/app_platform.dart';
 import '../../core/storage/game_storage_service.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
@@ -190,20 +191,20 @@ class GameDetailPage extends StatelessWidget {
 
   Future<void> _exportGame(BuildContext context) async {
     final suggestedName = gamePackageExportFileName(game);
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || isHarmonyOS) {
       try {
         final temporaryDirectory = await getTemporaryDirectory();
         final destination = File(
           '${temporaryDirectory.path}${Platform.pathSeparator}$suggestedName',
         );
         await onExport!(game, destination.path);
-        await SharePlus.instance.share(
-          ShareParams(
-            title: '导出 ${game.name}',
-            text: 'Playmesh 游戏包：${game.name} ${game.version}',
-            files: [XFile(destination.path, mimeType: 'application/zip')],
-            fileNameOverrides: [suggestedName],
-          ),
+        // The OHOS share_plus fork currently exposes this compatibility API.
+        // ignore: deprecated_member_use
+        await Share.shareXFiles(
+          [XFile(destination.path, mimeType: 'application/zip')],
+          subject: '导出 ${game.name}',
+          text: 'Playmesh 游戏包：${game.name} ${game.version}',
+          fileNameOverrides: [suggestedName],
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

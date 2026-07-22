@@ -16,6 +16,7 @@ import '../../core/session/go_core_session_client.dart';
 import '../../core/storage/game_storage_service.dart';
 import '../../models/game_summary.dart';
 import '../settings/settings_page.dart';
+import 'game_controls.dart';
 import 'game_launcher.dart';
 import 'game_orientation_controller.dart';
 
@@ -195,20 +196,37 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           fit: StackFit.expand,
           children: [
             Positioned.fill(child: _buildGameRuntime()),
-            _GameControls(
-              game: widget.game,
+            GameToolDock(
+              backTooltip: '返回游戏详情',
               showPerformance: _showPerformance,
               onTogglePerformance: _togglePerformance,
-              onRestart: _restartGame,
-              onBack: _returnToPrevious,
-              onExit: _exitGame,
-              onShare: _openShare,
-              onDebug: _openDebugLogs,
+              onReload: () =>
+                  unawaited(_restartGame().catchError((Object _) {})),
+              onBack: () => unawaited(_returnToPrevious()),
+              onShare: () => unawaited(_openShare()),
               onEnterFullscreen: () => _applyOrientation(
                 widget.game.orientation,
                 userInitiated: true,
               ),
-              onExitFullscreen: _exitFullscreen,
+              onExitFullscreen: () => unawaited(_exitFullscreen()),
+              secondaryActions: [
+                GameToolAction(
+                  icon: Icons.info_outline,
+                  label: '游戏信息',
+                  onPressed: _openGameInfo,
+                ),
+                GameToolAction(
+                  icon: Icons.receipt_long_outlined,
+                  label: '运行日志',
+                  onPressed: _openDebugLogs,
+                ),
+                GameToolAction(
+                  icon: Icons.tune_outlined,
+                  label: '游戏设置',
+                  onPressed: () =>
+                      Navigator.of(context).pushNamed(SettingsPage.routeName),
+                ),
+              ],
             ),
             if (_fullscreenError != null && !_shareVisible && !_debugVisible)
               Positioned(
@@ -241,7 +259,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
               ),
             if (_debugVisible)
               Positioned.fill(
-                child: _DeveloperLogOverlay(
+                child: GameRuntimeLogOverlay(
                   logs: _developerLogs,
                   onClear: () {
                     developerEventHub.clearRecentLogs();
@@ -610,6 +628,24 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
+  void _openGameInfo() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xff20242b),
+      barrierColor: const Color(0x99000000),
+      builder: (context) => GameToolInfoSheet(
+        title: widget.game.name,
+        description: widget.game.description,
+        labels: [
+          widget.game.entry.statusLabel,
+          widget.game.displayModeLabel,
+          widget.game.playerRangeLabel,
+          widget.game.modeLabel,
+        ],
+      ),
+    );
+  }
+
   void _openDebugLogs() {
     _developerLogs
       ..clear()
@@ -762,396 +798,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 }
 
-enum _GameAction { info, share, debug, settings }
-
-class _GameControls extends StatefulWidget {
-  const _GameControls({
-    required this.game,
-    required this.showPerformance,
-    required this.onTogglePerformance,
-    required this.onRestart,
-    required this.onBack,
-    required this.onExit,
-    required this.onShare,
-    required this.onDebug,
-    required this.onEnterFullscreen,
-    required this.onExitFullscreen,
-  });
-
-  final GameSummary game;
-  final bool showPerformance;
-  final VoidCallback onTogglePerformance;
-  final Future<void> Function() onRestart;
-  final Future<void> Function() onBack;
-  final Future<void> Function() onExit;
-  final Future<void> Function() onShare;
-  final VoidCallback onDebug;
-  final VoidCallback onEnterFullscreen;
-  final Future<void> Function() onExitFullscreen;
-
-  @override
-  State<_GameControls> createState() => _GameControlsState();
-}
-
-class _GameControlsState extends State<_GameControls> {
-  static const _dockWidth = 48.0;
-  Offset? _offset;
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final topInset = MediaQuery.paddingOf(context).top + 12;
-        final dockHeight = _expanded ? _dockWidth * 8 : _dockWidth;
-        final fallback = Offset(
-          constraints.maxWidth - _dockWidth - 12,
-          topInset,
-        );
-        final offset = _clampOffset(
-          _offset ?? fallback,
-          constraints,
-          dockHeight,
-          topInset,
-        );
-        return Stack(
-          children: [
-            Positioned(
-              left: offset.dx,
-              top: offset.dy,
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  setState(() {
-                    _offset = _clampOffset(
-                      offset + details.delta,
-                      constraints,
-                      dockHeight,
-                      topInset,
-                    );
-                  });
-                },
-                child: Material(
-                  color: Colors.black.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(8),
-                  clipBehavior: Clip.antiAlias,
-                  child: IconTheme(
-                    data: const IconThemeData(color: Colors.white),
-                    child: AnimatedSize(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: Tween<double>(
-                              begin: 0.92,
-                              end: 1,
-                            ).animate(animation),
-                            child: child,
-                          ),
-                        ),
-                        child: _expanded
-                            ? KeyedSubtree(
-                                key: const ValueKey('expanded-game-tools'),
-                                child: _expandedDock(context),
-                              )
-                            : KeyedSubtree(
-                                key: const ValueKey('collapsed-game-tools'),
-                                child: _collapsedDock(),
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _collapsedDock() {
-    return IconButton(
-      tooltip: '展开游戏工具',
-      onPressed: () => setState(() => _expanded = true),
-      icon: const Icon(Icons.sports_esports_outlined),
-    );
-  }
-
-  Widget _expandedDock(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          tooltip: '收纳游戏工具',
-          onPressed: () => setState(() => _expanded = false),
-          icon: const Icon(Icons.unfold_less),
-        ),
-        IconButton(
-          tooltip: '返回游戏详情',
-          onPressed: () => unawaited(widget.onBack()),
-          icon: const Icon(Icons.arrow_back),
-        ),
-        IconButton(
-          tooltip: '重新开始',
-          onPressed: () =>
-              unawaited(widget.onRestart().catchError((Object _) {})),
-          icon: const Icon(Icons.refresh),
-        ),
-        IconButton(
-          tooltip: '退出游戏',
-          onPressed: () => unawaited(widget.onExit()),
-          icon: const Icon(Icons.close),
-        ),
-        IconButton(
-          tooltip: widget.showPerformance ? '隐藏性能信息' : '显示性能信息',
-          onPressed: widget.onTogglePerformance,
-          icon: Icon(
-            Icons.speed,
-            color: widget.showPerformance
-                ? Colors.lightGreenAccent
-                : Colors.white54,
-          ),
-        ),
-        IconButton(
-          tooltip: '进入全屏',
-          onPressed: widget.onEnterFullscreen,
-          icon: const Icon(Icons.fullscreen),
-        ),
-        IconButton(
-          tooltip: '退出全屏',
-          onPressed: () => unawaited(widget.onExitFullscreen()),
-          icon: const Icon(Icons.fullscreen_exit),
-        ),
-        PopupMenuButton<_GameAction>(
-          tooltip: '更多游戏操作',
-          icon: const Icon(Icons.more_vert),
-          onSelected: (action) => _handleAction(context, action),
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: _GameAction.info,
-              child: _MenuLabel(icon: Icons.info_outline, label: '游戏信息'),
-            ),
-            const PopupMenuItem(
-              value: _GameAction.share,
-              child: _MenuLabel(
-                icon: Icons.qr_code_2_outlined,
-                label: '二维码与链接',
-              ),
-            ),
-            const PopupMenuItem(
-              value: _GameAction.debug,
-              child: _MenuLabel(
-                icon: Icons.receipt_long_outlined,
-                label: '运行日志',
-              ),
-            ),
-            const PopupMenuItem(
-              value: _GameAction.settings,
-              child: _MenuLabel(icon: Icons.tune_outlined, label: '游戏设置'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Offset _clampOffset(
-    Offset value,
-    BoxConstraints constraints,
-    double dockHeight,
-    double topInset,
-  ) {
-    return Offset(
-      value.dx.clamp(0, constraints.maxWidth - _dockWidth).toDouble(),
-      value.dy.clamp(topInset, constraints.maxHeight - dockHeight).toDouble(),
-    );
-  }
-
-  void _handleAction(BuildContext context, _GameAction action) {
-    switch (action) {
-      case _GameAction.info:
-        showModalBottomSheet<void>(
-          context: context,
-          showDragHandle: true,
-          builder: (context) => _GameInfoSheet(game: widget.game),
-        );
-        return;
-      case _GameAction.share:
-        unawaited(widget.onShare());
-        return;
-      case _GameAction.debug:
-        widget.onDebug();
-        return;
-      case _GameAction.settings:
-        Navigator.of(context).pushNamed(SettingsPage.routeName);
-        return;
-    }
-  }
-}
-
-class _DeveloperLogOverlay extends StatelessWidget {
-  const _DeveloperLogOverlay({
-    required this.logs,
-    required this.onClear,
-    required this.onClose,
-  });
-
-  final List<Map<String, Object?>> logs;
-  final VoidCallback onClear;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black.withValues(alpha: 0.72),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xff17191d),
-              border: Border.all(color: Colors.white24),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 48,
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 14),
-                      const Icon(
-                        Icons.receipt_long_outlined,
-                        color: Colors.lightGreenAccent,
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          '运行日志',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: '复制最近日志',
-                        onPressed: logs.isEmpty
-                            ? null
-                            : () => _copyLogs(context),
-                        icon: const Icon(Icons.copy_all_outlined),
-                        color: Colors.white70,
-                      ),
-                      IconButton(
-                        tooltip: '清空日志',
-                        onPressed: logs.isEmpty ? null : onClear,
-                        icon: const Icon(Icons.delete_sweep_outlined),
-                        color: Colors.white70,
-                      ),
-                      IconButton(
-                        tooltip: '关闭运行日志',
-                        onPressed: onClose,
-                        icon: const Icon(Icons.close),
-                        color: Colors.white,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1, color: Colors.white24),
-                Expanded(
-                  child: logs.isEmpty
-                      ? const Center(
-                          child: Text(
-                            '等待 console 输出...',
-                            style: TextStyle(color: Colors.white54),
-                          ),
-                        )
-                      : ListView.builder(
-                          reverse: true,
-                          padding: const EdgeInsets.all(12),
-                          itemCount: logs.length,
-                          itemBuilder: (context, index) {
-                            final event = logs[logs.length - index - 1];
-                            final level = event['level']?.toString() ?? 'log';
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: SelectableText(
-                                _formatLog(event),
-                                style: TextStyle(
-                                  color: _logColor(level),
-                                  fontFamily: 'monospace',
-                                  fontSize: 12,
-                                  height: 1.4,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  static String _logTime(Object? value) {
-    final milliseconds = value is int
-        ? value
-        : int.tryParse(value?.toString() ?? '');
-    if (milliseconds == null) return '--:--:--';
-    final time = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
-    String two(int number) => number.toString().padLeft(2, '0');
-    return '${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
-  }
-
-  Future<void> _copyLogs(BuildContext context) async {
-    final text = logs.map(_formatLog).join('\n');
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已复制最近 ${logs.length} 条日志')));
-  }
-
-  static String _formatLog(Map<String, Object?> event) {
-    final level = event['level']?.toString() ?? 'log';
-    final eventType = event['eventType']?.toString();
-    final filename = event['filename']?.toString();
-    final line = event['line']?.toString();
-    final column = event['column']?.toString();
-    final stack = event['stack']?.toString();
-    final kind = eventType == null || eventType == 'console'
-        ? ''
-        : ' [$eventType]';
-    final location = filename == null || filename.isEmpty
-        ? ''
-        : ' ($filename${line == null ? '' : ':$line${column == null ? '' : ':$column'}'})';
-    final message =
-        '${_logTime(event['timestamp'])} '
-        '[${event['source'] ?? 'game'}] [$level]$kind '
-        '${event['message'] ?? ''}$location';
-    if (stack == null || stack.isEmpty || message.contains(stack)) {
-      return message;
-    }
-    return '$message\n$stack';
-  }
-
-  static Color _logColor(String level) {
-    return switch (level) {
-      'error' => const Color(0xffff8a80),
-      'warn' => const Color(0xffffd180),
-      'debug' => const Color(0xff80cbc4),
-      _ => const Color(0xffe5e7eb),
-    };
-  }
-}
-
 class _ShareOverlay extends StatelessWidget {
   const _ShareOverlay({
     required this.joinCode,
@@ -1177,120 +823,132 @@ class _ShareOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final qrLink = _invitationLink(selectedLink)?.toString();
     return ColoredBox(
-      color: Colors.black.withValues(alpha: 0.78),
+      color: const Color(0xc7000000),
       child: SafeArea(
         child: LayoutBuilder(
           builder: (context, viewport) {
+            final panelWidth = min(720.0, max(0.0, viewport.maxWidth - 20));
+            final compact = panelWidth < 590;
+            final qrSize = min(
+              compact ? 168.0 : 214.0,
+              max(48.0, panelWidth - 64),
+            );
+            final qr = qrLink == null
+                ? const SizedBox.shrink()
+                : Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x18000000), blurRadius: 18),
+                      ],
+                    ),
+                    child: QrImageView(data: qrLink, size: qrSize),
+                  );
+            final addresses = _ShareAddressList(
+              links: links,
+              selectedLink: selectedLink,
+              onSelectLink: onSelectLink,
+            );
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     maxWidth: 720,
-                    maxHeight: viewport.maxHeight - 20,
+                    maxHeight: max(120.0, viewport.maxHeight - 20),
                   ),
-                  child: Material(
-                    color: const Color(0xfff7f8f6),
-                    borderRadius: BorderRadius.circular(24),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 10, 8, 8),
-                          child: Row(
+                  child: Theme(
+                    data: ThemeData.light(useMaterial3: true),
+                    child: Material(
+                      color: const Color(0xfff7f8f6),
+                      borderRadius: BorderRadius.circular(24),
+                      clipBehavior: Clip.antiAlias,
+                      child: SizedBox(
+                        width: panelWidth,
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  joinCode == null
-                                      ? '分享游戏'
-                                      : '加入对局 · $joinCode',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w800),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  10,
+                                  8,
+                                  8,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        joinCode == null
+                                            ? '分享游戏'
+                                            : '加入对局 · $joinCode',
+                                        style: const TextStyle(
+                                          color: Color(0xff17191d),
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: '关闭分享',
+                                      color: const Color(0xff17191d),
+                                      onPressed: () => unawaited(onClose()),
+                                      icon: const Icon(Icons.close),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              IconButton(
-                                tooltip: '关闭分享',
-                                onPressed: () => unawaited(onClose()),
-                                icon: const Icon(Icons.close),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        Expanded(
-                          child: loading
-                              ? const Center(child: CircularProgressIndicator())
-                              : error != null
-                              ? Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(24),
-                                    child: Text(
-                                      '无法开启分享\n$error',
-                                      textAlign: TextAlign.center,
+                              const Divider(height: 1),
+                              if (loading)
+                                const SizedBox(
+                                  height: 240,
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
+                              else if (error != null)
+                                Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Text(
+                                    '无法开启分享\n$error',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Color(0xff17191d),
                                     ),
                                   ),
                                 )
-                              : LayoutBuilder(
-                                  builder: (context, content) {
-                                    final compact =
-                                        content.maxWidth < 590 ||
-                                        content.maxHeight < 420;
-                                    final qrSize = compact ? 168.0 : 214.0;
-                                    final qr = qrLink == null
-                                        ? const SizedBox.shrink()
-                                        : Container(
-                                            padding: const EdgeInsets.all(10),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(18),
-                                              boxShadow: const [
-                                                BoxShadow(
-                                                  color: Color(0x18000000),
-                                                  blurRadius: 18,
-                                                ),
-                                              ],
-                                            ),
-                                            child: QrImageView(
-                                              data: qrLink,
-                                              size: qrSize,
-                                            ),
-                                          );
-                                    final addresses = _ShareAddressList(
-                                      links: links,
-                                      selectedLink: selectedLink,
-                                      onSelectLink: onSelectLink,
-                                    );
-                                    if (compact) {
-                                      return ListView(
-                                        padding: const EdgeInsets.all(16),
-                                        children: [
-                                          Center(child: qr),
-                                          const SizedBox(height: 16),
-                                          addresses,
-                                        ],
-                                      );
-                                    }
-                                    return Padding(
-                                      padding: const EdgeInsets.all(20),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          qr,
-                                          const SizedBox(width: 20),
-                                          Expanded(
-                                            child: SingleChildScrollView(
-                                              child: addresses,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
+                              else if (compact)
+                                Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Center(child: qr),
+                                      const SizedBox(height: 16),
+                                      addresses,
+                                    ],
+                                  ),
+                                )
+                              else
+                                Padding(
+                                  padding: const EdgeInsets.all(20),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      qr,
+                                      const SizedBox(width: 20),
+                                      Expanded(child: addresses),
+                                    ],
+                                  ),
                                 ),
+                            ],
+                          ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -1459,58 +1117,6 @@ class _GameStartFailure extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MenuLabel extends StatelessWidget {
-  const _MenuLabel({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(children: [Icon(icon), const SizedBox(width: 12), Text(label)]);
-  }
-}
-
-class _GameInfoSheet extends StatelessWidget {
-  const _GameInfoSheet({required this.game});
-
-  final GameSummary game;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              game.name,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Text(game.description),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                Chip(label: Text(game.entry.statusLabel)),
-                Chip(label: Text(game.displayModeLabel)),
-                Chip(label: Text(game.playerRangeLabel)),
-                Chip(label: Text(game.modeLabel)),
-              ],
-            ),
-          ],
         ),
       ),
     );

@@ -3,14 +3,24 @@ import 'package:flutter/services.dart';
 import 'package:flutter_fullscreen/flutter_fullscreen.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'app_platform.dart';
+
 class AppDeviceService {
   const AppDeviceService();
+
+  static const _harmonyChannel = MethodChannel('playmesh/harmony_capabilities');
 
   String get platform => kIsWeb ? 'web' : defaultTargetPlatform.name;
 
   List<String> get capabilities => const ['fullscreen', 'haptics'];
 
   Future<void> setFullscreen(bool enabled) async {
+    if (isHarmonyOS) {
+      await _harmonyChannel.invokeMethod<void>('setFullscreen', {
+        'enabled': enabled,
+      });
+      return;
+    }
     final desktop =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.windows ||
@@ -24,6 +34,10 @@ class AppDeviceService {
   }
 
   Future<void> haptic(String style) async {
+    if (isHarmonyOS) {
+      await _harmonyChannel.invokeMethod<void>('haptic', {'style': style});
+      return;
+    }
     switch (style) {
       case 'selection':
         await HapticFeedback.selectionClick();

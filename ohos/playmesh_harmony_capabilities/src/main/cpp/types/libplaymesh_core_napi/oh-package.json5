@@ -1,0 +1,6 @@
+{
+  "name": "libplaymesh_core_napi.so",
+  "version": "1.0.0",
+  "description": "Playmesh Core HarmonyOS Node-API bridge",
+  "types": "./Index.d.ts"
+}

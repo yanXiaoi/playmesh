@@ -11,6 +11,7 @@ import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_package/game_asset_gateway.dart';
+import '../../core/platform/app_platform.dart';
 
 class LocalGameWebView extends StatefulWidget {
   const LocalGameWebView({
@@ -50,10 +51,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   late final WebViewMessageQueue _messageQueue;
 
   bool get _canUsePlatformWebView {
-    return !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS ||
-            defaultTargetPlatform == TargetPlatform.macOS);
+    return supportsPlatformWebView;
   }
 
   @override

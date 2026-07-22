@@ -80,7 +80,7 @@ console.log("replaced");
 
 【SDK 使用边界与摘要】
 - 本提示随后附带同一次 SDK 构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`；它们是方法、参数、返回值、类型、版本与中文 JSDoc 的唯一接口事实源。以下内容仅总结运行边界；如摘要与声明冲突，以 `.d.ts` 为准，禁止臆造声明中不存在的成员。
-- playmesh.version: 当前 Game SDK 版本字符串，当前为 1.4.2。
+- playmesh.version: 当前 Game SDK 版本字符串，当前为 1.4.3。
 - playmesh.ready: SDK 就绪 Promise，resolve 为 { sdkVersion, isAuthority, player, session }；页面仍应通过对应 namespace 读取后续最新值。
 - playmesh.lifecycle.onChange/onPause/onResume/onExit(callback): 返回取消订阅函数。关键状态在变化时保存，onExit 只做业务清理；最终落盘由 App 负责。
 - playmesh.storage.getBucket(name): 返回 Bucket；Bucket 只提供 getData、setData、removeData、clearData。游戏没有 flush 接口。

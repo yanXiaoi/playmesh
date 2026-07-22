@@ -97,6 +97,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
         ? _gameLibrary.refresh()
         : SynchronousFuture(_gameLibrary.cachedGames);
     _developerRuns = DeveloperRunController(onLaunch: _launchDeveloperProject);
+    // The Android embedding currently owns the ACTION_VIEW/open-file bridge.
+    // Harmony file picking is provided through file_selector_ohos, but external
+    // file intents are not advertised until an equivalent native bridge exists.
     if (!kIsWeb && Platform.isAndroid) {
       final incomingFiles = IncomingFileService();
       _incomingFiles = incomingFiles;

@@ -15,6 +15,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
     required this.title,
     this.bridge,
     this.appBridge,
+    this.onRunJavaScriptReady,
   });
 
   final String assetPath;
@@ -22,6 +23,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final String title;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
+  final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
 
   @override
   State<WindowsLocalGameWebView> createState() =>
@@ -91,6 +93,9 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       );
       await _controller.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
       await _controller.loadUrl(widget.entryUri.toString());
+      widget.onRunJavaScriptReady?.call((script) async {
+        await _controller.executeScript(script);
+      });
 
       if (mounted) {
         setState(() => _ready = true);

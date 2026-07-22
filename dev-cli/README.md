@@ -10,7 +10,7 @@ go test ./...
 go build -o playmesh-cli.exe .
 ```
 
-把生成的可执行文件放入 `PATH` 后即可在任意项目目录调用。CLI 当前版本为 `1.1.0`，可通过 `playmesh-cli --version`、`playmesh-cli -v` 或 `playmesh-cli version` 查看；正式二进制名称固定为 Windows 的 `playmesh-cli.exe` 和 macOS/Linux 的 `playmesh-cli`。
+把生成的可执行文件放入 `PATH` 后即可在任意项目目录调用。CLI 当前开发版本为 `1.2.0`（正式发布基线为 `1.1.0`），可通过 `playmesh-cli --version`、`playmesh-cli -v` 或 `playmesh-cli version` 查看；正式二进制名称固定为 Windows 的 `playmesh-cli.exe` 和 macOS/Linux 的 `playmesh-cli`。
 
 桌面 App 会跟随平台构建自动编译 CLI：Windows 把它放在 `playmesh-core.exe` 同级；Linux 放在 bundle 根目录；macOS 放在 `.app/Contents/MacOS/`。Android/iOS 不携带 CLI。开发者不需要在每次 App 编译后再手工复制文件。
 
@@ -20,11 +20,12 @@ go build -o playmesh-cli.exe .
 playmesh-cli to "http://10.31.2.222:16666/dev/<workspace-id>/workspace?token=<token>"
 mkdir my-game
 cd my-game
-playmesh-cli get com.example.game
+playmesh-cli create
 playmesh-cli dev
 ```
 
 - `playmesh-cli to <workspace-url>`：解析完整工作区链接，校验目标并切换全局目标 App。token 保存在当前用户配置目录的 `Playmesh/cli-target.json`；该文件只应由当前用户读取，不能提交到项目或共享。
+- `playmesh-cli create`：在空目录中交互式填写与开发者工作区“新建项目”一致的 ID、名称、描述、模式、方向、显示模式、玩家人数、标签和平台能力；通过 Developer API 创建后立即把项目与统一 SDK 下载到当前目录。
 - `playmesh-cli get <project-id>`：把项目、当前 SDK 运行文件和类型契约拉到当前目录。非空目录只允许更新相同 `main.json.id` 的项目。
 - `playmesh-cli sdk`：获取目标 App 当前唯一的 SDK 版本，不支持指定历史版本，并同步 `main.json` 的两个 SDK 版本字段。
 - `playmesh-cli push`：先按本地 SDK 文件重写 `main.json.sdkVersion/appSdkVersion`，再只上传 `main.json`、`capabilities.json` 和 `app/`，校验并原子提交，不启动游戏。

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../core/platform/app_platform.dart';
 import '../../models/game_summary.dart';
 import '../../ui/playmesh_ui.dart';
 import 'game_page.dart';
@@ -91,7 +92,8 @@ class _JoinGamePageState extends State<JoinGamePage> {
       kIsWeb ||
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS ||
-      defaultTargetPlatform == TargetPlatform.macOS;
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      isHarmonyOS;
 
   @override
   void initState() {

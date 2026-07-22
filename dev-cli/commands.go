@@ -74,6 +74,10 @@ func commandGet(ctx context.Context, args []string) error {
 		return err
 	}
 	client := newAPIClient(target)
+	return downloadProject(ctx, client, projectID, root)
+}
+
+func downloadProject(ctx context.Context, client *apiClient, projectID, root string) error {
 	response, err := client.request(ctx, "GET", escapedProjectPath(projectID, "/package"), nil, "")
 	if err != nil {
 		return err

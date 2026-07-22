@@ -8,8 +8,8 @@ import 'package:flutter/services.dart';
 import 'go_core_host_contract.dart';
 
 GoCoreHost createBundledGoCoreHost({required String address}) {
-  if (Platform.isAndroid) {
-    return _AndroidGoCoreHost(address);
+  if (Platform.isAndroid || Platform.operatingSystem == 'ohos') {
+    return _MobileGoCoreHost(address);
   }
   if (Platform.isWindows) {
     return _WindowsGoCoreHost(address);
@@ -17,8 +17,8 @@ GoCoreHost createBundledGoCoreHost({required String address}) {
   return _UnsupportedIoGoCoreHost(address);
 }
 
-class _AndroidGoCoreHost implements GoCoreHost {
-  _AndroidGoCoreHost(this._address);
+class _MobileGoCoreHost implements GoCoreHost {
+  _MobileGoCoreHost(this._address);
 
   static const _channel = MethodChannel('playmesh/go_core_host');
 
@@ -47,14 +47,14 @@ class _AndroidGoCoreHost implements GoCoreHost {
     } on PlatformException catch (error) {
       throw GoCoreHostException(
         code: error.code,
-        userMessage: '无法启动 Android 内置 Go Core。',
+        userMessage: '无法启动移动端内置 Go Core。',
         diagnostic: error.message ?? 'unknown platform error',
         cause: error,
       );
     } on Object catch (error) {
       throw GoCoreHostException(
-        code: 'android_core_start_failed',
-        userMessage: '无法启动 Android 内置 Go Core。',
+        code: '${Platform.operatingSystem}_core_start_failed',
+        userMessage: '无法启动移动端内置 Go Core。',
         diagnostic: error.toString(),
         cause: error,
       );
@@ -72,7 +72,7 @@ class _AndroidGoCoreHost implements GoCoreHost {
     } on PlatformException catch (error) {
       throw GoCoreHostException(
         code: error.code,
-        userMessage: '无法停止 Android 内置 Go Core。',
+        userMessage: '无法停止移动端内置 Go Core。',
         diagnostic: error.message ?? 'unknown platform error',
         cause: error,
       );

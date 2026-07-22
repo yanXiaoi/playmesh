@@ -11,6 +11,9 @@ import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
+import '../../core/platform/app_platform.dart';
+import '../settings/settings_page.dart';
+import 'game_controls.dart';
 import 'windows_local_game_web_view.dart';
 
 class RemoteGamePage extends StatefulWidget {
@@ -35,6 +38,12 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Object? _error;
   int _windowsReloadKey = 0;
   late final WebViewMessageQueue _messageQueue;
+  ({String gameId, String gameName, List<String> required})? _descriptor;
+  Future<void> Function(String)? _runWindowsJavaScript;
+  bool _showPerformance = true;
+  bool _debugVisible = false;
+  final List<Map<String, Object?>> _developerLogs = [];
+  StreamSubscription<Map<String, Object?>>? _developerLogSubscription;
 
   Uri get _launchUri => widget.entryUri.replace(
     queryParameters: {
@@ -45,11 +54,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     },
   );
 
-  bool get _usesFlutterWebView =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.macOS);
+  bool get _usesFlutterWebView => supportsPlatformWebView;
 
   @override
   void initState() {
@@ -63,6 +68,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     try {
       final descriptor = await _loadDeclaredCapabilities();
       if (!mounted) return;
+      _descriptor = descriptor;
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
         nickname: widget.nickname,
@@ -142,9 +148,12 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
             },
             onPageFinished: (_) {
               unawaited(
-                _messageQueue.resume().catchError((Object error) {
-                  debugPrint('发送远程 WebView Bridge 启动消息失败: $error');
-                }),
+                _messageQueue
+                    .resume()
+                    .then((_) => _syncPerformanceVisible())
+                    .catchError((Object error) {
+                      debugPrint('发送远程 WebView Bridge 启动消息失败: $error');
+                    }),
               );
             },
             onWebResourceError: (error) {
@@ -183,6 +192,8 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
 
   @override
   void dispose() {
+    unawaited(_developerLogSubscription?.cancel());
+    _developerLogSubscription = null;
     unawaited(_appBridge?.close());
     unawaited(
       const AppDeviceService().setFullscreen(false).catchError((Object _) {}),
@@ -198,44 +209,44 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         fit: StackFit.expand,
         children: [
           _buildWebView(),
-          Positioned(
-            top: MediaQuery.paddingOf(context).top + 8,
-            right: 8,
-            child: Material(
-              color: Colors.black.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(12),
-              clipBehavior: Clip.antiAlias,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: '返回',
-                    color: Colors.white,
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-                  IconButton(
-                    tooltip: '重新加载',
-                    color: Colors.white,
-                    onPressed: _reload,
-                    icon: const Icon(Icons.refresh),
-                  ),
-                  IconButton(
-                    tooltip: '进入全屏',
-                    color: Colors.white,
-                    onPressed: () => _setFullscreen(true),
-                    icon: const Icon(Icons.fullscreen),
-                  ),
-                  IconButton(
-                    tooltip: '退出全屏',
-                    color: Colors.white,
-                    onPressed: () => _setFullscreen(false),
-                    icon: const Icon(Icons.fullscreen_exit),
-                  ),
-                ],
+          GameToolDock(
+            backTooltip: '返回加入页面',
+            onBack: () => Navigator.of(context).pop(),
+            onReload: _reload,
+            showPerformance: _showPerformance,
+            onTogglePerformance: _togglePerformance,
+            onEnterFullscreen: () => _setFullscreen(true),
+            onExitFullscreen: () => _setFullscreen(false),
+            secondaryActions: [
+              GameToolAction(
+                icon: Icons.info_outline,
+                label: '游戏信息',
+                onPressed: _openGameInfo,
+              ),
+              GameToolAction(
+                icon: Icons.receipt_long_outlined,
+                label: '运行日志',
+                onPressed: _openDebugLogs,
+              ),
+              GameToolAction(
+                icon: Icons.tune_outlined,
+                label: '游戏设置',
+                onPressed: () =>
+                    Navigator.of(context).pushNamed(SettingsPage.routeName),
+              ),
+            ],
+          ),
+          if (_debugVisible)
+            Positioned.fill(
+              child: GameRuntimeLogOverlay(
+                logs: _developerLogs,
+                onClear: () {
+                  developerEventHub.clearRecentLogs();
+                  setState(_developerLogs.clear);
+                },
+                onClose: () => unawaited(_hideDebugLogs()),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -271,6 +282,10 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         entryUri: _launchUri,
         title: 'Playmesh 对局',
         appBridge: appBridge,
+        onRunJavaScriptReady: (runJavaScript) {
+          _runWindowsJavaScript = runJavaScript;
+          unawaited(_syncPerformanceVisible());
+        },
       );
     }
     final controller = _controller;
@@ -296,6 +311,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       setState(() {
         _error = null;
+        _runWindowsJavaScript = null;
         _windowsReloadKey += 1;
       });
       return;
@@ -323,5 +339,71 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         );
       }),
     );
+  }
+
+  void _togglePerformance() {
+    setState(() => _showPerformance = !_showPerformance);
+    unawaited(_syncPerformanceVisible());
+  }
+
+  Future<void> _syncPerformanceVisible() async {
+    final script =
+        'window.playmesh && window.playmesh.performance && '
+        'window.playmesh.performance.setVisible(${jsonEncode(_showPerformance)});';
+    try {
+      final runWindowsJavaScript = _runWindowsJavaScript;
+      if (runWindowsJavaScript != null) {
+        await runWindowsJavaScript(script);
+      } else if (_controller != null) {
+        await _controller!.runJavaScript(script);
+      }
+    } on Object catch (error) {
+      debugPrint('同步扫码加入页性能显示失败: $error');
+    }
+  }
+
+  void _openGameInfo() {
+    final descriptor = _descriptor;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xff20242b),
+      barrierColor: const Color(0x99000000),
+      builder: (context) => GameToolInfoSheet(
+        title: descriptor?.gameName ?? 'Playmesh 对局',
+        description: '通过主机分享地址加载，无需在本机安装游戏。',
+        labels: [
+          if (widget.entryUri.queryParameters['playmeshJoinCode']
+              case final code?)
+            '加入码 $code',
+          if (descriptor != null) descriptor.gameId,
+        ],
+      ),
+    );
+  }
+
+  void _openDebugLogs() {
+    _developerLogs
+      ..clear()
+      ..addAll(developerEventHub.recentLogs);
+    _developerLogSubscription ??= developerEventHub.events.listen((event) {
+      if (event['type'] != 'runtime.log' || !mounted) return;
+      setState(() {
+        _developerLogs.add(Map<String, Object?>.from(event));
+        if (_developerLogs.length > DeveloperEventHub.maxRecentLogs) {
+          _developerLogs.removeRange(
+            0,
+            _developerLogs.length - DeveloperEventHub.maxRecentLogs,
+          );
+        }
+      });
+    });
+    setState(() => _debugVisible = true);
+  }
+
+  Future<void> _hideDebugLogs() async {
+    if (mounted) setState(() => _debugVisible = false);
+    final subscription = _developerLogSubscription;
+    _developerLogSubscription = null;
+    await subscription?.cancel();
   }
 }

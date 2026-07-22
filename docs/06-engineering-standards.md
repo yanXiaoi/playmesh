@@ -146,7 +146,7 @@ Game Package
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
-游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id` 始终不可修改，其他字段经完整清单校验后可保存。
+游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id` 始终不可修改，其他字段经完整清单校验后可保存。
 
 Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library/sdk-src/playmesh.ts` 和 `playmesh-app.ts`。正式构建先执行 `tool/generate_sdk.ps1`，生成 `public/sdk/v1/` 下的 `.js`、`.d.ts` 以及 Dart 版本常量；运行时注入、IDEA 类型提示、Developer Gateway 下载和版本校验只能使用这些生成产物。一次版本变更必须同步更新代码常量、默认模板、机器契约、编辑器补全、测试断言和开发文档，并在版本或验证记录中写明升级原因。App、SDK、默认骨架、示例契约、AI 提示词和项目校验器始终只维护一套当前版本；版本升级后，不提供旧 SDK 入口、兼容矩阵、字段适配、自动迁移或双写逻辑。
 
@@ -185,6 +185,7 @@ Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library
 - 集成测试：创建会话、浏览器中间层加入、短期凭证、WebSocket 输入链路。
 - 游戏包验收：目录结构、`main.json`、必需入口、当前 SDK 版本和资源路径。
 - 回归测试：每次修改协议、权限、会话状态或 Game SDK API 时执行相关测试。
+- 平台发布测试：用户明确要求构建时，必须验证签名状态、目标架构、必需运行库和产物哈希，并把真实结果与未执行的真机项目分开记录。
 
 每个新功能至少提供一个成功用例和一个失败用例。修复 bug 时先增加能复现问题的测试，再修改实现。
 
@@ -196,6 +197,7 @@ Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library
 - 修改架构边界：更新 `01-architecture.md` 和调用链。
 - 修改 Flutter 结构：更新 `01-architecture.md`、`05-next-steps.md` 和测试说明。
 - 修改环境或依赖：更新 `04-dev-env.md` 和运行命令。
+- 修改 HarmonyOS/OpenHarmony 工具链、能力或打包链：同步更新 `harmony-release.md`、`01-architecture.md`、`version/NEXT.md` 和相应 `verification/` 记录。
 - 修改规范：更新本文件，并在任务记录中说明原因和影响。
 - 修改任何代码、契约、模板或提示词：按“版本与升级策略”检查受影响组件，并同步升级所有需要升级的版本来源。
 - 每个重要决策记录“背景、选择、替代方案、影响、回滚方式”。
@@ -221,7 +223,7 @@ feat(session): add browser join identity step
 
 历史阶段文档只追加更正，不随意改写历史结论，也不再作为后续归档模板。版本更新日志规则详见 `docs/version/README.md`。
 
-Android、iOS、Windows、macOS、Linux 等平台的构建、实际运行和真机验证均由用户自行处理。自动开发任务不得执行平台构建命令，也不得把任何平台 Runner、安装包或设备结果作为收尾条件；自动验证限于静态分析、代码级测试以及与平台编译无关的 SDK、资源和语法检查。用户确认的平台结果可随后写入独立验证记录。需要执行 Flutter、Dart 或 Go 工具时，遵循 `04-dev-env.md` 的执行环境要求。
+平台构建默认不执行；只有用户明确要求或授权时，自动开发任务才可使用已配置工具链串行构建，并必须如实记录签名、架构、包内条目和哈希。构建成功不能替代安装、真机行为或商店签名验证，也不能把旧产物当作本轮结果。需要执行 Flutter、Dart、Go 或平台原生工具时，遵循 `04-dev-env.md` 的执行环境与权限要求。
 
 版本日志完成后，后续任务必须引用最近版本日志作为事实基线；计划中的能力写入任务或路线说明，只有实际完成并通过相应验证的内容才能进入已发布版本日志。
 
@@ -229,6 +231,7 @@ Android、iOS、Windows、macOS、Linux 等平台的构建、实际运行和真�
 
 - 游戏需要的平台能力只在与 `main.json` 同级的可选 `capabilities.json` 中声明；能力 ID 按功能命名，不绑定具体 App 或浏览器实现。
 - 能力 code、中文名、用途说明及 App/HTML 适配状态必须集中维护在 `game_capability_registry.dart`。SDK 弹窗、开发者工作区、Schema/运行时校验和 API 输出不得再维护平行的硬编码清单；新增能力元数据只改注册表，新增真实能力实现时再增加相应 App 或 HTML 适配器。
+- 开发者工作区的能力测试必须显示实际返回数据日志，并持续执行到用户手动关闭测试窗口；一次 `POST /dev/api/capability-tests` 仍只返回该轮结果，持续行为由工作区循环调用实现，不新增平行测试协议。
 - `required` 非空时，主 SDK 在 App 与浏览器每次加载游戏时都必须展示全部能力并等待用户确认；拒绝则退出，结果不得持久化或写入 Authority 主机。文件缺失或列表为空时不弹窗。
 - 当前平台不支持的能力必须在 SDK 弹窗中标注“本平台暂不支持”，但不能阻止用户同意后进入。游戏应通过 `getCapabilities()` 做非阻塞降级；SDK 仍只允许订阅已经声明且当前设备可用的能力。
 - 浏览器玩家必须由 SDK 读取或生成 `p_...` 玩家 ID 并确认昵称后，才能调用加入接口获得短期凭证。分享 URL 不得携带昵称或玩家 ID；`localStorage` 只允许保存 SDK 管理的 `playmesh.player-id.v1` 与昵称偏好，不得保存玩家凭证或游戏 Bucket。
@@ -238,6 +241,7 @@ Android、iOS、Windows、macOS、Linux 等平台的构建、实际运行和真�
 - USB 设备优先映射为标准输入事件；不向 AI 生成的游戏默认开放原始 USB 设备。
 - 所有权限必须在 SDK、服务端和 UI 三处保持一致，不能只隐藏界面按钮。
 - AI 只能调用持久开发者工作区 token 有权限的项目 API，不能执行任意系统命令或访问其他项目。该 token、端口和工作区路径保存在 `playmesh-library/developer/settings.json`，不得写入日志或暴露给非开发者页面。
+- 开发者工作区项目列表必须来自统一游戏库，不按“开发中”等展示状态过滤。最近打开项目只在浏览器本地持久化；首次进入或记录项目已不存在时必须强制选择，在尚未选择项目时不能关闭选择层。
 
 ## 游戏包安装规范
 

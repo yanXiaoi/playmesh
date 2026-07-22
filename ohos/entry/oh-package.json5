@@ -1,0 +1,8 @@
+{
+  "name": "entry",
+  "version": "1.6.2",
+  "description": "Playmesh HarmonyOS entry module",
+  "dependencies": {
+    "@playmesh/harmony_capabilities": "../playmesh_harmony_capabilities"
+  }
+}

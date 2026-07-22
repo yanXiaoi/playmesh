@@ -37,6 +37,12 @@ Go Core 监听 0.0.0.0:0
 - `single_screen_multiplayer`：创建会话的 App 主机是公共显示端与 Authority Client，不属于 `players`；玩家只能通过 Controller 加入。
 - `multi_screen`：创建会话的 App 主机固定为 Authority Client，并可同时作为 Player 计入人数；不得把玩家首位或加入顺序当作 Authority 规则。
 
+## 当前开发版本：Playmesh 1.6.2
+
+当前已增加 OpenHarmony API 12 arm64 HAP 发布链：SIG Go `c-shared` Core、异步 N-API、ArkTS 能力 HAR 和 Flutter `playmesh/go_core_host` 已闭环，统一脚本可以选择 `harmony`、`android`、`windows` 或 `all`。内部无签名 HAP 已完成包结构验证；生产发布仍需外部签名配置，真机网络、线程、前后台生命周期和系统分享仍需设备验收。
+
+OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的扫码页面使用手动输入回退。不得把该回退写成“鸿蒙扫码已接入”，也不得为通过编译而声明不存在的 HMS 能力。详细事实见 `docs/harmony-release.md`、`docs/version/NEXT.md` 和 `docs/verification/playmesh-1.6.2-harmony-build-2026-07-22.md`。
+
 ## 第四阶段交付基线
 
 已归档的纵向链路：
@@ -90,12 +96,15 @@ Go Core 监听 0.0.0.0:0
 - Core 每次启动都使用系统分配端口，实际端口由宿主上报。
 - 开发者 Gateway 与 Core 分离，默认固定端口 `16666`，可在设置页修改；不得为了修改开发者端口重启 Core。
 - Android 发布物包含 `playmesh_core.aar`，Windows 发布物包含 Runner 同目录的 `playmesh-core.exe`。
+- OpenHarmony arm64 HAP 必须同时包含 `libapp.so`、`libplaymesh_core.so` 和 `libplaymesh_core_napi.so`；Core ELF 必须为 AArch64、SONAME 正确并导出三个 C ABI 函数。
 - `orientation`、`displayModes` 和 `modes` 是独立维度；当前 `displayModes` 与 `modes` 都只能声明一个值。
 - 浏览器分享 token 在当前游戏会话期间有效，关闭附加层和重新开始不撤销；退出游戏、会话结束或 Core 重启后失效。
 - 分享地址列表可点选，二维码始终对应当前选中的地址。
+- 主机与 App 扫码加入页使用同一套悬浮工具语义；主机分享入口为一级按钮，所有 App 游戏工具只保留返回而不重复提供退出。普通浏览器由 SDK 提供不含 App 导航和分享能力的对应功能区。
+- 分享链接/二维码面板在视口内居中并动态适配，内容超出屏幕时允许整体滚动；悬浮工具二级界面固定使用高对比度配色，不继承游戏显示颜色。
 - 所有 Bucket 数据只保存在开始游戏的 Authority 主机；浏览器走主机 HTTP 存储端点，其他 App 玩家走会话内存储 RPC。
 - FPS 由游戏在真实渲染点调用 `playmesh.performance.reportFrame()` 上报，默认显示在左上角并可从悬浮工具坞关闭。
-- 各平台构建和运行由用户自行验证，自动任务不在 Android、iOS、Windows 等平台尝试编译或运行验证。
+- 平台构建仅在用户明确要求时执行；产物结构验证必须记录到 `docs/verification/`，安装、真机运行和生产签名仍由用户或 CI 验证。
 - 公共显示端不得进入 `players` 或提交玩家动作。
 
 ## 明确排除

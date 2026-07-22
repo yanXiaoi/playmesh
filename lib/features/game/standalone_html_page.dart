@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
 import '../../core/platform/app_device_service.dart';
+import '../../core/platform/app_platform.dart';
 import '../../core/developer/webview_console_capture.dart';
 import 'windows_local_game_web_view.dart';
 
@@ -23,11 +24,7 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
   Object? _error;
   int _windowsReloadKey = 0;
 
-  bool get _usesFlutterWebView =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.macOS);
+  bool get _usesFlutterWebView => supportsPlatformWebView;
 
   Uri get _fileUri => Uri.file(widget.filePath, windows: _isWindows);
 
