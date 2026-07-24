@@ -106,7 +106,7 @@ class DeveloperRunController {
       projectId,
       DeveloperRunPhase.starting,
       runId: runId,
-      message: '正在重新启动游戏',
+      message: '正在刷新游戏内容',
     );
     try {
       await restart();
@@ -116,7 +116,7 @@ class DeveloperRunController {
         runId: runId,
         joinCode: previous.joinCode,
         links: previous.links,
-        message: '游戏已重新启动',
+        message: '游戏内容已刷新',
       );
       return status(projectId);
     } on Object catch (error) {

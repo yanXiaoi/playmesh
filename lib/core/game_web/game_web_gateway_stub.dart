@@ -1,16 +1,20 @@
 import 'game_web_gateway_contract.dart';
 import '../storage/game_storage_service.dart';
+import '../../models/game_summary.dart';
 
 Future<GameWebGateway> startGameWebGateway({
   required String gameRootAssetPath,
   String? gameRootFilePath,
   required bool multiplayer,
   required String displayMode,
+  required GameOrientation orientation,
+  GameOrientation? controllerOrientation,
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
   String gameId = 'com.playmesh.unknown',
   String gameName = 'Playmesh 游戏',
   List<String> requiredCapabilities = const [],
+  List<String> controllerRequiredCapabilities = const [],
   Uri? coreEndpoint,
   String? joinCode,
   required String shareToken,

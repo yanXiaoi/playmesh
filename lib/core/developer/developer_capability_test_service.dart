@@ -4,6 +4,7 @@ import '../capabilities/capability_plugin.dart';
 import '../capabilities/capability_registry.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../capabilities/support/motion_sensor_source.dart';
+import '../platform/app_device_service.dart';
 
 /// 开发者工作区能力自检服务。
 ///
@@ -12,10 +13,14 @@ import '../capabilities/support/motion_sensor_source.dart';
 class DeveloperCapabilityTestService {
   DeveloperCapabilityTestService({
     MotionSensorSource? motionSource,
+    AppDeviceService? deviceService,
     CapabilityRegistry? registry,
   }) : registry =
            registry ??
-           createDefaultCapabilityRegistry(motionSource: motionSource);
+           createDefaultCapabilityRegistry(
+             motionSource: motionSource,
+             deviceService: deviceService,
+           );
 
   final CapabilityRegistry registry;
 

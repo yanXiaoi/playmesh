@@ -62,6 +62,18 @@ Remove-Item Env:CC -ErrorAction SilentlyContinue
 Remove-Item Env:CXX -ErrorAction SilentlyContinue
 $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
 
+$flutterAssetsDir = Join-Path $repoRoot 'build\flutter_assets'
+if (Test-Path -LiteralPath $flutterAssetsDir) {
+  $resolvedFlutterAssetsDir = (Resolve-Path -LiteralPath $flutterAssetsDir).Path
+  $expectedBuildRoot = (Resolve-Path -LiteralPath (Join-Path $repoRoot 'build')).Path
+  if (-not $resolvedFlutterAssetsDir.StartsWith(
+      $expectedBuildRoot + '\',
+      [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clean Flutter assets outside build/: $resolvedFlutterAssetsDir"
+  }
+  Remove-Item -LiteralPath $resolvedFlutterAssetsDir -Recurse -Force
+}
+
 if (Test-Path -LiteralPath $buildDir) {
   $resolvedBuildDir = (Resolve-Path -LiteralPath $buildDir).Path
   if (-not $resolvedBuildDir.StartsWith(

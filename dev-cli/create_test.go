@@ -81,7 +81,7 @@ func TestCreateUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *testing.T)
 	t.Cleanup(func() { _ = os.Chdir(previous) })
 
 	input := strings.NewReader(strings.Join([]string{
-		"com.example.created", "Created", "动作派对", "1", "2", "2", "3", "6", "体感, 聚会", "1", "",
+		"com.example.created", "Created", "动作派对", "1", "2", "2", "3", "6", "体感, 聚会", "1", "1", "1", "",
 	}, "\n"))
 	if err := commandCreateFrom(context.Background(), input); err != nil {
 		t.Fatal(err)
@@ -89,11 +89,18 @@ func TestCreateUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *testing.T)
 	if request.Mode != "multiplayer" || request.Orientation != "portrait" || request.DisplayMode != "single_screen_multiplayer" {
 		t.Fatalf("create options were not forwarded: %#v", request)
 	}
+	if request.ControllerOrientation != "portrait" {
+		t.Fatalf("controller orientation was not forwarded: %#v", request)
+	}
 	if request.MinPlayers != 3 || request.MaxPlayers != 6 || request.ClientID != "cli" {
 		t.Fatalf("player options were not forwarded: %#v", request)
 	}
 	if len(request.RequiredCapabilities) != 1 || request.RequiredCapabilities[0] != "sensor.accelerometer" {
 		t.Fatalf("capabilities were not forwarded: %#v", request.RequiredCapabilities)
+	}
+	if len(request.ControllerRequiredCapabilities) != 1 ||
+		request.ControllerRequiredCapabilities[0] != "sensor.accelerometer" {
+		t.Fatalf("controller capabilities were not forwarded: %#v", request.ControllerRequiredCapabilities)
 	}
 	for _, path := range []string{"main.json", "capabilities.json", "app/index.html", "playmesh/sdk/playmesh.js"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {

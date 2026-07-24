@@ -20,6 +20,7 @@ type Handler struct {
 	logger *slog.Logger
 	mutex  sync.Mutex
 	rooms  map[string]map[string]*peer
+	binary *binaryHub
 }
 
 type peer struct {
@@ -44,13 +45,17 @@ type serverMessage struct {
 }
 
 type sessionResponse struct {
-	Session    Snapshot    `json:"session"`
-	Credential Credentials `json:"credential"`
-	WebSocket  string      `json:"webSocketPath"`
+	Session         Snapshot    `json:"session"`
+	Credential      Credentials `json:"credential"`
+	WebSocket       string      `json:"webSocketPath"`
+	BinaryWebSocket string      `json:"binaryWebSocketPath"`
 }
 
 func NewHandler(store *Store, logger *slog.Logger) *Handler {
-	return &Handler{store: store, logger: logger, rooms: make(map[string]map[string]*peer)}
+	return &Handler{
+		store: store, logger: logger, rooms: make(map[string]map[string]*peer),
+		binary: newBinaryHub(logger),
+	}
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -74,6 +79,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.closeShare(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/share"))
 	case strings.HasSuffix(path, "/ws") && request.Method == http.MethodGet:
 		h.connect(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/ws"))
+	case strings.HasSuffix(path, "/binary") && request.Method == http.MethodGet:
+		h.connectBinary(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/binary"))
 	case strings.HasPrefix(path, "/") && request.Method == http.MethodGet:
 		h.snapshot(writer, request, strings.TrimPrefix(path, "/"))
 	default:
@@ -101,7 +108,9 @@ func (h *Handler) create(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusCreated, sessionResponse{
-		Session: snapshot, Credential: credential, WebSocket: "/v1/sessions/" + snapshot.ID + "/ws",
+		Session: snapshot, Credential: credential,
+		WebSocket:       "/v1/sessions/" + snapshot.ID + "/ws",
+		BinaryWebSocket: "/v1/sessions/" + snapshot.ID + "/binary",
 	})
 }
 
@@ -124,7 +133,9 @@ func (h *Handler) join(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, sessionResponse{
-		Session: snapshot, Credential: credential, WebSocket: "/v1/sessions/" + snapshot.ID + "/ws",
+		Session: snapshot, Credential: credential,
+		WebSocket:       "/v1/sessions/" + snapshot.ID + "/ws",
+		BinaryWebSocket: "/v1/sessions/" + snapshot.ID + "/binary",
 	})
 	h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &snapshot})
 }
@@ -228,6 +239,7 @@ func (h *Handler) connect(writer http.ResponseWriter, request *http.Request, ses
 
 	defer func() {
 		if h.removePeer(sessionID, player.ID, client) {
+			h.binary.disconnect(sessionID, player.ID)
 			snapshot := h.store.SetConnected(record, player.ID, false)
 			h.broadcast(sessionID, serverMessage{Type: "session.state", Session: &snapshot})
 		}

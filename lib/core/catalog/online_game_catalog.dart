@@ -146,10 +146,11 @@ class GameDownloadQueue extends ChangeNotifier {
     task.client = client;
     final temporary = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      '${task.id}.playmesh.zip',
+      'playmesh-catalog-import.playmesh.zip',
     );
     IOSink? sink;
     try {
+      if (await temporary.exists()) await temporary.delete();
       final uri = task.game.source.host.replace(
         path: '/apps/download',
         queryParameters: {'id': task.game.manifest.id},

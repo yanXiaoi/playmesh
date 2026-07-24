@@ -21,7 +21,7 @@ void main() {
     expect(status.phase, DeveloperRunPhase.running);
     expect(status.joinCode, 'ABC123');
     expect(status.links, hasLength(1));
-    expect(status.message, '游戏已重新启动');
+    expect(status.message, '游戏内容已刷新');
 
     unregister();
     await expectLater(controller.restart('com.example.game'), throwsStateError);

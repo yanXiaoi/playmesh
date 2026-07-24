@@ -36,6 +36,9 @@ class GameRuntimeBridge implements GameSdkBridge {
   Stream<double?> get latencyValues => _latencyValues.stream;
 
   @override
+  Future<GameStorageService> ensureStorage() => Future.value(storage);
+
+  @override
   Future<void> handleJavaScriptMessage(String rawMessage) async {
     String? requestId;
     try {
@@ -149,6 +152,8 @@ class GameRuntimeBridge implements GameSdkBridge {
           : connection.currentPlayer.toJson(),
       'isAuthority': connection.isAuthority,
       'session': connection.snapshot.toJson(),
+      // 二进制连接配置只供 SDK 内部使用；SDK 接收后会从公开 bootstrap 中移除。
+      'binaryTransport': {'url': connection.binaryEndpoint.toString()},
     });
   }
 

@@ -25,6 +25,8 @@ assert.match(macScript, /xcrun lipo -create/);
 assert.match(release, /'playmesh-cli\.exe'/);
 assert.match(windowsRelease, /pubspec\.yaml version must use MAJOR\.MINOR\.PATCH\+BUILD/);
 assert.match(windowsRelease, /-DPLAYMESH_FLUTTER_VERSION=\$version/);
+assert.match(windowsRelease, /build\\flutter_assets/);
+assert.match(windowsRelease, /Refusing to clean Flutter assets outside build/);
 assert.match(windows, /set\(FLUTTER_VERSION "\$\{PLAYMESH_FLUTTER_VERSION\}"\)/);
 
 console.log("桌面 CLI 跟随编译与产物命名校验通过");

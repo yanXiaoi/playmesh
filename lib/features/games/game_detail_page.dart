@@ -70,32 +70,8 @@ class GameDetailPage extends StatelessWidget {
                             ),
                             const SizedBox(height: 8),
                             Text(game.description),
-                            const SizedBox(height: 24),
-                            _DetailRow(
-                              icon: Icons.people_outline,
-                              label: '游玩人数',
-                              value: game.playerRangeLabel,
-                            ),
-                            _DetailRow(
-                              icon: Icons.devices_outlined,
-                              label: '显示模式',
-                              value: game.displayModeLabel,
-                            ),
-                            _DetailRow(
-                              icon: Icons.screen_rotation_outlined,
-                              label: '屏幕方向',
-                              value: game.orientation.label,
-                            ),
-                            _DetailRow(
-                              icon: Icons.hub_outlined,
-                              label: '游戏模式',
-                              value: game.modeLabel,
-                            ),
-                            _DetailRow(
-                              icon: Icons.web_asset_outlined,
-                              label: '运行入口',
-                              value: game.entry.statusLabel,
-                            ),
+                            const SizedBox(height: 18),
+                            _ManifestFacts(game: game),
                             const SizedBox(height: 12),
                             if (onExport != null)
                               Align(
@@ -142,11 +118,17 @@ class GameDetailPage extends StatelessWidget {
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(20, 8, 20, 20),
         child: FilledButton.icon(
-          onPressed: () => Navigator.of(
-            context,
-          ).pushNamed(GamePage.routeName, arguments: game),
-          icon: const Icon(Icons.play_arrow),
-          label: const Text('开始游戏'),
+          onPressed: game.manifestError == null
+              ? () => Navigator.of(
+                  context,
+                ).pushNamed(GamePage.routeName, arguments: game)
+              : null,
+          icon: Icon(
+            game.manifestError == null
+                ? Icons.play_arrow
+                : Icons.build_outlined,
+          ),
+          label: Text(game.manifestError == null ? '开始游戏' : '请先修复 main.json'),
         ),
       ),
     );
@@ -195,8 +177,10 @@ class GameDetailPage extends StatelessWidget {
       try {
         final temporaryDirectory = await getTemporaryDirectory();
         final destination = File(
-          '${temporaryDirectory.path}${Platform.pathSeparator}$suggestedName',
+          '${temporaryDirectory.path}${Platform.pathSeparator}'
+          'playmesh-share-export.playmesh.zip',
         );
+        if (await destination.exists()) await destination.delete();
         await onExport!(game, destination.path);
         // The OHOS share_plus fork currently exposes this compatibility API.
         // ignore: deprecated_member_use
@@ -350,8 +334,84 @@ class _GameHeader extends StatelessWidget {
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({
+class _ManifestFacts extends StatelessWidget {
+  const _ManifestFacts({required this.game});
+
+  final GameSummary game;
+
+  @override
+  Widget build(BuildContext context) {
+    final facts = <(IconData, String, String)>[
+      (Icons.person_outline, '作者', game.author.isEmpty ? '佚名' : game.author),
+      (
+        Icons.schedule_outlined,
+        '最后上传',
+        _formatOptionalTimestamp(context, game.lastModifiedAt),
+      ),
+      (
+        Icons.history_outlined,
+        '最近打开',
+        _formatOptionalTimestamp(context, game.lastOpenedAt),
+      ),
+      if (game.manifestError != null)
+        (Icons.warning_amber_rounded, '清单状态', '待修复'),
+      (Icons.sell_outlined, '版本', game.version),
+      (Icons.people_outline, '游玩人数', game.playerRangeLabel),
+      (Icons.devices_outlined, '显示模式', game.displayModeLabel),
+      (Icons.screen_rotation_outlined, '主画面', game.orientation.label),
+      if (game.controllerOrientation case final orientation?)
+        (Icons.smartphone_outlined, '控制器', orientation.label),
+      (Icons.hub_outlined, '游戏模式', game.modeLabel),
+      if (game.sdkVersion.isNotEmpty)
+        (Icons.code_outlined, 'Game SDK', game.sdkVersion),
+      if (game.appSdkVersion.isNotEmpty)
+        (
+          Icons.integration_instructions_outlined,
+          'App SDK',
+          game.appSdkVersion,
+        ),
+      (Icons.web_asset_outlined, '运行入口', game.entry.statusLabel),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 620 ? 3 : 2;
+        final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final fact in facts)
+              SizedBox(
+                width: width,
+                child: _ManifestFact(
+                  icon: fact.$1,
+                  label: fact.$2,
+                  value: fact.$3,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _formatLocalTimestamp(BuildContext context, DateTime value) {
+    final local = value.toLocal();
+    final localizations = MaterialLocalizations.of(context);
+    final date = localizations.formatShortDate(local);
+    final time = localizations.formatTimeOfDay(
+      TimeOfDay.fromDateTime(local),
+      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+    );
+    return '$date $time';
+  }
+
+  String _formatOptionalTimestamp(BuildContext context, DateTime? value) =>
+      value == null ? '无' : _formatLocalTimestamp(context, value);
+}
+
+class _ManifestFact extends StatelessWidget {
+  const _ManifestFact({
     required this.icon,
     required this.label,
     required this.value,
@@ -363,12 +423,45 @@ class _DetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-      leading: Icon(icon),
-      title: Text(label),
-      subtitle: MediaQuery.sizeOf(context).width < 420 ? Text(value) : null,
-      trailing: MediaQuery.sizeOf(context).width < 420 ? null : Text(value),
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.56),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.7)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: colors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    value,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

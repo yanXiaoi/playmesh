@@ -15,6 +15,12 @@ const sdkManifest = JSON.parse(
     "utf8",
   ),
 );
+const sdkSchema = JSON.parse(
+  fs.readFileSync(
+    "assets/playmesh-library/public/developer/contracts/schemas/sdk-v1.json",
+    "utf8",
+  ),
+);
 const developerSources = [
   "assets/playmesh-library/public/developer/prompts/common.txt",
   "assets/playmesh-library/public/developer/prompts/agent-common.txt",
@@ -24,7 +30,12 @@ const developerSources = [
 
 assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
-assert.match(game, /readonly version: "2\.0\.0"/);
+assert.match(game, /readonly version: "2\.2\.1"/);
+assert.match(game, /readonly version: "2\.1\.0"/);
+assert.match(
+  game,
+  /setFullscreen\(enabled: boolean, orientation\?: PlaymeshOrientation\)/,
+);
 assert.match(game, /interface PlaymeshCapabilityHandle/);
 assert.match(game, /capabilities\.create/);
 assert.doesNotMatch(game, /onDevice\(/);
@@ -37,9 +48,23 @@ assert.match(game, /onChange\(callback: \(event: PlaymeshLifecycleEvent\) => voi
 assert.match(game, /当前会话中的玩家/);
 assert.match(game, /固定 Authority Client/);
 assert.match(game, /Authority 主机上的持久 JSON Bucket/);
+assert.match(game, /send\(data: Uint8Array\): Promise<void>/);
+assert.match(game, /send\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
+assert.match(game, /sendLatest\(data: Uint8Array\): Promise<void>/);
+assert.match(game, /sendLatest\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
+assert.match(game, /interface PlaymeshBinaryForwardContext[\s\S]*targetPlayerIds: string\[\]/);
+assert.doesNotMatch(game, /sendLast\(/);
 assert.match(app, /游戏业务使用 playmesh\.app/);
 assert.equal(sdkManifest.projectRules.appUrlRoot, "/app/");
 assert.equal("gameUrlRoot" in sdkManifest.projectRules, false);
+assert.equal(
+  sdkSchema.$defs.BinaryForwardContext.properties.targetPlayerIds.type,
+  "array",
+);
+assert.equal(
+  "targetPlayerId" in sdkSchema.$defs.BinaryForwardContext.properties,
+  false,
+);
 for (const source of developerSources) {
   assert(!source.includes("/game/"), "开发模板或提示词仍包含旧 /game/ 路径");
 }

@@ -1,6 +1,6 @@
 # Playmesh
 
-Playmesh 1.0 是一个局域网优先的 HTML 游戏平台。Flutter App 负责游戏库、用户资料、会话与 WebView 容器，Go Core 负责本机联机会话，Game SDK 为单机与多人游戏提供统一能力。
+Playmesh 是一个局域网优先的 HTML 游戏平台。Flutter App 负责游戏库、用户资料、会话与 WebView 容器，Go Core 负责本机联机会话，Game SDK 为单机与多人游戏提供 JSON 消息、二进制 Channel、Bucket 存储与设备能力。
 
 ## 产品能力
 

@@ -70,5 +70,8 @@ await instance.dispose();
 |---|---:|---|---|---|
 | `sensor.accelerometer` | `1.0.0` | `{fps: 1..120}` | `start`, `stop` | `reading` |
 | `sensor.gyroscope` | `1.0.0` | `{fps: 1..120}` | `start`, `stop` | `reading` |
+| `device.vibration` | `1.0.0` | `{}` | `vibrate` | 无 |
 
 两种传感器分别位于独立目录，共享 `support/` 中的运动采样基础设施。同种插件的多个实例共享一条原生流，并按最高请求频率采样；最后一个实例停止或释放后关闭原生流。
+
+`device.vibration` 位于独立插件目录，创建实例时不接受参数。调用 `invoke('vibrate', {style})` 主动触发一次反馈，`style` 可为 `selection`、`light`、`medium`、`heavy` 或 `vibrate`，省略时使用 `light`。该插件不产生事件；平台自检只报告可用性和样式，不会在工作区持续测试中实际震动。

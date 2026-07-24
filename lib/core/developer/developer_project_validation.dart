@@ -191,7 +191,11 @@ class DeveloperProjectValidator {
       manifest = await _validateManifest(projectId, manifestFile, diagnostics);
     }
     if (files['capabilities.json'] case final capabilitiesFile?) {
-      await _validateCapabilities(capabilitiesFile, diagnostics);
+      await _validateCapabilities(
+        capabilitiesFile,
+        diagnostics,
+        manifest: manifest,
+      );
     }
 
     if (manifest != null) {
@@ -393,15 +397,25 @@ class DeveloperProjectValidator {
 
   Future<void> _validateCapabilities(
     File file,
-    List<DeveloperProjectDiagnostic> diagnostics,
-  ) async {
+    List<DeveloperProjectDiagnostic> diagnostics, {
+    GameManifest? manifest,
+  }) async {
     try {
       final source = utf8.decode(await file.readAsBytes());
       final decoded = jsonDecode(source);
       if (decoded is! Map) {
         throw const FormatException('capabilities.json 根节点必须是对象');
       }
-      GameCapabilities.fromJson(Map<String, Object?>.from(decoded));
+      final capabilities = GameCapabilities.fromJson(
+        Map<String, Object?>.from(decoded),
+      );
+      if (manifest != null &&
+          !manifest.displayModes.contains(
+            GameDisplayMode.singleScreenMultiplayer,
+          ) &&
+          capabilities.controllerRequired.isNotEmpty) {
+        throw const FormatException('仅单屏多人游戏可以声明 controllerRequired');
+      }
     } on Object catch (error) {
       diagnostics.add(
         _error(

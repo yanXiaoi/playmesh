@@ -14,7 +14,7 @@ void main() {
     if (await root.exists()) await root.delete(recursive: true);
   });
 
-  test('Bucket 缓存写入 data 目录并可重新加载', () async {
+  test('Bucket JSON 写入 data/json 并可重新加载', () async {
     final storage = await GameStorageService.create(
       gameId: 'com.playmesh.demo',
       libraryRoot: root,
@@ -32,11 +32,49 @@ void main() {
       File(
         '${root.path}${Platform.pathSeparator}packages'
         '${Platform.pathSeparator}com.playmesh.demo'
-        '${Platform.pathSeparator}data${Platform.pathSeparator}profile.json',
+        '${Platform.pathSeparator}data${Platform.pathSeparator}json'
+        '${Platform.pathSeparator}profile.json',
       ).existsSync(),
       isTrue,
     );
     await reloaded.close();
+  });
+
+  test('Bucket 文件流写入 data/data 并返回公开时间戳地址', () async {
+    final storage = await GameStorageService.create(
+      gameId: 'com.playmesh.upload',
+      libraryRoot: root,
+    );
+
+    final url = await storage.upload(
+      bucket: 'assets',
+      originalName: '角色快照.PNG',
+      data: Stream.value(<int>[0, 255, 7, 9]),
+      contentLength: 4,
+    );
+
+    expect(url, matches(RegExp(r'^/bucket/assets/[0-9]{13,}\.PNG$')));
+    final fileName = Uri.parse(url).pathSegments.last;
+    expect(await storage.dataFile('assets', fileName).readAsBytes(), [
+      0,
+      255,
+      7,
+      9,
+    ]);
+    expect(
+      Directory(
+        '${root.path}${Platform.pathSeparator}packages'
+        '${Platform.pathSeparator}com.playmesh.upload'
+        '${Platform.pathSeparator}data${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}assets',
+      ).existsSync(),
+      isTrue,
+    );
+    expect(
+      () => storage.dataFile('assets', '../json/save.json'),
+      throwsFormatException,
+    );
+    await storage.close();
   });
 
   test('清除游戏数据只删除当前游戏 data', () async {
@@ -100,7 +138,7 @@ void main() {
     final dataDirectory = Directory(
       '${root.path}${Platform.pathSeparator}packages'
       '${Platform.pathSeparator}com.playmesh.concurrent'
-      '${Platform.pathSeparator}data',
+      '${Platform.pathSeparator}data${Platform.pathSeparator}json',
     );
     expect(
       dataDirectory.listSync().where((entry) => entry.path.endsWith('.tmp')),

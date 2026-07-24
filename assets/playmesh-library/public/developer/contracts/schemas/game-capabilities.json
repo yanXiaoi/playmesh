@@ -14,6 +14,17 @@
         "description": "Must exist in GET /dev/api/capabilities; runtime validation uses the central capability registry."
       },
       "default": []
+    },
+    "controllerRequired": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Capabilities used only by the controller page. Allowed only for single_screen_multiplayer games.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+$",
+        "description": "Must exist in GET /dev/api/capabilities; runtime validation uses the central capability registry."
+      },
+      "default": []
     }
   }
 }

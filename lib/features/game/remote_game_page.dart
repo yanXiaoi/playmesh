@@ -12,6 +12,7 @@ import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
+import '../../models/game_summary.dart';
 import '../settings/settings_page.dart';
 import 'game_controls.dart';
 import 'windows_local_game_web_view.dart';
@@ -38,7 +39,13 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Object? _error;
   int _windowsReloadKey = 0;
   late final WebViewMessageQueue _messageQueue;
-  ({String gameId, String gameName, List<String> required})? _descriptor;
+  ({
+    String gameId,
+    String gameName,
+    GameOrientation orientation,
+    List<String> required,
+  })?
+  _descriptor;
   Future<void> Function(String)? _runWindowsJavaScript;
   bool _showPerformance = true;
   bool _debugVisible = false;
@@ -78,6 +85,10 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           if (mounted) await Navigator.of(context).maybePop();
         },
       );
+      await const AppDeviceService().setFullscreen(
+        true,
+        orientation: descriptor.orientation,
+      );
       if (_usesFlutterWebView) {
         await _initialize();
       } else if (mounted) {
@@ -88,7 +99,14 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     }
   }
 
-  Future<({String gameId, String gameName, List<String> required})>
+  Future<
+    ({
+      String gameId,
+      String gameName,
+      GameOrientation orientation,
+      List<String> required,
+    })
+  >
   _loadDeclaredCapabilities() async {
     final token = widget.entryUri.queryParameters['token'];
     if (token == null || token.isEmpty) {
@@ -107,12 +125,16 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     if (decoded is! Map ||
         decoded['gameId'] is! String ||
         decoded['gameName'] is! String ||
+        decoded['orientation'] is! String ||
         decoded['required'] is! List) {
       throw const FormatException('当前游戏设备能力定义无效');
     }
     return (
       gameId: decoded['gameId']! as String,
       gameName: decoded['gameName']! as String,
+      orientation: GameOrientation.fromManifestValue(
+        decoded['orientation']! as String,
+      ),
       required: List<String>.unmodifiable(
         (decoded['required']! as List).cast<String>(),
       ),
@@ -330,14 +352,17 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
 
   void _setFullscreen(bool enabled) {
     unawaited(
-      const AppDeviceService().setFullscreen(enabled).catchError((
-        Object error,
-      ) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${enabled ? '进入' : '退出'}全屏失败：$error')),
-        );
-      }),
+      const AppDeviceService()
+          .setFullscreen(
+            enabled,
+            orientation: enabled ? _descriptor?.orientation : null,
+          )
+          .catchError((Object error) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('${enabled ? '进入' : '退出'}全屏失败：$error')),
+            );
+          }),
     );
   }
 

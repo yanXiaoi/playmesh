@@ -1,5 +1,6 @@
 import 'game_web_gateway_contract.dart';
 import '../storage/game_storage_service.dart';
+import '../../models/game_summary.dart';
 import 'game_web_gateway_stub.dart'
     if (dart.library.io) 'game_web_gateway_io.dart'
     as implementation;
@@ -11,11 +12,14 @@ Future<GameWebGateway> startGameWebGateway({
   String? gameRootFilePath,
   required bool multiplayer,
   required String displayMode,
+  required GameOrientation orientation,
+  GameOrientation? controllerOrientation,
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
   String gameId = 'com.playmesh.unknown',
   String gameName = 'Playmesh 游戏',
   List<String> requiredCapabilities = const [],
+  List<String> controllerRequiredCapabilities = const [],
   Uri? coreEndpoint,
   String? joinCode,
   required String shareToken,
@@ -26,11 +30,14 @@ Future<GameWebGateway> startGameWebGateway({
     gameRootFilePath: gameRootFilePath,
     multiplayer: multiplayer,
     displayMode: displayMode,
+    orientation: orientation,
+    controllerOrientation: controllerOrientation,
     gameEntryPath: gameEntryPath,
     controllerEntryPath: controllerEntryPath,
     gameId: gameId,
     gameName: gameName,
     requiredCapabilities: requiredCapabilities,
+    controllerRequiredCapabilities: controllerRequiredCapabilities,
     coreEndpoint: coreEndpoint,
     joinCode: joinCode,
     shareToken: shareToken,

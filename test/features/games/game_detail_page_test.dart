@@ -6,10 +6,15 @@ import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
 void main() {
-  const game = GameSummary(
+  final game = GameSummary(
     id: 'com.example.party',
     name: '欢乐派对',
     version: '1.2.3',
+    author: 'Test Author',
+    lastModifiedAt: DateTime.utc(2026, 7, 24, 8, 30),
+    lastOpenedAt: DateTime.utc(2026, 7, 24, 9, 30),
+    sdkVersion: '2.2.0',
+    appSdkVersion: '2.1.0',
     description: '测试游戏',
     minPlayers: 1,
     maxPlayers: 4,
@@ -73,6 +78,34 @@ void main() {
     await tester.pump();
 
     expect(clipboardText, game.id);
+    expect(find.text('Test Author'), findsOneWidget);
+    expect(find.text('2.2.0'), findsOneWidget);
+    expect(find.text('2.1.0'), findsOneWidget);
     expect(find.text('游戏 ID 已复制'), findsOneWidget);
+    expect(find.text('最近打开'), findsOneWidget);
+  });
+
+  testWidgets('缺省上传元数据显示为佚名和无', (tester) async {
+    const legacy = GameSummary(
+      id: 'com.example.legacy',
+      name: '旧游戏',
+      version: '1.0.0',
+      description: '',
+      minPlayers: 1,
+      maxPlayers: 1,
+      supportsMultiplayer: false,
+      displayModeLabel: '多屏',
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: '待修复'),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GameDetailPage(game: legacy, onDelete: (_) async {}),
+      ),
+    );
+
+    expect(find.text('佚名'), findsOneWidget);
+    expect(find.text('无'), findsNWidgets(2));
   });
 }

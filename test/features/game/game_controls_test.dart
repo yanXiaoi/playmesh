@@ -37,7 +37,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('返回加入页面'), findsOneWidget);
-    expect(find.byTooltip('重新开始'), findsOneWidget);
+    expect(find.byTooltip('刷新游戏'), findsOneWidget);
     expect(find.byTooltip('隐藏性能信息'), findsOneWidget);
     expect(find.byTooltip('进入全屏'), findsOneWidget);
     expect(find.byTooltip('退出全屏'), findsOneWidget);

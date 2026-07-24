@@ -14,6 +14,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperRunController? runController,
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
+  String Function()? currentAuthor,
+  DateTime Function()? clock,
 }) {
   throw UnsupportedError('当前平台不支持网页开发者通道');
 }

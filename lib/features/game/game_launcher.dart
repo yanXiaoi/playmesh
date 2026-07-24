@@ -80,7 +80,9 @@ class _GameLauncherState extends State<GameLauncher> {
           bridge: widget.bridge,
           localUserId: widget.localUserId,
           localNickname: widget.localNickname,
-          declaredCapabilities: widget.game.capabilities.required.toList(),
+          declaredCapabilities: widget.game.capabilities
+              .requiredForRole(controller: widget.controllerRole)
+              .toList(),
           onExitRequested: widget.onExitRequested,
         );
       },

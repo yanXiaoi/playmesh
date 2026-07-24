@@ -157,9 +157,6 @@ func extractProjectPackage(data []byte, target string) error {
 	if _, err := os.Stat(filepath.Join(temporary, "main.json")); err != nil {
 		return errors.New("项目包缺少 main.json")
 	}
-	if _, err := os.Stat(filepath.Join(temporary, "app")); err != nil {
-		return errors.New("项目包缺少 app/")
-	}
 	if _, err := os.Stat(filepath.Join(temporary, "capabilities.json")); os.IsNotExist(err) {
 		if err := os.WriteFile(filepath.Join(temporary, "capabilities.json"), []byte("{\n  \"required\": []\n}\n"), 0o644); err != nil {
 			return err
@@ -172,6 +169,9 @@ func extractProjectPackage(data []byte, target string) error {
 	} {
 		source := filepath.Join(temporary, mapping.source)
 		destination := filepath.Join(target, mapping.destination)
+		if _, err := os.Stat(source); os.IsNotExist(err) {
+			continue
+		}
 		if mapping.source == "app" {
 			if err := replaceDirectory(source, destination); err != nil {
 				return err

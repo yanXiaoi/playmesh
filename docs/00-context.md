@@ -48,7 +48,7 @@ Flutter App
   -> 点击“开始游戏”
   -> 进入独立的全屏游戏页
   -> WebView 加载内置静态界面
-  -> 返回详情 / 退出到游戏库 / 重新开始并刷新 WebView
+  -> 返回详情 / 退出到游戏库 / 刷新游戏 WebView
 ```
 
 第二阶段已实现 Go Core 与 Flutter 通讯；第三阶段在此基础上完成真实会话、联机码、二维码与浏览器加入和 Game SDK。
@@ -75,7 +75,7 @@ Flutter App
 
 ## 当前开发建议
 
-第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `1.6.2+10`、Game SDK `2.0.0`、App Bridge SDK `2.0.0`、Developer API / OpenAPI `1.5.0`、Developer CLI `1.2.0`；能力系统已破坏性迁移为有状态插件协议。变化统一记录在 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `1.8.2+15`、Go Core `0.3.0`、Core 协议 `1.1.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Developer API / OpenAPI `1.6.1`、Developer CLI `1.3.1`；本轮新增角色化全屏方向、角色化能力声明、只读发布元数据、最近打开排序、损坏项目自救与 Agent/CLI 发布历史，并修复单屏多人显示端空能力声明被控制器声明污染的问题。变化统一记录在 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
 
 建议顺序：
 
@@ -116,7 +116,7 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 首页可以进入用户资料、游戏库和设置页。
 - 游戏库进入游戏详情，只有详情页提供“开始游戏”。
 - 游戏页默认最大化显示 WebView，主机与 App 扫码加入页共用可拖动、可展开/收纳的悬浮工具坞；扫码加入不显示主机分享入口。
-- 游戏工具坞只提供返回，不再提供独立“退出游戏”按钮；重新开始会重建 WebView。主机的链接/二维码是工具坞一级入口，普通浏览器由 Game SDK 模拟无 App 导航能力的对应功能区。
+- 游戏工具坞只提供返回，不再提供独立“退出游戏”按钮；刷新游戏会在保留会话的前提下重建 WebView。主机的链接/二维码是工具坞一级入口，普通浏览器由 Game SDK 模拟无 App 导航能力的对应功能区。
 - 游戏库右上角可以手动后台扫描；扫描期间继续展示旧缓存，成功后原子替换列表，新增游戏不要求重启 App。App 级缓存保留 revision、刷新时间和搜索索引，为后续分页/搜索提供数据源。
 - 游戏必须声明横屏或竖屏；WebView 创建前切换方向，离开后恢复。
 - Go Core 使用系统分配端口，设置页展示当前实际服务地址和结构化状态。
@@ -124,7 +124,7 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 
 ## 当前产品取舍
 
-- 联机码用于定位会话；浏览器二维码和链接还必须携带当前游戏会话有效的随机 token。关闭分享附加层不撤销 token；重新开始把同一 Core 会话重置为大厅并重建 WebView，同时保留会话、网关和 token；退出游戏、会话关闭或 Core 重启后失效。
+- 联机码用于定位会话；浏览器二维码和链接还必须携带当前游戏会话有效的随机 token。关闭分享附加层和刷新游戏都不撤销 token；刷新只重建 WebView 内容，不重置 Core 会话，并保留会话、网关和 token；退出游戏、会话关闭或 Core 重启后失效。
 - 分享附加层居中显示并根据视口动态调整宽高；内容超过屏幕时整体可滚动。它列出全部可用局域网地址，用户点选任一地址时二维码必须立即切换到该地址。
 - 加入前允许查看房主昵称、游戏名称、最小/最大人数和当前在线人数。
 - 不提供房间列表、局域网自动发现和旁观者入口。
@@ -133,8 +133,8 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 游戏声明文件使用 `displayModes` 声明唯一显示模式：`single_screen_multiplayer`（大屏模式）或 `multi_screen`（普通模式）。当前不允许同时声明两者。
 - 大屏模式下主机使用 `app/index.html` 作为公共显示端与 Authority Client，不属于 `players`；所有玩家使用 `app/controller/index.html`。
 - 普通模式下主机、其他 App 设备和普通浏览器都使用 `app/index.html`；创建会话的 App 主机固定为 Authority Client，并可同时作为一个 Player，任何玩家进入顺序都不参与 Authority 判定。
-- 游戏运行时只公开当前游戏的 `app/` 和平台 `public/` 资源；分别通过 `/app/...` 与 `/playmesh/...` 访问，`data/`、其他游戏包和 App 私有文件不可通过 URL 读取。
-- 游戏持久化目录固定为 `packages/{gameId}/data/`，不生成 `{userId}` 子目录；游戏开发者通过合法 Bucket 名称和 JSON 内容自行组织数据。
+- 游戏运行时公开当前游戏的 `app/`、平台 `public/` 资源和 SDK 上传的 Bucket 文件；分别通过 `/app/...`、`/playmesh/...` 与 `/bucket/{bucket}/{file}` 访问。`data/json`、其他游戏包和 App 私有文件不可通过 URL 读取。
+- 游戏持久化目录固定为 `packages/{gameId}/data/`，不生成 `{userId}` 子目录；JSON 位于 `data/json`，上传文件位于 `data/data`，游戏开发者只能通过合法 Bucket API 组织数据。
 - 所有 SDK 持久化数据统一写入开始游戏的 Authority 主机；浏览器经受 token 保护的主机接口读写，其他 App 玩家经会话路由到主机，不能写入加入设备自己的游戏库。
 - FPS 默认显示在游戏页左上角，可在悬浮工具坞关闭。SDK 只统计游戏在实际渲染完成处调用 `playmesh.performance.reportFrame()` 上报的帧；未接入时显示 `-- FPS`。
 - 二维码和链接根据当前运行模式指向不同入口；App 加入和浏览器加入遵循同一套入口选择规则。

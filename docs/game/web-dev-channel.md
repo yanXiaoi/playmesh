@@ -43,7 +43,7 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑，除稳定 `id` 外其他字段均可修改，并提供可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
 - 能力选项必须由 `GET /dev/api/capabilities` 返回的统一插件注册表动态生成，展示中文名、用途、`apiVersion`、方法、事件以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
 - “更多 → 能力测试”始终展示全平台注册表，不按当前项目的 `capabilities.json` 过滤。`GET /dev/api/capability-tests` 读取插件自检清单；`POST` 省略 `codes` 或传空数组时测试全部插件，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。工作区持续调用并回显插件版本、状态、耗时和实际结果，直到用户手动关闭测试窗口。
-- 新建项目弹窗与项目设置都必须提供标签和能力编辑。新建请求的 `tags` 写入 `main.json.tags`，`requiredCapabilities` 非空时创建 `capabilities.json`，不能要求用户创建后再二次修改。
+- 新建项目弹窗与项目设置都必须提供标签和能力编辑。新建请求的 `tags` 写入 `main.json.tags`；`requiredCapabilities` 写入主画面 `required`，单屏多人的 `controllerRequiredCapabilities` 写入控制器 `controllerRequired`，任一非空时创建 `capabilities.json`。
 - 编辑器文件标签栏右侧提供“复制文件”操作，复制 CodeMirror 中当前显示的完整文本（包括尚未保存的编辑），便于直接发送给 AI；图片和二进制文件禁用该操作。手机端按钮缩写为“复制”并固定保留在编辑视图内。
 - 在项目树点击文本、图片或其他文档后，工作区必须自动切到编辑区；文本文件同时聚焦编辑器。
 - 项目树目录右键菜单支持新建文件、新建文件夹、删除文件夹和向当前目录多选上传文件，也支持把本机文件直接拖到根节点、文件夹或文件节点上传；拖到文件节点时使用该文件所在目录。文件右键支持删除。空文件夹必须保留并参与 SSE 同步，上传单文件上限为 2 MiB。
@@ -100,7 +100,7 @@ AI 应优先使用高层开发者 API，例如“创建项目”“修改文件�
 
 清单和能力声明使用专用高层接口：`GET/PUT /dev/api/projects/{projectId}/manifest` 读取或修改 `main.json`（请求中的 `id` 必须与当前项目一致），`GET/PUT /dev/api/projects/{projectId}/capabilities` 读取或修改可选能力声明，`GET /dev/api/capabilities` 读取统一能力注册表，`GET/POST /dev/api/capability-tests` 读取或执行平台注册表驱动的能力自检。普通文件写接口继续禁止修改 `main.json`，从而保证稳定 ID 和完整清单校验。
 
-项目运行生命周期使用四个正式接口：`GET /dev/api/projects/{projectId}/run` 读取当前状态，`POST /run` 开始，`POST /run/restart` 重启，`POST /run/stop` 停止并关闭当前游戏会话。没有对应运行实例时，重启和停止返回结构化错误。AI 在非流式调用中应优先轮询 `GET /dev/api/projects/{projectId}/run` 获取状态，并使用 `GET /dev/api/logs?limit=50` 读取诊断日志；SSE 仍用于浏览器工作区的实时体验。
+项目运行生命周期使用四个正式接口：`GET /dev/api/projects/{projectId}/run` 读取当前状态，`POST /run` 开始，`POST /run/restart` 刷新当前运行内容，`POST /run/stop` 停止并关闭当前游戏会话。首次启动会先移除旧游戏路由再创建新的游戏 WebView；刷新只重建当前 WebView 内容并保留现有会话。没有对应运行实例时，刷新和停止返回结构化错误。AI 在非流式调用中应优先轮询 `GET /dev/api/projects/{projectId}/run` 获取状态，并使用 `GET /dev/api/logs?limit=50` 读取诊断日志；SSE 仍用于浏览器工作区的实时体验。
 
 开发者工作区提供“清理游戏数据”高风险操作，对应 `DELETE /dev/api/projects/{projectId}/data`。接口只删除当前项目的 `data/`，保留 `cache/`、源码与开发历史；游戏处于 `starting` 或 `running` 时返回 `409 game_running`，必须退出游戏后再调用，避免内存中的旧数据被 App 最终写回。
 
@@ -185,9 +185,9 @@ main.json 内容
 - 关闭开发者模式或 App 退出时现有工作区连接断开；重新开启后使用持久链接重新连接。Go Core 生命周期不改变开发者工作区身份。
 - 日志不记录完整 token，只记录 token 哈希或短标识。
 
-联机游戏分享链接和二维码使用另一类会话 token：关闭分享面板、浏览器玩家刷新和重新开始都不撤销；离开游戏、会话结束、App/Core 重启后失效。同一会话重新展示分享信息或重新开始时复用原 token，退出后创建的新会话不能复用旧链接或二维码。联机浏览器刷新会读取 `localStorage` 中由 SDK 管理的玩家 ID 和昵称重新加入；运行中的旧连接掉线后可用同 ID 恢复，在线同 ID 的后续连接会被拒绝。单机分享使用独立随机访问 token，只加载主 `index.html` 和 HTTP 资源/存储，不调用 Core 加入接口；其 Console 只保留在当前浏览器。
+联机游戏分享链接和二维码使用另一类会话 token：关闭分享面板、浏览器玩家刷新和 App 刷新游戏都不撤销；离开游戏、会话结束、App/Core 重启后失效。同一会话重新展示分享信息或刷新游戏时复用原 token，退出后创建的新会话不能复用旧链接或二维码。联机浏览器刷新会读取 `localStorage` 中由 SDK 管理的玩家 ID 和昵称重新加入；运行中的旧连接掉线后可用同 ID 恢复，在线同 ID 的后续连接会被拒绝。单机分享使用独立随机访问 token，只加载主 `index.html` 和 HTTP 资源/存储，不调用 Core 加入接口；其 Console 只保留在当前浏览器。
 
-开发运行时调用 `playmesh.storage` 必须写入当前 Authority 主机的 `packages/{gameId}/data/`。浏览器开发者工作区不能把游戏 Bucket 保存在浏览器 `localStorage`，其他加入端也不能建立独立副本。FPS 只能读取游戏通过 `playmesh.performance.reportFrame()` 上报的数据，不能用工作区自己的 RAF 估算游戏 FPS。
+开发运行时调用 `playmesh.storage` 必须写入当前 Authority 主机的 `packages/{gameId}/data/`：JSON 写入 `data/json`，`upload(file)` 写入 `data/data` 并返回 `/bucket/...`。浏览器开发者工作区不能把游戏 Bucket 保存在浏览器 `localStorage`，其他加入端也不能建立独立副本；只有 `data/data` 通过不可枚举的 Bucket URL 映射，JSON 始终私有。FPS 只能读取游戏通过 `playmesh.performance.reportFrame()` 上报的数据，不能用工作区自己的 RAF 估算游戏 FPS。
 
 ## 上传后的文件整理
 
@@ -201,7 +201,7 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.0.0` 与 App Bridge SDK `2.0.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
 
 ## 第四阶段完成标准
 

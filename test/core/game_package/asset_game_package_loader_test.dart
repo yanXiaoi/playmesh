@@ -12,11 +12,14 @@ void main() {
       'assets/games/test-game/main.json': '''
         {
           "id": "com.playmesh.test-game",
+          "author": "Test Author",
+          "lastModifiedAt": 1784851200000,
           "name": "测试游戏",
           "version": "1.0.0",
           "sdkVersion": "1.0.0",
           "orientation": "landscape",
           "modes": ["multiplayer"],
+          "controllerOrientation": "portrait",
           "displayModes": ["single_screen_multiplayer"],
           "players": {"min": 2, "max": 5},
           "authority": {"entry": "app/static/js/service/index.js"}
@@ -42,9 +45,11 @@ void main() {
     final bundle = _MemoryAssetBundle({
       'assets/game/main.json': '''
         {
-          "id": "game", "name": "game", "version": "1.0.0",
+          "id": "game", "name": "game", "author": "Test Author",
+          "lastModifiedAt": 1784851200000, "version": "1.0.0",
           "sdkVersion": "1.0.0", "orientation": "portrait",
           "modes": ["multiplayer"],
+          "controllerOrientation": "portrait",
           "displayModes": ["single_screen_multiplayer"],
           "players": {"min": 2, "max": 2},
           "authority": {"entry": "app/service.js"}
@@ -64,9 +69,11 @@ void main() {
     final bundle = _MemoryAssetBundle({
       'assets/game/main.json': '''
         {
-          "id": "game", "name": "game", "version": "1.0.0",
+          "id": "game", "name": "game", "author": "Test Author",
+          "lastModifiedAt": 1784851200000, "version": "1.0.0",
           "sdkVersion": "1.0.0", "orientation": "landscape",
           "modes": ["multiplayer"],
+          "controllerOrientation": "portrait",
           "displayModes": ["single_screen_multiplayer"],
           "players": {"min": 2, "max": 4},
           "entries": {
@@ -95,12 +102,15 @@ void main() {
       '$root/main.json': '''
         {
           "id": "com.playmesh.test-game",
+          "author": "Test Author",
+          "lastModifiedAt": 1784851200000,
           "name": "测试游戏",
           "remarks": "扫描测试",
           "version": "1.0.0",
           "sdkVersion": "1.0.0",
           "orientation": "landscape",
           "modes": ["multiplayer"],
+          "controllerOrientation": "portrait",
           "displayModes": ["single_screen_multiplayer"],
           "players": {"min": 2, "max": 5},
           "authority": {"entry": "app/static/js/service/index.js"},
@@ -128,7 +138,8 @@ void main() {
     final bundle = _MemoryAssetBundle({
       '$root/main.json': '''
         {
-          "id": "actual-id", "name": "game", "version": "1.0.0",
+          "id": "actual-id", "name": "game", "author": "Test Author",
+          "lastModifiedAt": 1784851200000, "version": "1.0.0",
           "sdkVersion": "1.0.0", "orientation": "portrait",
           "modes": ["solo"], "displayModes": ["multi_screen"],
           "players": {"min": 1, "max": 1}
@@ -165,7 +176,8 @@ void main() {
 String _soloManifest(String name) =>
     '''
   {
-    "id": "refresh-game", "name": "$name", "version": "1.0.0",
+    "id": "refresh-game", "name": "$name", "author": "Test Author",
+    "lastModifiedAt": 1784851200000, "version": "1.0.0",
     "sdkVersion": "1.0.0", "orientation": "portrait",
     "modes": ["solo"], "displayModes": ["multi_screen"],
     "players": {"min": 1, "max": 1}

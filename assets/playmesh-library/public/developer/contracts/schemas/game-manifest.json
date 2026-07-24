@@ -8,11 +8,14 @@
   "properties": {
     "id": { "type": "string", "minLength": 1 },
     "name": { "type": "string", "minLength": 1 },
+    "author": { "type": "string", "minLength": 1, "maxLength": 80, "readOnly": true, "default": "佚名", "description": "Platform-managed upload metadata. Legacy packages may omit it and are displayed as 佚名." },
+    "lastModifiedAt": { "type": "integer", "minimum": 0, "readOnly": true, "description": "Optional Unix epoch milliseconds; missing values render as 无 in the current device timezone." },
     "remarks": { "type": "string" },
     "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
-    "sdkVersion": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
-    "appSdkVersion": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+    "sdkVersion": { "type": "string", "pattern": "^[12]\\.\\d+\\.\\d+$" },
+    "appSdkVersion": { "type": "string", "pattern": "^[12]\\.\\d+\\.\\d+$" },
     "orientation": { "enum": ["landscape", "portrait"] },
+    "controllerOrientation": { "enum": ["landscape", "portrait"] },
     "modes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["solo", "multiplayer"] } },
     "displayModes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["multi_screen", "single_screen_multiplayer"] } },
     "players": {
@@ -53,7 +56,11 @@
     },
     {
       "if": { "properties": { "displayModes": { "contains": { "const": "single_screen_multiplayer" } } }, "required": ["displayModes"] },
-      "then": { "description": "entries.controller or its default app/controller/index.html must exist" }
+      "then": {
+        "required": ["controllerOrientation"],
+        "description": "controllerOrientation and entries.controller or its default app/controller/index.html must exist"
+      },
+      "else": { "not": { "required": ["controllerOrientation"] } }
     }
   ],
   "$defs": {

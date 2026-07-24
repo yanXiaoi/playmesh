@@ -13,6 +13,7 @@ import 'package:playmesh/core/developer/developer_run_controller.dart';
 import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_package/asset_game_library_scanner.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
+import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/core/lifecycle/go_core_host.dart';
 import 'package:playmesh/core/network/go_core_client.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
@@ -119,16 +120,16 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '2.0.0');
-    expect(statusJson['appSdkVersion'], '2.0.0');
+    expect(statusJson['gameSdkVersion'], '2.2.1');
+    expect(statusJson['appSdkVersion'], '2.1.0');
 
     final sdkBundle = await http.get(
       base.resolve('/dev/api/sdk?token=custom-dev-token'),
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '2.0.0');
-    expect(sdkBundleJson['appSdkVersion'], '2.0.0');
+    expect(sdkBundleJson['gameSdkVersion'], '2.2.1');
+    expect(sdkBundleJson['appSdkVersion'], '2.1.0');
     expect(
       (sdkBundleJson['files'] as Map).keys,
       containsAll([
@@ -278,7 +279,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "2.0.0"'));
+    expect(aiPrompt.body, contains('readonly version: "2.1.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -336,6 +337,11 @@ void main() {
       agentPrompt.body,
       contains('Authorization: Bearer custom-dev-token'),
     );
+    final cliWorkspaceUrl = Uri.parse(takeoverBaseUrl).replace(
+      path: session.workspacePath,
+      queryParameters: {'token': 'custom-dev-token'},
+    );
+    expect(agentPrompt.body, contains('playmesh-cli to "$cliWorkspaceUrl"'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/file'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/run/restart'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/run/stop'));
@@ -708,9 +714,11 @@ body { color: white; }
     );
 
     final project = await catalog.createProject(
-      const DeveloperProjectDraft(
+      DeveloperProjectDraft(
         id: 'com.example.created-game',
         name: 'Created Game',
+        author: 'Test Author',
+        lastModifiedAt: DateTime.utc(2026, 7, 24),
         description: 'A polished party game.',
         orientation: GameOrientation.portrait,
         displayMode: 'multi_screen',
@@ -769,6 +777,20 @@ body { color: white; }
       catalog.updateManifest(project.id, {
         ...manifestJson,
         'id': 'com.example.changed-id',
+      }),
+      throwsA(isA<FormatException>()),
+    );
+    await expectLater(
+      catalog.updateManifest(project.id, {
+        ...manifestJson,
+        'author': 'Changed Author',
+      }),
+      throwsA(isA<FormatException>()),
+    );
+    await expectLater(
+      catalog.updateManifest(project.id, {
+        ...manifestJson,
+        'lastModifiedAt': 0,
       }),
       throwsA(isA<FormatException>()),
     );
@@ -880,9 +902,11 @@ body { color: white; }
       workspaceRoot: workspace,
     );
     final project = await catalog.createProject(
-      const DeveloperProjectDraft(
+      DeveloperProjectDraft(
         id: 'com.example.visual-settings',
         name: 'Visual Settings',
+        author: 'Test Author',
+        lastModifiedAt: DateTime.utc(2026, 7, 24),
         orientation: GameOrientation.landscape,
         displayMode: 'multi_screen',
         minPlayers: 2,
@@ -988,9 +1012,11 @@ body { color: white; }
     );
 
     final project = await catalog.createProject(
-      const DeveloperProjectDraft(
+      DeveloperProjectDraft(
         id: 'com.example.solo-game',
         name: 'Solo Game',
+        author: 'Test Author',
+        lastModifiedAt: DateTime.utc(2026, 7, 24),
         mode: 'solo',
         orientation: GameOrientation.landscape,
         displayMode: 'multi_screen',
@@ -1009,6 +1035,88 @@ body { color: white; }
     expect(manifest, contains('"solo"'));
     expect(manifest, isNot(contains('"authority"')));
     expect((await catalog.validateProject(project.id)).valid, isTrue);
+  });
+  test('Agent/CLI 发布写入作者时间并生成可恢复的本地历史', () async {
+    final libraryRoot = await Directory.systemTemp.createTemp(
+      'playmesh-publish-history-',
+    );
+    addTearDown(() => libraryRoot.delete(recursive: true));
+    final workspace = Directory(
+      '${libraryRoot.path}${Platform.pathSeparator}packages',
+    );
+    await workspace.create(recursive: true);
+    final repository = GameLibraryRepository(AssetGameLibraryScanner().scan);
+    final transfer = GamePackageTransferService(libraryRoot: libraryRoot);
+    final catalog = GameLibraryDeveloperProjectCatalog(
+      repository,
+      workspaceRoot: workspace,
+      packageTransfer: transfer,
+    );
+    final project = await catalog.createProject(
+      DeveloperProjectDraft(
+        id: 'com.example.publish-history',
+        name: 'Publish History',
+        author: 'Original Author',
+        lastModifiedAt: DateTime.utc(2026, 7, 23),
+        mode: 'solo',
+        orientation: GameOrientation.landscape,
+        displayMode: 'multi_screen',
+        minPlayers: 1,
+        maxPlayers: 1,
+      ),
+    );
+    final source = File(
+      '${libraryRoot.path}${Platform.pathSeparator}published.zip',
+    );
+    await transfer.exportPackage(await catalog.prepareGame(project.id), source);
+    final index = File(
+      '${workspace.path}${Platform.pathSeparator}${project.id}'
+      '${Platform.pathSeparator}app${Platform.pathSeparator}index.html',
+    );
+    await index.writeAsString('<!doctype html><title>Before publish</title>');
+
+    final publishedAt = DateTime.utc(2026, 7, 24, 9, 30);
+    await catalog.publishPackage(
+      source,
+      author: 'Current Nickname',
+      lastModifiedAt: publishedAt,
+    );
+
+    final publishedManifest =
+        jsonDecode(
+              utf8.decode(
+                (await catalog.readFile(project.id, 'main.json')).bytes,
+              ),
+            )
+            as Map;
+    expect(publishedManifest['author'], 'Current Nickname');
+    expect(
+      publishedManifest['lastModifiedAt'],
+      publishedAt.millisecondsSinceEpoch,
+    );
+    final history = await catalog.listLocalHistory(project.id, '');
+    expect(history, hasLength(1));
+
+    await catalog.restoreLocalHistory(
+      project.id,
+      history.single.id,
+      '',
+      DeveloperHistoryVersion.before,
+    );
+
+    expect(await index.readAsString(), contains('Before publish'));
+    final restoredManifest =
+        jsonDecode(
+              utf8.decode(
+                (await catalog.readFile(project.id, 'main.json')).bytes,
+              ),
+            )
+            as Map;
+    expect(restoredManifest['author'], 'Original Author');
+    expect(
+      restoredManifest['lastModifiedAt'],
+      DateTime.utc(2026, 7, 23).millisecondsSinceEpoch,
+    );
   });
 }
 
@@ -1036,6 +1144,13 @@ class _FakeCatalog implements DeveloperProjectCatalog {
   @override
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft) =>
       throw UnimplementedError();
+
+  @override
+  Future<GameSummary> publishPackage(
+    File source, {
+    required String author,
+    required DateTime lastModifiedAt,
+  }) => throw UnimplementedError();
 
   @override
   Future<List<String>> listFiles(String projectId) async => const [

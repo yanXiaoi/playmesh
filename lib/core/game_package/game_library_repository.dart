@@ -91,10 +91,7 @@ class GameLibraryRepository {
       uniqueGames[game.id] = game;
     }
     final indexed = uniqueGames.values.map(_IndexedGame.new).toList()
-      ..sort((left, right) {
-        final byName = left.game.name.compareTo(right.game.name);
-        return byName != 0 ? byName : left.game.id.compareTo(right.game.id);
-      });
+      ..sort((left, right) => compareGameLibraryOrder(left.game, right.game));
     _cache = List.unmodifiable(indexed);
     if (markRefreshed) {
       _revision += 1;
@@ -111,12 +108,29 @@ class GameLibraryRepository {
   }
 
   void upsert(GameSummary game) {
+    final existing = _cache
+        .where((entry) => entry.game.id == game.id)
+        .firstOrNull
+        ?.game;
+    if (game.lastOpenedAt == null && existing?.lastOpenedAt != null) {
+      game = game.withLastOpenedAt(existing!.lastOpenedAt!);
+    }
     final games = [
       ..._cache
           .where((entry) => entry.game.id != game.id)
           .map((entry) => entry.game),
       game,
     ];
+    _replace(games, markRefreshed: true);
+  }
+
+  void markOpened(String gameId, DateTime openedAt) {
+    final games = _cache.map((entry) {
+      return entry.game.id == gameId
+          ? entry.game.withLastOpenedAt(openedAt.toUtc())
+          : entry.game;
+    }).toList();
+    if (!games.any((game) => game.id == gameId)) return;
     _replace(games, markRefreshed: true);
   }
 
@@ -139,4 +153,17 @@ class _IndexedGame {
 
   final GameSummary game;
   final String searchText;
+}
+
+int compareGameLibraryOrder(GameSummary left, GameSummary right) {
+  final leftOpened = left.lastOpenedAt;
+  final rightOpened = right.lastOpenedAt;
+  if (leftOpened != null || rightOpened != null) {
+    if (leftOpened == null) return 1;
+    if (rightOpened == null) return -1;
+    final byOpened = rightOpened.compareTo(leftOpened);
+    if (byOpened != 0) return byOpened;
+  }
+  final byName = left.name.compareTo(right.name);
+  return byName != 0 ? byName : left.id.compareTo(right.id);
 }

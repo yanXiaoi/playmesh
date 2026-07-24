@@ -16,6 +16,8 @@ void main() {
       '${package.path}${Platform.pathSeparator}main.json',
     ).writeAsString('''{
   "id": "com.example.game",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
   "name": "Example Game",
   "version": "1.0.0",
   "sdkVersion": "1.0.0",
@@ -38,7 +40,7 @@ void main() {
     expect(games.single.entry.packageRootFilePath, package.path);
   });
 
-  test('拒绝目录名与 main.json id 不一致的项目', () async {
+  test('目录名与 id 不一致时仍保留待修复项目', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-library-');
     addTearDown(() => root.delete(recursive: true));
     final package = Directory(
@@ -50,6 +52,8 @@ void main() {
       '${package.path}${Platform.pathSeparator}main.json',
     ).writeAsString('''{
   "id": "com.example.actual",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
   "name": "Example Game",
   "version": "1.0.0",
   "sdkVersion": "1.0.0",
@@ -65,10 +69,10 @@ void main() {
     await entry.parent.create(recursive: true);
     await entry.writeAsString('<!doctype html>');
 
-    await expectLater(
-      FileGameLibraryScanner(libraryRoot: root).scan(),
-      throwsFormatException,
-    );
+    final games = await FileGameLibraryScanner(libraryRoot: root).scan();
+
+    expect(games.single.id, 'com.example.actual');
+    expect(games.single.manifestError, contains('不一致'));
   });
 
   test('扫描并返回自定义页面入口', () async {
@@ -83,11 +87,14 @@ void main() {
       '${package.path}${Platform.pathSeparator}main.json',
     ).writeAsString('''{
   "id": "com.example.custom-entry",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
   "name": "Custom Entry",
   "version": "1.0.0",
   "sdkVersion": "1.0.0",
   "orientation": "landscape",
   "modes": ["multiplayer"],
+  "controllerOrientation": "portrait",
   "displayModes": ["single_screen_multiplayer"],
   "players": {"min": 2, "max": 4},
   "entries": {
@@ -115,7 +122,7 @@ void main() {
     expect(games.single.entry.controllerEntryPath, 'app/remote/pad.html');
   });
 
-  test('拒绝缺少 Authority 文件的多人项目', () async {
+  test('缺少 Authority 文件时仍保留待修复项目', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-library-');
     addTearDown(() => root.delete(recursive: true));
     final package = Directory(
@@ -127,6 +134,8 @@ void main() {
       '${package.path}${Platform.pathSeparator}main.json',
     ).writeAsString('''{
   "id": "com.example.missing-authority",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
   "name": "Missing Authority",
   "version": "1.0.0",
   "sdkVersion": "1.0.0",
@@ -143,9 +152,38 @@ void main() {
     await entry.parent.create(recursive: true);
     await entry.writeAsString('');
 
-    await expectLater(
-      FileGameLibraryScanner(libraryRoot: root).scan(),
-      throwsFormatException,
+    final games = await FileGameLibraryScanner(libraryRoot: root).scan();
+
+    expect(games.single.id, 'com.example.missing-authority');
+    expect(games.single.manifestError, contains('缺少'));
+  });
+
+  test('只有 id 的损坏清单不会阻断其他游戏扫描', () async {
+    final root = await Directory.systemTemp.createTemp('playmesh-library-');
+    addTearDown(() => root.delete(recursive: true));
+    final packages = Directory('${root.path}${Platform.pathSeparator}packages');
+    final broken = Directory(
+      '${packages.path}${Platform.pathSeparator}com.example.broken',
     );
+    final unidentifiable = Directory(
+      '${packages.path}${Platform.pathSeparator}no-id',
+    );
+    await broken.create(recursive: true);
+    await unidentifiable.create(recursive: true);
+    await File(
+      '${broken.path}${Platform.pathSeparator}main.json',
+    ).writeAsString('{"id":"com.example.broken","name":42}');
+    await File(
+      '${unidentifiable.path}${Platform.pathSeparator}main.json',
+    ).writeAsString('{"name":"No id"}');
+
+    final games = await FileGameLibraryScanner(libraryRoot: root).scan();
+
+    expect(games, hasLength(1));
+    expect(games.single.id, 'com.example.broken');
+    expect(games.single.name, 'com.example.broken');
+    expect(games.single.author, '佚名');
+    expect(games.single.lastModifiedAt, isNull);
+    expect(games.single.manifestError, isNotNull);
   });
 }

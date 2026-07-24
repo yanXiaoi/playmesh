@@ -10,6 +10,7 @@ import '../../models/game_capabilities.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../../models/local_game_entry.dart';
 import '../game_package/game_library_repository.dart';
+import '../game_package/game_package_transfer_service.dart';
 import '../library/playmesh_library_root.dart';
 import 'developer_local_history.dart';
 import 'developer_project_validation.dart';
@@ -68,7 +69,10 @@ class DeveloperProjectDraft {
   const DeveloperProjectDraft({
     required this.id,
     required this.name,
+    required this.author,
+    required this.lastModifiedAt,
     required this.orientation,
+    this.controllerOrientation,
     required this.displayMode,
     required this.minPlayers,
     required this.maxPlayers,
@@ -76,11 +80,15 @@ class DeveloperProjectDraft {
     this.description = '',
     this.tags = const [],
     this.requiredCapabilities = const [],
+    this.controllerRequiredCapabilities = const [],
   });
 
   final String id;
   final String name;
+  final String author;
+  final DateTime lastModifiedAt;
   final GameOrientation orientation;
+  final GameOrientation? controllerOrientation;
   final String displayMode;
   final int minPlayers;
   final int maxPlayers;
@@ -88,6 +96,7 @@ class DeveloperProjectDraft {
   final String description;
   final List<String> tags;
   final List<String> requiredCapabilities;
+  final List<String> controllerRequiredCapabilities;
 }
 
 class DeveloperFileDiff {
@@ -121,6 +130,12 @@ abstract interface class DeveloperProjectCatalog {
   Future<List<DeveloperProject>> listProjects();
 
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft);
+
+  Future<GameSummary> publishPackage(
+    File source, {
+    required String author,
+    required DateTime lastModifiedAt,
+  });
 
   Future<List<String>> listFiles(String projectId);
 
@@ -201,8 +216,10 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     this.repository, {
     AssetBundle? bundle,
     Directory? workspaceRoot,
+    GamePackageTransferService? packageTransfer,
   }) : bundle = bundle ?? rootBundle,
-       _injectedWorkspaceRoot = workspaceRoot;
+       _injectedWorkspaceRoot = workspaceRoot,
+       _packageTransfer = packageTransfer ?? GamePackageTransferService();
 
   static const _maxFileBytes = 2 * 1024 * 1024;
   static const _templateRoot =
@@ -211,6 +228,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
   final GameLibraryRepository repository;
   final AssetBundle bundle;
   final Directory? _injectedWorkspaceRoot;
+  final GamePackageTransferService _packageTransfer;
   final DeveloperLocalHistoryStore _localHistory = DeveloperLocalHistoryStore();
   final DeveloperProjectValidator _validator =
       const DeveloperProjectValidator();
@@ -241,15 +259,63 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
   }
 
   @override
+  Future<GameSummary> publishPackage(
+    File source, {
+    required String author,
+    required DateTime lastModifiedAt,
+  }) async {
+    final package = await _packageTransfer.readPackage(
+      source,
+      author: author,
+      lastModifiedAt: lastModifiedAt,
+    );
+    final root = await _workspaceRoot();
+    final target = Directory(
+      '${root.path}${Platform.pathSeparator}${package.manifest.id}',
+    );
+    final existed = await target.exists();
+    final before = existed ? await _visibleFilePaths(target) : const <String>{};
+    if (existed) {
+      await _localHistory.recordMutation(
+        workspace: target,
+        label: '发布项目 ${package.manifest.version}',
+        path: '',
+        forceNew: true,
+        action: () => _packageTransfer.commitPackage(package, target),
+      );
+    } else {
+      await _packageTransfer.commitPackage(package, target);
+    }
+    final game = await _customGame(target);
+    repository.upsert(game);
+    final after = await _visibleFilePaths(target);
+    for (final path in {...before, ...after}) {
+      _revisions.update(
+        _revisionKey(game.id, path),
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    return game;
+  }
+
+  @override
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft) async {
     final id = draft.id.trim();
     final name = draft.name.trim();
+    final author = draft.author.trim();
     final description = draft.description.trim();
     if (!RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(id)) {
       throw const FormatException('项目 ID 必须是小写反向域名格式');
     }
     if (name.isEmpty || name.length > 80) {
       throw const FormatException('项目名称长度必须为 1 到 80 个字符');
+    }
+    if (author.isEmpty || author.length > 80) {
+      throw const FormatException('作者名称长度必须为 1 到 80 个字符');
+    }
+    if (!draft.lastModifiedAt.isUtc) {
+      throw const FormatException('最后修改时间必须使用 UTC');
     }
     if (description.length > 500) {
       throw const FormatException('项目描述不能超过 500 个字符');
@@ -263,6 +329,11 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         throw FormatException('未知能力 code：$capability');
       }
     }
+    for (final capability in draft.controllerRequiredCapabilities) {
+      if (!defaultCapabilityDescriptorRegistry.containsKey(capability)) {
+        throw FormatException('未知控制器能力 code：$capability');
+      }
+    }
     if (draft.minPlayers < 1 || draft.maxPlayers < draft.minPlayers) {
       throw const FormatException('玩家人数必须满足 1 <= min <= max');
     }
@@ -272,6 +343,18 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (draft.displayMode != 'multi_screen' &&
         draft.displayMode != 'single_screen_multiplayer') {
       throw const FormatException('不支持的显示模式');
+    }
+    if (draft.displayMode == 'single_screen_multiplayer' &&
+        draft.controllerOrientation == null) {
+      throw const FormatException('单屏多人项目必须声明控制器方向');
+    }
+    if (draft.displayMode != 'single_screen_multiplayer' &&
+        draft.controllerOrientation != null) {
+      throw const FormatException('仅单屏多人项目可以声明控制器方向');
+    }
+    if (draft.displayMode != 'single_screen_multiplayer' &&
+        draft.controllerRequiredCapabilities.isNotEmpty) {
+      throw const FormatException('仅单屏多人项目可以声明控制器能力');
     }
     if (draft.mode == 'solo' &&
         (draft.displayMode != 'multi_screen' ||
@@ -315,12 +398,20 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       final manifestJson = Map<String, Object?>.from(decoded)
         ..['id'] = id
         ..['name'] = name
+        ..['author'] = author
+        ..['lastModifiedAt'] = draft.lastModifiedAt.millisecondsSinceEpoch
         ..['remarks'] = description
         ..['orientation'] = draft.orientation.manifestValue
         ..['modes'] = [draft.mode]
         ..['displayModes'] = [draft.displayMode]
         ..['tags'] = draft.tags.map((tag) => tag.trim()).toSet().toList()
         ..['players'] = {'min': draft.minPlayers, 'max': draft.maxPlayers};
+      if (draft.controllerOrientation case final controllerOrientation?) {
+        manifestJson['controllerOrientation'] =
+            controllerOrientation.manifestValue;
+      } else {
+        manifestJson.remove('controllerOrientation');
+      }
       if (draft.mode == 'solo') {
         manifestJson.remove('authority');
         await _replaceWithSoloSkeleton(staging);
@@ -332,11 +423,16 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         const JsonEncoder.withIndent('  ').convert(manifestJson),
         flush: true,
       );
-      if (draft.requiredCapabilities.isNotEmpty) {
+      if (draft.requiredCapabilities.isNotEmpty ||
+          draft.controllerRequiredCapabilities.isNotEmpty) {
         await _resolveFile(staging, 'capabilities.json').writeAsString(
-          const JsonEncoder.withIndent(
-            ' ',
-          ).convert({'required': draft.requiredCapabilities.toSet().toList()}),
+          const JsonEncoder.withIndent('  ').convert({
+            'required': draft.requiredCapabilities.toSet().toList(),
+            if (draft.controllerRequiredCapabilities.isNotEmpty)
+              'controllerRequired': draft.controllerRequiredCapabilities
+                  .toSet()
+                  .toList(),
+          }),
           flush: true,
         );
       }
@@ -626,7 +722,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     final currentFile = _resolveFile(workspace, 'main.json');
     final currentJson = jsonDecode(await currentFile.readAsString());
     if (currentJson is! Map) throw const FormatException('项目 main.json 无效');
-    final currentId = Map<String, Object?>.from(currentJson)['id'];
+    final current = Map<String, Object?>.from(currentJson);
+    final currentId = current['id'];
     if (currentId is! String || currentId.isEmpty) {
       throw const FormatException('项目 main.json 缺少有效 id');
     }
@@ -634,7 +731,15 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (requestedId != null && requestedId != currentId) {
       throw const FormatException('main.json.id 是项目稳定标识，不能修改');
     }
-    final normalized = Map<String, Object?>.from(manifest)..['id'] = currentId;
+    for (final field in ['author', 'lastModifiedAt']) {
+      if (manifest[field] != current[field]) {
+        throw FormatException('main.json.$field 由 App 管理，不能修改');
+      }
+    }
+    final normalized = Map<String, Object?>.from(manifest)
+      ..['id'] = currentId
+      ..['author'] = current['author']
+      ..['lastModifiedAt'] = current['lastModifiedAt'];
     GameManifest.fromJson(normalized);
     final encoded = utf8.encode(
       '${const JsonEncoder.withIndent('  ').convert(normalized)}\n',
@@ -907,6 +1012,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         ifAbsent: () => 1,
       );
     }
+    repository.upsert(await _customGame(workspace));
   }
 
   @override
@@ -947,6 +1053,10 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       id: game.id,
       name: game.name,
       version: game.version,
+      author: game.author,
+      lastModifiedAt: game.lastModifiedAt,
+      sdkVersion: game.sdkVersion,
+      appSdkVersion: game.appSdkVersion,
       description: game.description,
       minPlayers: game.minPlayers,
       maxPlayers: game.maxPlayers,
@@ -954,6 +1064,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       displayModeLabel: game.displayModeLabel,
       displayMode: game.displayMode,
       orientation: game.orientation,
+      controllerOrientation: game.controllerOrientation,
       tags: game.tags,
       capabilities: await _readCustomCapabilities(directory),
       entry: LocalGameEntry(
@@ -1051,6 +1162,10 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       id: manifest.id,
       name: manifest.name,
       version: manifest.version,
+      author: manifest.author,
+      lastModifiedAt: manifest.lastModifiedAt,
+      sdkVersion: manifest.sdkVersion,
+      appSdkVersion: manifest.appSdkVersion,
       description: manifest.remarks,
       minPlayers: manifest.players.min,
       maxPlayers: manifest.players.max,
@@ -1060,6 +1175,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
           : '多人多屏',
       displayMode: displayMode.manifestValue,
       orientation: manifest.orientation,
+      controllerOrientation: manifest.controllerOrientation,
       tags: manifest.tags,
       capabilities: await _readCustomCapabilities(directory),
       entry: LocalGameEntry(
@@ -1168,6 +1284,14 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         yield* _visibleWorkspaceEntities(workspace, entity);
       }
     }
+  }
+
+  Future<Set<String>> _visibleFilePaths(Directory workspace) async {
+    final paths = <String>{};
+    await for (final entity in _visibleWorkspaceEntities(workspace)) {
+      if (entity is File) paths.add(_relativePath(workspace, entity.path));
+    }
+    return paths;
   }
 
   Future<List<String>> _sourceFiles(DeveloperProject project) async {

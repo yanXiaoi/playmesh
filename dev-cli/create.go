@@ -14,17 +14,19 @@ import (
 )
 
 type createProjectRequest struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	Description          string   `json:"description"`
-	Tags                 []string `json:"tags"`
-	RequiredCapabilities []string `json:"requiredCapabilities"`
-	Mode                 string   `json:"mode"`
-	Orientation          string   `json:"orientation"`
-	DisplayMode          string   `json:"displayMode"`
-	MinPlayers           int      `json:"minPlayers"`
-	MaxPlayers           int      `json:"maxPlayers"`
-	ClientID             string   `json:"clientId"`
+	ID                             string   `json:"id"`
+	Name                           string   `json:"name"`
+	Description                    string   `json:"description"`
+	Tags                           []string `json:"tags"`
+	RequiredCapabilities           []string `json:"requiredCapabilities"`
+	ControllerRequiredCapabilities []string `json:"controllerRequiredCapabilities,omitempty"`
+	Mode                           string   `json:"mode"`
+	Orientation                    string   `json:"orientation"`
+	ControllerOrientation          string   `json:"controllerOrientation,omitempty"`
+	DisplayMode                    string   `json:"displayMode"`
+	MinPlayers                     int      `json:"minPlayers"`
+	MaxPlayers                     int      `json:"maxPlayers"`
+	ClientID                       string   `json:"clientId"`
 }
 
 type capabilityOption struct {
@@ -125,7 +127,7 @@ func promptCreateProject(reader *bufio.Reader, capabilities []capabilityOption) 
 		return createProjectRequest{}, err
 	}
 
-	displayMode, minPlayers, maxPlayers := "multi_screen", 1, 1
+	displayMode, controllerOrientation, minPlayers, maxPlayers := "multi_screen", "", 1, 1
 	if mode == "multiplayer" {
 		displayMode, err = promptChoice(reader, "显示模式", []promptOption{{"multi_screen", "多人多屏"}, {"single_screen_multiplayer", "单屏多人"}}, 0)
 		if err != nil {
@@ -145,6 +147,17 @@ func promptCreateProject(reader *bufio.Reader, capabilities []capabilityOption) 
 		return createProjectRequest{}, err
 	}
 	tags := splitUnique(tagText)
+	if displayMode == "single_screen_multiplayer" {
+		controllerOrientation, err = promptChoice(
+			reader,
+			"控制器方向",
+			[]promptOption{{"portrait", "竖屏"}, {"landscape", "横屏"}},
+			0,
+		)
+		if err != nil {
+			return createProjectRequest{}, err
+		}
+	}
 	if len(tags) > 20 {
 		return createProjectRequest{}, errors.New("标签最多 20 个")
 	}
@@ -157,10 +170,22 @@ func promptCreateProject(reader *bufio.Reader, capabilities []capabilityOption) 
 	if err != nil {
 		return createProjectRequest{}, err
 	}
+	var controllerRequiredCapabilities []string
+	if displayMode == "single_screen_multiplayer" {
+		fmt.Println("控制器能力（与主画面独立声明）：")
+		controllerRequiredCapabilities, err = promptCapabilities(
+			reader,
+			capabilities,
+		)
+		if err != nil {
+			return createProjectRequest{}, err
+		}
+	}
 	return createProjectRequest{
 		ID: id, Name: name, Description: description, Tags: tags,
 		RequiredCapabilities: requiredCapabilities, Mode: mode,
-		Orientation: orientation, DisplayMode: displayMode,
+		ControllerRequiredCapabilities: controllerRequiredCapabilities,
+		Orientation:                    orientation, ControllerOrientation: controllerOrientation, DisplayMode: displayMode,
 		MinPlayers: minPlayers, MaxPlayers: maxPlayers, ClientID: "cli",
 	}, nil
 }

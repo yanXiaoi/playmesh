@@ -9,6 +9,7 @@ import 'package:qr/qr.dart';
 
 import '../../models/game_capabilities.dart';
 import '../../models/game_summary.dart';
+import '../../models/local_game_entry.dart';
 import '../game_package/game_package_transfer_service.dart';
 import '../game_sdk/generated_sdk_versions.dart';
 import '../network/lan_endpoint_resolver.dart';
@@ -31,6 +32,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperRunController? runController,
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
+  String Function()? currentAuthor,
+  DateTime Function()? clock,
 }) async {
   if (port < 1 || port > 65535) {
     throw const FormatException('开发者通道端口必须在 1 到 65535 之间');
@@ -48,6 +51,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
       runController: runController ?? DeveloperRunController(),
       capabilityTests: capabilityTests ?? DeveloperCapabilityTestService(),
       packageTransfer: packageTransfer ?? GamePackageTransferService(),
+      currentAuthor: currentAuthor,
+      clock: clock ?? DateTime.now,
     );
     gateway.listen();
     return gateway;
@@ -66,6 +71,8 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     required this.runController,
     required this.capabilityTests,
     required this.packageTransfer,
+    required this.currentAuthor,
+    required this.clock,
   }) : session = DeveloperSession(
          enabled: true,
          port: server.port,
@@ -87,8 +94,19 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   final DeveloperRunController runController;
   final DeveloperCapabilityTestService capabilityTests;
   final GamePackageTransferService packageTransfer;
+  final String Function()? currentAuthor;
+  final DateTime Function() clock;
+  Future<void> _packageFileTail = Future<void>.value();
   @override
   final DeveloperSession session;
+
+  String _requireCurrentAuthor() {
+    final author = currentAuthor?.call().trim() ?? '';
+    if (author.isEmpty) {
+      throw StateError('当前 App 昵称不可用，无法写入项目作者');
+    }
+    return author;
+  }
 
   void listen() {
     server.listen((request) async {
@@ -284,18 +302,31 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
       final orientation = GameOrientation.fromManifestValue(
         body['orientation'] as String? ?? 'landscape',
       );
+      final displayMode = body['displayMode'] as String? ?? 'multi_screen';
+      final controllerOrientationValue =
+          body['controllerOrientation'] as String?;
+      final controllerOrientation = controllerOrientationValue == null
+          ? null
+          : GameOrientation.fromManifestValue(controllerOrientationValue);
+      final now = clock().toUtc();
       final project = await catalog.createProject(
         DeveloperProjectDraft(
           id: body['id'] as String? ?? '',
           name: body['name'] as String? ?? '',
+          author: _requireCurrentAuthor(),
+          lastModifiedAt: now,
           description: body['description'] as String? ?? '',
           orientation: orientation,
-          displayMode: body['displayMode'] as String? ?? 'multi_screen',
+          controllerOrientation: controllerOrientation,
+          displayMode: displayMode,
           minPlayers: body['minPlayers'] as int? ?? 2,
           maxPlayers: body['maxPlayers'] as int? ?? 5,
           mode: body['mode'] as String? ?? 'multiplayer',
           tags: _stringValues(body['tags']),
           requiredCapabilities: _stringValues(body['requiredCapabilities']),
+          controllerRequiredCapabilities: _stringValues(
+            body['controllerRequiredCapabilities'],
+          ),
         ),
       );
       developerEventHub.emit({
@@ -722,16 +753,47 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     HttpRequest request,
     String requestId,
     String projectId,
+  ) => _serializePackageFile(
+    () => _exportProjectPackageNow(request, requestId, projectId),
+  );
+
+  Future<void> _exportProjectPackageNow(
+    HttpRequest request,
+    String requestId,
+    String projectId,
   ) async {
-    final temporary = await Directory.systemTemp.createTemp(
-      'playmesh-dev-export-',
+    final file = File(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'playmesh-developer-export.playmesh.zip',
     );
     try {
-      final game = await catalog.prepareGame(projectId);
-      final file = File(
-        '${temporary.path}${Platform.pathSeparator}$projectId.playmesh.zip',
+      if (await file.exists()) await file.delete();
+      final project = (await catalog.listProjects()).firstWhere(
+        (candidate) => candidate.id == projectId,
+        orElse: () => throw StateError('开发者项目不存在'),
       );
-      await packageTransfer.exportPackage(game, file);
+      final rootFilePath = project.rootFilePath;
+      if (rootFilePath == null) {
+        throw StateError('该项目没有可拉取的本地工作区');
+      }
+      final game = GameSummary(
+        id: project.id,
+        name: project.name,
+        version: project.version,
+        description: '',
+        minPlayers: 1,
+        maxPlayers: 1,
+        supportsMultiplayer: false,
+        displayModeLabel: '',
+        displayMode: 'multi_screen',
+        orientation: GameOrientation.landscape,
+        entry: LocalGameEntry(
+          assetPath: 'app/index.html',
+          statusLabel: '开发项目',
+          packageRootFilePath: rootFilePath,
+        ),
+      );
+      await packageTransfer.exportPackage(game, file, validate: false);
       request.response.headers
         ..contentType = ContentType('application', 'zip')
         ..set(
@@ -741,11 +803,14 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         ..set('X-Request-ID', requestId);
       await file.openRead().pipe(request.response);
     } finally {
-      if (await temporary.exists()) await temporary.delete(recursive: true);
+      if (await file.exists()) await file.delete();
     }
   }
 
-  Future<void> _importPackage(HttpRequest request, String requestId) async {
+  Future<void> _importPackage(HttpRequest request, String requestId) =>
+      _serializePackageFile(() => _importPackageNow(request, requestId));
+
+  Future<void> _importPackageNow(HttpRequest request, String requestId) async {
     final builder = BytesBuilder(copy: false);
     var length = 0;
     await for (final chunk in request) {
@@ -756,15 +821,18 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
       builder.add(chunk);
     }
     if (length == 0) throw const FormatException('上传的游戏包不能为空');
-    final temporary = await Directory.systemTemp.createTemp(
-      'playmesh-dev-import-',
+    final file = File(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'playmesh-developer-import.playmesh.zip',
     );
     try {
-      final file = File(
-        '${temporary.path}${Platform.pathSeparator}developer-upload.playmesh.zip',
-      );
+      if (await file.exists()) await file.delete();
       await file.writeAsBytes(builder.takeBytes(), flush: true);
-      final game = await packageTransfer.importPackage(file);
+      final game = await catalog.publishPackage(
+        file,
+        author: _requireCurrentAuthor(),
+        lastModifiedAt: clock().toUtc(),
+      );
       developerEventHub.emit({
         'type': 'project.imported',
         'projectId': game.id,
@@ -779,8 +847,17 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         'preservedDirectories': ['data', 'cache'],
       });
     } finally {
-      if (await temporary.exists()) await temporary.delete(recursive: true);
+      if (await file.exists()) await file.delete();
     }
+  }
+
+  Future<T> _serializePackageFile<T>(Future<T> Function() action) {
+    final operation = _packageFileTail.then((_) => action());
+    _packageFileTail = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
   }
 
   Future<void> _servePublicAsset(HttpRequest request, String route) async {
@@ -866,6 +943,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
 
     final projectFiles = await catalog.listFiles(projectId);
     var declaredCapabilities = const <String>[];
+    var controllerDeclaredCapabilities = const <String>[];
     if (projectFiles.contains('capabilities.json')) {
       final capabilitiesFile = await catalog.readFile(
         projectId,
@@ -877,9 +955,12 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
       if (decodedCapabilities is! Map) {
         throw const FormatException('capabilities.json 必须是对象');
       }
-      declaredCapabilities = GameCapabilities.fromJson(
+      final capabilities = GameCapabilities.fromJson(
         Map<String, Object?>.from(decodedCapabilities),
-      ).required.toList()..sort();
+      );
+      declaredCapabilities = capabilities.required.toList()..sort();
+      controllerDeclaredCapabilities = capabilities.controllerRequired.toList()
+        ..sort();
     }
 
     final promptParts = <String>[
@@ -960,16 +1041,27 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
       ..writeln(
         '当前 capabilities.json.required：'
         '${declaredCapabilities.isEmpty ? '未声明' : declaredCapabilities.join(', ')}',
+      )
+      ..writeln(
+        '当前 capabilities.json.controllerRequired：'
+        '${controllerDeclaredCapabilities.isEmpty ? '未声明' : controllerDeclaredCapabilities.join(', ')}',
       );
     if (!isAgent) {
+      final selectedCodes = {
+        ...declaredCapabilities,
+        ...controllerDeclaredCapabilities,
+      };
       final selectedDefinitions = capabilityTests.registry.descriptors
-          .where((definition) => declaredCapabilities.contains(definition.code))
+          .where((definition) => selectedCodes.contains(definition.code))
           .map((definition) => definition.toJson())
           .toList(growable: false);
       output
         ..writeln()
         ..writeln('当前项目已勾选能力的完整声明（对话 AI 能力上下文）：')
-        ..writeln('这里只提供 capabilities.json.required 已声明的能力，不包含未勾选的平台注册能力。');
+        ..writeln(
+          '这里只提供 capabilities.json.required/controllerRequired '
+          '已声明的能力，不包含未勾选的平台注册能力。',
+        );
       if (selectedDefinitions.isEmpty) {
         output.writeln('未声明平台能力。');
       } else {
@@ -980,6 +1072,10 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     }
     if (isAgent) {
       final origin = await _promptBaseUrl(request);
+      final workspaceUrl = origin.replace(
+        path: session.workspacePath,
+        queryParameters: {'token': token},
+      );
       String endpoint(String route) => origin.replace(path: route).toString();
       output
         ..writeln()
@@ -992,6 +1088,10 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         )
         ..writeln('Base URL: $origin')
         ..writeln('Authorization: Bearer $token')
+        ..writeln(
+          '本地 CLI 连接命令（完整地址，可直接执行）: '
+          'playmesh-cli to "$workspaceUrl"',
+        )
         ..writeln('项目 ID: $projectId')
         ..writeln('GET ${endpoint('/dev/api/projects/$projectId/files')}')
         ..writeln(
@@ -1528,6 +1628,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         'exists': true,
         'revision': file.revision,
         'required': capabilities.required.toList(),
+        'controllerRequired': capabilities.controllerRequired.toList(),
       });
     } on StateError {
       await _json(request.response, HttpStatus.ok, {
@@ -1536,6 +1637,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         'exists': false,
         'revision': 0,
         'required': <String>[],
+        'controllerRequired': <String>[],
       });
     }
   }
@@ -1547,7 +1649,22 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   ) async {
     final body = await _jsonBody(request);
     final required = body['required'];
-    final capabilities = GameCapabilities.fromJson({'required': required});
+    final capabilities = GameCapabilities.fromJson({
+      'required': required,
+      'controllerRequired': body['controllerRequired'],
+    });
+    final manifest = jsonDecode(
+      utf8.decode((await catalog.readFile(projectId, 'main.json')).bytes),
+    );
+    final singleScreen =
+        manifest is Map &&
+        manifest['displayModes'] is List &&
+        (manifest['displayModes'] as List).contains(
+          'single_screen_multiplayer',
+        );
+    if (!singleScreen && capabilities.controllerRequired.isNotEmpty) {
+      throw const FormatException('仅单屏多人项目可以声明控制器能力');
+    }
     DeveloperProjectFile? before;
     try {
       before = await catalog.readFile(projectId, 'capabilities.json');
@@ -1577,11 +1694,12 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         'exists': false,
         'revision': before == null ? 0 : before.revision + 1,
         'required': <String>[],
+        'controllerRequired': <String>[],
       });
       return;
     }
     final content =
-        '${const JsonEncoder.withIndent('  ').convert({'required': capabilities.required.toList()})}\n';
+        '${const JsonEncoder.withIndent('  ').convert(capabilities.toJson())}\n';
     final saved = await catalog.writeFile(
       projectId,
       'capabilities.json',
@@ -1604,6 +1722,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
       'exists': true,
       'revision': saved.revision,
       'required': capabilities.required.toList(),
+      'controllerRequired': capabilities.controllerRequired.toList(),
     });
   }
 
@@ -2080,6 +2199,15 @@ class _EmptyDeveloperProjectCatalog implements DeveloperProjectCatalog {
 
   @override
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft) async {
+    throw StateError('开发者项目不可用');
+  }
+
+  @override
+  Future<GameSummary> publishPackage(
+    File source, {
+    required String author,
+    required DateTime lastModifiedAt,
+  }) async {
     throw StateError('开发者项目不可用');
   }
 
@@ -2653,7 +2781,7 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 
 工作区直接编辑 UTF-8 文本，并可预览 PNG、JPEG、GIF、WebP 和 SVG。其他二进制文件会显示在文件树中但不提供页面预览。`PUT file` 的 `encoding` 默认为 `utf8`；传 `base64` 时可以完整替换图片或其他二进制资源。`PATCH file` 只支持文本。
 
-游戏与控制器继续使用原生 `console.log/info/warn/error/debug`。Console 由运行页面的宿主底层捕获，不经过 Game SDK 或游戏网关。App WebView 只把当前设备页面的输出写入本机 `runtime.log`，每条包含 `eventId`、`projectId` 和 `runId`；每次启动或重新开始游戏前清空旧缓存，并在本次运行期间保留最近 500 条。`GET /dev/api/logs` 可用 `projectId/runId` 过滤，CLI 用它回放订阅前的早期日志并与 SSE 去重。普通浏览器在自身开发者工具查看本机 Console，日志不会跨设备转发，也不写磁盘。App WebView 入口缺少主 SDK 标签时，资源网关会自动补齐 App SDK 和 Game SDK；资源或脚本加载失败由宿主直接记录错误。
+游戏与控制器继续使用原生 `console.log/info/warn/error/debug`。Console 由运行页面的宿主底层捕获，不经过 Game SDK 或游戏网关。App WebView 只把当前设备页面的输出写入本机 `runtime.log`，每条包含 `eventId`、`projectId` 和 `runId`；每次启动或刷新游戏前清空旧缓存，并在本次运行期间保留最近 500 条。`GET /dev/api/logs` 可用 `projectId/runId` 过滤，CLI 用它回放订阅前的早期日志并与 SSE 去重。普通浏览器在自身开发者工具查看本机 Console，日志不会跨设备转发，也不写磁盘。App WebView 入口缺少主 SDK 标签时，资源网关会自动补齐 App SDK 和 Game SDK；资源或脚本加载失败由宿主直接记录错误。
 
 运行项目前会执行游戏包校验。校验报告包含稳定诊断码、严重级别、文件路径、行列和修复提示；存在 `error` 时运行接口返回 `422 package_validation_failed`。校验覆盖 main.json 语义、项目 ID、`entries.game`、`entries.controller`、`authority.entry`、icon 文件、发布包禁止文件，以及 HTML/CSS/JavaScript 的本地资源引用。页面入口未声明时分别使用 `app/index.html` 和 `app/controller/index.html`。
 
@@ -2662,7 +2790,7 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 
 Map<String, Object?> _openApi() => {
   'openapi': '3.1.0',
-  'info': {'title': 'Playmesh Developer Channel', 'version': '1.5.0'},
+  'info': {'title': 'Playmesh Developer Channel', 'version': '1.6.1'},
   'paths': {
     '/dev/api/status': {'get': _operation('读取开发者通道状态')},
     '/dev/api/sdk': {'get': _operation('读取统一生成的 SDK 与类型声明')},
@@ -2732,7 +2860,7 @@ Map<String, Object?> _openApi() => {
     '/dev/api/qr.svg': {'get': _operation('生成联机链接二维码')},
     '/dev/api/projects/{projectId}/files': {'get': _operation('列出项目文件与文件夹')},
     '/dev/api/projects/{projectId}/package': {
-      'get': _operation('导出标准 Playmesh ZIP'),
+      'get': _operation('无语义校验拉取现有项目文件，用于损坏项目修复'),
     },
     '/dev/api/projects/{projectId}/chat-prompt.txt': {
       'get': _operation('按当前游戏类型导出对话 AI 提示词 TXT'),

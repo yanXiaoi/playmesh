@@ -15,7 +15,11 @@ playmesh-library/
         controller/index.html
         static/...
       data/
-        {bucket}.json
+        json/
+          {bucket}.json
+        data/
+          {bucket}/
+            {timestamp-ms}.{ext}
       cache/
         developer/local-history/...
   public/
@@ -32,9 +36,9 @@ Android 与 iOS 使用系统应用支持目录中的 `playmesh-library`。所有
 
 ## 公开资源边界
 
-- `app/` 是当前游戏唯一映射到 WebView 的目录，对应 `/app/...`。
+- `app/` 是当前游戏的发布资源映射目录，对应 `/app/...`。
 - `playmesh-library/public/` 是平台公共资源目录，对应 `/playmesh/...`。
-- `data/` 与 `app/` 同级，不参与静态映射，不能通过 URL、相对路径或 `/app/...` 读取。
+- `data/` 与 `app/` 同级。只有 `data/data` 中由 SDK 上传的文件按原 Bucket 映射为 `/bucket/{bucket}/{file}`；`data/json` 永远私有，`/bucket` 不允许目录枚举或路径穿越。
 - `cache/` 与 `app/`、`data/` 同级，由平台管理，同样不参与静态映射。
 - 游戏不能读取其他包、用户资料或 App 私有文件。
 - SDK 固定从 `/playmesh/sdk/v1/playmesh.js` 引入，禁止使用 `../../../sdk/...` 一类跨目录路径。
@@ -62,11 +66,14 @@ game-package/
   "icon": "app/static/image/icon.png",
   "id": "com.example.party-game",
   "name": "派对游戏",
+  "author": "当前 App 昵称",
+  "lastModifiedAt": 1784851200000,
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "2.0.0",
-  "appSdkVersion": "2.0.0",
+  "sdkVersion": "2.2.1",
+  "appSdkVersion": "2.1.0",
   "orientation": "landscape",
+  "controllerOrientation": "portrait",
   "modes": ["multiplayer"],
   "displayModes": ["single_screen_multiplayer"],
   "players": { "min": 2, "max": 6 },
@@ -86,11 +93,14 @@ game-package/
 |---|---|---|
 | `id` | 是 | 非空稳定标识；必须等于安装目录名 |
 | `name` | 是 | 非空展示名称 |
+| `author` | 新发布必有，旧包可缺省 | 上传时由平台写入当前 App 设置昵称，只读；缺省显示“佚名” |
+| `lastModifiedAt` | 新发布必有，旧包可缺省 | 最后上传的 Unix 毫秒时间戳，只读；缺省显示“无”，有值时按设备本地时区显示 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `2.0.0` |
-| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `2.0.0`；旧包缺省按 `1.0.0` 读取，CLI 发布时总会写入当前值 |
+| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `2.2.1` |
+| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `2.1.0`；CLI 发布时总会写入当前值 |
 | `orientation` | 是 | `landscape` 或 `portrait` |
+| `controllerOrientation` | 单屏多人必填 | 控制器全屏方向；其他显示模式禁止声明 |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
 | `displayModes` | 是 | 单元素数组，值为 `multi_screen` 或 `single_screen_multiplayer` |
 | `players` | 是 | 整数，满足 `1 <= min <= max` |
@@ -119,11 +129,17 @@ game-package/
 ```json
 {
   "required": [
+    "device.vibration"
+  ],
+  "controllerRequired": [
     "sensor.accelerometer",
     "sensor.gyroscope"
   ]
 }
 ```
+
+- `required` 只授权 `entries.game` 主画面；`controllerRequired` 只授权 `entries.controller` 控制器。任一角色声明为空时不弹能力确认，也不会回退读取另一角色的声明。
+- `controllerRequired` 仅允许用于 `single_screen_multiplayer`，其他模式声明会校验失败。
 
 - 能力 ID 与实现环境解耦。当前两个传感器能力由 App 适配器提供；未来摄像头、麦克风等通用能力可由 App 和 HTTPS 浏览器分别实现同一 ID。
 - 平台统一能力插件注册表把每个 code 映射为中文名、用途、`apiVersion`、方法、事件以及 App/HTML 适配状态。能力确认弹窗、开发者工作区的新建/项目设置选项和能力声明校验均以该注册表为准；工作区能力测试展示全平台注册表并调用各插件自带的自检，不按当前项目声明过滤。
@@ -132,17 +148,18 @@ game-package/
 
 ## 屏幕方向
 
-游戏必须声明自身方向。App 在创建 WebView 前应用 `orientation`，离开游戏后恢复系统方向。游戏页面不应自行依赖平台私有 API 切换方向。
+游戏必须声明主画面 `orientation`；单屏多人还必须声明 `controllerOrientation`。App 在创建 WebView 前按当前角色应用方向，SDK 进入全屏时把方向传给原生宿主；普通浏览器使用 Fullscreen API 后尽力调用 Screen Orientation API。浏览器可能拒绝锁定，游戏页面仍须使用响应式布局。离开游戏后恢复系统方向。
 
 ## 存储目录
 
-每个 Bucket 对应主机上的一个 JSON 文件：
+Bucket 数据分为私有 JSON 与运行时文件：
 
 ```text
-packages/{gameId}/data/{bucket}.json
+packages/{gameId}/data/json/{bucket}.json
+packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}
 ```
 
-该路径只是宿主实现，不是游戏 API。游戏必须通过 `playmesh.storage.getBucket()` 访问数据。平台不添加 `{userId}` 层，且浏览器或其他 App 玩家不会创建本地副本。
+游戏必须通过 `playmesh.storage.getBucket()` 访问数据。平台不添加 `{userId}` 层，且浏览器或其他 App 玩家不会创建本地副本。运行时仅把 `data/data` 文件映射到 `/bucket/{bucket}/{file}`；`data/json` 保持私有且 `/bucket` 不提供目录枚举。
 
 ## 缓存与开发历史
 
@@ -154,13 +171,15 @@ packages/{gameId}/cache/developer/local-history/
 
 该目录由平台管理，不属于发布包，也不能通过游戏 URL 或开发者普通文件 API 访问。历史采用初始基线加逐时间操作的变更后快照；连续变更按 5 分钟滚动窗口合并，默认最多保留 100 个操作。最旧操作被淘汰时，其变更后快照提升为新基线。
 
-历史只覆盖游戏发布文件，排除 `data/` 和 `cache/`。清除游戏数据不会删除历史；清除缓存会删除历史；卸载游戏会随整个游戏目录一起删除。
+历史只覆盖游戏发布文件，排除 `data/` 和 `cache/`。整包恢复会同时恢复 `main.json`、`capabilities.json` 与 `app/`。清除游戏数据不会删除历史；清除缓存会删除历史；卸载游戏会随整个游戏目录一起删除。
 
 ## 扫描与安装校验
 
-游戏库在 App 启动、恢复、导入或删除后扫描 `packages/`。游戏库页面右上角提供“重新扫描游戏库”按钮，新增游戏后不要求重启 App。扫描在后台执行：当前列表继续使用旧缓存，扫描成功后才原子替换；扫描失败保留原缓存并显示错误。
+游戏库在 App 启动、恢复、导入或删除后扫描 `packages/`。游戏库页面右上角提供“重新扫描游戏库”按钮，新增游戏后不要求重启 App。扫描在后台执行：当前列表继续使用旧缓存，扫描成功后才原子替换。单个项目只要 `main.json` 能解析出非空 `id`，即使其他字段或入口损坏，也必须以“待修复”状态保留，不能阻断 App 或开发者工作区；运行、正式导入和发布仍执行完整校验。无法解析 JSON 或没有有效 `id` 的目录只记录诊断并跳过。
 
-App 级游戏库仓库缓存排序后的清单元数据、搜索文本、`revision` 和 `refreshedAt`。同一时间的重复刷新复用一个扫描任务，并提供按关键字、`offset`、`limit` 查询缓存的接口，供后续搜索和分页直接使用。单个坏包不能阻止其他游戏出现。安装器至少拒绝：
+App 级游戏库仓库缓存排序后的清单元数据、搜索文本、`revision` 和 `refreshedAt`。最近打开时间只存于包外的 `playmesh-library/cache/app/game-library.json`，每个游戏 ID 只保留一个 Unix 毫秒值，打开时覆盖，删除游戏时同步删除，并硬性限制最多 2048 条、超限淘汰最旧记录；该文件不参与导入、导出、项目历史或游戏 URL 映射。游戏库默认按最近打开时间倒序，未打开项目排在最后并按名称稳定排序。同一时间的重复刷新复用一个扫描任务，并提供按关键字、`offset`、`limit` 查询缓存的接口，供后续搜索和分页直接使用。安装器至少拒绝：
+
+导入、导出、在线下载和 Developer Gateway 包传输使用各自固定名称的临时 ZIP；每次操作前删除或覆盖旧文件，完成后清理。并发入口必须串行复用固定文件，不能按操作生成无限增长的随机中转文件。
 
 - `../`、绝对路径、链接文件和越界解压。
 - 缺少 `main.json`、`entries.game` 解析出的游戏首页、大屏控制器入口或多人 Authority 文件。
@@ -172,6 +191,6 @@ App 级游戏库仓库缓存排序后的清单元数据、搜索文本、`revisi
 
 应用游戏库只导入 Playmesh ZIP 游戏包，不把任意 HTML 目录识别为可安装游戏。压缩包根目录必须直接包含 `main.json` 和 `app/`，不能外包一层目录；内容只允许根 `main.json`、可选 `capabilities.json` 与 `app/**`。完整 HTML 小游戏应进入开发者工作区，通过上传、ZIP 解压、移动、复制和粘贴整理，再由项目校验确认结构。
 
-当前导入限制为：压缩文件 64 MiB、解压总量 256 MiB、单文件 32 MiB、文件数 4096。导入拒绝绝对路径、目录穿越、重复路径、符号链接、系统脚本、可执行文件与原生动态库。`main.json.id` 不存在时新增游戏；同 ID 已存在时只原子替换 `main.json`、`capabilities.json` 与 `app/`，不覆盖或移动 `data/`、`cache/` 和其他运行内容，失败会恢复旧发布文件。安装过程不创建实体 `.playmesh/` 元数据目录。
+当前导入限制为：压缩文件 64 MiB、解压总量 256 MiB、单文件 32 MiB、文件数 4096。导入拒绝绝对路径、目录穿越、重复路径、符号链接、系统脚本、可执行文件与原生动态库。`main.json.id` 不存在时新增游戏；同 ID 已存在时只原子替换 `main.json`、`capabilities.json` 与 `app/`，不覆盖或移动 `data/`、`cache/` 和其他运行内容，失败会恢复旧发布文件。网页、Agent 和 CLI 发布均经过同一开发者本地历史事务，不能绕过恢复链路。安装过程不创建实体 `.playmesh/` 元数据目录。
 
 导出只打包当前安装目录的 `main.json`、可选 `capabilities.json` 与 `app/`，明确排除 `data/` 和 `cache/`。游戏详情页建议输出 `{游戏名称}-v{版本}.zip`，导出的包可再次导入并保持清单与入口一致；CLI `push/dev` 使用相同发布边界，直接上传本地 `app/`。

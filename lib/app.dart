@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 import 'core/game_package/file_game_library_scanner.dart';
+import 'core/game_package/game_library_local_metadata.dart';
 import 'core/catalog/online_game_catalog.dart';
 import 'core/game_package/game_library_manager.dart';
 import 'core/game_package/game_library_repository.dart';
@@ -42,8 +43,8 @@ class PlaymeshApp extends StatefulWidget {
   final GameOrientationController? gameOrientationController;
   final List<GameSummary>? games;
 
-  static const localUser = UserProfile(
-    userId: 'u_local_9f2c8a71',
+  static UserProfile createLocalUser() => UserProfile(
+    userId: UserProfileStore.generateUserId(),
     nickname: '本机玩家',
     avatarLabel: 'PM',
   );
@@ -58,6 +59,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
   late final bool _ownsRuntime;
   late final GameLibraryManager _gameLibraryManager;
   late final GameLibraryRepository _gameLibrary;
+  GameLibraryLocalMetadataStore? _gameLibraryMetadata;
   late final GamePackageTransferService _packageTransfer;
   late final GameCatalogController _catalogController;
   late final GameLibraryDeveloperProjectCatalog _developerCatalog;
@@ -67,12 +69,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
   IncomingFileService? _incomingFiles;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late Future<List<GameSummary>> _games;
-  UserProfile _profile = PlaymeshApp.localUser;
+  late UserProfile _profile;
   bool _performanceVisible = true;
 
   @override
   void initState() {
     super.initState();
+    _profile = PlaymeshApp.createLocalUser();
     final injectedGames = widget.games;
     _gameLibraryManager = GameLibraryManager();
     _packageTransfer = GamePackageTransferService();
@@ -84,9 +87,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       initialGames: injectedGames ?? const [],
     );
     _developerCatalog = GameLibraryDeveloperProjectCatalog(_gameLibrary);
-    scan = injectedGames == null
-        ? FileGameLibraryScanner().scan
-        : () async => injectedGames;
+    if (injectedGames == null) {
+      final metadata = GameLibraryLocalMetadataStore();
+      _gameLibraryMetadata = metadata;
+      scan = FileGameLibraryScanner(metadataStore: metadata).scan;
+    } else {
+      scan = () async => injectedGames;
+    }
     _catalogController = GameCatalogController(
       library: _gameLibrary,
       transfer: _packageTransfer,
@@ -134,6 +141,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       _runtime = GoCoreRuntime.bundled(
         developerProjectCatalog: _developerCatalog,
         developerRunController: _developerRuns,
+        developerAuthorProvider: () => _profile.nickname,
       );
       _statusProvider = _runtime!;
       _ownsRuntime = true;
@@ -239,6 +247,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
                   null => null,
                 };
           if (launchArguments == null) return null;
+          unawaited(_recordGameOpened(launchArguments.game.id));
 
           return MaterialPageRoute<void>(
             settings: settings,
@@ -263,8 +272,27 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
     );
   }
 
+  Future<void> _recordGameOpened(String gameId) async {
+    final openedAt = DateTime.now().toUtc();
+    try {
+      await _gameLibraryMetadata?.markOpened(gameId, openedAt);
+    } on Object catch (error) {
+      debugPrint('保存最近打开时间失败: $error');
+    }
+    _gameLibrary.markOpened(gameId, openedAt);
+    if (!mounted) return;
+    setState(() {
+      _games = SynchronousFuture(_gameLibrary.cachedGames);
+    });
+  }
+
   Future<void> _deleteGame(GameSummary game) async {
     await _gameLibraryManager.deleteGame(game);
+    try {
+      await _gameLibraryMetadata?.remove(game.id);
+    } on Object catch (error) {
+      debugPrint('删除最近打开记录失败: $error');
+    }
     _gameLibrary.remove(game.id);
     if (!mounted) return;
     setState(() {
@@ -278,7 +306,11 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
   }
 
   Future<GameSummary> _importGame(String sourcePath) async {
-    final game = await _packageTransfer.importPackage(File(sourcePath));
+    final game = await _developerCatalog.publishPackage(
+      File(sourcePath),
+      author: _profile.nickname,
+      lastModifiedAt: DateTime.now().toUtc(),
+    );
     _gameLibrary.upsert(game);
     if (mounted) {
       setState(() {
@@ -361,8 +393,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
     }
     if (navigator == null) throw StateError('App 导航尚未就绪');
     unawaited(
-      navigator.pushNamed<void>(
+      navigator.pushNamedAndRemoveUntil<void>(
         GamePage.routeName,
+        (route) => route.isFirst,
         arguments: GameLaunchArguments(
           game: game,
           developerProjectId: projectId,

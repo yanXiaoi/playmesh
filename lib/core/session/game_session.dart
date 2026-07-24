@@ -107,6 +107,7 @@ class GameSessionBootstrap {
     required this.session,
     required this.credential,
     required this.webSocketPath,
+    required this.binaryWebSocketPath,
   });
 
   factory GameSessionBootstrap.fromJson(Map<String, Object?> json) {
@@ -123,12 +124,14 @@ class GameSessionBootstrap {
         reconnected: credential['reconnected'] as bool? ?? false,
       ),
       webSocketPath: json['webSocketPath']! as String,
+      binaryWebSocketPath: json['binaryWebSocketPath']! as String,
     );
   }
 
   final GameSessionSnapshot session;
   final GameSessionCredential credential;
   final String webSocketPath;
+  final String binaryWebSocketPath;
 }
 
 Map<String, Object?> decodeSessionMessage(Object? value) {

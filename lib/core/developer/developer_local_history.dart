@@ -299,12 +299,11 @@ class DeveloperLocalHistoryStore {
   ) async {
     await for (final entity in workspace.list()) {
       final name = _basename(entity.path);
-      if ({'.playmesh', 'cache', 'data', 'main.json'}.contains(name)) continue;
+      if ({'.playmesh', 'cache', 'data'}.contains(name)) continue;
       await entity.delete(recursive: true);
     }
     if (!await snapshot.exists()) return;
     await for (final entity in snapshot.list()) {
-      if (_basename(entity.path) == 'main.json') continue;
       await _copyEntity(entity, workspace);
     }
   }

@@ -88,6 +88,8 @@ void main() {
 const _manifest = '''{
   "id": "com.example.fileops",
   "name": "File Operations",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
   "version": "1.0.0",
   "sdkVersion": "1.1.0",
   "orientation": "portrait",

@@ -6,24 +6,42 @@ import '../library/playmesh_library_root.dart';
 
 class GameStorageService {
   GameStorageService._({required this.gameId, required Directory libraryRoot})
-    : _dataDirectory = Directory(
+    : _rootDataDirectory = Directory(
         '${libraryRoot.path}${Platform.pathSeparator}packages'
         '${Platform.pathSeparator}$gameId${Platform.pathSeparator}data',
+      ),
+      _jsonDirectory = Directory(
+        '${libraryRoot.path}${Platform.pathSeparator}packages'
+        '${Platform.pathSeparator}$gameId${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}json',
+      ),
+      _binaryDirectory = Directory(
+        '${libraryRoot.path}${Platform.pathSeparator}packages'
+        '${Platform.pathSeparator}$gameId${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}data',
       );
 
   static const _flushDelay = Duration(seconds: 2);
   static const _backgroundRetryDelay = Duration(milliseconds: 500);
   static const _dirtyFlushThreshold = 20;
   static const _maxValueBytes = 256 * 1024;
+  static const maxUploadBytes = 256 * 1024 * 1024;
   static const _replaceAttempts = 8;
   static final _gameIdPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$');
   static final _bucketPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');
   static final _keyPattern = RegExp(r'^[A-Za-z0-9._-]{1,128}$');
+  static final _dataFilePattern = RegExp(
+    r'^[0-9]{13,}(?:\.[A-Za-z0-9]{1,16})?$',
+  );
+  static final _extensionPattern = RegExp(r'^[A-Za-z0-9]{1,16}$');
   static final Map<String, Future<void>> _pathOperations = {};
   static int _temporarySequence = 0;
+  static int _lastUploadTimestamp = 0;
 
   final String gameId;
-  final Directory _dataDirectory;
+  final Directory _rootDataDirectory;
+  final Directory _jsonDirectory;
+  final Directory _binaryDirectory;
   final Map<String, _BucketState> _buckets = {};
   bool _closing = false;
 
@@ -70,19 +88,90 @@ class GameStorageService {
     _markDirty(bucket, state);
   }
 
+  /// 将文件流保存到公开数据区，返回游戏页面可直接访问的同源路径。
+  Future<String> upload({
+    required String bucket,
+    required String originalName,
+    required Stream<List<int>> data,
+    int? contentLength,
+  }) async {
+    _validateBucket(bucket);
+    if (contentLength != null && contentLength > maxUploadBytes) {
+      throw const FormatException('上传文件不能超过 256 MiB');
+    }
+    final extension = _safeExtension(originalName);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final timestamp = now > _lastUploadTimestamp
+        ? now
+        : _lastUploadTimestamp + 1;
+    _lastUploadTimestamp = timestamp;
+    final fileName = '$timestamp${extension == null ? '' : '.$extension'}';
+    final bucketDirectory = Directory(
+      '${_binaryDirectory.path}${Platform.pathSeparator}$bucket',
+    );
+    final target = File(
+      '${bucketDirectory.path}${Platform.pathSeparator}$fileName',
+    );
+    await _withPathLock(target.path, () async {
+      await bucketDirectory.create(recursive: true);
+      final sequence = _temporarySequence++;
+      final temporary = File(
+        '${target.path}.${DateTime.now().microsecondsSinceEpoch}.$sequence.tmp',
+      );
+      var written = 0;
+      IOSink? sink;
+      try {
+        sink = temporary.openWrite();
+        await for (final chunk in data) {
+          written += chunk.length;
+          if (written > maxUploadBytes) {
+            throw const FormatException('上传文件不能超过 256 MiB');
+          }
+          sink.add(chunk);
+        }
+        await sink.flush();
+        await sink.close();
+        sink = null;
+        await _replaceFileWithRetry(temporary, target);
+      } finally {
+        await sink?.close();
+        if (await temporary.exists()) {
+          try {
+            await temporary.delete();
+          } on FileSystemException {
+            // 临时文件名唯一，Windows 短暂占用不会阻塞后续上传。
+          }
+        }
+      }
+    });
+    return '/bucket/$bucket/$fileName';
+  }
+
+  /// 解析公开数据区文件。JSON 数据目录不会经过此入口。
+  File dataFile(String bucket, String fileName) {
+    _validateBucket(bucket);
+    if (!_dataFilePattern.hasMatch(fileName)) {
+      throw const FormatException('Bucket 文件名无效');
+    }
+    return File(
+      '${_binaryDirectory.path}${Platform.pathSeparator}$bucket'
+      '${Platform.pathSeparator}$fileName',
+    );
+  }
+
   Future<void> _flushBucket(String bucket) async {
     _validateBucket(bucket);
     final state = await _load(bucket);
     state.timer?.cancel();
     state.timer = null;
     final target = File(
-      '${_dataDirectory.path}${Platform.pathSeparator}$bucket.json',
+      '${_jsonDirectory.path}${Platform.pathSeparator}$bucket.json',
     );
     await _withPathLock(target.path, () async {
       if (!state.dirty) return;
       final version = state.version;
       final content = jsonEncode(Map<String, Object?>.from(state.values));
-      await _dataDirectory.create(recursive: true);
+      await _jsonDirectory.create(recursive: true);
       final sequence = _temporarySequence++;
       final temporary = File(
         '${target.path}.${DateTime.now().microsecondsSinceEpoch}.$sequence.tmp',
@@ -128,8 +217,8 @@ class GameStorageService {
     Directory? libraryRoot,
   }) async {
     final storage = await create(gameId: gameId, libraryRoot: libraryRoot);
-    if (await storage._dataDirectory.exists()) {
-      await storage._dataDirectory.delete(recursive: true);
+    if (await storage._rootDataDirectory.exists()) {
+      await storage._rootDataDirectory.delete(recursive: true);
     }
   }
 
@@ -138,7 +227,7 @@ class GameStorageService {
     final cached = _buckets[bucket];
     if (cached != null) return cached;
     final file = File(
-      '${_dataDirectory.path}${Platform.pathSeparator}$bucket.json',
+      '${_jsonDirectory.path}${Platform.pathSeparator}$bucket.json',
     );
     var values = <String, Object?>{};
     if (await file.exists()) {
@@ -235,6 +324,21 @@ class GameStorageService {
         'Bucket 名称必须以字母或数字开头，只能包含字母、数字、下划线和连字符，且不超过 64 个字符',
       );
     }
+  }
+
+  static String? _safeExtension(String originalName) {
+    if (originalName.isEmpty || originalName.contains('\u0000')) {
+      throw const FormatException('上传文件名无效');
+    }
+    final normalized = originalName.replaceAll('\\', '/');
+    final baseName = normalized.substring(normalized.lastIndexOf('/') + 1);
+    final dot = baseName.lastIndexOf('.');
+    if (dot <= 0 || dot == baseName.length - 1) return null;
+    final extension = baseName.substring(dot + 1);
+    if (!_extensionPattern.hasMatch(extension)) {
+      throw const FormatException('文件后缀只能包含 1 至 16 个字母或数字');
+    }
+    return extension;
   }
 }
 

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:playmesh/core/game_web/game_web_gateway.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
+import 'package:playmesh/models/game_summary.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -44,12 +45,15 @@ void main() {
           'assets/playmesh-library/public/developer/templates/default-game/package',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
+      orientation: GameOrientation.landscape,
+      controllerOrientation: GameOrientation.portrait,
       coreEndpoint: Uri.parse('http://127.0.0.1:${core.port}/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
       gameId: 'com.playmesh.test-game',
       gameName: '测试游戏',
       requiredCapabilities: const ['sensor.accelerometer'],
+      controllerRequiredCapabilities: const ['sensor.gyroscope'],
       storage: storage,
     );
     addTearDown(() async {
@@ -81,7 +85,7 @@ void main() {
     expect(controller.body, contains('"gameName"'));
     expect(
       controller.body,
-      contains('"requiredCapabilities":["sensor.accelerometer"]'),
+      contains('"requiredCapabilities":["sensor.gyroscope"]'),
     );
     expect(controller.body, contains('"availableCapabilities":[]'));
     expect(controller.body, contains('/playmesh/sdk/v1/playmesh.js'));
@@ -120,7 +124,7 @@ void main() {
     final capabilityBody = jsonDecode(capabilities.body) as Map;
     expect(capabilityBody, containsPair('gameId', 'com.playmesh.test-game'));
     expect(capabilityBody, containsPair('gameName', '测试游戏'));
-    expect(capabilityBody, containsPair('required', ['sensor.accelerometer']));
+    expect(capabilityBody, containsPair('required', ['sensor.gyroscope']));
     expect(
       capabilityBody['capabilityRegistry'],
       contains(containsPair('code', 'sensor.accelerometer')),
@@ -201,6 +205,29 @@ void main() {
     );
     expect(invalidBucket.statusCode, HttpStatus.badRequest);
 
+    final rejectedUpload = await http.post(
+      base.resolve('/bucket/replays?name=round.bin'),
+      headers: const {'X-Playmesh-Share-Token': 'wrong-token'},
+      body: <int>[1, 2, 3],
+    );
+    expect(rejectedUpload.statusCode, HttpStatus.forbidden);
+    final upload = await http.post(
+      base.resolve('/bucket/replays?name=round.bin'),
+      headers: const {'X-Playmesh-Share-Token': 'share-token'},
+      body: <int>[1, 2, 255, 4],
+    );
+    expect(upload.statusCode, HttpStatus.created);
+    final uploadBody = jsonDecode(upload.body) as Map<String, Object?>;
+    final uploadedUrl = uploadBody['url']! as String;
+    expect(uploadedUrl, matches(RegExp(r'^/bucket/replays/[0-9]{13,}\.bin$')));
+    final download = await http.get(base.resolve(uploadedUrl));
+    expect(download.statusCode, HttpStatus.ok);
+    expect(download.bodyBytes, <int>[1, 2, 255, 4]);
+    expect(
+      (await http.get(base.resolve('/bucket/replays'))).statusCode,
+      HttpStatus.notFound,
+    );
+
     final missing = await http.get(base.resolve('/not-found'));
     expect(missing.statusCode, HttpStatus.notFound);
   });
@@ -233,6 +260,7 @@ void main() {
       gameRootFilePath: root.path,
       multiplayer: true,
       displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'MULTI1',
       shareToken: 'share-token',
@@ -274,6 +302,7 @@ void main() {
       gameRootFilePath: root.path,
       multiplayer: false,
       displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
       shareToken: 'solo-token',
       storage: storage,
     );
@@ -310,6 +339,8 @@ void main() {
           'assets/playmesh-library/public/developer/templates/default-game/package',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
+      orientation: GameOrientation.landscape,
+      controllerOrientation: GameOrientation.portrait,
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
@@ -361,6 +392,7 @@ void main() {
       gameRootFilePath: root.path,
       multiplayer: false,
       displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
       gameEntryPath: 'app/play/main.html',
       shareToken: 'custom-token',
       storage: storage,

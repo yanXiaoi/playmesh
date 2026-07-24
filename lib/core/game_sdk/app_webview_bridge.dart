@@ -8,6 +8,7 @@ import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../capabilities/support/motion_sensor_source.dart';
 import '../platform/app_device_service.dart';
+import '../../models/game_summary.dart';
 
 class AppWebViewBridge {
   AppWebViewBridge({
@@ -21,7 +22,10 @@ class AppWebViewBridge {
     this.onExitRequested,
   }) : capabilityRegistry =
            capabilityRegistry ??
-           createDefaultCapabilityRegistry(motionSource: motionSource) {
+           createDefaultCapabilityRegistry(
+             motionSource: motionSource,
+             deviceService: deviceService,
+           ) {
     _capabilityRuntime = CapabilityRuntime(
       registry: this.capabilityRegistry,
       declaredCapabilities: declaredCapabilities,
@@ -61,7 +65,6 @@ class AppWebViewBridge {
         ),
         'app.capability.invoke' => await _capabilityRuntime.invoke(payload),
         'app.capability.dispose' => await _disposeCapability(payload),
-        'app.device.haptic' => await _haptic(payload),
         'app.device.fullscreen' => await _fullscreen(payload),
         'app.game.exit' => _requestExit(),
         _ => throw FormatException('未知 App SDK 命令：${command['command']}'),
@@ -117,19 +120,21 @@ class AppWebViewBridge {
     return null;
   }
 
-  Future<Object?> _haptic(Map<String, Object?> payload) async {
-    final style = payload['style'];
-    if (style is! String || style.isEmpty) {
-      throw const FormatException('style 必须是非空字符串');
-    }
-    await deviceService.haptic(style);
-    return null;
-  }
-
   Future<Object?> _fullscreen(Map<String, Object?> payload) async {
     final enabled = payload['enabled'];
     if (enabled is! bool) throw const FormatException('enabled 必须是布尔值');
-    await deviceService.setFullscreen(enabled);
+    final orientationValue = payload['orientation'];
+    final orientation = orientationValue == null
+        ? null
+        : GameOrientation.fromManifestValue(
+            orientationValue is String
+                ? orientationValue
+                : throw const FormatException('orientation 必须是字符串'),
+          );
+    if (!enabled && orientation != null) {
+      throw const FormatException('退出全屏时不能声明 orientation');
+    }
+    await deviceService.setFullscreen(enabled, orientation: orientation);
     return null;
   }
 

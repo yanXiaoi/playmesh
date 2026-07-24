@@ -27,7 +27,7 @@ playmesh-cli create
 playmesh-cli dev
 ```
 
-`get` 拉取包内 `main.json`、`capabilities.json`、`app/`，并把目标 App 构建时生成的两套 SDK 与 `.d.ts` 放入 `playmesh/sdk/`。项目根的 `app/` 与 `playmesh/` 直接镜像运行时 `/app/...` 与 `/playmesh/...` 两个 URL 空间，IDEA 能解析 HTML、JavaScript、CSS 中的绝对引用。`playmesh/` 只属于本地开发副本，不会出现在 App 安装目录或上传包中。
+`get` 拉取包内现有的 `main.json`、可选 `capabilities.json`、已有 `app/` 文件，并把目标 App 构建时生成的两套 SDK 与 `.d.ts` 放入 `playmesh/sdk/`。这是损坏项目自救通道，不执行 Manifest、能力或入口语义校验；只要 `main.json` 仍有有效 `id`，即使缺少 `app/` 也能拉回已有内容。项目根的 `app/` 与 `playmesh/` 直接镜像运行时 `/app/...` 与 `/playmesh/...` 两个 URL 空间，IDEA 能解析 HTML、JavaScript、CSS 中的绝对引用。`playmesh/` 只属于本地开发副本，不会出现在 App 安装目录或上传包中。
 
 `playmesh-cli create` 从统一能力注册表读取与网页 Dev Tool 相同的新建选项，调用现有 Developer API 创建项目后下载到当前空目录。`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新 `playmesh/sdk/` 到目标 App 当前版本，不支持选择历史版本。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。完整命令、目录和安全边界见 `dev-cli/README.md`。
 
@@ -161,6 +161,8 @@ playmesh.authority.onService(async (action, context) => {
 
 玩家页面通过 `playmesh.game.onMessage()` 接收 Authority 已路由的消息。不要依赖客户端提交的玩家 ID、分数、答案或时间作为最终依据。
 
+需要发送 `Uint8Array`、高频状态或自定义序列化数据时使用 `playmesh.binary`，不要把字节编码进 JSON。只有 Authority 创建/关闭 Channel，其他成员凭 Channel ID 加入；Authority 固定目标为 `playmesh.binary.authorityPlayerId`。可靠单发使用 `send(id, data)`，一个上行帧多发使用 `send([id...], data)`，快捷广播使用 `send(data)`；只关心最新未发状态时使用同名重载 `sendLatest(id 或 id[], data)` 或 `sendLatest(data)`。广播只发给 Channel 中除发送者外的当前在线成员，所有投递都由同一个 `onMessage` 接收。`mode: "authority"` 的 `onForward` 上下文始终给出 `targetPlayerIds` 数组，可原样通过、替换或拒绝；已经开始执行的旧、新审核都会继续且各自结果生效。`mode: "relay"` 直接转发。
+
 大屏游戏不在公共显示端提供“开始游戏”动作。每位控制器玩家提交准备状态，人数满足 `players.min` 且全员准备后，由 Authority 时钟自动倒计时并开始。回合推进也应由 Authority 时钟完成，不能依赖显示页面的定时器。
 
 ## 生命周期
@@ -173,7 +175,7 @@ playmesh.lifecycle.onExit(() => {
 });
 ```
 
-退出回调有有限等待时间，关键状态应在发生变化时保存。重新开始会把当前 Core 会话恢复为大厅并重建 WebView 和游戏业务状态，但保留会话 ID、联机码、玩家连接、分享网关和本局 token；离开游戏才关闭会话并使 token 失效。
+退出回调有有限等待时间，关键状态应在发生变化时保存。刷新游戏会通知旧页面退出、完成存储落盘并重建 WebView 和游戏业务状态，但不会重置当前 Core 会话；会话 ID、联机码、玩家连接、分享网关和本局 token 均保留。离开游戏才关闭会话并使 token 失效。
 
 ## 持久化数据
 
@@ -181,6 +183,9 @@ playmesh.lifecycle.onExit(() => {
 const save = playmesh.storage.getBucket("save_v1");
 const score = await save.getData("high_score");
 await save.setData("high_score", Math.max(score ?? 0, currentScore));
+
+const imageUrl = await save.upload(imageFile);
+preview.src = imageUrl;
 ```
 
 - Bucket 名称匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
@@ -190,6 +195,7 @@ await save.setData("high_score", Math.max(score ?? 0, currentScore));
 - 浏览器昵称采集、修改和普通浏览器游戏功能区由 SDK 统一提供。功能区模拟 App 可用的刷新、性能、全屏和信息操作，但不伪造 App 返回、退出或分享能力；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具或昵称悬浮控件。
 - 使用 `session.onPlayerJoin`、`session.onPlayerLeave` 和 `session.onPlayerReconnect` 处理首次连接、掉线和同 ID 重连。不要用昵称推断玩家身份。
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
+- JSON 值存放在私有 `data/json`；`upload(file)` 使用原始文件流写入 `data/data`，返回运行时 `/bucket/...` 地址。游戏不得猜测宿主文件路径、枚举目录或用 `/bucket` 读取 JSON 存档。
 
 ## FPS 上报
 
@@ -208,11 +214,15 @@ Canvas/WebGL 游戏应在实际绘制或提交完成后调用。非逐帧渲染�
 
 ## 平台能力插件
 
-需要平台能力时，在 `main.json` 同级创建可选 `capabilities.json`。不要把能力写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都从平台注册表生成选项。`GET /dev/api/capabilities` 返回每个插件的 code、`apiVersion`、方法、事件和平台状态。工作区“能力测试”显示并测试全平台注册表，不按当前项目声明过滤；项目声明只控制该游戏可创建哪些插件实例。
+需要平台能力时，在 `main.json` 同级创建可选 `capabilities.json`。`required` 声明主画面能力；单屏多人使用 `controllerRequired` 独立声明控制器能力，其他模式禁止该字段。不要把能力写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都从平台注册表为两个角色分别生成选项。`GET /dev/api/capabilities` 返回每个插件的 code、`apiVersion`、方法、事件和平台状态。工作区“能力测试”显示并测试全平台注册表，不按当前项目声明过滤；项目声明只控制当前页面角色可创建哪些插件实例。
 
 ```json
 {
-  "required": ["sensor.accelerometer", "sensor.gyroscope"]
+  "required": [
+    "sensor.accelerometer",
+    "sensor.gyroscope",
+    "device.vibration"
+  ]
 }
 ```
 
@@ -232,7 +242,20 @@ if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
 }
 ```
 
-能力实例统一提供 `invoke/on/onError/dispose`，具体方法和事件必须以注册表中对应插件的 `apiVersion` 契约为准。加速度计与陀螺仪插件的 `fps` 必须为 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。App 为同种传感器共享一条原生流；实例停止、释放或页面退出后清理。当前两项仅 App 已适配，普通局域网 HTML 环境使用安全空实现。
+能力实例统一提供 `invoke/on/onError/dispose`，具体方法和事件必须以注册表中对应插件的 `apiVersion` 契约为准。加速度计与陀螺仪插件的 `fps` 必须为 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。App 为同种传感器共享一条原生流；实例停止、释放或页面退出后清理。传感器和震动均只在 App 中适配，普通局域网 HTML 环境使用安全空实现。
+
+震动是主动调用型插件，不需要保持订阅：
+
+```js
+if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
+  const vibration = await playmesh.app.capabilities.create(
+    'device.vibration',
+    {},
+  );
+  await vibration.invoke('vibrate', { style: 'medium' });
+  await vibration.dispose();
+}
+```
 
 ## 开发检查清单
 
@@ -243,6 +266,6 @@ if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
 - 多人游戏声明合法的 `authority.entry`。
 - 需要设备能力时存在合法的 `capabilities.json`，能力 code 来自统一注册表；未声明或当前不可用时主流程仍可运行。
 - SDK 从 `/playmesh/sdk/v1/playmesh.js` 引入，没有跨目录相对路径。
-- 页面没有直接 WebSocket、Core 地址、原生 Bridge 或 `data/` URL。
+- 页面没有直接 WebSocket、Core 地址、原生 Bridge 或私有 `data/json` URL；运行时文件只使用 `upload(file)` 返回的 `/bucket/...` 地址。
 - Authority 与玩家层职责分离，大屏公共显示端不进入玩家集合。
 - 存储只通过 `playmesh.storage`，FPS 只在真实渲染完成处上报。

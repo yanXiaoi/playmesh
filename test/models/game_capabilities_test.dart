@@ -9,10 +9,46 @@ void main() {
 
   test('解析统一的必需能力 code', () {
     final capabilities = GameCapabilities.fromJson({
-      'required': ['sensor.accelerometer', 'sensor.gyroscope'],
+      'required': [
+        'sensor.accelerometer',
+        'sensor.gyroscope',
+        'device.vibration',
+      ],
+      'controllerRequired': ['device.vibration'],
     });
 
-    expect(capabilities.required, {'sensor.accelerometer', 'sensor.gyroscope'});
+    expect(capabilities.required, {
+      'sensor.accelerometer',
+      'sensor.gyroscope',
+      'device.vibration',
+    });
+    expect(capabilities.controllerRequired, {'device.vibration'});
+    expect(capabilities.requiredForRole(controller: false), {
+      'sensor.accelerometer',
+      'sensor.gyroscope',
+      'device.vibration',
+    });
+    expect(capabilities.requiredForRole(controller: true), {
+      'device.vibration',
+    });
+  });
+
+  test('主画面空声明不会回退到控制器声明', () {
+    final capabilities = GameCapabilities.fromJson({
+      'required': <String>[],
+      'controllerRequired': [
+        'sensor.accelerometer',
+        'sensor.gyroscope',
+        'device.vibration',
+      ],
+    });
+
+    expect(capabilities.requiredForRole(controller: false), isEmpty);
+    expect(capabilities.requiredForRole(controller: true), {
+      'sensor.accelerometer',
+      'sensor.gyroscope',
+      'device.vibration',
+    });
   });
 
   test('拒绝未注册、重复或结构错误的能力声明', () {
@@ -46,5 +82,9 @@ void main() {
     expect(accelerometer.events.single.name, 'reading');
     expect(accelerometer.appSupported, isTrue);
     expect(accelerometer.htmlSupported, isFalse);
+    final vibration = defaultCapabilityDescriptorRegistry['device.vibration']!;
+    expect(vibration.name, '震动反馈');
+    expect(vibration.methods.single.name, 'vibrate');
+    expect(vibration.events, isEmpty);
   });
 }

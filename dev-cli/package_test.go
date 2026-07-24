@@ -125,6 +125,29 @@ func TestExtractProjectPackageKeepsAppDirectory(t *testing.T) {
 	}
 }
 
+func TestExtractProjectPackageAllowsBrokenProjectWithoutApp(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	entry, err := writer.Create("main.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte(`{"id":"com.example.broken"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	if err := extractProjectPackage(buffer.Bytes(), root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "main.json")); err != nil {
+		t.Fatalf("broken manifest must remain recoverable: %v", err)
+	}
+}
+
 func writeTestFile(t *testing.T, path, value string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -4,6 +4,7 @@ import 'package:flutter_fullscreen/flutter_fullscreen.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_platform.dart';
+import '../../models/game_summary.dart';
 
 class AppDeviceService {
   const AppDeviceService();
@@ -12,25 +13,49 @@ class AppDeviceService {
 
   String get platform => kIsWeb ? 'web' : defaultTargetPlatform.name;
 
-  List<String> get capabilities => const ['fullscreen', 'haptics'];
+  bool get hapticsAvailable =>
+      !kIsWeb &&
+      (isHarmonyOS ||
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
-  Future<void> setFullscreen(bool enabled) async {
+  Future<void> setFullscreen(
+    bool enabled, {
+    GameOrientation? orientation,
+  }) async {
     if (isHarmonyOS) {
       await _harmonyChannel.invokeMethod<void>('setFullscreen', {
         'enabled': enabled,
       });
+    } else {
+      final desktop =
+          !kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.windows ||
+              defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.linux);
+      if (desktop) {
+        await windowManager.setFullScreen(enabled);
+      } else {
+        FullScreen.setFullScreen(enabled);
+      }
+    }
+    if (!isMobileAppPlatform) return;
+    if (!enabled) {
+      await SystemChrome.setPreferredOrientations(const []);
       return;
     }
-    final desktop =
-        !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.windows ||
-            defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.linux);
-    if (desktop) {
-      await windowManager.setFullScreen(enabled);
-      return;
+    if (orientation != null) {
+      await SystemChrome.setPreferredOrientations(switch (orientation) {
+        GameOrientation.landscape => const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+        GameOrientation.portrait => const [
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ],
+      });
     }
-    FullScreen.setFullScreen(enabled);
   }
 
   Future<void> haptic(String style) async {

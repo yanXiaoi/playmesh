@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_sdk/app_webview_bridge.dart';
+import 'package:playmesh/core/platform/app_device_service.dart';
+import 'package:playmesh/models/game_summary.dart';
 
 void main() {
   test('bootstrap 返回项目声明、平台注册表和当前可用插件', () async {
@@ -26,7 +28,7 @@ void main() {
     expect(identity['userId'], 'u-current-app');
     expect(device['capabilities'], ['sensor.accelerometer']);
     expect(device['declaredCapabilities'], ['sensor.accelerometer']);
-    expect(registry, hasLength(2));
+    expect(registry, hasLength(3));
     expect(registry, everyElement(contains('methods')));
   });
 
@@ -124,6 +126,41 @@ void main() {
     expect(unconfirmed['error'], contains('能力确认'));
   });
 
+  test('震动能力通过通用插件实例调用原生触觉服务', () async {
+    final deviceService = _FakeDeviceService();
+    final bridge = AppWebViewBridge(
+      userId: 'u-haptic',
+      nickname: '震动玩家',
+      declaredCapabilities: const ['device.vibration'],
+      deviceService: deviceService,
+    );
+    addTearDown(bridge.close);
+
+    await _command(bridge, 'app.capabilities.confirm', 'confirm');
+    final create = await _command(
+      bridge,
+      'app.capability.create',
+      'create-vibration',
+      payload: {'code': 'device.vibration', 'options': <String, Object?>{}},
+    );
+    final instanceId =
+        (create['result']! as Map<String, Object?>)['instanceId']! as String;
+
+    final invoke = await _command(
+      bridge,
+      'app.capability.invoke',
+      'vibrate',
+      payload: {
+        'instanceId': instanceId,
+        'method': 'vibrate',
+        'arguments': {'style': 'heavy'},
+      },
+    );
+
+    expect(invoke['type'], 'app.command.result');
+    expect(deviceService.styles, ['heavy']);
+  });
+
   test('网页请求退出时通知宿主', () async {
     final exitRequested = Completer<void>();
     final bridge = AppWebViewBridge(
@@ -137,6 +174,28 @@ void main() {
 
     expect(response['type'], 'app.command.result');
     await exitRequested.future.timeout(const Duration(seconds: 1));
+  });
+
+  test('全屏命令把控制器方向传给原生设备服务', () async {
+    final deviceService = _FakeDeviceService();
+    final bridge = AppWebViewBridge(
+      userId: 'u-controller',
+      nickname: 'Controller',
+      deviceService: deviceService,
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.device.fullscreen',
+      'fullscreen',
+      payload: {'enabled': true, 'orientation': 'portrait'},
+    );
+
+    expect(response['type'], 'app.command.result');
+    expect(deviceService.fullscreenCalls, [
+      (enabled: true, orientation: GameOrientation.portrait),
+    ]);
   });
 }
 
@@ -187,4 +246,26 @@ class _FakeMotionSource implements MotionSensorSource {
   @override
   Stream<MotionSample> gyroscopeEvents(Duration samplingPeriod) =>
       _gyroscope.stream;
+}
+
+class _FakeDeviceService extends AppDeviceService {
+  final List<String> styles = [];
+  final List<({bool enabled, GameOrientation? orientation})> fullscreenCalls =
+      [];
+
+  @override
+  bool get hapticsAvailable => true;
+
+  @override
+  Future<void> haptic(String style) async {
+    styles.add(style);
+  }
+
+  @override
+  Future<void> setFullscreen(
+    bool enabled, {
+    GameOrientation? orientation,
+  }) async {
+    fullscreenCalls.add((enabled: enabled, orientation: orientation));
+  }
 }

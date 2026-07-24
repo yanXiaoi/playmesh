@@ -19,6 +19,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperRunController? runController,
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
+  String Function()? currentAuthor,
+  DateTime Function()? clock,
 }) {
   return implementation.startDeveloperWebGateway(
     port: port,
@@ -29,5 +31,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
     runController: runController,
     capabilityTests: capabilityTests,
     packageTransfer: packageTransfer,
+    currentAuthor: currentAuthor,
+    clock: clock,
   );
 }

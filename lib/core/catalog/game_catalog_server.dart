@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -14,6 +15,7 @@ class GameCatalogServer {
   final GamePackageTransferService _transfer;
   HttpServer? _server;
   String _token = '';
+  Future<void> _downloadTail = Future<void>.value();
 
   bool get running => _server != null;
   int? get port => _server?.port;
@@ -137,7 +139,10 @@ class GameCatalogServer {
     });
   }
 
-  Future<void> _download(HttpRequest request) async {
+  Future<void> _download(HttpRequest request) =>
+      _serializeDownload(() => _downloadNow(request));
+
+  Future<void> _downloadNow(HttpRequest request) async {
     final id = request.uri.queryParameters['id']?.trim() ?? '';
     if (id.isEmpty) throw const FormatException('缺少游戏 id');
     final games = await _library.refresh();
@@ -157,9 +162,10 @@ class GameCatalogServer {
     }
     final temporary = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      'playmesh-catalog-${DateTime.now().microsecondsSinceEpoch}.zip',
+      'playmesh-catalog-export.playmesh.zip',
     );
     try {
+      if (await temporary.exists()) await temporary.delete();
       await _transfer.exportPackage(selected, temporary);
       request.response.statusCode = HttpStatus.ok;
       request.response.headers.contentType = ContentType('application', 'zip');
@@ -173,6 +179,15 @@ class GameCatalogServer {
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
+  }
+
+  Future<T> _serializeDownload<T>(Future<T> Function() action) {
+    final operation = _downloadTail.then((_) => action());
+    _downloadTail = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
   }
 
   Future<GameManifest> _manifest(GameSummary game) async {

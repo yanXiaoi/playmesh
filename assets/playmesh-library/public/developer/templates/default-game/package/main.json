@@ -1,16 +1,18 @@
 {
   "id": "com.example.new-game",
   "name": "New Game",
+  "author": "Playmesh Developer",
+  "lastModifiedAt": 0,
   "remarks": "Playmesh multiplayer game",
   "version": "0.1.0",
-  "sdkVersion": "2.0.0",
-  "appSdkVersion": "2.0.0",
+  "sdkVersion": "2.2.1",
+  "appSdkVersion": "2.1.0",
   "orientation": "landscape",
+  "controllerOrientation": "portrait",
   "modes": [
     "multiplayer"
   ],
   "displayModes": [
-    "multi_screen",
     "single_screen_multiplayer"
   ],
   "players": {

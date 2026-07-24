@@ -140,7 +140,19 @@ class GoCoreSessionClient {
     );
     final channel = _channelFactory(endpoint);
     await channel.ready;
-    return GameSessionConnection._(this, bootstrap, channel);
+    final binaryHttpUri = baseUri.resolve(bootstrap.binaryWebSocketPath);
+    final binaryEndpoint = binaryHttpUri.replace(
+      scheme: binaryHttpUri.scheme == 'https' ? 'wss' : 'ws',
+      queryParameters: {'token': bootstrap.credential.token},
+    );
+    return GameSessionConnection._(
+      this,
+      bootstrap,
+      channel,
+      endpoint: endpoint,
+      channelFactory: _channelFactory,
+      binaryEndpoint: binaryEndpoint,
+    );
   }
 
   void close() {
@@ -151,20 +163,29 @@ class GoCoreSessionClient {
 }
 
 class GameSessionConnection {
-  GameSessionConnection._(this._client, this.bootstrap, this._channel) {
-    _subscription = _channel.stream.listen(
-      _handleMessage,
-      onError: _messages.addError,
-      onDone: _messages.close,
-    );
+  GameSessionConnection._(
+    this._client,
+    this.bootstrap,
+    this._channel, {
+    required this._endpoint,
+    required this._channelFactory,
+    required this.binaryEndpoint,
+  }) {
+    _listen(_channel!);
   }
 
   final GoCoreSessionClient _client;
-  final WebSocketChannel _channel;
+  final Uri _endpoint;
+  final SessionChannelFactory _channelFactory;
+  WebSocketChannel? _channel;
   final GameSessionBootstrap bootstrap;
+  final Uri binaryEndpoint;
   final StreamController<Map<String, Object?>> _messages =
       StreamController.broadcast();
-  late final StreamSubscription<Object?> _subscription;
+  StreamSubscription<Object?>? _subscription;
+  Future<void>? _reconnectOperation;
+  final List<String> _outboundQueue = [];
+  bool _closed = false;
   int _sequence = 0;
   late GameSessionSnapshot snapshot = bootstrap.session;
 
@@ -238,14 +259,97 @@ class GameSessionConnection {
     List<String>? targetPlayerIds,
   }) {
     _sequence += 1;
-    _channel.sink.add(
-      jsonEncode({
-        'type': type,
-        'sequence': _sequence,
-        'targetPlayerIds': ?targetPlayerIds,
-        'payload': payload,
-      }),
+    final encoded = jsonEncode({
+      'type': type,
+      'sequence': _sequence,
+      'targetPlayerIds': ?targetPlayerIds,
+      'payload': payload,
+    });
+    final channel = _channel;
+    if (channel == null) {
+      _outboundQueue.add(encoded);
+      return;
+    }
+    try {
+      channel.sink.add(encoded);
+    } on Object catch (error) {
+      _outboundQueue.add(encoded);
+      _handleDisconnect(channel, error);
+    }
+  }
+
+  void _listen(WebSocketChannel channel) {
+    _subscription = channel.stream.listen(
+      _handleMessage,
+      onError: (Object error, StackTrace stackTrace) {
+        _handleDisconnect(channel, error);
+      },
+      onDone: () => _handleDisconnect(channel, '连接已关闭'),
     );
+  }
+
+  void _handleDisconnect(WebSocketChannel channel, Object error) {
+    if (_closed || !identical(_channel, channel)) return;
+    _channel = null;
+    final subscription = _subscription;
+    _subscription = null;
+    unawaited(subscription?.cancel());
+    _emitTransportStatus('disconnected', error: error);
+    _scheduleReconnect();
+  }
+
+  void _scheduleReconnect() {
+    if (_closed || _channel != null || _reconnectOperation != null) return;
+    _reconnectOperation = _reconnect().whenComplete(() {
+      _reconnectOperation = null;
+      if (!_closed && _channel == null) _scheduleReconnect();
+    });
+  }
+
+  Future<void> _reconnect() async {
+    var attempt = 0;
+    while (!_closed && _channel == null) {
+      attempt += 1;
+      if (attempt > 1) {
+        final exponent = (attempt - 2).clamp(0, 5);
+        final milliseconds = (250 * (1 << exponent)).clamp(250, 5000);
+        await Future<void>.delayed(Duration(milliseconds: milliseconds));
+      }
+      if (_closed || _channel != null) return;
+      _emitTransportStatus('reconnecting', attempt: attempt);
+      WebSocketChannel? channel;
+      try {
+        channel = _channelFactory(_endpoint);
+        await channel.ready;
+        if (_closed) {
+          await channel.sink.close();
+          return;
+        }
+        _channel = channel;
+        _listen(channel);
+        while (_outboundQueue.isNotEmpty && identical(_channel, channel)) {
+          channel.sink.add(_outboundQueue.removeAt(0));
+        }
+        if (!identical(_channel, channel)) continue;
+        _emitTransportStatus('reconnected', attempt: attempt);
+        return;
+      } on Object catch (error) {
+        if (identical(_channel, channel)) _channel = null;
+        await channel?.sink.close();
+        _emitTransportStatus('reconnecting', attempt: attempt, error: error);
+      }
+    }
+  }
+
+  void _emitTransportStatus(String state, {int? attempt, Object? error}) {
+    if (_closed || _messages.isClosed) return;
+    _messages.add({
+      'type': 'transport.status',
+      'transport': 'session',
+      'state': state,
+      'attempt': ?attempt,
+      'error': ?error?.toString(),
+    });
   }
 
   void _handleMessage(Object? raw) {
@@ -264,9 +368,16 @@ class GameSessionConnection {
   }
 
   Future<void> close() async {
-    await _subscription.cancel();
-    await _channel.sink.close();
-    await _messages.close();
+    if (_closed) return;
+    _closed = true;
+    _outboundQueue.clear();
+    final subscription = _subscription;
+    _subscription = null;
+    await subscription?.cancel();
+    final channel = _channel;
+    _channel = null;
+    await channel?.sink.close();
+    if (!_messages.isClosed) await _messages.close();
   }
 }
 

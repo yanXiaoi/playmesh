@@ -20,24 +20,30 @@ const window = {
       if (command.command === "app.bootstrap") {
         result = {
           available: true,
-          sdkVersion: "2.0.0",
+          sdkVersion: "2.1.0",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
             source: "playmesh_app",
           },
-          game: { requiredCapabilities: ["sensor.accelerometer"] },
+          game: { requiredCapabilities: ["sensor.accelerometer", "device.vibration"] },
           capabilityRegistry: [{
             code: "sensor.accelerometer",
             name: "加速度计",
             apiVersion: "1.0.0",
             methods: [{ name: "start" }, { name: "stop" }],
             events: [{ name: "reading" }],
+          }, {
+            code: "device.vibration",
+            name: "震动反馈",
+            apiVersion: "1.0.0",
+            methods: [{ name: "vibrate" }],
+            events: [],
           }],
           device: {
             platform: "android",
-            capabilities: ["sensor.accelerometer"],
-            declaredCapabilities: ["sensor.accelerometer"],
+            capabilities: ["sensor.accelerometer", "device.vibration"],
+            declaredCapabilities: ["sensor.accelerometer", "device.vibration"],
           },
         };
       } else if (command.command === "app.capability.create") {
@@ -59,7 +65,7 @@ window.window = window;
 vm.runInNewContext(source, window, { filename: "playmesh-app.js" });
 
 await window.playmeshApp.ready;
-assert.equal(window.playmeshApp.version, "2.0.0");
+assert.equal(window.playmeshApp.version, "2.1.0");
 assert.equal(window.playmeshApp.isAvailable(), true);
 assert.deepEqual(
   JSON.parse(JSON.stringify(window.playmeshApp.identity.getCurrent())),
@@ -67,11 +73,11 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [...window.playmeshApp.capabilities.getAvailable()],
-  ["sensor.accelerometer"],
+  ["sensor.accelerometer", "device.vibration"],
 );
 assert.deepEqual(
   [...window.playmeshApp.capabilities.getDeclared()],
-  ["sensor.accelerometer"],
+  ["sensor.accelerometer", "device.vibration"],
 );
 
 const capability = await window.playmeshApp.capabilities.create(
@@ -90,8 +96,14 @@ window.playmeshApp.__receive({
 assert.equal(reading.unit, "m/s^2");
 await capability.dispose();
 
-await window.playmeshApp.device.haptic("medium");
-await window.playmeshApp.device.setFullscreen(false);
+const vibration = await window.playmeshApp.capabilities.create("device.vibration");
+await vibration.invoke("vibrate", { style: "medium" });
+await vibration.dispose();
+await window.playmeshApp.device.setFullscreen(true, "portrait");
+assert.deepEqual(
+  commands.find((item) => item.command === "app.device.fullscreen").payload,
+  { enabled: true, orientation: "portrait" },
+);
 assert.equal(commands.some((item) => item.command === "app.capability.create"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.invoke"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.dispose"), true);

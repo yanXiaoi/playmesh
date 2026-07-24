@@ -349,6 +349,68 @@
         }
       }
     },
+    "BinaryChannelMode": {
+      "enum": [
+        "authority",
+        "relay"
+      ]
+    },
+    "BinaryDelivery": {
+      "enum": [
+        "queued",
+        "latest"
+      ]
+    },
+    "BinaryMessageContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "senderPlayerId",
+        "delivery"
+      ],
+      "properties": {
+        "senderPlayerId": {
+          "type": "string",
+          "description": "Uses the stable value authority when the sender is the Authority runtime"
+        },
+        "delivery": {
+          "$ref": "#/$defs/BinaryDelivery"
+        }
+      }
+    },
+    "BinaryForwardContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "senderPlayerId",
+        "targetPlayerIds",
+        "delivery"
+      ],
+      "properties": {
+        "senderPlayerId": {
+          "type": "string"
+        },
+        "targetPlayerIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Normalized recipients for this one review; Authority uses the stable value authority"
+        },
+        "delivery": {
+          "$ref": "#/$defs/BinaryDelivery"
+        }
+      }
+    },
+    "BucketUploadUrl": {
+      "type": "string",
+      "pattern": "^/bucket/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[0-9]+(?:\\.[A-Za-z0-9]{1,16})?$",
+      "description": "Same-origin URL returned by StorageBucket.upload(file)"
+    },
     "SdkBootstrap": {
       "type": "object",
       "required": [
@@ -359,7 +421,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "2.0.0"
+          "const": "2.2.1"
         },
         "isAuthority": {
           "type": "boolean"

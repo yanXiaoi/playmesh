@@ -20,7 +20,7 @@
   -> 游戏详情
   -> 应用 orientation，并行尝试可选全屏
   -> Game SDK / WebView
-  -> 返回详情 / 退出游戏库 / 重新开始
+  -> 返回详情 / 退出游戏库 / 刷新游戏
   -> 恢复进入前的全屏状态和系统屏幕方向
 ```
 
@@ -37,7 +37,7 @@ Go Core 监听 0.0.0.0:0
 - `single_screen_multiplayer`：创建会话的 App 主机是公共显示端与 Authority Client，不属于 `players`；玩家只能通过 Controller 加入。
 - `multi_screen`：创建会话的 App 主机固定为 Authority Client，并可同时作为 Player 计入人数；不得把玩家首位或加入顺序当作 Authority 规则。
 
-## 当前开发版本：Playmesh 1.6.2
+## 当前开发版本：Playmesh 1.8.0
 
 当前已增加 OpenHarmony API 12 arm64 HAP 发布链：SIG Go `c-shared` Core、异步 N-API、ArkTS 能力 HAR 和 Flutter `playmesh/go_core_host` 已闭环，统一脚本可以选择 `harmony`、`android`、`windows` 或 `all`。内部无签名 HAP 已完成包结构验证；生产发布仍需外部签名配置，真机网络、线程、前后台生命周期和系统分享仍需设备验收。
 
@@ -74,7 +74,7 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 
 第六阶段已于 2026-07-18 完成。加入 App 不再要求预装游戏，而是直接加载权威主机提供的当前入口；游戏与控制器的全屏请求不再参与运行前置条件，失败时只提示，并可在 WebView 悬浮工具中按需进入或退出。Android 已接通系统文件打开/分享入口：压缩包复用 Playmesh 包导入，单个 HTML 使用无 SDK 的独立 WebView，游戏包导出交给系统保存或分享。
 
-运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。当前 Game SDK 与 App Bridge SDK 均为 `2.0.0`；能力统一通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`，旧 `DeviceType/onDevice` 接口已移除。
+运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。当前 Game SDK 为 `2.2.1`，App Bridge SDK 为 `2.1.0`；能力统一通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`。单屏多人按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
@@ -91,14 +91,14 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 ## 必须保持的边界
 
 - 游戏包直接位于 `playmesh-library/packages/{gameId}/`，不增加版本或 `files` 中间目录。
-- `packages/{gameId}/app/` 是当前游戏唯一可映射目录；平台公共 SDK、头像等资源位于 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露，`data/` 与 `cache/` 永不参与静态映射。
-- 持久化文件直接位于 `packages/{gameId}/data/{bucket}.json`，不增加 `{userId}` 目录。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
+- `packages/{gameId}/app/` 通过 `/app/...` 映射；平台公共 SDK、头像等资源位于 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。运行时只额外映射 `data/data` 中由 SDK 上传的文件到 `/bucket/{bucket}/{file}`；`data/json` 与 `cache/` 永不映射。
+- JSON 持久化文件位于 `packages/{gameId}/data/json/{bucket}.json`，二进制上传位于 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，不增加 `{userId}` 目录。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
 - Core 每次启动都使用系统分配端口，实际端口由宿主上报。
 - 开发者 Gateway 与 Core 分离，默认固定端口 `16666`，可在设置页修改；不得为了修改开发者端口重启 Core。
 - Android 发布物包含 `playmesh_core.aar`，Windows 发布物包含 Runner 同目录的 `playmesh-core.exe`。
 - OpenHarmony arm64 HAP 必须同时包含 `libapp.so`、`libplaymesh_core.so` 和 `libplaymesh_core_napi.so`；Core ELF 必须为 AArch64、SONAME 正确并导出三个 C ABI 函数。
 - `orientation`、`displayModes` 和 `modes` 是独立维度；当前 `displayModes` 与 `modes` 都只能声明一个值。
-- 浏览器分享 token 在当前游戏会话期间有效，关闭附加层和重新开始不撤销；退出游戏、会话结束或 Core 重启后失效。
+- 浏览器分享 token 在当前游戏会话期间有效，关闭附加层和刷新游戏不撤销；退出游戏、会话结束或 Core 重启后失效。
 - 分享地址列表可点选，二维码始终对应当前选中的地址。
 - 主机与 App 扫码加入页使用同一套悬浮工具语义；主机分享入口为一级按钮，所有 App 游戏工具只保留返回而不重复提供退出。普通浏览器由 SDK 提供不含 App 导航和分享能力的对应功能区。
 - 分享链接/二维码面板在视口内居中并动态适配，内容超出屏幕时允许整体滚动；悬浮工具二级界面固定使用高对比度配色，不继承游戏显示颜色。
@@ -111,6 +111,6 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 
 - 完整房间列表或局域网自动发现。
 - 云端账号和异地联机。
-- 完整原生键盘、USB、摄像头适配，以及加速度计、陀螺仪之外的传感器适配。加速度计和陀螺仪已在 Playmesh 1.3.0 通过 App SDK 接入。
+- 完整原生键盘、USB、摄像头适配，以及加速度计、陀螺仪之外的传感器适配。加速度计和陀螺仪已在 Playmesh 1.3.0 通过 App SDK 接入，原生震动已通过 `device.vibration` 插件接入。
 - iOS 发布和云端游戏包分发。
 - 创意工坊与生产级签名审核系统。

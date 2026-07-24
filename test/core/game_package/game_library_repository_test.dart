@@ -55,6 +55,35 @@ void main() {
     repository.remove(_newGame.id);
     expect(repository.cachedGames, isEmpty);
   });
+
+  test('默认按最近打开时间倒序，未打开项目排在最后', () {
+    final older = _oldGame.withLastOpenedAt(DateTime.utc(2026, 7, 23));
+    final newer = _newGame.withLastOpenedAt(DateTime.utc(2026, 7, 24));
+    final unopened = _thirdGame;
+    final repository = GameLibraryRepository(
+      () async => const [],
+      initialGames: [unopened, older, newer],
+    );
+
+    expect(repository.cachedGames.map((game) => game.id), [
+      'new',
+      'old',
+      'third',
+    ]);
+
+    repository.markOpened('third', DateTime.utc(2026, 7, 25));
+    expect(repository.cachedGames.map((game) => game.id), [
+      'third',
+      'new',
+      'old',
+    ]);
+
+    repository.upsert(_thirdGame);
+    expect(
+      repository.cachedGames.first.lastOpenedAt,
+      DateTime.utc(2026, 7, 25),
+    );
+  });
 }
 
 const _oldGame = GameSummary(
@@ -84,4 +113,18 @@ const _newGame = GameSummary(
   orientation: GameOrientation.landscape,
   tags: ['party'],
   entry: LocalGameEntry(assetPath: 'new/app/index.html', statusLabel: 'SDK'),
+);
+
+const _thirdGame = GameSummary(
+  id: 'third',
+  name: '未打开',
+  version: '1.0.0',
+  description: '',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: '多屏模式',
+  displayMode: 'multi_screen',
+  orientation: GameOrientation.landscape,
+  entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: 'SDK'),
 );

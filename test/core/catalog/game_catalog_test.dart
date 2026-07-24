@@ -271,6 +271,8 @@ Map<String, Object?> _manifest(
 }) => {
   'id': id,
   'name': name,
+  'author': 'Test Author',
+  'lastModifiedAt': 1784851200000,
   'remarks': description,
   'version': '1.0.0',
   'sdkVersion': '1.3.0',

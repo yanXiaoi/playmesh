@@ -7,10 +7,13 @@ import 'package:playmesh/app.dart';
 import 'package:playmesh/core/developer/developer_event_hub.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
+import 'package:playmesh/features/game/game_launcher.dart';
 import 'package:playmesh/features/game/game_orientation_controller.dart';
 import 'package:playmesh/features/game/game_page.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
+import 'package:playmesh/features/game/local_game_web_view.dart';
 import 'package:playmesh/features/games/game_library_page.dart';
+import 'package:playmesh/models/game_capabilities.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 import 'package:playmesh/models/game_summary.dart';
 
@@ -85,7 +88,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('唯一 ID'), findsOneWidget);
-    expect(find.text('u_local_9f2c8a71'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^u_[a-f0-9]{32}$')), findsOneWidget);
 
     await tester.pageBack();
     await tester.pumpAndSettle();
@@ -94,7 +97,7 @@ void main() {
     await tester.tap(find.text('设置').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 1.6.2'), findsOneWidget);
+    expect(find.text('Playmesh 1.8.2'), findsOneWidget);
     expect(find.text('Go Core'), findsOneWidget);
   });
 
@@ -153,7 +156,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('返回游戏详情'), findsOneWidget);
-    expect(find.byTooltip('重新开始'), findsOneWidget);
+    expect(find.byTooltip('刷新游戏'), findsOneWidget);
     expect(find.byTooltip('退出游戏'), findsNothing);
     expect(find.byTooltip('二维码与链接'), findsOneWidget);
     expect(find.byTooltip('隐藏性能信息'), findsOneWidget);
@@ -180,7 +183,7 @@ void main() {
       'type': 'runtime.log',
       'message': 'current game log',
     });
-    await tester.tap(find.byTooltip('重新开始'));
+    await tester.tap(find.byTooltip('刷新游戏'));
     await tester.pumpAndSettle();
 
     expect(
@@ -191,7 +194,7 @@ void main() {
     );
     expect(find.byKey(GamePage.runtimeKey(0)), findsNothing);
     expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
-    expect(find.text('游戏已重新开始。'), findsOneWidget);
+    expect(find.text('游戏内容已刷新。'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回游戏详情'));
     await tester.pumpAndSettle();
@@ -223,6 +226,56 @@ void main() {
     expect(find.byTooltip('展开游戏工具'), findsOneWidget);
     expect(find.text('-- FPS'), findsNothing);
     expect(find.text('Fake WebView: test-game/app/index.html'), findsOneWidget);
+  });
+
+  testWidgets('single-screen authority display receives only required', (
+    WidgetTester tester,
+  ) async {
+    const game = GameSummary(
+      id: 'com.playmesh.role-capabilities',
+      name: '角色能力测试',
+      version: '1.0.0',
+      description: '验证显示端不会取得控制器能力',
+      minPlayers: 2,
+      maxPlayers: 4,
+      supportsMultiplayer: true,
+      displayModeLabel: '大屏模式',
+      displayMode: 'single_screen_multiplayer',
+      orientation: GameOrientation.landscape,
+      controllerOrientation: GameOrientation.portrait,
+      capabilities: GameCapabilities(
+        required: {},
+        controllerRequired: {
+          'sensor.accelerometer',
+          'sensor.gyroscope',
+          'device.vibration',
+        },
+      ),
+      entry: LocalGameEntry(
+        assetPath: 'app/index.html',
+        gameEntryPath: 'app/index.html',
+        controllerEntryPath: 'app/controller/index.html',
+        statusLabel: 'Game SDK test',
+        packageRootFilePath: 'test-role-capabilities',
+      ),
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: GameLauncher(
+          game: game,
+          localUserId: 'u-authority',
+          localNickname: 'Authority',
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final webView = tester.widget<LocalGameWebView>(
+      find.byType(LocalGameWebView),
+    );
+    expect(webView.assetPath, 'app/index.html');
+    expect(webView.declaredCapabilities, isEmpty);
   });
 
   testWidgets(

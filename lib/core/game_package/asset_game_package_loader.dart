@@ -57,6 +57,12 @@ class AssetGamePackageLoader {
     } on FlutterError {
       // capabilities.json is optional. No file means no protected capability.
     }
+    if (!manifest.displayModes.contains(
+          GameDisplayMode.singleScreenMultiplayer,
+        ) &&
+        capabilities.controllerRequired.isNotEmpty) {
+      throw const FormatException('仅单屏多人游戏可以声明 controllerRequired');
+    }
 
     final appEntry = '$root/${manifest.entries.game}';
     bundle.evict(appEntry);

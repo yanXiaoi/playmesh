@@ -1,6 +1,6 @@
 # Game SDK / App 能力插件 API
 
-本文记录 Game SDK `2.0.0` 与 App Bridge SDK `2.0.0` 的公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。
+本文记录 Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -43,12 +43,12 @@ App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "2.0.0"
+console.log(playmesh.version); // "2.2.1"
 ```
 
-`playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若 `capabilities.json.required` 非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
+`playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若当前页面角色在 `capabilities.json` 中对应的能力列表非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
 
-浏览器游戏首页与控制器首页还会显示不遮挡游戏的可选全屏浮层，但 SDK 初始化、昵称和会话加入不等待全屏结果；全屏失败或选择“暂不全屏”均不影响游玩。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
+Game SDK 会把当前页面的方向传给 App Bridge；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过 SDK 悬浮工具栏的全屏按钮再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
 
 事件订阅 API 都返回取消订阅函数：
 
@@ -59,7 +59,7 @@ unsubscribe();
 
 ## App 能力插件
 
-游戏先在根 `capabilities.json` 的 `required` 中声明能力 code。主 SDK 在 App 和普通浏览器中统一请求用户确认；普通浏览器会把不可用能力标为“本平台暂不支持”，但同意后仍进入游戏。能力不是“订阅函数”的同义词：每个插件可以拥有自己的创建参数、状态、异步方法、事件和返回值，因此录音类插件可以实现由用户操作触发的 `start/stop`，传感器插件则可以持续发送 `reading` 事件。
+游戏在根 `capabilities.json` 中按角色声明能力 code：`required` 属于主画面，单屏多人的 `controllerRequired` 属于控制器。SDK 只向当前页面暴露当前角色声明的集合。主 SDK 在 App 和普通浏览器中统一请求用户确认；普通浏览器会把不可用能力标为“本平台暂不支持”，但同意后仍进入游戏。能力不是“订阅函数”的同义词：每个插件可以拥有自己的创建参数、状态、异步方法、事件和返回值，因此录音类插件可以实现由用户操作触发的 `start/stop`，传感器插件则可以持续发送 `reading` 事件。
 
 弹窗、开发者工作区的项目设置和能力测试都读取同一份平台注册表。注册表公开 code、中文说明、插件 `apiVersion`、方法、事件和平台状态；工作区能力测试始终显示全平台注册表，不按当前项目声明过滤。
 
@@ -82,6 +82,19 @@ if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
 ```
 
 通用实例固定提供 `invoke(method, args)`、`on(event, callback)`、`onError(callback)` 和 `dispose()`；具体方法、事件与语义以插件 `apiVersion` 为准。当前加速度计与陀螺仪插件均为 `1.0.0`，创建参数 `fps` 必须是 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。加速度计单位为 `m/s^2`（包含重力），陀螺仪单位为 `rad/s`；`timestamp` 为毫秒时间戳。同一种传感器插件共享一条原生采集流，最后一个实例停止、页面重载或退出后自动释放。
+
+`device.vibration@1.0.0` 是主动调用型插件，创建参数为 `{}`，不产生事件。`vibrate` 的 `style` 可为 `selection`、`light`、`medium`、`heavy` 或 `vibrate`，省略时使用 `light`：
+
+```js
+if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
+  const vibration = await playmesh.app.capabilities.create(
+    'device.vibration',
+    {},
+  );
+  await vibration.invoke('vibrate', { style: 'light' });
+  await vibration.dispose();
+}
+```
 
 ## 会话
 
@@ -259,6 +272,56 @@ playmesh.authority.onService(async (action, context) => ({
 
 规则、分数、答案和胜负应由处理器维护。Go Core 不解析游戏业务。
 
+## Binary Channel
+
+`playmesh.binary` 用于不适合 JSON 的高频或二进制数据，例如局域网内的位姿、语音片段、压缩快照和自定义序列化状态。SDK 按需建立独立 Binary WebSocket；同一游戏只维护一条该连接，并在其上复用多个相互隔离的逻辑 Channel。游戏不能直接创建 WebSocket、读取 URL/token 或解析平台帧头。
+
+只有 Authority 可以创建和关闭 Channel；创建者会自动加入。其他玩家获得 Channel ID 后调用 `joinChannel(id)`。Authority 使用固定玩家 ID `playmesh.binary.authorityPlayerId`（值为 `"authority"`）。所有角色都使用同一组发送方法：
+
+- `send(playerId, data)`：可靠单发。
+- `send(playerIds, data)`：用一个上行二进制帧可靠发送给多个目标，由 Core 扇出。
+- `send(data)`：可靠广播给当前 Channel 中除自己外的全部在线成员。
+- `sendLatest(playerId | playerIds, data)`：定向发送，但尚未发出的旧帧只保留同一目标集的最新值。
+- `sendLatest(data)`：广播，并只保留尚未发出的最新广播值。
+
+```js
+await playmesh.ready;
+
+let channel;
+if (playmesh.session.isAuthority()) {
+  channel = await playmesh.binary.createChannel({ mode: "authority" });
+  console.log(channel.id); // 通过可靠业务消息分享给其他玩家
+  channel.onForward((data, context) => {
+    console.log(context.targetPlayerIds); // 即使单发也始终是 string[]
+    // undefined：原样通过；Uint8Array：替换后通过；throw：拒绝
+    return data;
+  });
+} else {
+  channel = await playmesh.binary.joinChannel(channelIdFromAuthority);
+  await channel.send(
+    playmesh.binary.authorityPlayerId,
+    new Uint8Array([1, 2, 3]),
+  );
+}
+
+await channel.send([playerA, playerB, playerC], reliableEvent);
+await channel.sendLatest([playerA, playerB, playerC], newestSnapshot);
+await channel.send(reliableBroadcast);
+await channel.sendLatest(newestBroadcastSnapshot);
+
+channel.onMessage((data, context) => {
+  console.log(context.senderPlayerId, context.delivery, data);
+});
+```
+
+`mode: "relay"` 直接转发字节；`mode: "authority"` 中，非 Authority 发送先进入 Authority `onForward`。Authority 自己主动发送时直接投递，不再次审核。Channel ID 本身就是加入令牌，只应通过当前游戏的可靠消息分享给本局成员。
+
+多目标发送只上传一次 payload，Core 对去重后的目标数组执行扇出；最多指定 1024 个目标。`mode: "authority"` 下同一个多目标帧只触发一次 `onForward`，`context.targetPlayerIds` 始终为数组，Authority 返回的替换数据或拒绝结果作用于这一帧的全部目标。
+
+`send()` 可靠排队。带目标的 `sendLatest()` 以同一 Channel、发送者与规范化目标集为合并范围；单参数 `sendLatest(data)` 以广播为合并范围。Core 实际投递时仍按每个接收者分别替换尚未发送的旧帧。接收端统一由 `onMessage()` 处理，并通过 `context.delivery` 得知 `"queued"` 或 `"latest"`。如果 Authority 处理器已经开始执行某一旧帧，Core 不会忽略其返回值；旧新审核都会继续并各自完成转发或拒绝。
+
+广播目标由 Core 在处理请求时根据当前 Channel 在线成员计算，并排除发送者；空房间广播直接成功。当前局域网保护上限为：单帧 4 MiB、每条连接 2000 帧/秒、64 MiB/秒入站、32 MiB 出站队列、每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。达到可靠队列或审核上限时 Promise 会 reject；连续状态优先使用 `sendLatest()`。
+
 ## 生命周期
 
 ```js
@@ -272,7 +335,7 @@ playmesh.lifecycle.onExit((event) => {});
 
 `onExit` 处理器可以返回 Promise，宿主会有限等待业务清理。关键进度仍应在状态变化时调用 `setData`，不要只依赖退出回调；最终存储落盘由 App 在 WebView 重启、退出或会话关闭时完成。
 
-重新开始会收到旧 WebView 的退出通知，把原 Core 会话重置为大厅并重建页面；会话 ID、联机码、已连接玩家、分享网关和 token 保留。真正退出游戏才销毁会话。
+刷新游戏会收到旧 WebView 的退出通知，完成存储落盘后重建页面，但不会重置 Core 会话；会话 ID、联机码、已连接玩家、分享网关和 token 均保留。真正退出游戏才销毁会话。
 
 ## 存储
 
@@ -295,12 +358,15 @@ await profile.clearData();
 | `setData(key, value)` | `Promise` | 写入可 JSON 序列化值 |
 | `removeData(key)` | `Promise` | 删除单个 key |
 | `clearData()` | `Promise` | 清空当前 Bucket |
+| `upload(file)` | `Promise<string>` | 上传原始文件并返回 `/bucket/...` 地址 |
 
 key 必须匹配 `^[A-Za-z0-9._-]+$`，长度为 1 至 128。当前 SDK 会用 `JSON.stringify` 检查写入值；不要写入函数、循环引用或依赖对象原型的实例。
 
 当前宿主限制单个值序列化后不超过 256 KiB。修改先进入主机内存缓存，默认在 2 秒后批量写盘；同一 Bucket 累积 20 次脏写时会提前落盘。`setData()` 完成表示宿主已经接收修改，不表示每次调用都单独写盘。游戏没有显式 flush 能力；App 在 WebView 重启、退出或会话关闭前等待最终写入完成。
 
-所有数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/{bucket}.json`。浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他 App 玩家通过会话访问主机存储。
+JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/json/{bucket}.json`，始终保持私有。`upload(file)` 不经过 JSON/Base64，文件以流写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，单文件上限 256 MiB；平台保留安全的字母数字后缀并用毫秒时间戳替换原文件名。
+
+上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch` 的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他 App 玩家通过 Authority 主机的同一存储服务访问。
 
 平台不定义 `{userId}` 存储层。需要按用户区分时，由游戏设计 key 或 JSON 结构。
 
@@ -346,8 +412,8 @@ FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工�
 
 ## 浏览器行为
 
-- `capabilities.json.required` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；不支持项只做标注，不阻止同意后进入。
-- 浏览器主游戏页和控制器页都提供可选全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
+- 当前页面角色对应的 `required` 或 `controllerRequired` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；空数组是有效声明，绝不回退到另一角色。不支持项只做标注，不阻止同意后进入。
+- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 悬浮工具栏保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
 - 普通多人多屏分享加载 `main.json.entries.game`（默认 `app/index.html`），浏览器玩家加入 Session 并建立 WebSocket；只有单屏多人分享才加载 `entries.controller`（默认 `app/controller/index.html`）。
 - 单机分享加载 `entries.game`，只使用静态资源和 HTTP 存储，不调用加入接口且不建立 WebSocket；浏览器 Console 只保留在当前浏览器；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
 - 自定义嵌套 HTML 入口由网关按入口所在目录设置页面基准 URL，页面内相对 CSS、脚本和图片仍解析到当前游戏的 `/app/...`，不会改变 SDK、会话或存储边界。
@@ -357,7 +423,7 @@ FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工�
 - SDK 在普通浏览器页面上提供隔离于游戏样式的可收纳功能区和固定配色二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境只显示 SDK 性能层，由 App 自己的共用工具区提供返回、刷新、全屏、日志和设置，不重复显示浏览器工具区。
 - 旧浏览器连接断开后，其玩家从会话成员集合移除并释放人数名额；短暂的刷新竞态由 SDK 对 `session_full` 做有限重试。
 - 刷新继续使用本局分享 token；退出游戏、会话关闭、App/Core 重启后旧 token 失效。
-- 关闭分享面板和重新开始不会使 token 失效。
+- 关闭分享面板和刷新游戏不会使 token 失效。
 - 浏览器存储、动作与消息语义和 App WebView 保持一致，但浏览器不获得 App 原生硬件能力或用户私有资料。
 
 ## 错误处理
@@ -374,7 +440,7 @@ try {
 
 订阅回调中的异常由游戏自己处理。Authority 处理器抛出的异常会作为生命周期 `error` 事件暴露给 Authority 页面。
 
-Console 日志由运行页面的宿主捕获，不经过 Game SDK 或游戏网关。Playmesh App 的 WebView 只把本设备当前页面的 `console.log/info/warn/error/debug` 写入本机运行日志流；其他 App 或浏览器玩家的日志不会传给 Authority。普通浏览器继续使用自身开发者工具查看本机 Console。App SDK 与 Game SDK 在各自全局对象赋值成功后，分别输出 `Playmesh App SDK 注入成功` 和 `Playmesh Game SDK 注入成功`；完成宿主握手后再输出对应的 `SDK 就绪` 日志，可直接区分“文件已注入”和“Bridge 已就绪”。单机 App 页面由本地 Game SDK Bridge 返回无多人 Session 的 bootstrap，并提供本地存储、性能和生命周期命令。Bridge 请求超过 15 秒会 reject 并产生未处理 Promise 日志，不会永久等待。App 在每次启动或重新开始游戏前清空旧缓存，并在本次运行期间保留最近 500 条本机日志，即使游戏内日志面板没有打开；工作区和游戏内日志层都可一键复制最近日志。缓存不写磁盘，App 生命周期结束后清空。
+Console 日志由运行页面的宿主捕获，不经过 Game SDK 或游戏网关。Playmesh App 的 WebView 只把本设备当前页面的 `console.log/info/warn/error/debug` 写入本机运行日志流；其他 App 或浏览器玩家的日志不会传给 Authority。普通浏览器继续使用自身开发者工具查看本机 Console。App SDK 与 Game SDK 在各自全局对象赋值成功后，分别输出 `Playmesh App SDK 注入成功` 和 `Playmesh Game SDK 注入成功`；完成宿主握手后再输出对应的 `SDK 就绪` 日志，可直接区分“文件已注入”和“Bridge 已就绪”。单机 App 页面由本地 Game SDK Bridge 返回无多人 Session 的 bootstrap，并提供本地存储、性能和生命周期命令。Bridge 请求超过 15 秒会 reject 并产生未处理 Promise 日志，不会永久等待。App 在每次启动或刷新游戏前清空旧缓存，并在本次运行期间保留最近 500 条本机日志，即使游戏内日志面板没有打开；工作区和游戏内日志层都可一键复制最近日志。缓存不写磁盘，App 生命周期结束后清空。
 
 ## AI 开发依据
 

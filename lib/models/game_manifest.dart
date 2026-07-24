@@ -45,11 +45,14 @@ class GameManifest {
   const GameManifest({
     required this.id,
     required this.name,
+    required this.author,
+    required this.lastModifiedAt,
     required this.remarks,
     required this.version,
     required this.sdkVersion,
     required this.appSdkVersion,
     required this.orientation,
+    this.controllerOrientation,
     required this.modes,
     required this.displayModes,
     required this.players,
@@ -63,6 +66,19 @@ class GameManifest {
   factory GameManifest.fromJson(Map<String, Object?> json) {
     final id = _requiredString(json, 'id');
     final name = _requiredString(json, 'name');
+    final author = (_optionalString(json, 'author')?.trim() ?? '').isEmpty
+        ? '佚名'
+        : _optionalString(json, 'author')!.trim();
+    if (author.length > 80) {
+      throw const FormatException('author 不能超过 80 个字符');
+    }
+    final lastModifiedAtValue = json['lastModifiedAt'];
+    final lastModifiedAt = lastModifiedAtValue == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(
+            _asNonNegativeInt(lastModifiedAtValue, 'lastModifiedAt'),
+            isUtc: true,
+          );
     final version = _requiredVersion(json, 'version');
     final sdkVersion = _requiredVersion(json, 'sdkVersion');
     if (!sdkVersion.startsWith('1.') && !sdkVersion.startsWith('2.')) {
@@ -95,6 +111,24 @@ class GameManifest {
     );
     if (displayModes.length != 1) {
       throw const FormatException('displayModes 必须且只能声明一个显示模式');
+    }
+    final singleScreen =
+        displayModes.single == GameDisplayMode.singleScreenMultiplayer;
+    final controllerOrientationValue = json['controllerOrientation'];
+    final controllerOrientation = controllerOrientationValue == null
+        ? null
+        : GameOrientation.fromManifestValue(
+            _asString(controllerOrientationValue, 'controllerOrientation'),
+          );
+    if (singleScreen && controllerOrientation == null) {
+      throw const FormatException(
+        'single_screen_multiplayer 必须声明 controllerOrientation',
+      );
+    }
+    if (!singleScreen && controllerOrientation != null) {
+      throw const FormatException(
+        '仅 single_screen_multiplayer 可以声明 controllerOrientation',
+      );
     }
 
     final playerJson = _requiredMap(json, 'players');
@@ -150,11 +184,14 @@ class GameManifest {
     return GameManifest(
       id: id,
       name: name,
+      author: author,
+      lastModifiedAt: lastModifiedAt,
       remarks: _optionalString(json, 'remarks') ?? '',
       version: version,
       sdkVersion: sdkVersion,
       appSdkVersion: appSdkVersion,
       orientation: orientation,
+      controllerOrientation: controllerOrientation,
       modes: Set.unmodifiable(modes),
       displayModes: Set.unmodifiable(displayModes),
       players: GamePlayerLimits(min: minPlayers, max: maxPlayers),
@@ -168,11 +205,14 @@ class GameManifest {
 
   final String id;
   final String name;
+  final String author;
+  final DateTime? lastModifiedAt;
   final String remarks;
   final String version;
   final String sdkVersion;
   final String appSdkVersion;
   final GameOrientation orientation;
+  final GameOrientation? controllerOrientation;
   final Set<GameMode> modes;
   final Set<GameDisplayMode> displayModes;
   final GamePlayerLimits players;
@@ -188,6 +228,7 @@ class GameManifest {
     final json = <String, Object?>{
       'id': id,
       'name': name,
+      'author': author,
       'remarks': remarks,
       'version': version,
       'sdkVersion': sdkVersion,
@@ -200,6 +241,12 @@ class GameManifest {
       'permissions': permissions,
       'tags': tags,
     };
+    if (lastModifiedAt case final lastModifiedAt?) {
+      json['lastModifiedAt'] = lastModifiedAt.millisecondsSinceEpoch;
+    }
+    if (controllerOrientation case final controllerOrientation?) {
+      json['controllerOrientation'] = controllerOrientation.manifestValue;
+    }
     if (authority case final authority?) {
       json['authority'] = {'entry': authority.entry};
     }
@@ -287,6 +334,13 @@ int _requiredInt(Map<String, Object?> json, String field) {
   final value = json[field];
   if (value is! int) {
     throw FormatException('$field 必须是整数');
+  }
+  return value;
+}
+
+int _asNonNegativeInt(Object value, String field) {
+  if (value is! int || value < 0) {
+    throw FormatException('$field 必须是非负 Unix 毫秒时间戳');
   }
   return value;
 }

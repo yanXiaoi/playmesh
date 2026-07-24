@@ -1,6 +1,6 @@
 {
-  "version": "2.0.0",
-  "channelVersion": "2.0.0",
+  "version": "2.2.1",
+  "channelVersion": "2.1.0",
   "script": "/playmesh/sdk/v1/playmesh.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -8,7 +8,7 @@
   "initialization": {
     "required": "await playmesh.ready",
     "failure": "Promise rejects with Error when the host transport or browser join fails",
-    "rule": "Do not call session, player, game, authority or storage methods before ready resolves"
+    "rule": "Do not call session, player, game, authority, binary or storage methods before ready resolves"
   },
   "environments": [
     {
@@ -107,6 +107,32 @@
       "in-game-debug-overlay"
     ]
   },
+  "binaryTransport": {
+    "connection": "One lazy platform-managed Binary WebSocket per multiplayer game runtime, separate from the Session WebSocket",
+    "channelIsolation": "Many logical channels share the connection; data never crosses channel ids",
+    "authorityPlayerId": "authority",
+    "createAndClose": "Authority only; Authority automatically joins a channel it creates",
+    "modes": {
+      "authority": "Non-Authority sends are reviewed by Authority; undefined passes, Uint8Array replaces, and throw rejects",
+      "relay": "Opaque bytes are routed directly to the target"
+    },
+    "delivery": {
+      "send": "Reliable queued frame; accepts one target, a target array, or no target argument for broadcast to all other online channel members",
+      "sendLatest": "Accepts one target, a target array, or no target argument for latest broadcast; replaces only an older unsent frame in the same channel, sender and canonical target scope",
+      "multiTargetFanOut": "One upstream binary frame is expanded by Core to all normalized target ids; Authority review receives targetPlayerIds as an array and runs once for the whole frame",
+      "startedAuthorityReview": "Once an Authority handler starts, old and new reviews both continue and both decisions are honored"
+    },
+    "limits": {
+      "frameBytes": 4194304,
+      "framesPerSecond": 2000,
+      "inboundBytesPerSecond": 67108864,
+      "outboundQueueBytes": 33554432,
+      "channelsPerSession": 1024,
+      "pendingAuthorityReviews": 1024,
+      "pendingAuthorityReviewBytes": 134217728,
+      "authorityReviewTimeoutMs": 15000
+    }
+  },
   "namespaces": [
     {
       "name": "playmesh",
@@ -115,7 +141,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "2.0.0"
+          "value": "2.2.1"
         },
         {
           "name": "ready",
@@ -161,11 +187,6 @@
           "signature": "capabilities.create(code: string, options?: JsonObject): Promise<CapabilityHandle>",
           "availability": "Playmesh App WebView after declaration and per-load user consent",
           "behavior": "Creates a stateful plugin instance with invoke, on, onError and dispose"
-        },
-        {
-          "name": "device.haptic",
-          "signature": "device.haptic(style: string): Promise<null>",
-          "availability": "Playmesh App WebView with haptics capability"
         },
         {
           "name": "device.setFullscreen",
@@ -278,6 +299,32 @@
       ]
     },
     {
+      "name": "playmesh.binary",
+      "members": [
+        {
+          "name": "authorityPlayerId",
+          "kind": "property",
+          "type": "\"authority\"",
+          "behavior": "Stable target and sender id for Authority in every Binary Channel"
+        },
+        {
+          "name": "createChannel",
+          "signature": "createChannel(options: {mode: \"authority\" | \"relay\"}): Promise<BinaryChannel>",
+          "availability": "Authority Client only"
+        },
+        {
+          "name": "joinChannel",
+          "signature": "joinChannel(channelId: string): Promise<BinaryChannel>",
+          "behavior": "Joins one isolated logical channel; the channel id is the join token"
+        },
+        {
+          "name": "BinaryChannel",
+          "signature": "{id, mode, send(Uint8Array), send(targetPlayerId | readonly string[], Uint8Array), sendLatest(Uint8Array), sendLatest(targetPlayerId | readonly string[], Uint8Array), onMessage(callback), onForward(handler), close()}",
+          "rule": "send(data) and sendLatest(data) broadcast to every other currently-online member in this channel. onForward always receives targetPlayerIds: string[]. close and onForward authority behavior are restricted as described by the generated d.ts"
+        }
+      ]
+    },
+    {
       "name": "playmesh.lifecycle",
       "members": [
         {
@@ -343,8 +390,12 @@
             "getData(key): Promise<JsonValue | null>",
             "setData(key, value): Promise<null>",
             "removeData(key): Promise<null>",
-            "clearData(): Promise<null>"
-          ]
+            "clearData(): Promise<null>",
+            "upload(file): Promise<string>"
+          ],
+          "uploadStorage": "packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{safe-extension}",
+          "uploadUrl": "/bucket/{bucket}/{timestamp-ms}.{safe-extension}",
+          "jsonStorage": "packages/{gameId}/data/json/{bucket}.json; never mapped to the web"
         }
       ]
     },
@@ -391,14 +442,15 @@
     "The platform attaches senderPlayerId and the current SessionSnapshot",
     "Authority handler validates the action and updates authoritative state",
     "Authority returns targetPlayerIds using Player.id values and optionally SessionSnapshot.authorityClientId for the single-screen public display",
-    "Target pages receive the message through playmesh.game.onMessage"
+    "Target pages receive the message through playmesh.game.onMessage",
+    "Opaque Uint8Array data uses playmesh.binary; the SDK owns the second lazy WebSocket, multiplexing, addressing and frame format"
   ],
   "securityRules": [
     "Determine Authority only with playmesh.session.isAuthority() or SessionSnapshot.authorityClientId; never use players[0], join order or a first-player convention",
     "Do not access PlaymeshBridge, chrome.webview, Core HTTP, WebSocket, share tokens or player credentials directly",
     "Do not trust identity or final results supplied by action payloads",
     "Do not store credentials, player ids or game buckets in localStorage",
-    "Do not read data/, cache/, .playmesh/ or another game package",
+    "Do not read data/json, cache/, .playmesh/ or another game package; use only URLs returned by Bucket upload for runtime files",
     "Do not register authority service from a controller page"
   ],
   "projectRules": {

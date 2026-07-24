@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../network/lan_endpoint_resolver.dart';
+import '../storage/game_bucket_http.dart';
 import '../storage/game_storage_service.dart';
 import '../../models/game_manifest.dart';
+import '../../models/game_summary.dart';
 import '../capabilities/default_capability_plugins.dart';
 import 'game_web_gateway_contract.dart';
 
@@ -14,11 +16,14 @@ Future<GameWebGateway> startGameWebGateway({
   String? gameRootFilePath,
   required bool multiplayer,
   required String displayMode,
+  required GameOrientation orientation,
+  GameOrientation? controllerOrientation,
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
   String gameId = 'com.playmesh.unknown',
   String gameName = 'Playmesh 游戏',
   List<String> requiredCapabilities = const [],
+  List<String> controllerRequiredCapabilities = const [],
   Uri? coreEndpoint,
   String? joinCode,
   required String shareToken,
@@ -30,6 +35,10 @@ Future<GameWebGateway> startGameWebGateway({
   }
   if (!multiplayer && displayMode != 'multi_screen') {
     throw const FormatException('单机分享必须使用 multi_screen');
+  }
+  if (displayMode == 'single_screen_multiplayer' &&
+      controllerOrientation == null) {
+    throw const FormatException('单屏多人分享缺少控制器方向');
   }
   if (multiplayer && (coreEndpoint == null || joinCode?.isNotEmpty != true)) {
     throw const FormatException('联机分享缺少 Core 地址或联机码');
@@ -43,11 +52,16 @@ Future<GameWebGateway> startGameWebGateway({
     gameRootFilePath: gameRootFilePath,
     multiplayer: multiplayer,
     displayMode: displayMode,
+    orientation: orientation,
+    controllerOrientation: controllerOrientation,
     gameEntryPath: gameEntryPath,
     controllerEntryPath: controllerEntryPath,
     gameId: gameId,
     gameName: gameName,
     requiredCapabilities: List.unmodifiable(requiredCapabilities),
+    controllerRequiredCapabilities: List.unmodifiable(
+      controllerRequiredCapabilities,
+    ),
     coreEndpoint: coreEndpoint?.replace(path: '/', query: null, fragment: null),
     joinCode: joinCode,
     shareToken: shareToken,
@@ -64,11 +78,14 @@ class _IoGameWebGateway implements GameWebGateway {
     this.gameRootFilePath,
     required this.multiplayer,
     required this.displayMode,
+    required this.orientation,
+    required this.controllerOrientation,
     required this.gameEntryPath,
     required this.controllerEntryPath,
     required this.gameId,
     required this.gameName,
     required this.requiredCapabilities,
+    required this.controllerRequiredCapabilities,
     required this.coreEndpoint,
     required this.joinCode,
     required this.shareToken,
@@ -80,11 +97,14 @@ class _IoGameWebGateway implements GameWebGateway {
   final String? gameRootFilePath;
   final bool multiplayer;
   final String displayMode;
+  final GameOrientation orientation;
+  final GameOrientation? controllerOrientation;
   final String gameEntryPath;
   final String controllerEntryPath;
   final String gameId;
   final String gameName;
   final List<String> requiredCapabilities;
+  final List<String> controllerRequiredCapabilities;
   final Uri? coreEndpoint;
   final String? joinCode;
   final String shareToken;
@@ -106,6 +126,13 @@ class _IoGameWebGateway implements GameWebGateway {
   }
 
   Future<void> _handle(HttpRequest request) async {
+    if (await handleGameBucketRequest(
+      request,
+      storage: storage,
+      uploadToken: shareToken,
+    )) {
+      return;
+    }
     final expectedJoinPath = multiplayer ? '/join/$joinCode' : '/play';
     if (request.uri.path == expectedJoinPath) {
       if (request.uri.queryParameters['token'] != shareToken) {
@@ -139,7 +166,8 @@ class _IoGameWebGateway implements GameWebGateway {
       await _json(request.response, HttpStatus.ok, {
         'gameId': gameId,
         'gameName': gameName,
-        'required': requiredCapabilities,
+        'orientation': _pageOrientation.manifestValue,
+        'required': _pageRequiredCapabilities,
         'capabilityRegistry': defaultCapabilityDescriptors
             .map((definition) => definition.toJson())
             .toList(),
@@ -297,7 +325,8 @@ class _IoGameWebGateway implements GameWebGateway {
       if (multiplayer) 'joinCode': joinCode,
       'shareToken': shareToken,
       'gameName': gameName,
-      'requiredCapabilities': requiredCapabilities,
+      'orientation': _pageOrientation.manifestValue,
+      'requiredCapabilities': _pageRequiredCapabilities,
       'availableCapabilities': defaultCapabilityDescriptors
           .where((definition) => definition.htmlSupported)
           .map((definition) => definition.code)
@@ -306,6 +335,7 @@ class _IoGameWebGateway implements GameWebGateway {
           .map((definition) => definition.toJson())
           .toList(),
       'storageEndpoint': '/api/storage',
+      'bucketEndpoint': '/bucket',
       if (multiplayer) 'nicknameEndpoint': '/api/player/nickname',
       'nickname': ?request.uri.queryParameters['playmeshNickname'],
     });
@@ -323,6 +353,16 @@ class _IoGameWebGateway implements GameWebGateway {
     }
     await _html(request.response, html);
   }
+
+  GameOrientation get _pageOrientation =>
+      multiplayer && displayMode == 'single_screen_multiplayer'
+      ? controllerOrientation!
+      : orientation;
+
+  List<String> get _pageRequiredCapabilities =>
+      multiplayer && displayMode == 'single_screen_multiplayer'
+      ? controllerRequiredCapabilities
+      : requiredCapabilities;
 
   Future<void> _asset(HttpRequest request) async {
     final path = request.uri.path;

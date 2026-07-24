@@ -26,6 +26,7 @@ class GoCoreRuntime
     DeveloperPreferences? developerPreferences,
     DeveloperRunController? developerRunController,
     this.developerCapabilityTests,
+    this.developerAuthorProvider,
   }) : assert(client != null || clientFactory != null),
        _client = client,
        _clientFactory = clientFactory,
@@ -40,6 +41,7 @@ class GoCoreRuntime
     DeveloperPreferences? developerPreferences,
     DeveloperRunController? developerRunController,
     DeveloperCapabilityTestService? developerCapabilityTests,
+    String Function()? developerAuthorProvider,
   }) {
     final host = createBundledGoCoreHost(address: address);
     return GoCoreRuntime(
@@ -52,6 +54,7 @@ class GoCoreRuntime
       developerPreferences: developerPreferences,
       developerRunController: developerRunController,
       developerCapabilityTests: developerCapabilityTests,
+      developerAuthorProvider: developerAuthorProvider,
     );
   }
 
@@ -62,6 +65,7 @@ class GoCoreRuntime
   final DeveloperAiPromptTemplateStore? developerAiPromptTemplates;
   final DeveloperRunController developerRunController;
   final DeveloperCapabilityTestService? developerCapabilityTests;
+  final String Function()? developerAuthorProvider;
   final DeveloperPreferences _developerPreferences;
   GoCoreStatusService? _statusService;
   DeveloperWebGateway? _developerGateway;
@@ -96,6 +100,7 @@ class GoCoreRuntime
       promptTemplates: developerAiPromptTemplates,
       runController: developerRunController,
       capabilityTests: developerCapabilityTests,
+      currentAuthor: developerAuthorProvider,
     );
     _developerGateway = gateway;
     _developerSession = gateway.session;

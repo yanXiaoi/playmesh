@@ -113,6 +113,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   String? _developerRunId;
 
   GameSdkBridge? get _webViewBridge => _bridge ?? _soloBridge;
+  bool get _controllerRole =>
+      widget.game.displayMode == 'single_screen_multiplayer' &&
+      widget.joinRequest != null;
+  GameOrientation get _runtimeOrientation =>
+      widget.game.orientationForRole(controller: _controllerRole);
 
   @override
   void initState() {
@@ -121,7 +126,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _showPerformance = widget.initialPerformanceVisible;
     _orientationController =
         widget.orientationController ?? SystemGameOrientationController();
-    _applyOrientation(widget.game.orientation);
+    _applyOrientation(_runtimeOrientation);
     final developerProjectId = widget.developerProjectId;
     final runtime = widget.goCoreRuntime;
     if (developerProjectId != null && runtime != null) {
@@ -140,8 +145,14 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(GamePage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.game.orientation != widget.game.orientation) {
-      _applyOrientation(widget.game.orientation);
+    final oldControllerRole =
+        oldWidget.game.displayMode == 'single_screen_multiplayer' &&
+        oldWidget.joinRequest != null;
+    final oldOrientation = oldWidget.game.orientationForRole(
+      controller: oldControllerRole,
+    );
+    if (oldOrientation != _runtimeOrientation) {
+      _applyOrientation(_runtimeOrientation);
     }
   }
 
@@ -204,10 +215,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                   unawaited(_restartGame().catchError((Object _) {})),
               onBack: () => unawaited(_returnToPrevious()),
               onShare: () => unawaited(_openShare()),
-              onEnterFullscreen: () => _applyOrientation(
-                widget.game.orientation,
-                userInitiated: true,
-              ),
+              onEnterFullscreen: () =>
+                  _applyOrientation(_runtimeOrientation, userInitiated: true),
               onExitFullscreen: () => unawaited(_exitFullscreen()),
               secondaryActions: [
                 GameToolAction(
@@ -236,7 +245,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                 child: _FullscreenNotice(
                   error: _fullscreenError!,
                   onRetry: () => _applyOrientation(
-                    widget.game.orientation,
+                    _runtimeOrientation,
                     userInitiated: true,
                   ),
                   onDismiss: () => setState(() => _fullscreenError = null),
@@ -296,7 +305,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             bridge: _webViewBridge,
             localUserId: widget.localUserId,
             localNickname: widget.localNickname,
-            controllerRole: widget.joinRequest != null,
+            controllerRole: _controllerRole,
             onExitRequested: _returnToPrevious,
           ),
     );
@@ -552,11 +561,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         displayMode: multiplayer
             ? bridge!.connection.snapshot.displayMode
             : 'multi_screen',
+        orientation: widget.game.orientation,
+        controllerOrientation: widget.game.controllerOrientation,
         gameEntryPath: widget.game.entry.gameEntryPath,
         controllerEntryPath: widget.game.entry.controllerEntryPath,
         gameId: widget.game.id,
         gameName: widget.game.name,
         requiredCapabilities: widget.game.capabilities.required.toList(),
+        controllerRequiredCapabilities: widget
+            .game
+            .capabilities
+            .controllerRequired
+            .toList(),
         coreEndpoint: multiplayer ? runtime!.endpoint : null,
         joinCode: multiplayer ? bridge!.connection.snapshot.joinCode : null,
         shareToken: shareToken,
@@ -708,18 +724,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     await bridge?.persistStorage();
     await soloBridge?.persistStorage();
     await _soloShareStorage?.flushAll();
-    if (bridge?.connection.isAuthority ?? false) {
-      try {
-        await bridge!.connection.reset();
-      } on Object catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('重新开始失败：$error')));
-        }
-        rethrow;
-      }
-    }
     if (!mounted) {
       return;
     }
@@ -732,7 +736,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     });
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('游戏已重新开始。')));
+    ).showSnackBar(const SnackBar(content: Text('游戏内容已刷新。')));
   }
 
   void _clearLogsForNewRun() {

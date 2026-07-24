@@ -10,6 +10,13 @@ import '../../models/game_summary.dart';
 import '../library/playmesh_library_root.dart';
 import 'file_game_library_scanner.dart';
 
+class ValidatedGamePackage {
+  const ValidatedGamePackage({required this.manifest, required this.files});
+
+  final GameManifest manifest;
+  final Map<String, List<int>> files;
+}
+
 class GamePackageTransferService {
   GamePackageTransferService({Directory? libraryRoot})
     : _injectedRoot = libraryRoot;
@@ -35,7 +42,31 @@ class GamePackageTransferService {
   final Directory? _injectedRoot;
   Directory? _resolvedRoot;
 
-  Future<GameSummary> importPackage(File source) async {
+  Future<GameSummary> importPackage(
+    File source, {
+    String? author,
+    DateTime? lastModifiedAt,
+  }) async {
+    final package = await readPackage(
+      source,
+      author: author,
+      lastModifiedAt: lastModifiedAt,
+    );
+    final root = await _root();
+    final packages = Directory('${root.path}${Platform.pathSeparator}packages');
+    await packages.create(recursive: true);
+    final target = Directory(
+      '${packages.path}${Platform.pathSeparator}${package.manifest.id}',
+    );
+    await commitPackage(package, target);
+    return FileGameLibraryScanner(libraryRoot: root).loadPackage(target);
+  }
+
+  Future<ValidatedGamePackage> readPackage(
+    File source, {
+    String? author,
+    DateTime? lastModifiedAt,
+  }) async {
     if (!await source.exists()) throw StateError('找不到游戏包文件');
     final compressedSize = await source.length();
     if (compressedSize <= 0 || compressedSize > maxCompressedBytes) {
@@ -74,35 +105,64 @@ class GamePackageTransferService {
     if (!files.keys.any((path) => path.startsWith('app/'))) {
       throw const FormatException('Playmesh 游戏包根目录必须存在 app/');
     }
-    final manifest = _readManifest(manifestEntry);
+    final manifestJson = _readManifestJson(manifestEntry);
+    if (author != null || lastModifiedAt != null) {
+      final normalizedAuthor = author?.trim() ?? '';
+      if (normalizedAuthor.isEmpty || lastModifiedAt == null) {
+        throw const FormatException('发布项目必须同时提供作者和最后修改时间');
+      }
+      manifestJson
+        ..['author'] = normalizedAuthor
+        ..['lastModifiedAt'] = lastModifiedAt.toUtc().millisecondsSinceEpoch;
+    }
+    final manifest = GameManifest.fromJson(manifestJson);
     if (files['capabilities.json'] case final capabilitiesEntry?) {
-      _readCapabilities(capabilitiesEntry);
+      final capabilities = _readCapabilities(capabilitiesEntry);
+      if (!manifest.displayModes.contains(
+            GameDisplayMode.singleScreenMultiplayer,
+          ) &&
+          capabilities.controllerRequired.isNotEmpty) {
+        throw const FormatException('仅单屏多人游戏可以声明 controllerRequired');
+      }
     }
     _validateRequiredFiles(manifest, files.keys.toSet());
+    final normalizedFiles = <String, List<int>>{
+      for (final item in files.entries)
+        item.key: item.key == 'main.json'
+            ? utf8.encode(
+                '${const JsonEncoder.withIndent('  ').convert(manifest.toJson())}\n',
+              )
+            : List<int>.from(item.value.content as List<int>),
+    };
+    return ValidatedGamePackage(
+      manifest: manifest,
+      files: Map.unmodifiable(normalizedFiles),
+    );
+  }
 
-    final root = await _root();
-    final packages = Directory('${root.path}${Platform.pathSeparator}packages');
+  Future<void> commitPackage(
+    ValidatedGamePackage package,
+    Directory target,
+  ) async {
+    final packages = target.parent;
     await packages.create(recursive: true);
     final nonce =
         '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
     final staging = Directory(
       '${packages.path}${Platform.pathSeparator}.playmesh-import-$nonce',
     );
-    final target = Directory(
-      '${packages.path}${Platform.pathSeparator}${manifest.id}',
-    );
     final backup = Directory(
       '${packages.path}${Platform.pathSeparator}.playmesh-backup-$nonce',
     );
     await staging.create(recursive: true);
     try {
-      for (final item in files.entries) {
+      for (final item in package.files.entries) {
         final output = File(
           '${staging.path}${Platform.pathSeparator}'
           '${item.key.replaceAll('/', Platform.pathSeparator)}',
         );
         await output.parent.create(recursive: true);
-        await output.writeAsBytes(item.value.content as List<int>, flush: true);
+        await output.writeAsBytes(item.value, flush: true);
       }
       final replacing = await target.exists();
       if (replacing) {
@@ -114,7 +174,6 @@ class GamePackageTransferService {
       } else {
         await staging.rename(target.path);
       }
-      return FileGameLibraryScanner(libraryRoot: root).loadPackage(target);
     } on Object {
       if (await staging.exists()) await staging.delete(recursive: true);
       rethrow;
@@ -178,21 +237,34 @@ class GamePackageTransferService {
     if (await directory.exists()) await directory.delete(recursive: true);
   }
 
-  Future<File> exportPackage(GameSummary game, File destination) async {
+  Future<File> exportPackage(
+    GameSummary game,
+    File destination, {
+    bool validate = true,
+  }) async {
     final packagePath = game.entry.packageRootFilePath;
     if (packagePath == null) throw StateError('内置游戏不能导出为本地游戏包');
     final root = await _root();
+    final packagesDirectory = Directory(
+      '${root.path}${Platform.pathSeparator}packages',
+    );
+    final packagesRoot = packagesDirectory.absolute.path.toLowerCase();
     final expected = Directory(
-      '${root.path}${Platform.pathSeparator}packages'
-      '${Platform.pathSeparator}${game.id}',
+      '${packagesDirectory.path}${Platform.pathSeparator}${game.id}',
     ).absolute.path.toLowerCase();
     final package = Directory(packagePath);
-    if (package.absolute.path.toLowerCase() != expected) {
+    final actual = package.absolute.path.toLowerCase();
+    final insidePackages =
+        actual.startsWith('$packagesRoot${Platform.pathSeparator}') &&
+        !actual
+            .substring(packagesRoot.length + 1)
+            .contains(Platform.pathSeparator);
+    if ((validate && actual != expected) || (!validate && !insidePackages)) {
       throw StateError('游戏包目录不在 Playmesh 游戏库中');
     }
     final manifest = File('${package.path}${Platform.pathSeparator}main.json');
     final app = Directory('${package.path}${Platform.pathSeparator}app');
-    if (!await manifest.exists() || !await app.exists()) {
+    if (!await manifest.exists() || (validate && !await app.exists())) {
       throw const FormatException('游戏包根目录必须包含 main.json 和 app/');
     }
     final archive = Archive()
@@ -210,30 +282,39 @@ class GamePackageTransferService {
     );
     if (await capabilities.exists()) {
       final bytes = await capabilities.readAsBytes();
-      GameCapabilities.fromJson(
-        Map<String, Object?>.from(jsonDecode(utf8.decode(bytes)) as Map),
-      );
+      if (validate) {
+        GameCapabilities.fromJson(
+          Map<String, Object?>.from(jsonDecode(utf8.decode(bytes)) as Map),
+        );
+      }
       archive.addFile(ArchiveFile('capabilities.json', bytes.length, bytes));
       expandedBytes += bytes.length;
       fileCount += 1;
     }
-    await for (final entity in app.list(recursive: true, followLinks: false)) {
-      if (entity is Link) throw const FormatException('游戏包不允许符号链接');
-      if (entity is! File) continue;
-      final size = await entity.length();
-      if (size > maxSingleFileBytes) {
-        throw FormatException('单个文件超过 32 MiB：${entity.path}');
+    if (await app.exists()) {
+      await for (final entity in app.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is Link) throw const FormatException('游戏包不允许符号链接');
+        if (entity is! File) continue;
+        final size = await entity.length();
+        if (size > maxSingleFileBytes) {
+          throw FormatException('单个文件超过 32 MiB：${entity.path}');
+        }
+        expandedBytes += size;
+        fileCount += 1;
+        if (expandedBytes > maxExpandedBytes || fileCount > maxFileCount) {
+          throw const FormatException('游戏包超过导出限制');
+        }
+        final relative = entity.path
+            .substring(package.path.length + 1)
+            .replaceAll('\\', '/');
+        _validatePackagePath(relative);
+        archive.addFile(
+          ArchiveFile(relative, size, await entity.readAsBytes()),
+        );
       }
-      expandedBytes += size;
-      fileCount += 1;
-      if (expandedBytes > maxExpandedBytes || fileCount > maxFileCount) {
-        throw const FormatException('游戏包超过导出限制');
-      }
-      final relative = entity.path
-          .substring(package.path.length + 1)
-          .replaceAll('\\', '/');
-      _validatePackagePath(relative);
-      archive.addFile(ArchiveFile(relative, size, await entity.readAsBytes()));
     }
     final encoded = ZipEncoder().encode(archive);
     if (encoded == null) throw StateError('游戏包压缩失败');
@@ -242,10 +323,10 @@ class GamePackageTransferService {
     return destination;
   }
 
-  GameManifest _readManifest(ArchiveFile file) {
+  Map<String, Object?> _readManifestJson(ArchiveFile file) {
     final decoded = jsonDecode(utf8.decode(file.content as List<int>));
     if (decoded is! Map) throw const FormatException('main.json 根节点必须是对象');
-    return GameManifest.fromJson(Map<String, Object?>.from(decoded));
+    return Map<String, Object?>.from(decoded);
   }
 
   GameCapabilities _readCapabilities(ArchiveFile file) {

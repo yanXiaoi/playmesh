@@ -45,12 +45,12 @@ Game Package
 - SDK 不额外设计启动回调，页面脚本执行就是启动；必须提供 `onPause`、`onResume` 和由 App 主动触发的 `onExit` 生命周期接口。
 - `onExit` 只作为退出前的最佳努力通知，必须幂等、有超时，不能作为唯一的数据持久化时机；重要数据应在状态变化后及时保存。
 - 游戏库采用“目录扫描优先”原则：游戏包导入后由 App 自动扫描、校验和建立索引，不增加开发者注册步骤；索引失效时可以从目录重新构建。
-- 游戏自定义数据必须通过 `playmesh.storage.getBucket(bucket)` 持久化，存放在 `packages/{gameId}/data/`，每个 Bucket 对应一个 JSON 文件；不能写入游戏包目录或直接操作文件系统。
-- 平台只按 `gameId + bucket` 选择 `packages/{gameId}/data/{bucket}.json`，不得自动增加 `{userId}` 目录。游戏需要区分用户时，由开发者在 Bucket、key 或 JSON 内容中自行设计。
+- 游戏自定义数据必须通过 `playmesh.storage.getBucket(bucket)` 持久化。JSON 值存放在 `packages/{gameId}/data/json/{bucket}.json`；`upload(file)` 写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`。不能写入游戏包目录或直接操作文件系统。
+- 平台只按 `gameId + bucket` 选择上述目录，不得自动增加 `{userId}` 层。游戏需要区分用户时，由开发者在 Bucket、key 或 JSON 内容中自行设计。
 - Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；SDK 在调用前校验，Flutter 存储层在落盘前再次校验。点号、空白、斜杠、反斜杠、非 ASCII 字符和前导下划线/连字符都不允许。
-- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。
+- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 256 MiB。
 - 持久化数据的唯一落盘端是开始游戏的 Authority 主机。Authority WebView 直接访问主机存储服务；浏览器使用受本局 token 保护的主机 HTTP 接口；其他 App 玩家使用会话内保留消息路由到 Authority。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。
-- `packages/{gameId}/app/` 是 WebView 静态映射根，`packages/{gameId}/data/` 必须是同级且不可映射目录；任何资源服务、路径拼接和预览接口都必须拒绝跨到 `data/`。
+- `packages/{gameId}/app/` 是 WebView 静态映射根。运行时只把 `data/data` 中的文件映射为不可枚举的 `/bucket/{bucket}/{timestamp-file}`；`data/json` 始终私有，任何资源服务、路径拼接和预览接口都必须拒绝访问或穿越到该目录。
 - 当前游戏的 `app/` 只通过 `/app/...` 暴露；SDK、平台头像等公共资源统一放在 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。游戏不得以相对路径越出 `app/`，也不得读取其他游戏包。
 - 游戏详情页清除缓存/数据和删除游戏必须调用统一的数据清理流程；数据清理必须有用户确认、日志和明确的不可恢复提示。
 - 原始压缩包只存在于导入和分享的临时生命周期内，安装库不长期保存压缩包；分享包由已安装目录临时生成。
@@ -118,7 +118,8 @@ Game Package
 - 页面入口只从 `main.json.entries.game` 与 `entries.controller` 解析，默认值分别为 `app/index.html` 与 `app/controller/index.html`；Authority JavaScript 只从 `authority.entry` 解析。扫描器、校验器、App WebView 和浏览器网关不得各自硬编码另一套入口。
 - 对外提供的 SDK、开发者通道和 Go API 必须提供机器可读接口文档；AI 应通过正式 API 契约调用能力，不为单个 AI 客户端编写专用 Agent。
 - HTTP 接口使用 OpenAPI，数据、事件和错误使用 JSON Schema；每个接口记录权限、风险等级、幂等性、重试规则和示例。
-- `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；WebView 必须在方向应用完成后创建，退出游戏后恢复系统方向。
+- `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。WebView 必须按当前页面角色在方向应用完成后创建，进入全屏时把对应方向传到原生宿主，退出游戏后恢复系统方向。
+- `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描，分别显示“佚名”和“无”，有时间值时按设备本地时区换算。
 - `sdkVersion` 用于声明游戏包要求的当前 Game SDK 版本；开发期只接受当前实现明确支持的版本，不能静默降级。
 - SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本，但开发期版本号不承诺向后兼容。
 - 协议字段、语义或入口变化时必须升级版本，并在同一次变更中删除旧实现和旧契约。
@@ -146,9 +147,9 @@ Game Package
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
-当前未发布开发线在 `docs/version/NEXT.md` 维护；其中 Game SDK 与 App Bridge SDK 已因能力插件协议的破坏性更新升级到 `2.0.0`，不得继续按上表正式基线生成新项目。
+当前未发布开发线在 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `1.8.2+15`、Go Core `0.3.0`、Core 协议 `1.1.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Developer API / OpenAPI `1.6.1` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
 
-游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id` 始终不可修改，其他字段经完整清单校验后可保存。
+游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 
 Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library/sdk-src/playmesh.ts` 和 `playmesh-app.ts`。正式构建先执行 `tool/generate_sdk.ps1`，生成 `public/sdk/v1/` 下的 `.js`、`.d.ts` 以及 Dart 版本常量；运行时注入、IDEA 类型提示、Developer Gateway 下载和版本校验只能使用这些生成产物。一次版本变更必须同步更新代码常量、默认模板、机器契约、编辑器补全、测试断言和开发文档，并在版本或验证记录中写明升级原因。App、SDK、默认骨架、示例契约、AI 提示词和项目校验器始终只维护一套当前版本；版本升级后，不提供旧 SDK 入口、兼容矩阵、字段适配、自动迁移或双写逻辑。
 
@@ -231,7 +232,7 @@ feat(session): add browser join identity step
 
 ## 安全和权限
 
-- 游戏需要的平台能力只在与 `main.json` 同级的可选 `capabilities.json` 中声明；能力 ID 按功能命名，不绑定具体 App 或浏览器实现。
+- 游戏需要的平台能力只在与 `main.json` 同级的可选 `capabilities.json` 中声明；`required` 属于主画面，单屏多人的 `controllerRequired` 属于控制器，运行时只暴露当前角色集合。能力 ID 按功能命名，不绑定具体 App 或浏览器实现。
 - 能力 code、中文名、用途、`apiVersion`、方法、事件、平台状态、实例工厂、自检和资源释放必须集中在 `lib/core/capabilities/{capability}/` 的插件内。SDK 弹窗、开发者工作区、Schema/运行时校验和 API 输出不得维护平行硬编码清单；新增能力只增加独立插件目录并注册插件。
 - 开发者工作区的能力测试必须展示全平台注册表，不按当前项目的 `capabilities.json` 过滤；项目声明只控制项目授权和运行时可创建范围。测试页显示插件版本、方法、事件、平台状态与实际返回数据，并持续执行到用户手动关闭窗口；一次 `POST /dev/api/capability-tests` 仍只返回该轮结果。
 - `required` 非空时，主 SDK 在 App 与浏览器每次加载游戏时都必须展示全部能力并等待用户确认；拒绝则退出，结果不得持久化或写入 Authority 主机。文件缺失或列表为空时不弹窗。
@@ -267,11 +268,16 @@ capabilities.json：声明 sensor.accelerometer / sensor.gyroscope
   -> capabilities.create(code, {fps})：创建实例
   -> instance.invoke('start')：启动插件
   -> instance.on('reading')：接收采样
+
+capabilities.json：声明 device.vibration
+  -> capabilities.create('device.vibration', {})：创建实例
+  -> instance.invoke('vibrate', {style})：主动触发一次反馈
+  -> instance.dispose()：释放实例
 ```
 
 当前加速度计与陀螺仪各自位于独立插件目录，插件 API 版本均为 `1.0.0`，方法为 `start/stop`，事件为 `reading`。内部每种传感器只建立一条原生流，原生采样频率取该插件全部运行实例请求频率的最大值；最后一个实例停止、页面重载或退出时必须释放原生流。频率范围为每秒 `1` 至 `120` 次。
 
-能力 ID 与提供方解耦，后续摄像头、麦克风等能力可以由 App 原生适配器或浏览器标准 API 提供。当前局域网浏览器分享使用 HTTP，加速度计和陀螺仪只由 App SDK 提供；普通浏览器将两项标为暂不支持，但用户同意后仍可进入游戏，游戏不得把传感器回调设为不可降级的主流程前提。
+能力 ID 与提供方解耦，后续摄像头、麦克风等能力可以由 App 原生适配器或浏览器标准 API 提供。当前局域网浏览器分享使用 HTTP，加速度计、陀螺仪和震动只由 App SDK 提供；普通浏览器将这些原生能力标为暂不支持，但用户同意后仍可进入游戏，游戏不得把原生能力设为不可降级的主流程前提。震动插件不建立持续采样流，工作区自检也不得主动制造副作用。
 
 ## Authority Client 与 Go Core 边界
 
@@ -279,7 +285,11 @@ Go Core 只做通用中转，不承载任何具体游戏规则。创建会话时
 
 游戏包可以按需使用 `app/static/js/service/` 目录或 `service.js` 入口组织上述权威逻辑，此目录和文件名是推荐约定，不是强制目录。该逻辑应在 Authority Runtime 中执行，不应被 Go Core 直接解析。SDK 应提供当前客户端角色、`authorityClientId`、玩家成员快照、Authority 连接状态和权威状态版本号；大屏公共显示端的当前玩家必须为 `null`。
 
-Authority Client 默认只建立一条物理 WebSocket。普通多屏 App 主机可在同一连接复用 `player` 与 `authority` 逻辑角色，但 Authority 资格只来自 App 创建会话时登记的凭证；大屏公共显示端只有 `authority` 角色，不得伪造玩家动作。游戏代码和 `service.js` 不得自行创建第二条 WS。对 AI 暴露的接口固定为 `playmesh.game.submitAction`、`playmesh.game.onMessage` 和 `playmesh.authority.onService`。
+每个多人游戏运行时最多由 SDK 管理两条物理 WebSocket：原有 Session WS 负责 JSON 会话、权威动作和状态同步；Binary WS 在首次调用 `playmesh.binary` 时按需创建，复用当前会话凭证，并在游戏退出、Session WS 断开或 Authority 退出时由平台统一释放。游戏代码和 `service.js` 不得直接创建、保存或操作任何 Core WebSocket。
+
+一条 Binary WS 复用多个逻辑 Channel，Channel ID 同时是加入令牌。只有 Authority 可以创建和关闭 Channel，创建后 Authority 自动加入；其他玩家只能凭 ID 加入。`playmesh.binary.authorityPlayerId` 固定为 `"authority"`。所有参与方统一使用 `send(targetPlayerId, data)` 单发、`send(targetPlayerIds, data)` 多发、`send(data)` 广播；`sendLatest(targetPlayerId 或 targetPlayerIds, data)` 发送定向最新帧，`sendLatest(data)` 发送最新广播，不增加 Authority 专用发送签名。
+
+Channel `mode` 只有 `authority` 与 `relay`。`relay` 直接转发原始字节；`authority` 中非 Authority 消息先交给 Authority 的 `onForward`，其上下文始终提供去重后的 `targetPlayerIds` 数组，一次多目标发送只审核一次；返回 `void` 原样通过、返回 `Uint8Array` 替换后通过、抛错则拒绝。Authority 自己发送时直接投递，不能再次进入审核形成循环。带目标的 `sendLatest` 只替换同一 Channel、发送者和规范化目标集下尚未发送或尚未开始审核的旧帧，单参数 `sendLatest(data)` 对广播做相同合并；Authority JavaScript 处理器一旦开始执行，旧新审核都必须继续并各自处理结果。
 
 权威处理函数通过 `playmesh.authority.onService` 注册，返回目标玩家 ID 列表：一个 ID 表示定向回复，多个 ID 表示回复多个玩家，当前所有在线玩家 ID 表示广播，空列表表示不发送。Go Core 根据目标列表执行路由，但不参与游戏业务判断。游戏逻辑只能使用 SDK 注入的 `playerId`、角色和成员快照，不能使用或伪造底层连接对象。`onWs` 不属于普通游戏开发 API。
 
@@ -298,6 +308,7 @@ Go Core 只校验连接、会话、角色、凭证、消息格式、大小、频
 - 权威服务只广播必要的状态变化或固定频率快照，不重复广播未变化的大对象。
 - 权威状态必须带 `revision` 或等价版本号，客户端丢失中间状态后可以请求最新快照。
 - SDK 应记录动作从提交到权威确认的耗时，便于区分本机 JS 处理、App 桥接、Go 转发和局域网传输问题。
+- Binary WS 单帧上限为 4 MiB，单次定向发送最多 1024 个去重目标，单连接允许每秒 2000 帧和 64 MiB 入站流量，出站队列上限为 32 MiB，每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。这些是局域网防失控边界，不是建议业务速率。多目标 payload 只能上行一次并由 Core 扇出；广播目标由 Core 按 Channel 当前在线成员展开并排除发送者。可靠帧达到上限时必须返回错误，连续状态应优先使用 `sendLatest` 合并尚未发送的状态帧。
 
 ## 完成定义
 

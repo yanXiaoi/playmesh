@@ -168,6 +168,11 @@ if ($buildAndroid) {
     [Text.UTF8Encoding]::new($false)
   )
 
+  & (Join-Path $PSScriptRoot 'build_go_core.ps1') -Target android
+  if ($LASTEXITCODE -ne 0) {
+    throw "Android Go Core build failed: $LASTEXITCODE"
+  }
+
   Write-Output "Android Flutter: $androidFlutterExecutable"
   & $androidFlutterExecutable build apk --release --no-pub
   if ($LASTEXITCODE -ne 0) {

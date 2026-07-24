@@ -21,13 +21,13 @@ void main() {
     );
     await _pumpAsync(tester);
 
-    expect(find.text('Playmesh 1.6.2'), findsOneWidget);
+    expect(find.text('Playmesh 1.8.2'), findsOneWidget);
     await tester.tap(find.byTooltip('查看本次更新'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 1.6.2 更新'), findsOneWidget);
-    expect(find.textContaining('主机与扫码加入页'), findsOneWidget);
-    expect(find.text('构建 10'), findsOneWidget);
+    expect(find.text('Playmesh 1.8.2 更新'), findsOneWidget);
+    expect(find.textContaining('控制器方向'), findsWidgets);
+    expect(find.text('构建 15'), findsOneWidget);
   });
 
   testWidgets('shows online Core version and request ID', (tester) async {

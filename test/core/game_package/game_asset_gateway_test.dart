@@ -1,19 +1,33 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:playmesh/core/game_package/game_asset_gateway.dart';
+import 'package:playmesh/core/storage/game_storage_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
 
   test('只映射当前游戏 app 和平台公共资源', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-bucket-gateway-',
+    );
+    final storage = await GameStorageService.create(
+      gameId: 'com.playmesh.gateway',
+      libraryRoot: root,
+    );
+    addTearDown(() async {
+      await storage.close();
+      await root.delete(recursive: true);
+    });
     final gateway = await startGameAssetGateway(
       gameRootAssetPath:
           'assets/playmesh-library/public/developer/templates/default-game/package',
       entryAssetPath:
           'assets/playmesh-library/public/developer/templates/default-game/package/app/index.html',
+      storage: storage,
     );
     addTearDown(gateway.close);
 
@@ -39,6 +53,29 @@ void main() {
 
     final data = await http.get(gateway.entryUri.resolve('/data/save.json'));
     expect(data.statusCode, HttpStatus.notFound);
+
+    await storage.setData('save', 'secret', 42);
+    await storage.flushAll();
+    final upload = await http.post(
+      gateway.entryUri.resolve('/bucket/media?name=frame.bin'),
+      body: <int>[0, 1, 255, 7],
+    );
+    expect(upload.statusCode, HttpStatus.created);
+    final uploadedUrl =
+        (jsonDecode(upload.body) as Map<String, Object?>)['url']! as String;
+    final binary = await http.get(gateway.entryUri.resolve(uploadedUrl));
+    expect(binary.statusCode, HttpStatus.ok);
+    expect(binary.bodyBytes, <int>[0, 1, 255, 7]);
+    expect(
+      (await http.get(gateway.entryUri.resolve('/bucket/media'))).statusCode,
+      HttpStatus.notFound,
+    );
+    expect(
+      (await http.get(
+        gateway.entryUri.resolve('/bucket/save/save.json'),
+      )).statusCode,
+      HttpStatus.notFound,
+    );
 
     final other = await http.get(
       gateway.entryUri.resolve('/assets/other-game/index.html'),

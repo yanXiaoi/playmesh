@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'game_asset_gateway_contract.dart';
+import '../storage/game_bucket_http.dart';
+import '../storage/game_storage_service.dart';
 
 const playmeshPublicAssetRoot = 'assets/playmesh-library/public';
 
@@ -10,6 +12,7 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
   String? gameRootAssetPath,
   String? gameRootFilePath,
   required String entryAssetPath,
+  GameStorageService? storage,
 }) async {
   if ((gameRootAssetPath == null) == (gameRootFilePath == null)) {
     throw const FormatException('游戏资源网关必须且只能指定一种包来源');
@@ -29,6 +32,7 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
         ? null
         : Directory('${fileRoot.path}${Platform.pathSeparator}app'),
     entryRelativePath: entryRelativePath,
+    storage: storage,
   );
   gateway.listen();
   return gateway;
@@ -40,12 +44,14 @@ class _IoGameAssetGateway implements GameAssetGateway {
     this.gameAppAssetPath,
     this.gameAppDirectory,
     required this.entryRelativePath,
+    this.storage,
   });
 
   final HttpServer server;
   final String? gameAppAssetPath;
   final Directory? gameAppDirectory;
   final String entryRelativePath;
+  final GameStorageService? storage;
 
   @override
   Uri get entryUri => Uri(
@@ -66,6 +72,11 @@ class _IoGameAssetGateway implements GameAssetGateway {
   }
 
   Future<void> _handle(HttpRequest request) async {
+    final bucketStorage = storage;
+    if (bucketStorage != null &&
+        await handleGameBucketRequest(request, storage: bucketStorage)) {
+      return;
+    }
     if (request.method != 'GET') {
       await _text(request.response, HttpStatus.methodNotAllowed, '不支持的请求');
       return;

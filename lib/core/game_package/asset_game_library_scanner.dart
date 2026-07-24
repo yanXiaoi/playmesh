@@ -53,6 +53,10 @@ class AssetGameLibraryScanner {
       id: manifest.id,
       name: manifest.name,
       version: manifest.version,
+      author: manifest.author,
+      lastModifiedAt: manifest.lastModifiedAt,
+      sdkVersion: manifest.sdkVersion,
+      appSdkVersion: manifest.appSdkVersion,
       description: manifest.remarks,
       minPlayers: manifest.players.min,
       maxPlayers: manifest.players.max,
@@ -60,6 +64,7 @@ class AssetGameLibraryScanner {
       displayModeLabel: _displayModeLabel(displayMode),
       displayMode: displayMode.manifestValue,
       orientation: manifest.orientation,
+      controllerOrientation: manifest.controllerOrientation,
       tags: manifest.tags,
       capabilities: package.capabilities,
       entry: LocalGameEntry(

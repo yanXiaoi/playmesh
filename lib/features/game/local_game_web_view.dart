@@ -77,10 +77,12 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
 
   Future<void> _initialize() async {
     try {
+      final storage = await widget.bridge?.ensureStorage();
       final gateway = await startGameAssetGateway(
         gameRootAssetPath: widget.gameRootAssetPath,
         gameRootFilePath: widget.gameRootFilePath,
         entryAssetPath: widget.assetPath,
+        storage: storage,
       );
       _assetGateway = gateway;
       _entryUri = gateway.entryUri;

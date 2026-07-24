@@ -4,40 +4,55 @@
 
 - 状态：开发中，尚未发布。
 - 当前正式基线：App `1.6.1+8`。
-- 当前开发版本：App `1.6.2+10`、Game SDK `2.0.0`、App Bridge SDK `2.0.0`、Developer API / OpenAPI `1.5.0`。
+- 当前开发版本：App `1.8.2+15`、Go Core `0.3.0`、Core 协议 `1.1.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Developer API / OpenAPI `1.6.1`、Developer CLI `1.3.1`。
 
-## 发布与平台
+## 游戏库兼容与最近打开
 
-- 新增 HarmonyOS 工程与 `harmony` 发布目标；统一脚本现在可选择构建 HarmonyOS arm64 HAP、Android 通用 APK、Windows x64 便携 ZIP，或用 `all` 串行构建全部目标。
-- 鸿蒙构建使用隔离依赖清单；WebView、文件选择和路径插件固定到明确提交，系统分享由自研 HAR 适配。OpenHarmony Public SDK 不含 HMS `ScanKit`，扫码使用明确的手动输入回退。
-- 新增 ArkTS 能力 HAR，接入全屏、触觉、加速度计和陀螺仪；Go Core 通过 C ABI、异步 N-API 和 `NativePlaymeshHarmonyCoreAdapter` 实际注入鸿蒙应用。
-- 鸿蒙生产发布要求外部签名配置；脚本验证 HAP 关键运行时入口并输出 SHA-256。已在 API 12 Public SDK 上实际生成包含 Go Core 的 arm64 内部测试 HAP，证据见 [构建验证记录](../verification/playmesh-1.6.2-harmony-build-2026-07-22.md)。
-- `all` 构建现在严格隔离标准 Flutter 与 OpenHarmony Flutter：Android 固定使用标准 SDK、拒绝 OHOS fork 并修正 `android/local.properties`，鸿蒙阶段结束后恢复进程环境。Android、OpenHarmony、Windows 三类内部测试产物已实际构建通过，见 [全平台构建验证](../verification/playmesh-1.6.2-all-build-2026-07-22.md)。
+- 旧游戏缺少 `author` 时显示“佚名”，缺少 `lastModifiedAt` 时显示“无”，不再导致整库扫描失败。
+- 其他清单或入口错误只要 `main.json` 能解析出非空 `id`，就以“待修复”条目进入游戏库和开发者工作区；无法识别 ID 的目录只记录诊断并跳过。
+- “最近打开时间”只存于包外 `playmesh-library/cache/app/game-library.json`，每个 ID 覆盖单个时间戳；删除游戏同步删除记录，最多保留 2048 条并淘汰最旧记录。
+- 游戏库默认按最近打开时间倒序，未打开游戏排在最后并按名称稳定排序。
 
-## 开发者工具
+## 损坏项目自救与临时文件
 
-- 开发者工作区项目选择器现在展示统一游戏库中的全部本地项目，并持久化最近打开项；首次进入或历史项目不存在时强制选择项目。
-- 平台能力测试增加持续数据日志，在用户手动关闭测试前循环回显实际能力返回值，而不再只显示一次通过或失败。
-- 能力系统完成破坏性插件化：每个能力在 `lib/core/capabilities/{capability}/` 拥有独立目录和描述符、实例、自检、资源释放；开发者工作区自动展示全平台注册表的插件版本、方法、事件、平台状态和测试结果，不按当前项目声明过滤。
-- AI 能力上下文按用途拆分：Agent 提示词提供全量能力注册表 API 与 GET/POST 测试 API，不直接内嵌全量声明；对话提示词只附带当前项目已勾选能力的完整声明。工作区新增“复制全平台能力”，可独立复制注册表 API 的全部插件契约。
-- 能力插件的分析、134 项 Flutter 测试、JS SDK 契约与 Android debug APK 构建均已通过；命令、产物哈希和真机待验证项见 [能力插件验证记录](../verification/playmesh-1.6.2-capability-plugins-2026-07-22.md)。
-- Developer CLI 升级到 `1.2.0`，新增 `playmesh-cli create` 交互式创建流程；选项与网页 Dev Tool 对齐，创建和下载继续复用既有 Developer API。
+- Developer Gateway 项目包下载和 `playmesh-cli get` 不执行 Manifest、能力、入口或运行语义校验；缺少 `app/` 的残缺项目仍可下载已有内容。
+- 运行、`push/dev` 和正式导入继续执行完整校验。
+- App 分享导出、在线库导入导出和 Developer Gateway 包传输改用固定临时 ZIP；每次操作前覆盖旧文件、完成后清理，并串行化共享中转文件。
 
-## 游戏工具与分享
+## 单屏多人方向与全屏
 
-- 主机与 App 扫码加入页统一使用可拖动、可收纳的游戏工具区；扫码加入除不显示分享入口外，其余 App 操作与主机一致。
-- 主机二维码/链接提升为工具区一级入口，移除独立“退出游戏”按钮，只保留返回操作。
-- 分享面板在屏幕内居中并动态适配宽高，内容超出视口时可整体滚动；二级菜单、游戏信息和运行日志固定使用高对比度配色。
-- Game SDK 与 App Bridge SDK 升级到 `2.0.0`。能力统一使用 `capabilities.create(code, options)` 创建实例，再通过 `invoke/on/onError/dispose` 操作；旧 `DeviceType`、`onDevice`、`device.getCapabilities/getDeclaredCapabilities` 已移除且不提供兼容层。普通浏览器仍由 SDK 渲染可收纳功能区，并为原生能力插件提供明确的不可用实现。
+- `main.json` 新增 `controllerOrientation`；单屏多人必填，其他模式禁止声明。
+- 主画面使用 `orientation`，控制器使用 `controllerOrientation`。本地 App WebView、远程 App WebView、普通浏览器分享入口均按当前页面角色选择方向。
+- Game SDK 在 App 中调用 `playmesh.app.device.setFullscreen(true, orientation)`，原生宿主进入全屏并应用横竖屏；退出时解除方向限制。
+- 普通浏览器不再显示全屏提示层，SDK 会直接尽力请求 Fullscreen API，再调用 Screen Orientation API；用户激活、浏览器策略或平台不支持导致的失败不阻断 SDK 初始化和加入对局，悬浮工具栏保留全屏按钮供用户手势重试。
 
-## 兼容性与迁移
+## 发布元数据与详情
 
-- 这是能力 SDK 的 MAJOR 破坏性更新。游戏必须把旧传感器订阅改为插件实例；`capabilities.json` 文件结构和既有两个能力 code 不变。
-- 加速度计、陀螺仪插件 API 版本均为 `1.0.0`，创建时传 `{fps}`，方法为 `start/stop`，事件为 `reading`。未来录音、语音转写等能力可以在各自插件中定义需要用户主动触发的异步方法，无需修改通用 Bridge。
+- `main.json` 新增只读 `author` 与 `lastModifiedAt`。网页、Agent 和 CLI 上传时分别使用当前 App 设置昵称与 Unix 毫秒时间戳覆盖包内值。
+- 普通项目设置不能修改 `id`、`author` 或 `lastModifiedAt`；最后上传时间在 App 游戏详情和开发者工作区按设备本地时区显示。
+- 游戏详情以紧凑信息卡展示作者、最后上传、游戏/SDK 版本、人数、模式、主画面方向、控制器方向和运行入口。
 
-## 已知边界
+## 角色化能力声明
 
-- 鸿蒙 Core 强制使用固定的 OpenHarmony SIG Go `go1.24.5.ohosv1r1`（commit `2d8b23f6923100d8c90d8add9299da2c9d032a20`）和 `GOOS=openharmony/arm64`，不再使用 Linux runtime 兼容构建；正式发布前仍必须在目标 HarmonyOS 真机验证网络、线程和生命周期。
-- 鸿蒙端暂不声明 Android `ACTION_VIEW` 对应的外部文件打开能力；应用内文件选择使用 `file_selector_ohos`。
+- `capabilities.json.required` 只属于主画面；单屏多人新增 `controllerRequired`，只属于控制器。
+- 开发者网页和 CLI 创建项目时分别选择两组能力；非单屏多人声明控制器能力会校验失败。
+- 本地 WebView、浏览器配置与 `/api/app-capabilities` 只返回当前页面角色的能力集合，能力确认和插件实例创建不会越权到另一角色。
+- 单屏多人页面角色统一驱动入口、方向和能力选择；权威显示端的空 `required` 是最终结果，不会回退到非空 `controllerRequired`。
+- App WebView 的 Game SDK 只以 App Bridge `getDeclared()` 返回的当前页面声明决定是否弹能力确认。
 
-详细说明见 [HarmonyOS 构建与适配](../harmony-release.md)。
+## Agent / CLI 发布历史
+
+- `POST /dev/api/packages/import` 改为复用 Developer Project Catalog 的发布事务，不再直接绕过本地历史。
+- 同 ID 发布记录整包 before/after 快照；恢复整个工作区时同时恢复 `main.json`、`capabilities.json` 与 `app/`，继续保留 `data/` 和 `cache/`。
+- 新增回归测试覆盖上传时作者/时间覆盖、发布历史生成与整包恢复。
+
+## 契约与资料
+
+- Manifest、能力 Schema、OpenAPI、默认模板、开发者工作区、CLI、AI 提示词、SDK 声明与游戏开发文档均同步到当前字段。
+- Game SDK 升级到 `2.2.1`，App Bridge SDK 保持 `2.1.0`，Developer API 当前为 `1.6.1`，CLI 当前为 `1.3.1`。
+- Go Core 与 Core 协议没有线级字段变化，保持 `0.3.0` / `1.1.0`。
+
+## 验证与构建
+
+- 使用固定 SDK 在沙箱外串行执行 Dart/Flutter 静态分析、定向测试、全量测试、SDK JavaScript 契约与 CLI Go 测试。
+- Android 与 Windows 通过统一发布脚本串行构建；1.8.2 产物和 SHA-256 记录在 `docs/verification/playmesh-1.8.2-role-capability-build-2026-07-24.md`。

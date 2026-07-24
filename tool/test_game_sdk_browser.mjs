@@ -6,11 +6,15 @@ const source = fs.readFileSync(new URL("../assets/playmesh-library/public/sdk/v1
 const hostData = new Map();
 const browserLocalStorage = new Map();
 const storageCommands = [];
+const uploadCommands = [];
 const nicknameCommands = [];
 const joinCommands = [];
 let joins = 0;
 
 function createPage(appIdentity = null, reconnected = false) {
+  const consoleEntries = [];
+  const fullscreenRequests = [];
+  const orientationLocks = [];
   const elements = Object.fromEntries([
     ".panel", ".fps", ".latency", ".edit", ".overlay", ".enter", ".card", "form", "h2", "input", ".error", ".close", ".save",
     ".performance", ".expand", ".tools", ".collapse", ".reload", ".enter-fullscreen", ".exit-fullscreen", ".more", ".menu", ".info", ".logs", ".info-overlay", ".info-close", ".info-title", ".game-name", ".session-info",
@@ -60,36 +64,66 @@ function createPage(appIdentity = null, reconnected = false) {
   let currentNickname = null;
 
   class FakeWebSocket {
-    constructor() {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    static instances = [];
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = FakeWebSocket.CONNECTING;
       this.listeners = new Map();
+      FakeWebSocket.instances.push(this);
+      queueMicrotask(() => {
+        if (this.readyState !== FakeWebSocket.CONNECTING) return;
+        this.readyState = FakeWebSocket.OPEN;
+        this.emit("open", {});
+        this.emit("message", {
+          data: JSON.stringify({
+            type: "session.state",
+            session: {
+              id: "s-1",
+              joinCode: "ABC123",
+              displayMode: "multi_screen",
+              state: "lobby",
+              authorityClientId: "p-authority",
+              players: [
+                { id: currentPlayerId, nickname: currentNickname, role: "player", connected: true },
+              ],
+            },
+          }),
+        });
+      });
     }
 
-    addEventListener(type, listener) {
-      this.listeners.set(type, listener);
-      if (type === "open") {
-        queueMicrotask(() => {
-          listener();
-          this.listeners.get("message")?.({
-            data: JSON.stringify({
-              type: "session.state",
-              session: {
-                id: "s-1",
-                joinCode: "ABC123",
-                authorityClientId: "p-authority",
-                players: [
-                  { id: currentPlayerId, nickname: currentNickname, role: "player", connected: true },
-                ],
-              },
-            }),
-          });
-        });
-      }
+    addEventListener(type, listener, options = {}) {
+      const wrapped = options.once
+        ? (event) => {
+            this.removeEventListener(type, wrapped);
+            listener(event);
+          }
+        : listener;
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(wrapped);
+      this.listeners.set(type, listeners);
+    }
+
+    removeEventListener(type, listener) {
+      this.listeners.set(
+        type,
+        (this.listeners.get(type) || []).filter((candidate) => candidate !== listener),
+      );
+    }
+
+    emit(type, event) {
+      for (const listener of [...(this.listeners.get(type) || [])]) listener(event);
     }
 
     send(rawMessage) {
       const message = JSON.parse(rawMessage);
       if (message.type === "session.ping") {
-        queueMicrotask(() => this.listeners.get("message")?.({
+        queueMicrotask(() => this.emit("message", {
           data: JSON.stringify({
             type: "session.pong",
             payload: {
@@ -102,6 +136,19 @@ function createPage(appIdentity = null, reconnected = false) {
         }));
       }
     }
+
+    close(code = 1000, reason = "") {
+      if (this.readyState >= FakeWebSocket.CLOSING) return;
+      this.readyState = FakeWebSocket.CLOSING;
+      queueMicrotask(() => {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.emit("close", { code, reason });
+      });
+    }
+
+    disconnect(reason = "network lost") {
+      this.close(1006, reason);
+    }
   }
 
   const window = {
@@ -111,7 +158,9 @@ function createPage(appIdentity = null, reconnected = false) {
       joinCode: "ABC123",
       shareToken: "game-token",
       storageEndpoint: "/api/storage",
+      bucketEndpoint: "/bucket",
       nicknameEndpoint: "/api/player/nickname",
+      orientation: "portrait",
     },
     localStorage: {
       getItem: (key) => browserLocalStorage.get(key) ?? null,
@@ -120,6 +169,15 @@ function createPage(appIdentity = null, reconnected = false) {
     document,
     location: { reload() {} },
     fetch: async (url, options) => {
+      if (url.startsWith("/bucket/")) {
+        uploadCommands.push({ url, options });
+        return {
+          ok: true,
+          json: async () => ({
+            url: "/bucket/browser_save/1770000000000.png",
+          }),
+        };
+      }
       if (url === "/api/storage") {
         const command = JSON.parse(options.body);
         storageCommands.push(command);
@@ -171,6 +229,7 @@ function createPage(appIdentity = null, reconnected = false) {
         ok: true,
         json: async () => ({
           webSocketPath: "/v1/sessions/s-1/ws",
+          binaryWebSocketPath: "/v1/sessions/s-1/binary",
           credential: {
             token: `player-token-${joins}`,
             player: { id: playerId, nickname: currentNickname, role: "player" },
@@ -184,7 +243,21 @@ function createPage(appIdentity = null, reconnected = false) {
       };
     },
     WebSocket: FakeWebSocket,
+    console: {
+      log: (...args) => consoleEntries.push({ level: "log", args }),
+      info: (...args) => consoleEntries.push({ level: "info", args }),
+      warn: (...args) => consoleEntries.push({ level: "warn", args }),
+      error: (...args) => consoleEntries.push({ level: "error", args }),
+      debug: (...args) => consoleEntries.push({ level: "debug", args }),
+    },
     URL,
+    screen: {
+      orientation: {
+        async lock(orientation) {
+          orientationLocks.push(orientation);
+        },
+      },
+    },
     addEventListener() {},
     queueMicrotask,
     setTimeout,
@@ -204,6 +277,9 @@ function createPage(appIdentity = null, reconnected = false) {
       },
       device: {
         getPlatform: () => "android",
+        setFullscreen: async (enabled, orientation) => {
+          fullscreenRequests.push({ enabled, orientation });
+        },
       },
     };
   }
@@ -212,6 +288,10 @@ function createPage(appIdentity = null, reconnected = false) {
   window.__ui = elements;
   window.__mountedHosts = mountedHosts;
   window.__shadowHtml = shadowHtml;
+  window.__consoleEntries = consoleEntries;
+  window.__fullscreenRequests = fullscreenRequests;
+  window.__orientationLocks = orientationLocks;
+  window.__sockets = FakeWebSocket.instances;
   return window;
 }
 
@@ -222,10 +302,6 @@ const playerReconnectEvents = [];
 firstPage.playmesh.session.onPlayerJoin((event) => playerJoinEvents.push(event));
 firstPage.playmesh.session.onPlayerLeave((event) => playerLeaveEvents.push(event));
 firstPage.playmesh.session.onPlayerReconnect((event) => playerReconnectEvents.push(event));
-while (!firstPage.__ui[".enter"].onclick) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-assert.equal(joins, 0, "全屏前不应加入对局");
 while (!firstPage.__ui.form.onsubmit) {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -234,10 +310,23 @@ firstPage.__ui.input.value = "缓存玩家";
 await firstPage.__ui.form.onsubmit({ preventDefault() {} });
 await firstPage.playmesh.ready;
 assert.equal(joins, 1);
+while (firstPage.__orientationLocks.length === 0) {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+assert.deepEqual(
+  firstPage.__orientationLocks,
+  ["portrait"],
+  "浏览器应无弹窗尽力自动进入全屏并锁定方向",
+);
 assert.equal(firstPage.playmesh.app.isAvailable(), false);
 assert.equal(firstPage.playmesh.app.identity.getCurrent(), null);
 assert.equal(firstPage.playmesh.session.isAuthority(), false);
 assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-profile"), true);
+assert.equal(
+  firstPage.__mountedHosts.includes("playmesh-browser-fullscreen"),
+  false,
+  "浏览器不得自动弹出全屏提示层",
+);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("更多游戏操作")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("运行日志")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏设置")), true);
@@ -280,6 +369,21 @@ firstPage.playmesh.__receive({
   message: { type: "session.state", session: connectedSession },
 });
 assert.equal(playerReconnectEvents.length, 1);
+assert.equal(
+  firstPage.__consoleEntries.some(
+    (entry) =>
+      entry.args[0] === "Playmesh 新玩家已加入房间" &&
+      entry.args[1].onlinePlayers === 1 &&
+      entry.args[1].roomType === "multi_screen",
+  ),
+  true,
+);
+assert.equal(
+  firstPage.__consoleEntries.some(
+    (entry) => entry.args[0] === "Playmesh 玩家已掉线或退出房间",
+  ),
+  true,
+);
 assert.notEqual(
   firstPage.playmesh.player.getCurrent().id,
   firstPage.playmesh.session.getCurrent().authorityClientId,
@@ -289,6 +393,9 @@ assert.notEqual(
 const appPage = createPage({ userId: "u-current-app", nickname: "App 玩家" });
 await appPage.playmesh.ready;
 assert.equal(appPage.playmesh.app.isAvailable(), true);
+assert.deepEqual(appPage.__fullscreenRequests, [
+  { enabled: true, orientation: "portrait" },
+]);
 assert.equal(joinCommands.at(-1).playerId, "u-current-app");
 assert.equal(joinCommands.at(-1).nickname, "App 玩家");
 assert.equal(appPage.__ui[".edit"].hidden, true);
@@ -296,6 +403,8 @@ assert.equal(appPage.__mountedHosts.includes("playmesh-browser-profile"), false)
 assert.equal(appPage.__mountedHosts.includes("playmesh-performance"), true);
 assert.equal(firstPage.__ui[".panel"].hidden, false);
 assert.equal(firstPage.__ui[".latency"].hidden, false);
+await firstPage.__ui[".enter-fullscreen"].onclick();
+assert.deepEqual(firstPage.__orientationLocks, ["portrait", "portrait"]);
 assert.equal(firstPage.playmesh.performance.getLatency() >= 0, true);
 assert.equal(
   firstPage.playmesh.session.getCurrent().players[0].connected,
@@ -309,11 +418,23 @@ await hostBucket.setData("score", 18);
 assert.equal(await hostBucket.getData("score"), 18);
 assert.equal(storageCommands.every((command) => command.shareToken === "game-token"), true);
 assert.equal(storageCommands.some((command) => command.command === "storage.set"), true);
+const uploadedFile = { name: "avatar.png", size: 4 };
+assert.equal(
+  await hostBucket.upload(uploadedFile),
+  "/bucket/browser_save/1770000000000.png",
+);
+assert.equal(uploadCommands.length, 1);
+assert.equal(
+  uploadCommands[0].url,
+  "/bucket/browser_save?name=avatar.png",
+);
+assert.equal(
+  uploadCommands[0].options.headers["X-Playmesh-Share-Token"],
+  "game-token",
+);
+assert.equal(uploadCommands[0].options.body, uploadedFile);
 
 const refreshedPage = createPage();
-while (!refreshedPage.__ui[".enter"].onclick) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
 await refreshedPage.playmesh.ready;
 assert.equal(joins, 3, "刷新必须使用持久化浏览器身份重新加入");
 assert.equal(refreshedPage.playmesh.player.getCurrent().id, persistedBrowserId);
@@ -344,4 +465,23 @@ assert.equal(selfReconnectEvents.length, 1);
 assert.equal(selfReconnectEvents[0].isCurrentPlayer, true);
 assert.equal(selfReconnectEvents[0].player.id, persistedBrowserId);
 
-console.log("Game SDK browser persistent identity and nickname contract passed");
+const reconnectJoins = joins;
+const firstSocket = reconnectPage.__sockets.at(-1);
+firstSocket.disconnect();
+while (joins < reconnectJoins + 1 || reconnectPage.__sockets.at(-1) === firstSocket) {
+  await new Promise((resolve) => setTimeout(resolve, 5));
+}
+assert.equal(
+  reconnectPage.__consoleEntries.some(
+    (entry) => entry.args[0] === "Playmesh 主会话 WebSocket 已掉线",
+  ),
+  true,
+);
+assert.equal(
+  reconnectPage.__consoleEntries.some(
+    (entry) => entry.args[0] === "Playmesh 主会话 WebSocket 重连成功",
+  ),
+  true,
+);
+
+console.log("Game SDK browser identity, fullscreen, logging, and reconnect contract passed");

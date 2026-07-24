@@ -1,14 +1,18 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/models/game_manifest.dart';
+import 'package:playmesh/models/game_summary.dart';
 
 void main() {
   Map<String, Object?> validManifest() => {
     'id': 'com.playmesh.test-game',
+    'author': 'Test Author',
+    'lastModifiedAt': 1784851200000,
     'name': '测试游戏',
     'remarks': '清单解析测试',
     'version': '1.0.0',
     'sdkVersion': '1.0.0',
     'orientation': 'landscape',
+    'controllerOrientation': 'portrait',
     'modes': ['multiplayer'],
     'displayModes': ['single_screen_multiplayer'],
     'players': {'min': 2, 'max': 5},
@@ -25,6 +29,29 @@ void main() {
     expect(manifest.authority?.entry, 'app/static/js/service/index.js');
     expect(manifest.entries.game, 'app/index.html');
     expect(manifest.entries.controller, 'app/controller/index.html');
+    expect(manifest.author, 'Test Author');
+    expect(manifest.lastModifiedAt?.isUtc, isTrue);
+    expect(manifest.controllerOrientation, GameOrientation.portrait);
+  });
+
+  test('单屏多人必须声明控制器方向', () {
+    final json = validManifest()..remove('controllerOrientation');
+
+    expect(() => GameManifest.fromJson(json), throwsFormatException);
+  });
+
+  test('非单屏多人不能声明控制器方向', () {
+    final json = validManifest()..['displayModes'] = ['multi_screen'];
+
+    expect(() => GameManifest.fromJson(json), throwsFormatException);
+  });
+
+  test('旧清单缺少作者和最后上传时间时使用兼容默认值', () {
+    final missingAuthor = validManifest()..remove('author');
+    final missingTimestamp = validManifest()..remove('lastModifiedAt');
+
+    expect(GameManifest.fromJson(missingAuthor).author, '佚名');
+    expect(GameManifest.fromJson(missingTimestamp).lastModifiedAt, isNull);
   });
 
   test('解析自定义游戏和控制器入口', () {

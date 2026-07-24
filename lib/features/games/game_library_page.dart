@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:file_selector/file_selector.dart';
 
 import '../../models/game_summary.dart';
+import '../../core/game_package/game_library_repository.dart';
 import '../../ui/playmesh_ui.dart';
 import 'game_detail_page.dart';
 
@@ -167,7 +168,7 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
       setState(() {
         _games.removeWhere((item) => item.id == game.id);
         _games.add(game);
-        _games.sort((left, right) => left.name.compareTo(right.name));
+        _games.sort(compareGameLibraryOrder);
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已导入 ${game.name} ${game.version}。')),
