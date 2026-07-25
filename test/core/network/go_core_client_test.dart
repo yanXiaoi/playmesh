@@ -18,7 +18,7 @@ void main() {
       return http.Response(
         jsonEncode({
           'type': 'core.health',
-          'protocolVersion': '1.1.0',
+          'protocolVersion': '1.2.0',
           'timestamp': 1760000000100,
           'requestId': 'req-client-1',
           'data': {
@@ -59,7 +59,7 @@ void main() {
           utf8.encode(
             jsonEncode({
               'type': 'core.error',
-              'protocolVersion': '1.1.0',
+              'protocolVersion': '1.2.0',
               'timestamp': 1760000000100,
               'requestId': 'req-client-error',
               'error': {

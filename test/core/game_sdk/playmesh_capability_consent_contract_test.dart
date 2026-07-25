@@ -18,9 +18,7 @@ void main() {
     expect(source, contains('error.code = "capability_denied"'));
     expect(
       source.indexOf('await requestCapabilityConsent(appBootstrap);'),
-      lessThan(
-        source.indexOf('connectBrowserFullscreen(global.__PLAYMESH_BROWSER__)'),
-      ),
+      lessThan(source.indexOf('? connectBrowserFullscreen({')),
     );
   });
 

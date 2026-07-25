@@ -34,7 +34,9 @@ type Player struct {
 	ID        string `json:"id"`
 	Nickname  string `json:"nickname"`
 	Role      string `json:"role"`
+	Source    string `json:"source"`
 	Connected bool   `json:"connected"`
+	LatencyMS *int   `json:"latencyMs"`
 }
 
 type Snapshot struct {
@@ -61,7 +63,7 @@ type CreateInput struct {
 }
 
 type JoinInput struct {
-	JoinCode, Nickname, ShareToken, PlayerID string
+	JoinCode, Nickname, ShareToken, PlayerID, Source string
 }
 
 type ShareGrant struct {
@@ -109,6 +111,7 @@ func (s *Store) Create(input CreateInput) (Snapshot, Credentials, error) {
 	if hostParticipatesAsPlayer {
 		authority.Role = "authority_player"
 	}
+	authority.Source = "lan_app"
 	id, err := randomID("s_", 16)
 	if err != nil {
 		return Snapshot{}, Credentials{}, err
@@ -142,6 +145,11 @@ func (s *Store) Join(input JoinInput) (Snapshot, Credentials, error) {
 	if err != nil {
 		return Snapshot{}, Credentials{}, err
 	}
+	source, err := normalizePlayerSource(input.Source)
+	if err != nil {
+		return Snapshot{}, Credentials{}, err
+	}
+	player.Source = source
 	record.mutex.Lock()
 	defer record.mutex.Unlock()
 	if input.ShareToken != "" && sha256.Sum256([]byte(input.ShareToken)) != record.shareTokenHash {
@@ -302,22 +310,22 @@ func (s *Store) SetConnected(record *record, playerID string, connected bool) Sn
 	defer record.mutex.Unlock()
 	if playerID == record.authority.ID {
 		record.authority.Connected = connected
+		if !connected {
+			record.authority.LatencyMS = nil
+		}
 		if _, isPlayer := record.players[playerID]; isPlayer {
 			player := record.authority
 			record.players[playerID] = player
 		}
-	} else if connected {
+	} else {
 		player := record.players[playerID]
 		player.Connected = connected
-		record.players[playerID] = player
-	} else {
-		if record.state == StateRunning || record.state == StatePaused {
-			player := record.players[playerID]
-			player.Connected = false
-			record.players[playerID] = player
-		} else {
-			delete(record.players, playerID)
+		if !connected {
+			player.LatencyMS = nil
 		}
+		record.players[playerID] = player
+	}
+	if !connected && playerID != record.authority.ID {
 		for tokenHash, tokenPlayerID := range record.tokens {
 			if tokenPlayerID == playerID {
 				delete(record.tokens, tokenHash)
@@ -326,6 +334,24 @@ func (s *Store) SetConnected(record *record, playerID string, connected bool) Sn
 	}
 	if !connected && playerID == record.authority.ID && record.state == StateRunning {
 		record.state = StatePaused
+	}
+	return record.snapshotLocked()
+}
+
+func (s *Store) SetLatency(record *record, playerID string, latencyMS *int) Snapshot {
+	record.mutex.Lock()
+	defer record.mutex.Unlock()
+	if playerID == record.authority.ID {
+		record.authority.LatencyMS = latencyMS
+		if _, isPlayer := record.players[playerID]; isPlayer {
+			record.players[playerID] = record.authority
+		}
+		return record.snapshotLocked()
+	}
+	player, exists := record.players[playerID]
+	if exists {
+		player.LatencyMS = latencyMS
+		record.players[playerID] = player
 	}
 	return record.snapshotLocked()
 }
@@ -426,6 +452,19 @@ func (r *record) pruneDisconnectedLocked() {
 				}
 			}
 		}
+	}
+}
+
+func normalizePlayerSource(value string) (string, error) {
+	switch strings.TrimSpace(value) {
+	case "", "lan_html":
+		return "lan_html", nil
+	case "lan_app":
+		return "lan_app", nil
+	case "server":
+		return "server", nil
+	default:
+		return "", errors.New("玩家来源无效")
 	}
 }
 

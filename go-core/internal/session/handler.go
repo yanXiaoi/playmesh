@@ -120,13 +120,14 @@ func (h *Handler) join(writer http.ResponseWriter, request *http.Request) {
 		Nickname   string `json:"nickname"`
 		ShareToken string `json:"shareToken"`
 		PlayerID   string `json:"playerId"`
+		Source     string `json:"source"`
 	}
 	if !decodeBody(writer, request, &body) {
 		return
 	}
 	snapshot, credential, err := h.store.Join(JoinInput{
 		JoinCode: body.JoinCode, Nickname: body.Nickname,
-		ShareToken: body.ShareToken, PlayerID: body.PlayerID,
+		ShareToken: body.ShareToken, PlayerID: body.PlayerID, Source: body.Source,
 	})
 	if err != nil {
 		writeStoreError(writer, err)
@@ -304,6 +305,17 @@ func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 					Type: "session.pong", Sequence: message.Sequence, Payload: payload,
 				})
 			}
+		case "performance.latency":
+			var report struct {
+				LatencyMS *int `json:"latencyMs"`
+			}
+			if json.Unmarshal(message.Payload, &report) != nil ||
+				(report.LatencyMS != nil && (*report.LatencyMS < 0 || *report.LatencyMS > 60000)) {
+				_ = client.conn.Close(websocket.StatusUnsupportedData, "延迟报告格式无效")
+				return
+			}
+			updated := h.store.SetLatency(record, client.player.ID, report.LatencyMS)
+			h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &updated})
 		case "authority.pong":
 			if client.player.ID != snapshot.AuthorityClientID ||
 				len(message.TargetPlayerIDs) != 1 ||

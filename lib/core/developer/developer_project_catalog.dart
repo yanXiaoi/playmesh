@@ -131,6 +131,16 @@ abstract interface class DeveloperProjectCatalog {
 
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft);
 
+  Future<DeveloperProject> copyProject(
+    String sourceProjectId, {
+    required String id,
+    required String name,
+    required String author,
+    required DateTime lastModifiedAt,
+  });
+
+  Future<void> deleteProject(String projectId);
+
   Future<GameSummary> publishPackage(
     File source, {
     required String author,
@@ -301,22 +311,13 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
 
   @override
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft) async {
-    final id = draft.id.trim();
-    final name = draft.name.trim();
-    final author = draft.author.trim();
+    final (:id, :name, :author) = _validateNewProjectIdentity(
+      id: draft.id,
+      name: draft.name,
+      author: draft.author,
+      lastModifiedAt: draft.lastModifiedAt,
+    );
     final description = draft.description.trim();
-    if (!RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(id)) {
-      throw const FormatException('项目 ID 必须是小写反向域名格式');
-    }
-    if (name.isEmpty || name.length > 80) {
-      throw const FormatException('项目名称长度必须为 1 到 80 个字符');
-    }
-    if (author.isEmpty || author.length > 80) {
-      throw const FormatException('作者名称长度必须为 1 到 80 个字符');
-    }
-    if (!draft.lastModifiedAt.isUtc) {
-      throw const FormatException('最后修改时间必须使用 UTC');
-    }
     if (description.length > 500) {
       throw const FormatException('项目描述不能超过 500 个字符');
     }
@@ -450,6 +451,76 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       rootAssetPath: _templateRoot,
       readOnly: false,
     );
+  }
+
+  @override
+  Future<DeveloperProject> copyProject(
+    String sourceProjectId, {
+    required String id,
+    required String name,
+    required String author,
+    required DateTime lastModifiedAt,
+  }) async {
+    final validated = _validateNewProjectIdentity(
+      id: id,
+      name: name,
+      author: author,
+      lastModifiedAt: lastModifiedAt,
+    );
+    final source = await _ensureWorkspace(sourceProjectId);
+    if ((await listProjects()).any((project) => project.id == validated.id)) {
+      throw StateError('项目 ID 已存在');
+    }
+
+    final root = await _workspaceRoot();
+    final target = Directory(
+      '${root.path}${Platform.pathSeparator}${validated.id}',
+    );
+    if (await target.exists()) throw StateError('项目目录已存在');
+    final staging = Directory(
+      '${root.path}${Platform.pathSeparator}.playmesh-copy-'
+      '${DateTime.now().toUtc().microsecondsSinceEpoch}',
+    );
+    try {
+      await staging.create(recursive: true);
+      // 项目副本只继承源码和声明，运行数据、缓存及本地历史必须从空状态开始。
+      await _copyDirectoryContents(source, staging);
+      final manifestFile = _resolveFile(staging, 'main.json');
+      final decoded = jsonDecode(await manifestFile.readAsString());
+      if (decoded is! Map) throw const FormatException('来源项目 main.json 无效');
+      final manifest = Map<String, Object?>.from(decoded)
+        ..['id'] = validated.id
+        ..['name'] = validated.name
+        ..['author'] = validated.author
+        ..['lastModifiedAt'] = lastModifiedAt.millisecondsSinceEpoch;
+      GameManifest.fromJson(manifest);
+      await manifestFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(manifest),
+        flush: true,
+      );
+      await _renameDirectoryWithRetry(staging, target.path);
+    } on Object {
+      if (await staging.exists()) await staging.delete(recursive: true);
+      rethrow;
+    }
+
+    final game = await _customGame(target);
+    repository.upsert(game);
+    return DeveloperProject(
+      id: game.id,
+      name: game.name,
+      version: game.version,
+      rootAssetPath: _templateRoot,
+      readOnly: false,
+    );
+  }
+
+  @override
+  Future<void> deleteProject(String projectId) async {
+    final workspace = await _ensureWorkspace(projectId);
+    await workspace.delete(recursive: true);
+    repository.remove(projectId);
+    _revisions.removeWhere((key, _) => key.startsWith('$projectId\n'));
   }
 
   @override
@@ -1255,16 +1326,24 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
 
   Future<void> _copyDirectoryContents(
     Directory source,
-    Directory destination,
-  ) async {
+    Directory destination, {
+    bool excludeProjectInternals = true,
+  }) async {
     await for (final entity in source.list(followLinks: false)) {
       final name = entity.path.split(Platform.pathSeparator).last;
-      if (name == 'data' || name == 'cache' || name == '.playmesh') continue;
+      if (excludeProjectInternals &&
+          (name == 'data' || name == 'cache' || name == '.playmesh')) {
+        continue;
+      }
       final targetPath = '${destination.path}${Platform.pathSeparator}$name';
       if (entity is Directory) {
         final target = Directory(targetPath);
         await target.create(recursive: true);
-        await _copyDirectoryContents(entity, target);
+        await _copyDirectoryContents(
+          entity,
+          target,
+          excludeProjectInternals: false,
+        );
       } else if (entity is File) {
         await entity.copy(targetPath);
       }
@@ -1309,6 +1388,30 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
             .toList()
           ..sort();
     return cache[project.id] = List.unmodifiable(files);
+  }
+
+  ({String id, String name, String author}) _validateNewProjectIdentity({
+    required String id,
+    required String name,
+    required String author,
+    required DateTime lastModifiedAt,
+  }) {
+    final normalizedId = id.trim();
+    final normalizedName = name.trim();
+    final normalizedAuthor = author.trim();
+    if (!RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(normalizedId)) {
+      throw const FormatException('项目 ID 必须是小写反向域名格式');
+    }
+    if (normalizedName.isEmpty || normalizedName.length > 80) {
+      throw const FormatException('项目名称长度必须为 1 到 80 个字符');
+    }
+    if (normalizedAuthor.isEmpty || normalizedAuthor.length > 80) {
+      throw const FormatException('作者名称长度必须为 1 到 80 个字符');
+    }
+    if (!lastModifiedAt.isUtc) {
+      throw const FormatException('最后修改时间必须使用 UTC');
+    }
+    return (id: normalizedId, name: normalizedName, author: normalizedAuthor);
   }
 
   void _checkRevision(String projectId, String path, int? expectedRevision) {

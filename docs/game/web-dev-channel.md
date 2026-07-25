@@ -38,9 +38,10 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 
 工作区至少包含：
 
-- 顶部只保留项目选择、运行、保存、快速操作和 AI 等高频入口；新建、重启、停止、校验、Diff、删除和数据清理收纳到 IDEA 风格的“更多”二级菜单，避免窄屏下按钮被截断。
-- 项目选择使用独立弹窗，列出统一游戏库中的全部项目，可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，选择弹窗不可关闭。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
-- IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑，除稳定 `id` 外其他字段均可修改，并提供可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
+- 顶部只保留项目、运行、保存、AI 开发和“更多”五个入口。移动端项目选择具有 `120px` 最小宽度，四个操作按钮保留固定可点击宽度；一行不足时允许响应式换行，由项目选择独占第一行，四个操作按钮均分第二行，禁止继续压缩任一入口。空间足够时仍保持单行，尽量把纵向视口留给项目树和代码。快速操作、新建文件、重启、停止、校验、文件 Diff、删除文件和数据清理统一收纳到“更多”下拉菜单。
+- 项目入口与“更多”都使用 IDEA 风格的锚点下拉菜单，按触发按钮的实时视口位置展开，不使用整页选择弹窗或固定坐标。项目菜单聚合新建项目、复制当前项目、项目设置和删除项目，列表可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，项目菜单保持展开，选定或新建项目后才能编辑。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
+- 复制项目以当前项目为来源，新项目名称和 ID 均可修改；源码、清单和公开资源进入副本，项目根目录的 `data/`、`cache/`、`.playmesh/` 不复制。普通项目设置不允许修改稳定 `id`、`author` 和 `lastModifiedAt`；复制操作通过创建新项目提供变更 ID 的正式入口。删除项目会删除源码、运行数据、缓存和本地历史，必须在项目未运行时二次确认。
+- IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑和可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
 - 能力选项必须由 `GET /dev/api/capabilities` 返回的统一插件注册表动态生成，展示中文名、用途、`apiVersion`、方法、事件以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
 - “更多 → 能力测试”始终展示全平台注册表，不按当前项目的 `capabilities.json` 过滤。`GET /dev/api/capability-tests` 读取插件自检清单；`POST` 省略 `codes` 或传空数组时测试全部插件，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。工作区持续调用并回显插件版本、状态、耗时和实际结果，直到用户手动关闭测试窗口。
 - 新建项目弹窗与项目设置都必须提供标签和能力编辑。新建请求的 `tags` 写入 `main.json.tags`；`requiredCapabilities` 写入主画面 `required`，单屏多人的 `controllerRequiredCapabilities` 写入控制器 `controllerRequired`，任一非空时创建 `capabilities.json`。
@@ -49,7 +50,7 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - 项目树目录右键菜单支持新建文件、新建文件夹、删除文件夹和向当前目录多选上传文件，也支持把本机文件直接拖到根节点、文件夹或文件节点上传；拖到文件节点时使用该文件所在目录。文件右键支持删除。空文件夹必须保留并参与 SSE 同步，上传单文件上限为 2 MiB。
 - 项目根目录、文件夹和文件右键均可打开本地历史。本地历史只保存一份初始基线和每个时间操作的变更后快照；上一操作的变更后快照即下一操作的变更前版本。每次文件或目录变更更新当前快照，连续活动在 5 分钟滚动窗口内合并为一个时间操作，最多保留最近 100 个操作。清理最老操作时必须先将其快照提升为新基线。
 - 本地历史存储在当前游戏包根目录的 `cache/developer/local-history/`，与 `app/`、`data/` 同级。快照只包含平台清单和 `app/`，不复制 `data/` 或 `cache/`；普通项目树和文件 API 不展示或修改 `data/cache`。CLI 本地开发副本中的 `playmesh/` 不属于安装内容或历史快照。清理游戏缓存会同时清除本地历史。
-- 本地历史按时间操作展示资源新增、修改、删除、文本前后内容、增删行数与二进制大小变化，并允许用该操作的变更前或变更后版本全量替换选中文件、文件夹或整个工作区。恢复前必须自动生成独立且不参与后续合并的历史操作；恢复整个工作区时继续保留平台管理的当前 `main.json`。
+- 本地历史按时间操作展示资源新增、修改、删除、文本前后内容、增删行数与二进制大小变化。文本文件使用左右双栏 Diff，左栏可切换该操作的变更前或变更后版本，右栏始终是当前工作区；用户既可以只把某一个差异块应用并保存到当前文件，也可以用整次恢复全量替换选中文件、文件夹或整个工作区。恢复前必须自动生成独立且不参与后续合并的历史操作；恢复整个工作区时继续保留平台管理的当前 `main.json`。
 - HTML/CSS/JavaScript 编辑区。编辑器提供 HTML 标签/属性、CSS 属性/值、JavaScript 和 `playmesh` SDK 方法补全；可用 `Ctrl+Space` 或 `Alt+/` 主动触发。
 - 开始、重启与停止操作；由 App 启动当前游戏，不在工作区嵌入主页面预览。重启只作用于当前 App 中运行的该项目实例，并保留已有联机码和分享链接；停止会关闭会话并返回游戏库。
 - 游戏运行状态、分享二维码和可复制链接。普通多人多屏与单机分享加载 `entries.game`（默认 `app/index.html`），单屏多人分享加载 `entries.controller`（默认 `app/controller/index.html`）；单机分享不加入 Session、不创建玩家且不建立 WebSocket。
@@ -66,6 +67,8 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - 完整接口文档入口和 API 调试入口。
 
 开发者网页本身也应通过 SDK/开发者通道 API 与 App/Go Core 通讯，不让页面直接猜测内部 WebSocket 帧格式。
+
+文件 Diff、快速操作预览和本地历史统一使用 Git 风格左右双栏：左栏是来源版本或待应用结果，右栏是可编辑的当前工作区内容。差异块之间的箭头只把该块从左栏应用到右栏，用户确认后再通过带修订号的正式文件或 Manifest API 保存；快速操作还保留整批原子应用。二进制、目录、过大或被截断的内容不开放块级应用，只提供元数据和原有整次恢复能力。
 
 ## 机器可读接口文档
 
@@ -99,6 +102,8 @@ AI 获取 /dev/openapi.json、/dev/sdk-manifest.json 和 JSON Schema
 AI 应优先使用高层开发者 API，例如“创建项目”“修改文件”“校验项目”“运行项目”和“读取事件”，而不是自行构造 Go Core WS 消息。所有 API 返回稳定的 `requestId`、成功结果或结构化错误。
 
 清单和能力声明使用专用高层接口：`GET/PUT /dev/api/projects/{projectId}/manifest` 读取或修改 `main.json`（请求中的 `id` 必须与当前项目一致），`GET/PUT /dev/api/projects/{projectId}/capabilities` 读取或修改可选能力声明，`GET /dev/api/capabilities` 读取统一能力注册表，`GET/POST /dev/api/capability-tests` 读取或执行平台注册表驱动的能力自检。普通文件写接口继续禁止修改 `main.json`，从而保证稳定 ID 和完整清单校验。
+
+项目级管理使用 `POST /dev/api/projects/{projectId}/copy` 和 `DELETE /dev/api/projects/{projectId}`。复制请求必须提供新的唯一 ID 与名称，作者取当前 App 用户昵称，并排除源项目的运行数据、缓存和本地历史；删除接口拒绝删除正在启动或运行的项目。两项操作都由 Developer Project Catalog 执行，网页不得直接操作目录。
 
 项目运行生命周期使用四个正式接口：`GET /dev/api/projects/{projectId}/run` 读取当前状态，`POST /run` 开始，`POST /run/restart` 刷新当前运行内容，`POST /run/stop` 停止并关闭当前游戏会话。首次启动会先移除旧游戏路由再创建新的游戏 WebView；刷新只重建当前 WebView 内容并保留现有会话。没有对应运行实例时，刷新和停止返回结构化错误。AI 在非流式调用中应优先轮询 `GET /dev/api/projects/{projectId}/run` 获取状态，并使用 `GET /dev/api/logs?limit=50` 读取诊断日志；SSE 仍用于浏览器工作区的实时体验。
 
@@ -197,11 +202,13 @@ main.json 内容
 
 ## 编辑器外部依赖与代码补全
 
-开发者工作区自身使用的前端第三方依赖统一放在 `assets/playmesh-library/public/developer/editor/`，通过该目录内的 `package.json` 与锁文件管理；不得把编辑器依赖散落到游戏模板或 Dart 网关。Flutter 资源清单只声明实际使用的依赖子目录。目前 CodeMirror 核心、语言模式、提示插件和括号插件均从 `editor/node_modules/codemirror/` 加载。
+开发者工作区自身使用的前端第三方依赖统一放在 `assets/playmesh-library/public/developer/editor/`，通过该目录内的 `package.json` 与锁文件管理；不得把编辑器依赖散落到游戏模板或 Dart 网关。Flutter 资源清单只声明实际使用的依赖子目录。目前 CodeMirror 核心、语言模式、提示插件、括号插件和 MergeView 均从 `editor/node_modules/codemirror/` 加载；MergeView 的文本差异计算使用同目录锁定的 `diff-match-patch`。
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
 编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从构建生成的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `sdk-src/*.ts` 的同一次生成。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威实现；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+
+> **AI 上下文最小披露原则：提示词只暴露游戏代码可调用的公开 SDK、当前项目声明与完成任务所必需的约束。回环代理、内部路由、中转鉴权、密钥协商和加密通道等平台实现不得进入游戏 AI 上下文。**
 
 ## 第四阶段完成标准
 

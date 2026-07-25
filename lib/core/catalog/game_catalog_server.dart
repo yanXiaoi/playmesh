@@ -9,10 +9,15 @@ import '../game_package/game_package_transfer_service.dart';
 import 'game_catalog_models.dart';
 
 class GameCatalogServer {
-  GameCatalogServer(this._library, this._transfer);
+  GameCatalogServer(
+    this._library,
+    this._transfer, {
+    required this._nicknameProvider,
+  });
 
   final GameLibraryRepository _library;
   final GamePackageTransferService _transfer;
+  final String Function() _nicknameProvider;
   HttpServer? _server;
   String _token = '';
   Future<void> _downloadTail = Future<void>.value();
@@ -59,6 +64,8 @@ class GameCatalogServer {
         return;
       }
       switch (request.uri.path) {
+        case '/apps/info':
+          await _info(request);
         case '/apps/list':
           await _list(request);
         case '/apps/download':
@@ -87,6 +94,15 @@ class GameCatalogServer {
         await request.response.close();
       }
     }
+  }
+
+  Future<void> _info(HttpRequest request) async {
+    final nickname = _nicknameProvider().trim();
+    await _json(request.response, HttpStatus.ok, {
+      'catalogApiVersion': gameCatalogApiVersion,
+      'name': '${nickname.isEmpty ? 'Playmesh 用户' : nickname}的游戏库',
+      'supportsGameRelay': false,
+    });
   }
 
   bool _authorized(HttpRequest request) {

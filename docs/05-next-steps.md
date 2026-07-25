@@ -11,7 +11,7 @@
 - `docs/status/phase-05-complete.md`
 - `docs/status/phase-06-complete.md`
 
-当前保持 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。第六阶段后不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和 CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
+当前保持 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。当前开发版本为 App `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0`，Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的游戏侧公共 API 保持不变。第六阶段后不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和 CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
 
 ## 当前稳定基线
 
@@ -29,7 +29,8 @@ Go Core 监听 0.0.0.0:0
   -> 宿主上报实际端口
   -> Flutter 本机使用回环地址
   -> 分享层列出全部可用局域网 IPv4 地址
-  -> /join/{code} 身份页与 app/controller/index.html
+  -> /app/{entry} 权威页面
+  -> Game SDK 直接调用受控 Core Join 能力并建立 Session WebSocket
 ```
 
 会话拓扑固定为：
@@ -37,7 +38,7 @@ Go Core 监听 0.0.0.0:0
 - `single_screen_multiplayer`：创建会话的 App 主机是公共显示端与 Authority Client，不属于 `players`；玩家只能通过 Controller 加入。
 - `multi_screen`：创建会话的 App 主机固定为 Authority Client，并可同时作为 Player 计入人数；不得把玩家首位或加入顺序当作 Authority 规则。
 
-## 当前开发版本：Playmesh 1.8.0
+## 已归档开发记录：Playmesh 1.8.0
 
 当前已增加 OpenHarmony API 12 arm64 HAP 发布链：SIG Go `c-shared` Core、异步 N-API、ArkTS 能力 HAR 和 Flutter `playmesh/go_core_host` 已闭环，统一脚本可以选择 `harmony`、`android`、`windows` 或 `all`。内部无签名 HAP 已完成包结构验证；生产发布仍需外部签名配置，真机网络、线程、前后台生命周期和系统分享仍需设备验收。
 
@@ -49,7 +50,7 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 
 1. 设置页可在独立固定端口开启开发者模式，默认 `16666`，并持久化端口、自定义或随机 token 和工作区路径。
 2. 关闭开发者模式或 App 退出时停止监听；重新开启或 App 重启后恢复同一工作区链接，局域网设备可直接重连。
-3. 工作区可新建项目，以 IDEA 风格项目树浏览并编辑文本文件；支持新建、删除、上传、快速批量操作和项目级本地历史，不提供嵌入式主页面预览。
+3. 工作区可新建、复制、设置和删除项目，以 IDEA 风格项目树浏览并编辑文本文件；支持新建、删除、上传、Git 风格双栏 Diff、差异块应用、快速批量操作和项目级本地历史，不提供嵌入式主页面预览。
 4. 工作区提供运行按钮；多人项目运行后显示与游戏分享面板一致的地址切换、链接复制和二维码入口。
 5. 已提供 `/dev/docs`、OpenAPI、Developer Session Schema、SDK Manifest、请求示例和当前接口鉴权/AI 可用性面板。
 6. 文件变更、运行状态和客户端日志通过统一 SSE 通道同步；浏览器原生 `console` 输出保留，同时在存在开发者监听时复制到后台日志面板。
@@ -88,6 +89,23 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 
 本机游戏库可以通过独立 Catalog Gateway 分享，提供带可选 Bearer Token 的分页搜索和标准游戏包下载。现有游戏库内部新增在线游戏库入口，可并发读取多个启用源、按 ID 去重、扫码配置与分享源，并通过可停止/删除的多选下载队列安装游戏。详细接口和边界见 `docs/catalog-api.md`，版本事实见 `docs/version/1.2.0.md`。
 
+## 当前开发版本：Playmesh 2.0.0
+
+- 分享弹窗统一为“局域网 / 服务器 / 房间状态”，局域网和公共中转可同时承载同一 Core 会话。
+- App 无论经局域网还是服务器加入，都先通过稳定的 `127.0.0.1` 本地 Origin 加载；普通局域网浏览器继续直连 Authority 地址。
+- 公共中转服务器从在线游戏源列表选择，按 `/apps/info` 声明筛选并异步展示最新延迟；中转连接和二维码 Host 前缀使用 Go Server 声明的 `publicBaseUrl`，不再从游戏源地址推导。Go Server 只持有配对凭据，端点密钥从未发送给它，因此它只能复制无法解密的密文字节。
+- 主机中转采用动态热池：上限直接读取 `/apps/info.relay.maxConnectionsPerTunnel`，
+  空闲时最多保留 4 条热连接，被配对后立即补充，活跃连接结束后自然收缩。
+- 端到端密钥只存在于两个 App 端点，放在邀请 fragment 中且不进入任何中转 HTTP/Upgrade 请求；TLS 保持可选。
+- 局域网邀请保留 `main.json` 声明的实际 `/app/**` 游戏或控制器入口，查询参数
+  收敛为 `channelId + token`；普通浏览器继续直连，局域网 App 解析同一链接后
+  使用本地回环。公共邀请收敛为 `/j/{tunnelId}#inviteToken=...`，只有 App
+  解析 fragment，并在回环 Origin 下恢复真实 `/app/**` 入口。
+- 游戏页返回只弹出当前路由并恢复来源页面；开发者工作区运行游戏时不再清空
+  工作区导航栈。
+- Authority 分享面只保留 `/app/**`、`/bucket/**`、`/playmesh/**` 和 SDK 无法替代的受控底层连接能力。新增能力优先修改 SDK，不恢复旧 `/api/*` 分享路由。
+- 完整架构与验收项见 `docs/remote-game-relay.md`。
+
 ## 必须保持的边界
 
 - 游戏包直接位于 `playmesh-library/packages/{gameId}/`，不增加版本或 `files` 中间目录。
@@ -102,7 +120,7 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 - 分享地址列表可点选，二维码始终对应当前选中的地址。
 - 主机与 App 扫码加入页使用同一套悬浮工具语义；主机分享入口为一级按钮，所有 App 游戏工具只保留返回而不重复提供退出。普通浏览器由 SDK 提供不含 App 导航和分享能力的对应功能区。
 - 分享链接/二维码面板在视口内居中并动态适配，内容超出屏幕时允许整体滚动；悬浮工具二级界面固定使用高对比度配色，不继承游戏显示颜色。
-- 所有 Bucket 数据只保存在开始游戏的 Authority 主机；浏览器走主机 HTTP 存储端点，其他 App 玩家走会话内存储 RPC。
+- 所有 Bucket 数据只保存在开始游戏的 Authority 主机；普通浏览器和其他 App 玩家统一由权威 Game SDK 通过当前受控 Session WebSocket 的存储 RPC 路由到 Authority，不增加分享 HTTP 存储端点。
 - FPS 由游戏在真实渲染点调用 `playmesh.performance.reportFrame()` 上报，默认显示在左上角并可从悬浮工具坞关闭。
 - 平台构建仅在用户明确要求时执行；产物结构验证必须记录到 `docs/verification/`，安装、真机运行和生产签名仍由用户或 CI 验证。
 - 公共显示端不得进入 `players` 或提交玩家动作。
@@ -110,7 +128,7 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 ## 明确排除
 
 - 完整房间列表或局域网自动发现。
-- 云端账号和异地联机。
+- 云端账号和中心化房间大厅。
 - 完整原生键盘、USB、摄像头适配，以及加速度计、陀螺仪之外的传感器适配。加速度计和陀螺仪已在 Playmesh 1.3.0 通过 App SDK 接入，原生震动已通过 `device.vibration` 插件接入。
 - iOS 发布和云端游戏包分发。
 - 创意工坊与生产级签名审核系统。

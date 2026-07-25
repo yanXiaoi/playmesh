@@ -45,12 +45,14 @@ class GoCoreSessionClient {
     required String nickname,
     String? shareToken,
     String? playerId,
+    String source = 'lan_app',
   }) async {
     final bootstrap = await _post('v1/sessions/join', {
       'joinCode': joinCode,
       'nickname': nickname,
       'shareToken': ?shareToken,
       'playerId': ?playerId,
+      'source': source,
     });
     return _connect(bootstrap);
   }

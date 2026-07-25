@@ -219,9 +219,14 @@ class GameCatalogController extends ChangeNotifier {
     required GameLibraryRepository library,
     required GamePackageTransferService transfer,
     required Future<void> Function(GameSummary game) onImported,
+    required String Function() nicknameProvider,
     GameCatalogPreferences? preferences,
   }) : _preferences = preferences ?? GameCatalogPreferences(),
-       _server = GameCatalogServer(library, transfer),
+       _server = GameCatalogServer(
+         library,
+         transfer,
+         nicknameProvider: nicknameProvider,
+       ),
        downloads = GameDownloadQueue(transfer, onImported);
 
   final GameCatalogPreferences _preferences;
@@ -389,6 +394,13 @@ class GameCatalogController extends ChangeNotifier {
     );
   }
 
+  Future<List<OnlineGameSourceProbe>> probeEnabledSources() async {
+    await initialize();
+    return Future.wait(
+      _sources.where((source) => source.enabled).map(_probeSource),
+    );
+  }
+
   Future<_SourceSearchResult> _searchSource(
     OnlineGameSource source, {
     required int page,
@@ -438,6 +450,45 @@ class GameCatalogController extends ChangeNotifier {
       return _SourceSearchResult(
         source: source,
         games: const [],
+        error: error.toString(),
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<OnlineGameSourceProbe> _probeSource(OnlineGameSource source) async {
+    final client = http.Client();
+    final stopwatch = Stopwatch()..start();
+    try {
+      final response = await client
+          .get(
+            source.host.replace(path: '/apps/info'),
+            headers: source.token.isEmpty
+                ? null
+                : {HttpHeaders.authorizationHeader: 'Bearer ${source.token}'},
+          )
+          .timeout(const Duration(seconds: 12));
+      stopwatch.stop();
+      if (response.statusCode != HttpStatus.ok) {
+        throw HttpException('HTTP ${response.statusCode}');
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map) {
+        throw const FormatException('游戏源声明根节点必须是对象');
+      }
+      return OnlineGameSourceProbe(
+        source: source,
+        elapsed: stopwatch.elapsed,
+        declaration: GameCatalogDeclaration.fromJson(
+          Map<String, Object?>.from(decoded),
+        ),
+      );
+    } on Object catch (error) {
+      stopwatch.stop();
+      return OnlineGameSourceProbe(
+        source: source,
+        elapsed: stopwatch.elapsed,
         error: error.toString(),
       );
     } finally {

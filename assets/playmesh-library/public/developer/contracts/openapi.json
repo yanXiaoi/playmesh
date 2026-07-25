@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Playmesh Developer Channel",
-    "version": "1.6.1",
+    "version": "1.7.0",
     "description": "Authenticated project, manifest, capability, file, validation, history, runtime, event and AI discovery APIs. main.json is edited only through the manifest endpoint, which preserves its immutable id. Raw file writes remain blocked."
   },
   "security": [{ "developerToken": [] }],
@@ -60,6 +60,32 @@
         "x-idempotent": false,
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectDraft" } } } },
         "responses": { "201": { "description": "Created project", "content": { "application/json": { "schema": { "type": "object", "required": ["requestId", "project"], "properties": { "requestId": { "type": "string" }, "project": { "$ref": "#/components/schemas/Project" } } } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/dev/api/projects/{projectId}": {
+      "delete": {
+        "summary": "Delete one stopped developer project",
+        "description": "Permanently deletes project sources, data, cache and local history. A starting or running project returns game_running.",
+        "x-permission": "project.delete",
+        "x-risk": "high",
+        "x-idempotent": false,
+        "parameters": [
+          { "$ref": "#/components/parameters/ProjectId" },
+          { "name": "clientId", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Deleted project", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectDeleteResult" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "description": "Project is starting or running" } }
+      }
+    },
+    "/dev/api/projects/{projectId}/copy": {
+      "post": {
+        "summary": "Copy project sources into a new project ID",
+        "description": "Copies visible project sources and declarations, rewrites main.json id/name/author/lastModifiedAt, and never copies data, cache or local history.",
+        "x-permission": "project.create",
+        "x-risk": "medium",
+        "x-idempotent": false,
+        "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectCopyRequest" } } } },
+        "responses": { "201": { "description": "Copied project", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectCopyResult" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
     "/dev/api/capabilities": {
@@ -533,6 +559,9 @@
       "CapabilityDocument": { "type": "object", "additionalProperties": false, "required": ["requestId", "projectId", "exists", "revision", "required"], "properties": { "requestId": { "type": "string" }, "projectId": { "type": "string" }, "exists": { "type": "boolean" }, "revision": { "type": "integer", "minimum": 0 }, "required": { "type": "array", "uniqueItems": true, "items": { "type": "string", "description": "Must exist in the central capability registry" } } } },
       "CapabilityUpdate": { "type": "object", "required": ["required", "baseRevision"], "properties": { "required": { "type": "array", "uniqueItems": true, "items": { "type": "string", "description": "Main-screen capability; must exist in GET /dev/api/capabilities" } }, "controllerRequired": { "type": "array", "uniqueItems": true, "items": { "type": "string", "description": "Controller capability; allowed only for single_screen_multiplayer" } }, "baseRevision": { "type": "integer", "minimum": 0 }, "clientId": { "type": "string" } } },
       "ProjectDraft": { "type": "object", "required": ["id", "name", "mode", "orientation", "displayMode", "minPlayers", "maxPlayers"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$" }, "name": { "type": "string", "minLength": 1, "maxLength": 80 }, "description": { "type": "string", "maxLength": 500 }, "tags": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } }, "requiredCapabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "description": "Main-screen capability; must exist in GET /dev/api/capabilities" } }, "controllerRequiredCapabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "description": "Controller capability; allowed only for single_screen_multiplayer" } }, "mode": { "enum": ["solo", "multiplayer"] }, "orientation": { "enum": ["landscape", "portrait"] }, "controllerOrientation": { "enum": ["landscape", "portrait"], "description": "Required only for single_screen_multiplayer" }, "displayMode": { "enum": ["multi_screen", "single_screen_multiplayer"] }, "minPlayers": { "type": "integer", "minimum": 1 }, "maxPlayers": { "type": "integer", "minimum": 1 }, "clientId": { "type": "string" } }, "description": "solo requires multi_screen and minPlayers=maxPlayers=1; single_screen_multiplayer requires controllerOrientation and may use controllerRequiredCapabilities" },
+      "ProjectCopyRequest": { "type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$" }, "name": { "type": "string", "minLength": 1, "maxLength": 80 }, "clientId": { "type": "string" } } },
+      "ProjectCopyResult": { "type": "object", "required": ["requestId", "sourceProjectId", "project"], "properties": { "requestId": { "type": "string" }, "sourceProjectId": { "type": "string" }, "project": { "$ref": "#/components/schemas/Project" } } },
+      "ProjectDeleteResult": { "type": "object", "required": ["requestId", "projectId", "deleted"], "properties": { "requestId": { "type": "string" }, "projectId": { "type": "string" }, "deleted": { "const": true } } },
       "ClientMutation": { "type": "object", "properties": { "clientId": { "type": "string" } } },
       "FileTree": { "type": "object", "required": ["requestId", "projectId", "files", "directories"], "properties": { "requestId": { "type": "string" }, "projectId": { "type": "string" }, "files": { "type": "array", "items": { "type": "string" } }, "directories": { "type": "array", "items": { "type": "string" } } } },
       "FileWrite": { "type": "object", "required": ["content", "baseRevision"], "properties": { "content": { "type": "string" }, "encoding": { "enum": ["utf8", "base64"], "default": "utf8" }, "baseRevision": { "type": "integer", "minimum": 0 }, "clientId": { "type": "string" } } },

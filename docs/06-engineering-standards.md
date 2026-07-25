@@ -40,6 +40,7 @@ Game Package
 - Domain 负责用户、游戏声明、会话、玩家和输入事件的规则。
 - Go Handler 只负责解析请求、鉴权、调用服务和生成响应，不直接修改会话内部状态。
 - Game SDK 是游戏访问平台能力的唯一入口，游戏页面不直接调用 Flutter、Go、原生桥接或任意端口。
+- 游戏分享运行时采用严格的最小公开面，只允许提供 `/app/**`、`/bucket/**`、`/playmesh/**`，以及 SDK 在浏览器沙箱内确实无法替代的受控底层连接能力（例如当前游戏受控的 WebSocket Upgrade）。该清单是完整公开边界而非接口示例。新增平台功能时必须遵循“SDK 优先”原则，优先修改 Game SDK 或 App Bridge SDK，不得为接入便利新增分享 HTTP 业务接口；只有确属连接或传输层的能力才可增加底层入口，且必须固定绑定当前游戏和会话、在建连前鉴权、禁止任意目标地址，并同步补齐协议文档与回归测试。
 - SDK 分为权威主机运行时 `playmesh.js` 与 App 本机桥接 `playmesh-app.js`。前者负责会话、联机和主机存储；后者只负责当前 App 的身份与本机能力，由 App 自动注入，不得持久化游戏能力授权。Console 必须由 WebView/浏览器宿主在底层捕获并只保留在当前设备，禁止经 SDK 或游戏网关跨设备转发。普通浏览器不得加载 App SDK，主 SDK 必须提供安全的 `playmesh.app` 空实现。
 - 游戏可以自带引擎或工具库，但必须放在自己的游戏包内并通过包校验流程管理；不得因为使用第三方引擎而绕过 SDK 的身份、存储和联机边界。
 - SDK 不额外设计启动回调，页面脚本执行就是启动；必须提供 `onPause`、`onResume` 和由 App 主动触发的 `onExit` 生命周期接口。
@@ -49,7 +50,7 @@ Game Package
 - 平台只按 `gameId + bucket` 选择上述目录，不得自动增加 `{userId}` 层。游戏需要区分用户时，由开发者在 Bucket、key 或 JSON 内容中自行设计。
 - Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；SDK 在调用前校验，Flutter 存储层在落盘前再次校验。点号、空白、斜杠、反斜杠、非 ASCII 字符和前导下划线/连字符都不允许。
 - `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 256 MiB。
-- 持久化数据的唯一落盘端是开始游戏的 Authority 主机。Authority WebView 直接访问主机存储服务；浏览器使用受本局 token 保护的主机 HTTP 接口；其他 App 玩家使用会话内保留消息路由到 Authority。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。
+- 持久化数据的唯一落盘端是开始游戏的 Authority 主机。Authority WebView 直接访问主机存储服务；普通浏览器和其他 App 玩家统一通过权威 Game SDK 及当前受控 Session WebSocket 的存储 RPC 路由到 Authority，不得为存储恢复 `/api/storage` 等分享 HTTP 业务接口。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。
 - `packages/{gameId}/app/` 是 WebView 静态映射根。运行时只把 `data/data` 中的文件映射为不可枚举的 `/bucket/{bucket}/{timestamp-file}`；`data/json` 始终私有，任何资源服务、路径拼接和预览接口都必须拒绝访问或穿越到该目录。
 - 当前游戏的 `app/` 只通过 `/app/...` 暴露；SDK、平台头像等公共资源统一放在 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。游戏不得以相对路径越出 `app/`，也不得读取其他游戏包。
 - 游戏详情页清除缓存/数据和删除游戏必须调用统一的数据清理流程；数据清理必须有用户确认、日志和明确的不可恢复提示。
@@ -73,14 +74,14 @@ Game Package
 
 ```text
 浏览器
-  -> GET /join/{joinCode}
-  -> 返回游戏 Controller 与浏览器 SDK 配置
+  -> GET /app/{declared-entry}?channelId=...&token=...
+  -> Authority 分享网关返回当前游戏页面与权威 Game SDK 配置
   -> SDK 从 localStorage 读取或生成持久化 playerId，并读取昵称偏好
-  -> POST /api/join
+  -> SDK 直接调用受控 Core Join 能力
   -> Go JoinService
   -> 校验 playerId 没有在线连接；掉线身份可重连
   -> 签发短期浏览器凭证
-  -> Game SDK 建立 session 连接
+  -> Game SDK 建立受控 Session WebSocket
   -> 游戏页面通过 onPlayerJoin/onPlayerLeave/onPlayerReconnect 收到连接事件
 ```
 
@@ -147,7 +148,7 @@ Game Package
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
-当前未发布开发线在 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `1.8.2+15`、Go Core `0.3.0`、Core 协议 `1.1.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Developer API / OpenAPI `1.6.1` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
+当前未发布开发线在 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 

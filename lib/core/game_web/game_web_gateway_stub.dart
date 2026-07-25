@@ -11,7 +11,6 @@ Future<GameWebGateway> startGameWebGateway({
   GameOrientation? controllerOrientation,
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
-  String gameId = 'com.playmesh.unknown',
   String gameName = 'Playmesh 游戏',
   List<String> requiredCapabilities = const [],
   List<String> controllerRequiredCapabilities = const [],

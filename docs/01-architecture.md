@@ -216,7 +216,7 @@ Android 主 Activity 声明接收 `ACTION_VIEW` 和 `ACTION_SEND`。原生层取
 
 游戏页使用全屏 WebView，让游戏内容占据整个可用区域。主机与 App 扫码加入页复用可拖动、可展开/收纳的窄悬浮工具区；扫码加入不显示分享入口，例如：
 
-- 返回游戏详情
+- 返回上一页（包括游戏详情或开发者工作区）
 - 刷新游戏并重建 WebView
 - 打开联机信息
 - 主机获取/复制二维码和链接（一级入口）
@@ -492,9 +492,9 @@ const url = await profile.upload(file); // /bucket/profile/{timestamp}.ext
 持久化主机固定为开始游戏的 Authority 设备，所有客户端看到同一份主机 Bucket：
 
 - Authority 主屏 WebView 通过 Flutter Bridge 直接访问主机 `GameStorageService`。
-- 普通浏览器通过分享网关的受 token 保护存储接口访问主机；浏览器不得使用 `localStorage` 保存玩家身份或游戏 Bucket。
-- 其他 App 玩家通过现有会话把保留的存储请求路由到 Authority 主机，再把结果返回调用方；加入设备不得在自己的 `packages/{gameId}/data/` 创建分叉副本。
-- 分享网关和会话路由最终调用同一个主机内存缓存与延迟落盘服务，避免不同入口产生不同数据。
+- 普通浏览器和其他 App 玩家都由 Authority Game SDK 通过当前受控 Session WebSocket 发起存储 RPC；分享网关不再增加 `/api/storage` 等业务 HTTP 接口。
+- 加入设备不得在自己的 `packages/{gameId}/data/` 创建分叉副本；所有请求最终调用同一个主机内存缓存与延迟落盘服务。
+- App 客户端本地提供的 `playmesh-app.js` 只负责本机身份、昵称和能力，不拥有游戏全局数据。
 
 存储范围只自动绑定当前 `gameId` 和当前游戏库。平台不创建、推断或强制 `{userId}` 子目录；如游戏需要多用户存档，应由开发者在 Bucket 名称、key 或 JSON 内容中自行设计。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，即首字符为字母或数字，其余只能使用字母、数字、下划线和连字符，最长 64 个字符；SDK 与宿主存储层必须分别校验。SDK 还必须限制 key 格式、单值大小、单文件大小、总容量和 JSON 类型；写入采用临时文件加原子替换，异常时不能破坏已有数据。游戏数据与 `main.json`、游戏包文件、其他游戏数据和 App 用户资料隔离。
 
@@ -529,11 +529,74 @@ Playmesh App 可以在独立固定端口启动 `GameCatalogServer`，把当前�
 
 多选下载进入顺序队列，每个任务使用独立 HTTP Client，支持进度、停止和删除。远程包下载到临时文件后必须继续走 `GamePackageTransferService.importPackage` 的完整安全校验和原子安装；成功、失败、停止或 App 退出后删除临时文件。完整契约见 `docs/catalog-api.md`。
 
+### 游戏运行分享与公共中转
+
+游戏运行分享面板在“二维码与链接”弹窗顶部统一提供“局域网 / 服务器 /
+房间状态”三个同级页签。页签只切换展示，不切换会话路由；局域网和公共中转可
+同时接收玩家并进入同一个 Go Core 会话。
+
+所有 App 加入链路都建立本机 `127.0.0.1:<ephemeral-port>` Origin：
+
+- 局域网 App：页面连接由本地 `LocalTunnelGateway` 透明转发到主机地址；Core
+  连接先通过绑定当前分享 Token 的 `/playmesh/core` 受控 Upgrade 选择本局
+  Core，随后透明转发原始 TCP 字节。链路不增加加密。
+- 公共中转 App：本地网关为每条 TCP 连接建立持续的端到端 AES-256-GCM 加密流，
+  Go Server 只负责临时 Host/Client 配对和密文字节复制。
+- 普通局域网 HTML 浏览器：无法获得 App 本地网关，继续直接访问 Authority
+  暴露的局域网地址。
+
+公共中转复用在线游戏库中已启用的游戏源配置。App 并发读取 `/apps/info`，
+筛选声明 `supportsGameRelay: true` 的源，展示本次请求延迟、搜索和分页；
+App 自带游戏库分享服务器固定声明不支持中转。完整协议见
+`docs/remote-game-relay.md`。
+
+游戏源 Host 只负责访问 Catalog 声明及游戏目录；真正的中转 Origin 由 Go
+Server 在 `relay.publicBaseUrl` 中明确返回。主机 App 使用该 Origin 建立隧道并
+生成二维码，客户端 App 也从邀请中的同一 Host 前缀连接，不能依据游戏源 Host、
+监听地址或请求头猜测。外层 HTTP/HTTPS 和对外域名因此完全由服务器部署配置
+决定；HTTPS 表示使用外层 TLS，HTTP 表示不使用，不再声明独立 TLS 策略。
+`relay.maxConnectionsPerTunnel` 同样由 Go Server 通过 Server Info 返回。主机
+App 以该值作为动态连接池上限，只保留最多 4 条热连接并在配对后补充；活跃连接
+结束后槽位自然退出，最终限流仍由 Go Server 执行。
+
+局域网邀请固定为
+`http://authority:port/{declared-app-entry}?channelId={channelId}&token={shareToken}`，
+其中路径保留当前运行模式在 `main.json` 声明的真实 `/app/**` 游戏或控制器入口；
+公共中转邀请固定为
+`https://relay.example/j/{tunnelId}#inviteToken={opaqueToken}`。两者都不携带
+Core 端口、联机码、游戏 ID、游戏名称或方向。公共邀请的 `inviteToken` 由主机
+App 生成并封装真实 `/app/**` 入口、`channelId`、Join Capability、Authority
+分享 Token 和端到端密钥，只放在 fragment；fragment 不随 HTTP 或 Upgrade 请求
+发送，因此 Go Server 即使完全不受信任也拿不到页面入口、分享 Token 与密钥。
+TLS 只作为可选外层保护，不代替端点间强制内容加密。
+
+### 分享 Authority 最小公开面
+
+游戏运行分享只允许公开：
+
+```text
+/app/**
+/bucket/**
+/playmesh/**
+SDK 无法替代的受控底层连接能力，例如当前游戏的 WebSocket Upgrade
+```
+
+新增功能必须优先修改 Game SDK 或 App Bridge SDK。只有受浏览器沙箱限制、
+无法由 SDK 替代且本质属于连接层的能力，才能增加受控底层入口；不得恢复
+`/api/join`、`/api/storage`、`/api/player/nickname`、
+`/api/app-capabilities` 或通用 `/v1/sessions/**` HTTP 代理。
+
+权威 `playmesh.js`、游戏资源和全局数据始终来自主机；只有
+`playmesh-app.js` 由加入方 App 在独立的 `127.0.0.1` 静态入口本地提供，
+用于本机 ID、昵称和能力；透明传输网关不解析或替换 HTTP 资源。
+
 ### 统一开发者工作区中新建和编辑游戏
 
 游戏文件管理和编辑统一由开发者工作区提供。桌面浏览器通过局域网地址进入，App 端在开启开发者模式后使用内置 WebView 打开同一个地址和同一套界面，不再实现独立 App 文件编辑器。游戏库中的每个游戏都必须能在工作区中查看、编辑、保存和运行，包括用户导入包和工作区新建的游戏；平台不内置游戏 Demo。
 
-工作区按浏览器来源持久化最近打开的项目。再次进入时仅在该项目仍存在于统一游戏库时自动恢复；首次进入或项目已删除时必须打开不可跳过的项目选择层，选定或新建项目后才能进入编辑。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
+工作区按浏览器来源持久化最近打开的项目。再次进入时仅在该项目仍存在于统一游戏库时自动恢复；首次进入或项目已删除时必须保持项目下拉菜单展开，选定或新建项目后才能进入编辑。顶部只保留项目、运行、保存和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
+
+复制项目是变更稳定 ID 的正式入口：以当前项目为来源创建新的唯一 ID 和名称，作者使用当前 App 用户昵称，只复制发布内容，不复制根目录 `data/`、`cache/`、`.playmesh/`。普通项目设置继续禁止修改 `id`、`author` 和 `lastModifiedAt`。删除项目会删除包、运行数据、缓存和本地历史，正在运行的项目不得删除。
 
 新建游戏时，用户只需要在开发者工作区填写必要信息：
 
@@ -556,8 +619,8 @@ Playmesh App 可以在独立固定端口启动 `GameCatalogServer`，把当前�
 - 整文件替换。
 - 在指定行插入内容。
 - 替换指定行到指定行的内容。
-- 查看修改前后的 Diff。
-- 按文件、文件夹或整个工作区查看本地历史，并从指定时间操作恢复变更前或变更后状态。
+- 以 Git 风格左右双栏查看修改前后的 Diff，并把单个差异块应用到当前工作区后保存。
+- 按文件、文件夹或整个工作区查看本地历史；文本文件可以把指定时间操作的变更前或变更后差异块应用到当前工作区，也可以全量恢复所选范围。
 - 未保存文本的撤销与重做由 CodeMirror 编辑器负责。
 
 ### 快速文本文件操作格式
@@ -583,7 +646,7 @@ export const ActionTypes = {};
 ----end
 ```
 
-支持的操作为 `create_file`、`replace_file`、`insert_lines` 和 `replace_lines`。`create_file` 要求目标不存在；`replace_file` 为完整内容 upsert，目标不存在时自动创建文件及父目录；行操作要求目标已经存在或在同一批操作中先创建。每个操作必须有 `----end` 结束标记；工作区解析后先显示逐文件 Diff，用户确认后作为一个原子事务执行；路径越界、行号失效、编码异常或任一文件写入失败时，整批操作取消。底层可以转换成结构化操作对象，用于校验、原子提交和本地历史差异记录，但用户和 AI 默认不需要编辑 JSON。
+支持的操作为 `create_file`、`replace_file`、`insert_lines` 和 `replace_lines`。`create_file` 要求目标不存在；`replace_file` 为完整内容 upsert，目标不存在时自动创建文件及父目录；行操作要求目标已经存在或在同一批操作中先创建。每个操作必须有 `----end` 结束标记；工作区解析后按文件显示左右双栏 Diff，用户可选择将某个差异块写入当前工作区，也可确认后把全部文件作为一个原子事务执行；路径越界、行号失效、编码异常或任一文件写入失败时，整批操作取消。底层可以转换成结构化操作对象，用于校验、原子提交和本地历史差异记录，但用户和 AI 默认不需要编辑 JSON。
 
 编辑操作只能作用于当前 `packages/{gameId}/` 目录，禁止访问其他游戏、App 私有目录和系统路径。保存前必须校验路径、编码和文件大小；多文件修改应作为一个原子操作，任一文件失败时整体取消。
 
@@ -593,7 +656,7 @@ export const ActionTypes = {};
 
 连续变更按 5 分钟滚动窗口合并为一个时间操作，最多保留 100 个操作。淘汰最旧操作时，先将其变更后快照提升为新基线，确保后续 Diff 仍可还原。保存、上传、新建、删除、快速操作和历史恢复都进入同一条项目历史链；手动恢复会创建一个独立且封口的时间操作，不与后续编辑合并。
 
-历史快照排除 `data/` 和 `cache/`，项目树与开发者文件 API 也不允许通过普通路径访问这些内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和删除差异，并用指定操作的变更前或变更后状态全量替换当前范围。单文件接口禁止直接恢复平台管理的 `main.json`，但恢复项目根时会连同当次历史中的完整 `main.json` 一并恢复。浏览器工作区、Agent 和 CLI 发布都必须进入同一项目历史链。恢复完成后通过统一 SSE 通道发送 `workspace.restored`，使其他工作区刷新状态。
+历史快照排除 `data/` 和 `cache/`，项目树与开发者文件 API 也不允许通过普通路径访问这些内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和删除差异；文本文件以历史版本为左栏、当前工作区为右栏，允许应用单个差异块并经带修订号的正式 API 保存，也可用指定操作的变更前或变更后状态全量替换当前范围。二进制、目录、过大或截断内容只支持全量恢复。单文件接口禁止直接恢复平台管理的 `main.json`，但恢复项目根时会连同当次历史中的完整 `main.json` 一并恢复。浏览器工作区、Agent 和 CLI 发布都必须进入同一项目历史链。恢复完成后通过统一 SSE 通道发送 `workspace.restored`，使其他工作区刷新状态。
 
 CodeMirror 负责当前编辑缓冲区尚未保存内容的即时撤销与重做。服务端不提供单文件 `/undo` 接口，也不维护独立的文件撤销栈。
 
@@ -757,11 +820,11 @@ MVP 建议默认关闭普通浏览器发布，由用户在每次游玩时单独�
 
 ```text
 浏览器打开房主分享的局域网地址
-  -> 主机网关返回当前模式的 app/controller 页面和浏览器 SDK 配置
+  -> Authority 分享网关通过 /app/** 返回当前模式的页面和权威 Game SDK 配置
   -> SDK 读取 localStorage 中的持久化 playerId 与昵称偏好
   -> 缺少 playerId 时生成 p_ 前缀随机 ID；昵称不存在时显示输入层
-  -> SDK 调用加入接口，服务端校验该 playerId 未被在线连接占用并签发短期凭证
-  -> SDK 建立会话连接并解除游戏初始化等待
+  -> SDK 直接调用受控 Core Join 能力，服务端校验该 playerId 未被在线连接占用并签发短期凭证
+  -> SDK 建立受控 Session WebSocket 并解除游戏初始化等待
 ```
 
 游戏脚本必须等待 `playmesh.ready`，在身份确认和加入完成前不能发送输入。分享 URL 与宿主注入配置不携带昵称或玩家 ID；浏览器 SDK 在当前来源的 `localStorage` 中保存 `playmesh.player-id.v1` 和昵称偏好，但不保存玩家凭证或游戏 Bucket。刷新后复用同一玩家 ID；旧 WebSocket 在线时同 ID 的后续加入与连接直接拒绝，旧连接掉线后才可重新签发凭证并触发 `onPlayerReconnect`。SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不显示该入口，并使用 App 自动注入的 `u_...` 用户 ID 和昵称。
@@ -847,17 +910,12 @@ App 从声明文件读取展示信息和 App 原生能力开关：单机模式�
 
 游戏网页和控制器网页可以有不同的原生能力需求：`capabilities.json.required` 只用于主游戏页面，`controllerRequired` 只允许单屏多人声明并用于控制器页面。两者都必须经过 Game SDK 的确认、权限和事件接口，不能直接访问原生对象。
 
-联机会话由创建者发起，使用一次可分享的联机码。二维码和复制链接应优先使用兼容入口，使 App 扫码和普通浏览器打开使用同一份凭证：
+联机会话由创建者发起，使用一次可分享的联机码。分享面板在“局域网 / 服务器 / 房间状态”同级页签中展示二维码和链接：局域网地址可由 App 或普通浏览器加入，公共中转邀请只允许 App 解析和加入。
 
 ```json
 {
   "joinCode": "ABCD12",
-  "joinUrl": "http://192.168.1.10:8080/join/ABCD12",
-  "joinLinks": {
-    "universal": "http://192.168.1.10:8080/join/ABCD12",
-    "app": "playmesh://join/ABCD12",
-    "browser": "http://192.168.1.10:8080/join/ABCD12?client=browser"
-  },
+  "joinUrl": "http://192.168.1.10:8080/app/controller/index.html?channelId=4haYwU3Ce2Br&token=...",
   "gameId": "com.playmesh.quiz-demo",
   "displayMode": "single_screen_multiplayer",
   "joinRole": "controller",
@@ -867,19 +925,27 @@ App 从声明文件读取展示信息和 App 原生能力开关：单机模式�
 }
 ```
 
-加入流程：创建者选择游戏并以某个 `displayMode` 启动 -> App 启动游戏和联机会话 -> 用户第一次打开分享附加层 -> Core 生成绑定当前会话的随机 token -> App 在随机端口提供 `/join/{joinCode}` -> 附加层显示二维码和全部可用局域网 IPv4 链接 -> 加入者通过 App 或浏览器打开 -> 浏览器 SDK 读取或生成本地持久化玩家 ID 并确认昵称，App SDK 自动提供 App 玩家 ID 与昵称 -> SDK 进入当前模式的 `app/controller/index.html` 或 `app/index.html` 并建立唯一 WebSocket。关闭附加层或重新开始不撤销 token，刷新可用同一 ID 重连；退出游戏、会话结束或 Core 重启后旧链接失效。
+加入流程：创建者选择游戏并以某个 `displayMode` 启动 -> App 启动游戏和联机会话 -> 用户第一次打开分享附加层 -> Core 生成绑定当前会话的随机 token，Authority 分享网关生成当前 `channelId` -> Authority 分享网关在随机端口只提供当前游戏的 `/app/**`、`/bucket/**`、`/playmesh/**` 与受控 Core Upgrade -> 附加层显示保留当前声明入口且查询参数只含 `channelId + token` 的全部局域网 IPv4 链接 -> 加入者通过 App 或浏览器打开 -> Authority 校验当前入口、通道和 Token 并注入运行上下文 -> 浏览器 SDK 读取或生成本地持久化玩家 ID 并确认昵称，App SDK 自动提供 App 玩家 ID 与昵称 -> 权威 Game SDK 调用受控 Core Join 能力并建立唯一 Session WebSocket。App 加入时保留同一 `/app/**` 入口，但页面和 Core 都经本机 `127.0.0.1` 网关访问；普通浏览器直接使用 Authority 局域网地址和 Authority 注入的 Core 地址。关闭附加层或重新开始不撤销 token，刷新可用同一 ID 重连；退出游戏、会话结束或 Core 重启后旧链接失效。
 
 已安装 App 的玩家使用 App WebView，可使用声明并获准的 App 原生能力；未安装 App 的玩家使用普通浏览器，按照当前运行模式进入游戏端或控制端，不能获得 App 原生桥接、App 用户资料或长期凭证。浏览器入口只能绑定当前游戏和当前会话，支持房主随时停止。
 
-统一入口兼容策略：
+加入入口路由规则：
 
-- App 扫描兼容二维码后，优先由 App 原生扫码流程识别 `joinCode`，直接进入 App 加入流程。
-- 浏览器扫描或打开兼容链接后，先进入临时兼容页；兼容页可以尝试唤起 App，失败或检测到未安装 App 时进入浏览器加入页。
-- 兼容页不能把 App 是否安装作为安全依据，最终仍由短期凭证和服务端确认控制加入权限。
-- 如果系统不支持 Universal Link/App Link、无法可靠唤起 App，或房主希望明确区分两类入口，则在开启浏览器加入时同时生成：App 专用二维码/链接和浏览器专用二维码/链接。
-- 双入口仍使用同一个 `joinCode`，只是客户端路由不同；两类入口都必须经过会话和身份校验。
+- App 扫描局域网邀请后保留其实际 `/app/**` 入口并解析
+  `channelId + token`，创建页面回环网关和绑定当前 Token 的受控 Core Upgrade；
+  游戏、会话和方向仍由 Authority 页面运行时提供。公共中转邀请只从公开 URL
+  读取 `tunnelId + fragment inviteToken`，再由 App 从 `inviteToken` 恢复实际
+  入口、`channelId`、加入凭证、分享 Token 与端到端密钥；fragment 永不进入
+  WebView 或 Go Server 请求，`/j/**` 也不作为页面资源前缀。
+- 普通浏览器打开局域网链接时直接访问 Authority 地址，不加载 App Bridge SDK，也不获得原生能力。
+- 是否安装 App 不能作为安全依据，最终仍由短期凭证和服务端确认控制加入权限。
+- App 与普通浏览器入口使用同一个 `joinCode` 和当前会话，但由客户端环境决定走回环代理或局域网直连；两类入口都必须经过会话和身份校验。
 
 不同入口最终仍按当前运行模式选择页面：大屏模式进入 `app/controller/index.html`，普通模式进入 `app/index.html`。二维码不直接决定游戏页面，只决定客户端路由和加入上下文。
+
+游戏页只压入当前导航栈，返回操作关闭当前游戏路由并恢复来源页面。普通游戏
+从详情页启动时返回详情；开发者工作区发起运行时保留工作区和设置页，返回不得
+清空导航栈或强制跳转首页。
 
 ## 房间和输入协议草案
 

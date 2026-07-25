@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "codemirror": "^5.65.21"
+    "codemirror": "^5.65.21",
+    "diff-match-patch": "1.0.5"
   }
 }

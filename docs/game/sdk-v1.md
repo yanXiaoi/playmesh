@@ -22,7 +22,7 @@
 
 ## 双 SDK 边界
 
-游戏代码始终只显式引入 `/playmesh/sdk/v1/playmesh.js`。该 SDK 连接创建对局的 Authority 主机，会话、联机消息和 `playmesh.storage` 都以 Authority 主机为唯一可信来源。App WebView 网关会在入口缺少该标签时补注入主 SDK，作为导入和开发运行的安全兜底。
+游戏代码始终只显式引入 `/playmesh/sdk/v1/playmesh.js`。该 SDK 连接创建对局的 Authority 主机，会话、联机消息和 `playmesh.storage` 都以 Authority 主机为唯一可信来源。游戏入口必须显式包含该标准标签，平台据此注入运行配置；缺少标签的页面不属于有效的 SDK 游戏入口。
 
 Playmesh App WebView 会在主 SDK 之前自动注入 `/playmesh/sdk/v1/playmesh-app.js`。它只提供当前设备能力和 App 本地身份，不接管联机或游戏数据。游戏代码不得自行引入该文件，也不得手动设置 App 用户 ID。
 
@@ -38,6 +38,12 @@ if (playmesh.app.isAvailable()) {
 ```
 
 App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持久化 `{ userId, nickname, source }`。`playmesh.app.capabilities` 提供 `getRegistry()`、`getDeclared()`、`getAvailable()` 与 `create(code, options)`；`device` 只保留平台、触感、全屏和统一输入等非插件宿主操作。普通浏览器中 `isAvailable()` 为 `false`、身份为 `null`、能力列表为空，创建插件实例会返回明确的不可用错误。
+
+## 运行环境与传输抽象
+
+不同加入方式的底层传输由平台透明处理。游戏代码始终使用同一套 Game SDK，不得探测底层链路、读取或保存分享参数，也不得按加入方式分叉会话协议。App 加入页运行在稳定的本机来源下；普通浏览器只通过主机提供的局域网入口加入。安全上下文并不等于具体能力一定可用，游戏仍须以 `playmesh.app`、能力声明和浏览器特性检测结果为准，并处理用户拒绝或平台不支持。
+
+Authority 面向游戏只公开 `/app/**`、`/bucket/**`、`/playmesh/**` 资源和 SDK 无法替代的受控底层连接能力。身份、昵称、会话和 JSON 存储均通过 SDK 完成，游戏不得构造内部 HTTP API、WebSocket、token 或连接参数。
 
 浏览器玩家由主 SDK 生成 `p_...` ID，并把 ID 写入浏览器 `localStorage` 的 `playmesh.player-id.v1`；昵称写入 `playmesh.nickname.v1`。同一来源刷新后会复用这两项，但不持久化玩家凭证或游戏 Bucket。App 玩家使用 App 自己的 `u_...` ID 和资料，不读写浏览器 ID。服务端只允许同一玩家 ID 存在一条在线 WebSocket；旧连接在线时新连接被拒绝，旧连接掉线后才允许同 ID 重新加入。
 
@@ -366,7 +372,7 @@ key 必须匹配 `^[A-Za-z0-9._-]+$`，长度为 1 至 128。当前 SDK 会用 `
 
 JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/json/{bucket}.json`，始终保持私有。`upload(file)` 不经过 JSON/Base64，文件以流写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，单文件上限 256 MiB；平台保留安全的字母数字后缀并用毫秒时间戳替换原文件名。
 
-上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch` 的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他 App 玩家通过 Authority 主机的同一存储服务访问。
+上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch` 的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。除 `upload(file)` 使用受控 `/bucket/**` 上传外，JSON 读写只经 Game SDK 的受控连接交给 Authority，不存在公开的存储 HTTP 业务接口。浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他 App 玩家通过 Authority 主机的同一存储服务访问。
 
 平台不定义 `{userId}` 存储层。需要按用户区分时，由游戏设计 key 或 JSON 结构。
 
@@ -415,7 +421,7 @@ FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工�
 - 当前页面角色对应的 `required` 或 `controllerRequired` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；空数组是有效声明，绝不回退到另一角色。不支持项只做标注，不阻止同意后进入。
 - 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 悬浮工具栏保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
 - 普通多人多屏分享加载 `main.json.entries.game`（默认 `app/index.html`），浏览器玩家加入 Session 并建立 WebSocket；只有单屏多人分享才加载 `entries.controller`（默认 `app/controller/index.html`）。
-- 单机分享加载 `entries.game`，只使用静态资源和 HTTP 存储，不调用加入接口且不建立 WebSocket；浏览器 Console 只保留在当前浏览器；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
+- 单机分享加载 `entries.game`，不加入多人 Session，也不建立会话 WebSocket；浏览器 Console 只保留在当前浏览器；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
 - 自定义嵌套 HTML 入口由网关按入口所在目录设置页面基准 URL，页面内相对 CSS、脚本和图片仍解析到当前游戏的 `/app/...`，不会改变 SDK、会话或存储边界。
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
 - 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。

@@ -170,8 +170,8 @@ func TestResetAndBrowserRefreshCreateFreshPlayer(t *testing.T) {
 		t.Fatalf("Reset() = %#v, %v", reset, err)
 	}
 	disconnected := store.SetConnected(record, first.Player.ID, false)
-	if len(disconnected.Players) != 0 {
-		t.Fatalf("lobby disconnect should release the player: %#v", disconnected.Players)
+	if len(disconnected.Players) != 1 || disconnected.Players[0].Connected {
+		t.Fatalf("lobby disconnect should remain visible in room status: %#v", disconnected.Players)
 	}
 	if _, _, err := store.Authenticate(snapshot.ID, first.Token); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("old credential error = %v, want ErrUnauthorized", err)
@@ -188,6 +188,46 @@ func TestResetAndBrowserRefreshCreateFreshPlayer(t *testing.T) {
 	}
 	if len(refreshed.Players) != 1 || refreshed.Players[0].ID != second.Player.ID {
 		t.Fatalf("refreshed snapshot = %#v", refreshed)
+	}
+}
+
+func TestPlayerSourceAndLatencyRemainInUnifiedRoomSnapshot(t *testing.T) {
+	store := NewStore()
+	snapshot, _, err := store.Create(CreateInput{
+		GameID: "room-status", DisplayMode: "single_screen_multiplayer",
+		MinPlayers: 1, MaxPlayers: 3, Nickname: "Host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, guest, err := store.Join(JoinInput{
+		JoinCode: snapshot.JoinCode,
+		Nickname: "Remote App",
+		PlayerID: "u_remote_app",
+		Source:   "server",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _, err := store.Authenticate(snapshot.ID, guest.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.TryConnect(record, guest.Player.ID)
+	latency := 42
+	withLatency := store.SetLatency(record, guest.Player.ID, &latency)
+	if len(withLatency.Players) != 1 ||
+		withLatency.Players[0].Source != "server" ||
+		withLatency.Players[0].LatencyMS == nil ||
+		*withLatency.Players[0].LatencyMS != latency {
+		t.Fatalf("room status player = %#v", withLatency.Players)
+	}
+	disconnected := store.SetConnected(record, guest.Player.ID, false)
+	if len(disconnected.Players) != 1 ||
+		disconnected.Players[0].Connected ||
+		disconnected.Players[0].LatencyMS != nil ||
+		disconnected.Players[0].Source != "server" {
+		t.Fatalf("disconnected room status player = %#v", disconnected.Players)
 	}
 }
 

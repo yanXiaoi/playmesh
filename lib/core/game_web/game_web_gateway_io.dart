@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 
@@ -10,6 +12,7 @@ import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../capabilities/default_capability_plugins.dart';
 import 'game_web_gateway_contract.dart';
+import 'local_tunnel_gateway_contract.dart';
 
 Future<GameWebGateway> startGameWebGateway({
   required String gameRootAssetPath,
@@ -20,7 +23,6 @@ Future<GameWebGateway> startGameWebGateway({
   GameOrientation? controllerOrientation,
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
-  String gameId = 'com.playmesh.unknown',
   String gameName = 'Playmesh 游戏',
   List<String> requiredCapabilities = const [],
   List<String> controllerRequiredCapabilities = const [],
@@ -48,6 +50,7 @@ Future<GameWebGateway> startGameWebGateway({
   final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
   final gateway = _IoGameWebGateway(
     server: server,
+    channelId: _randomChannelId(),
     gameRootAssetPath: gameRootAssetPath,
     gameRootFilePath: gameRootFilePath,
     multiplayer: multiplayer,
@@ -56,7 +59,6 @@ Future<GameWebGateway> startGameWebGateway({
     controllerOrientation: controllerOrientation,
     gameEntryPath: gameEntryPath,
     controllerEntryPath: controllerEntryPath,
-    gameId: gameId,
     gameName: gameName,
     requiredCapabilities: List.unmodifiable(requiredCapabilities),
     controllerRequiredCapabilities: List.unmodifiable(
@@ -74,6 +76,7 @@ Future<GameWebGateway> startGameWebGateway({
 class _IoGameWebGateway implements GameWebGateway {
   _IoGameWebGateway({
     required this.server,
+    required this.channelId,
     required this.gameRootAssetPath,
     this.gameRootFilePath,
     required this.multiplayer,
@@ -82,7 +85,6 @@ class _IoGameWebGateway implements GameWebGateway {
     required this.controllerOrientation,
     required this.gameEntryPath,
     required this.controllerEntryPath,
-    required this.gameId,
     required this.gameName,
     required this.requiredCapabilities,
     required this.controllerRequiredCapabilities,
@@ -93,6 +95,7 @@ class _IoGameWebGateway implements GameWebGateway {
   });
 
   final HttpServer server;
+  final String channelId;
   final String gameRootAssetPath;
   final String? gameRootFilePath;
   final bool multiplayer;
@@ -101,7 +104,6 @@ class _IoGameWebGateway implements GameWebGateway {
   final GameOrientation? controllerOrientation;
   final String gameEntryPath;
   final String controllerEntryPath;
-  final String gameId;
   final String gameName;
   final List<String> requiredCapabilities;
   final List<String> controllerRequiredCapabilities;
@@ -133,45 +135,18 @@ class _IoGameWebGateway implements GameWebGateway {
     )) {
       return;
     }
-    final expectedJoinPath = multiplayer ? '/join/$joinCode' : '/play';
-    if (request.uri.path == expectedJoinPath) {
-      if (request.uri.queryParameters['token'] != shareToken) {
+    final expectedEntryPath = '/$_pageEntryPath';
+    if (request.method == 'GET' && request.uri.path == expectedEntryPath) {
+      if (request.uri.queryParameters['channelId'] != channelId ||
+          request.uri.queryParameters['token'] != shareToken) {
         await _text(request.response, HttpStatus.forbidden, '分享链接已失效');
         return;
       }
       await _browserPage(request);
       return;
     }
-    if (request.uri.path == '/api/join' && request.method == 'POST') {
-      await _proxyJoin(request);
-      return;
-    }
-    if (request.uri.path == '/api/storage' && request.method == 'POST') {
-      await _storage(request);
-      return;
-    }
-    if (request.uri.path == '/api/player/nickname' &&
-        request.method == 'POST') {
-      await _proxyNickname(request);
-      return;
-    }
-    if (request.uri.path == '/api/app-capabilities' &&
-        request.method == 'GET') {
-      if (request.uri.queryParameters['token'] != shareToken) {
-        await _json(request.response, HttpStatus.forbidden, {
-          'error': '分享链接已失效',
-        });
-        return;
-      }
-      await _json(request.response, HttpStatus.ok, {
-        'gameId': gameId,
-        'gameName': gameName,
-        'orientation': _pageOrientation.manifestValue,
-        'required': _pageRequiredCapabilities,
-        'capabilityRegistry': defaultCapabilityDescriptors
-            .map((definition) => definition.toJson())
-            .toList(),
-      });
+    if (request.method == 'GET' && request.uri.path == playmeshCoreTunnelPath) {
+      await _coreTunnel(request);
       return;
     }
     if (request.method == 'GET' &&
@@ -183,111 +158,51 @@ class _IoGameWebGateway implements GameWebGateway {
     await _text(request.response, HttpStatus.notFound, '页面不存在');
   }
 
-  Future<void> _proxyJoin(HttpRequest request) async {
-    if (!multiplayer) {
-      await _text(request.response, HttpStatus.notFound, '单机分享不提供会话加入');
+  Future<void> _coreTunnel(HttpRequest request) async {
+    if (!multiplayer || coreEndpoint == null) {
+      await _text(request.response, HttpStatus.notFound, '连接入口不存在');
       return;
     }
-    final rawBody = await utf8.decoder.bind(request).join();
-    final body = jsonDecode(rawBody);
-    if (body is! Map || body['shareToken'] != shareToken) {
+    if (request.headers.value(playmeshShareTokenHeader) != shareToken) {
       await _text(request.response, HttpStatus.forbidden, '分享链接已失效');
       return;
     }
-    final client = HttpClient();
-    try {
-      final proxy = await client.postUrl(
-        coreEndpoint!.resolve('v1/sessions/join'),
-      );
-      proxy.headers.contentType = ContentType.json;
-      proxy.write(
-        jsonEncode({
-          'joinCode': joinCode,
-          'nickname': body['nickname'],
-          'shareToken': shareToken,
-          if (body['playerId'] case final String playerId) 'playerId': playerId,
-        }),
-      );
-      final response = await proxy.close();
-      request.response.statusCode = response.statusCode;
-      request.response.headers.contentType = ContentType.json;
-      await response.pipe(request.response);
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  Future<void> _proxyNickname(HttpRequest request) async {
-    if (!multiplayer) {
-      await _text(request.response, HttpStatus.notFound, '单机分享不提供玩家昵称');
+    final connectionTokens =
+        request.headers
+            .value(HttpHeaders.connectionHeader)
+            ?.split(',')
+            .map((value) => value.trim().toLowerCase())
+            .toSet() ??
+        const <String>{};
+    if (!connectionTokens.contains('upgrade') ||
+        request.headers.value(HttpHeaders.upgradeHeader) !=
+            playmeshCoreTunnelProtocol) {
+      request.response.statusCode = HttpStatus.upgradeRequired;
+      await request.response.close();
       return;
     }
-    final rawBody = await utf8.decoder.bind(request).join();
-    final decoded = jsonDecode(rawBody);
-    if (decoded is! Map || decoded['shareToken'] != shareToken) {
-      await _text(request.response, HttpStatus.forbidden, '分享链接已失效');
-      return;
-    }
-    final body = Map<String, Object?>.from(decoded);
-    final sessionID = _requiredString(body, 'sessionId');
-    final playerToken = _requiredString(body, 'playerToken');
-    final nickname = _requiredString(body, 'nickname');
-    final client = HttpClient();
+    Socket? core;
+    var detached = false;
     try {
-      final proxy = await client.patchUrl(
-        coreEndpoint!.resolve(
-          'v1/sessions/${Uri.encodeComponent(sessionID)}/players/me',
-        ),
+      core = await Socket.connect(coreEndpoint!.host, coreEndpoint!.port);
+      request.response.statusCode = HttpStatus.switchingProtocols;
+      request.response.headers
+        ..set(HttpHeaders.connectionHeader, 'Upgrade')
+        ..set(HttpHeaders.upgradeHeader, playmeshCoreTunnelProtocol);
+      final joiningApp = await request.response.detachSocket(
+        writeHeaders: true,
       );
-      proxy.headers.contentType = ContentType.json;
-      proxy.headers.set(HttpHeaders.authorizationHeader, 'Bearer $playerToken');
-      proxy.write(jsonEncode({'nickname': nickname}));
-      final response = await proxy.close();
-      request.response.statusCode = response.statusCode;
-      request.response.headers.contentType = ContentType.json;
-      await response.pipe(request.response);
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  Future<void> _storage(HttpRequest request) async {
-    final rawBody = await utf8.decoder.bind(request).join();
-    final decoded = jsonDecode(rawBody);
-    if (decoded is! Map || decoded['shareToken'] != shareToken) {
-      await _json(request.response, HttpStatus.forbidden, {'error': '分享链接已失效'});
-      return;
-    }
-    final body = Map<String, Object?>.from(decoded);
-    try {
-      final command = body['command'];
-      final bucket = _requiredString(body, 'bucket');
-      Object? result;
-      switch (command) {
-        case 'storage.get':
-          result = await storage.getData(bucket, _requiredString(body, 'key'));
-          break;
-        case 'storage.set':
-          await storage.setData(
-            bucket,
-            _requiredString(body, 'key'),
-            body['value'],
-          );
-          break;
-        case 'storage.remove':
-          await storage.removeData(bucket, _requiredString(body, 'key'));
-          break;
-        case 'storage.clear':
-          await storage.clearData(bucket);
-          break;
-        default:
-          throw const FormatException('未知存储命令');
+      detached = true;
+      await _bridgeSockets(joiningApp, core);
+    } on Object {
+      core?.destroy();
+      if (!detached) {
+        await _text(
+          request.response,
+          HttpStatus.serviceUnavailable,
+          'Core 连接不可用',
+        );
       }
-      await _json(request.response, HttpStatus.ok, {'result': result});
-    } on Object catch (error) {
-      await _json(request.response, HttpStatus.badRequest, {
-        'error': error.toString(),
-      });
     }
   }
 
@@ -314,7 +229,6 @@ class _IoGameWebGateway implements GameWebGateway {
     html = html.replaceFirst('<head>', '<head><base href="$basePath">');
     final browserConfig = jsonEncode({
       'mode': multiplayer ? 'multiplayer' : 'solo',
-      if (multiplayer) 'joinEndpoint': '/api/join',
       if (multiplayer)
         'coreBase': Uri(
           scheme: 'http',
@@ -334,9 +248,7 @@ class _IoGameWebGateway implements GameWebGateway {
       'capabilityRegistry': defaultCapabilityDescriptors
           .map((definition) => definition.toJson())
           .toList(),
-      'storageEndpoint': '/api/storage',
       'bucketEndpoint': '/bucket',
-      if (multiplayer) 'nicknameEndpoint': '/api/player/nickname',
       'nickname': ?request.uri.queryParameters['playmeshNickname'],
     });
     html = html.replaceFirst(
@@ -345,9 +257,15 @@ class _IoGameWebGateway implements GameWebGateway {
           '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
     );
     if (request.uri.queryParameters['playmeshApp'] == '1') {
+      final appSdkUri = _localAppSdkUri(
+        request.uri.queryParameters['playmeshAppSdkUrl'],
+      );
+      final appSdkSource = const HtmlEscape(
+        HtmlEscapeMode.attribute,
+      ).convert(appSdkUri.toString());
       html = html.replaceFirst(
         '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
-        '<script src="/playmesh/sdk/v1/playmesh-app.js"></script>'
+        '<script src="$appSdkSource"></script>'
             '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
       );
     }
@@ -363,6 +281,11 @@ class _IoGameWebGateway implements GameWebGateway {
       multiplayer && displayMode == 'single_screen_multiplayer'
       ? controllerRequiredCapabilities
       : requiredCapabilities;
+
+  String get _pageEntryPath =>
+      multiplayer && displayMode == 'single_screen_multiplayer'
+      ? controllerEntryPath
+      : gameEntryPath;
 
   Future<void> _asset(HttpRequest request) async {
     final path = request.uri.path;
@@ -409,8 +332,11 @@ class _IoGameWebGateway implements GameWebGateway {
     return bases
         .map(
           (base) => base.replace(
-            path: multiplayer ? '/join/$joinCode' : '/play',
-            queryParameters: {'token': shareToken},
+            path: '/$_pageEntryPath',
+            queryParameters: {
+              'channelId': channelId,
+              'token': shareToken,
+            },
           ),
         )
         .toList(growable: false);
@@ -418,6 +344,83 @@ class _IoGameWebGateway implements GameWebGateway {
 
   @override
   Future<void> close() => server.close(force: true);
+}
+
+String _randomChannelId() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(9, (_) => random.nextInt(256));
+  return base64Url.encode(bytes).replaceAll('=', '');
+}
+
+Future<void> _bridgeSockets(Socket left, Socket right) async {
+  final completed = Completer<void>();
+  var leftWriting = Future<void>.value();
+  var rightWriting = Future<void>.value();
+  late final StreamSubscription<Uint8List> leftSubscription;
+  late final StreamSubscription<Uint8List> rightSubscription;
+
+  void complete() {
+    if (!completed.isCompleted) completed.complete();
+  }
+
+  StreamSubscription<Uint8List> pipe(
+    Socket source,
+    Socket destination,
+    void Function(Future<void>) updateWriting,
+  ) {
+    late final StreamSubscription<Uint8List> subscription;
+    subscription = source.listen(
+      (chunk) {
+        subscription.pause();
+        destination.add(chunk);
+        final writing = destination.flush();
+        updateWriting(writing);
+        unawaited(
+          writing
+              .then((_) {
+                if (!completed.isCompleted) subscription.resume();
+              })
+              .catchError((Object _) {
+                complete();
+              }),
+        );
+      },
+      onError: (_) => complete(),
+      onDone: complete,
+      cancelOnError: true,
+    );
+    return subscription;
+  }
+
+  leftSubscription = pipe(left, right, (value) => rightWriting = value);
+  rightSubscription = pipe(right, left, (value) => leftWriting = value);
+  await completed.future;
+  await leftSubscription.cancel();
+  await rightSubscription.cancel();
+  try {
+    await Future.wait([leftWriting, rightWriting]);
+  } on Object {
+    // 任一方向关闭后只需等待已提交写入结束，失败不覆盖原始断开原因。
+  }
+  left.destroy();
+  right.destroy();
+}
+
+Uri _localAppSdkUri(String? value) {
+  final uri = value == null ? null : Uri.tryParse(value);
+  if (uri == null ||
+      uri.scheme != 'http' ||
+      uri.host != '127.0.0.1' ||
+      !uri.hasPort ||
+      uri.port < 1 ||
+      uri.port > 65535 ||
+      uri.path != '/playmesh-app.js' ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    throw const FormatException('App 加入必须提供有效的本地 playmesh-app.js 地址');
+  }
+  return uri;
 }
 
 String _appRelativeHtmlEntry(String path, {required String field}) {
@@ -440,25 +443,6 @@ Future<void> _text(HttpResponse response, int status, String body) async {
   response.headers.contentType = ContentType.text;
   response.write(body);
   await response.close();
-}
-
-Future<void> _json(
-  HttpResponse response,
-  int status,
-  Map<String, Object?> body,
-) async {
-  response.statusCode = status;
-  response.headers.contentType = ContentType.json;
-  response.write(jsonEncode(body));
-  await response.close();
-}
-
-String _requiredString(Map<String, Object?> body, String key) {
-  final value = body[key];
-  if (value is! String || value.isEmpty) {
-    throw FormatException('$key 必须是非空字符串');
-  }
-  return value;
 }
 
 ContentType _contentType(String path) {

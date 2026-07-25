@@ -16,6 +16,9 @@ class AppWebViewBridge {
     required this.nickname,
     this.gameName = 'Playmesh 游戏',
     this.declaredCapabilities = const [],
+    this.acceptRuntimeGameDeclaration = false,
+    this.coreBaseUri,
+    this.playerSource = 'lan_app',
     this.deviceService = const AppDeviceService(),
     MotionSensorSource? motionSource,
     CapabilityRegistry? capabilityRegistry,
@@ -36,10 +39,17 @@ class AppWebViewBridge {
   final String nickname;
   final String gameName;
   final List<String> declaredCapabilities;
+  final bool acceptRuntimeGameDeclaration;
+  final Uri? coreBaseUri;
+  final String playerSource;
   final AppDeviceService deviceService;
   final Future<void> Function()? onExitRequested;
   final CapabilityRegistry capabilityRegistry;
-  late final CapabilityRuntime _capabilityRuntime;
+  late CapabilityRuntime _capabilityRuntime;
+  late String _runtimeGameName = gameName;
+  late List<String> _runtimeDeclaredCapabilities = List.unmodifiable(
+    declaredCapabilities,
+  );
 
   Future<void> handleJavaScriptMessage(
     String rawMessage,
@@ -57,7 +67,7 @@ class AppWebViewBridge {
           ? Map<String, Object?>.from(command['payload']! as Map)
           : const <String, Object?>{};
       final result = switch (command['command']) {
-        'app.bootstrap' => _bootstrap(),
+        'app.bootstrap' => await _bootstrap(payload),
         'app.capabilities.confirm' => _confirmCapabilities(),
         'app.capability.create' => await _capabilityRuntime.create(
           payload,
@@ -94,7 +104,34 @@ class AppWebViewBridge {
     return send(jsonEncode({'type': 'app.device.input', 'input': input}));
   }
 
-  Map<String, Object?> _bootstrap() {
+  Future<Map<String, Object?>> _bootstrap(Map<String, Object?> payload) async {
+    if (acceptRuntimeGameDeclaration) {
+      final runtimeGameName = payload['gameName'];
+      final runtimeCapabilities = payload['declaredCapabilities'];
+      if (runtimeGameName is! String || runtimeGameName.trim().isEmpty) {
+        throw const FormatException('gameName 必须是非空字符串');
+      }
+      if (runtimeCapabilities is! List ||
+          runtimeCapabilities.any((value) => value is! String)) {
+        throw const FormatException('declaredCapabilities 必须是字符串数组');
+      }
+      final normalizedCapabilities = List<String>.unmodifiable(
+        runtimeCapabilities.cast<String>().toSet(),
+      );
+      if (_runtimeGameName != runtimeGameName.trim() ||
+          !_sameCapabilities(
+            _runtimeDeclaredCapabilities,
+            normalizedCapabilities,
+          )) {
+        await _capabilityRuntime.reset();
+        _runtimeGameName = runtimeGameName.trim();
+        _runtimeDeclaredCapabilities = normalizedCapabilities;
+        _capabilityRuntime = CapabilityRuntime(
+          registry: capabilityRegistry,
+          declaredCapabilities: _runtimeDeclaredCapabilities,
+        );
+      }
+    }
     return {
       'available': true,
       'sdkVersion': generatedAppSdkVersion,
@@ -103,14 +140,21 @@ class AppWebViewBridge {
         'nickname': nickname,
         'source': 'playmesh_app',
       },
-      'game': {'name': gameName, 'requiredCapabilities': declaredCapabilities},
+      'game': {
+        'name': _runtimeGameName,
+        'requiredCapabilities': _runtimeDeclaredCapabilities,
+      },
+      'runtime': {
+        if (coreBaseUri != null) 'coreBase': coreBaseUri.toString(),
+        'playerSource': playerSource,
+      },
       'capabilityRegistry': capabilityRegistry.descriptors
           .map((definition) => definition.toJson())
           .toList(),
       'device': {
         'platform': deviceService.platform,
         'capabilities': _capabilityRuntime.availableDeclaredCodes.toList(),
-        'declaredCapabilities': declaredCapabilities,
+        'declaredCapabilities': _runtimeDeclaredCapabilities,
       },
     };
   }
@@ -159,4 +203,12 @@ class AppWebViewBridge {
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
   }
+}
+
+bool _sameCapabilities(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index += 1) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
 }

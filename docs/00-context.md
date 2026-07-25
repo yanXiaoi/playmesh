@@ -13,7 +13,8 @@
 7. `06-engineering-standards.md`：代码复用、调用链、测试、日志和文档规范。
 8. `version/README.md`：第六阶段之后的版本更新日志与 App 简略日志规则。
 9. `catalog-api.md`：本机游戏源、在线多源游戏库、鉴权和下载队列。
-10. `game/README.md`：游戏开发文档入口，包含游戏包、SDK、默认模板和开发者通道文档。
+10. `remote-game-relay.md`：局域网、本地回环网关、公共中转和端到端加密边界。
+11. `game/README.md`：游戏开发文档入口，包含游戏包、SDK、默认模板和开发者通道文档。
 
 ## 项目定位
 
@@ -35,6 +36,7 @@ Playmesh 是一个局域网优先的跨平台派对游戏平台。应用负责�
 - AI 生成的 HTML 游戏不能直接获得原生 JS Bridge 权限，必须经过受限 SDK 和权限系统。
 - 默认自动验证限于静态分析、Flutter/Go/SDK 代码级测试以及与平台编译无关的资源和语法检查。只有用户明确要求平台构建时，才可使用其已配置工具链生成并检查产物；安装、真机行为和生产签名仍需用户或 CI 验证。iOS 发布、体感和云端仍放在后续版本评估。
 - 第三阶段已完成真实会话、WebSocket、Game SDK、统一游戏包扫描和浏览器控制器入口；平台当前不内置游戏 Demo。
+- 远程联机只通过已启用在线游戏源声明的公共中转提供；Go Server 没有端点密钥，只能配对和复制密文字节，不能成为通用反向代理。
 
 ## 第一阶段目标
 
@@ -55,7 +57,7 @@ Flutter App
 
 第三阶段已实现可供游戏使用的 SDK。启动当前会话的 App 游戏运行端固定为 Authority Client；大屏公共显示端不属于 `players`，普通多屏 App 主机可同时作为 Player，但其玩家顺序不参与 Authority 判定。开发者工作区创建的项目直接写入统一 `playmesh-library/packages/{gameId}/` 游戏库，平台不提供内置游戏 Demo。
 
-第四阶段网页开发者通道已完成并归档：用户在设置中开启开发者模式后，App 使用独立固定端口（默认 `16666`）启动开发者 Gateway；端口、token 和工作区路径一并持久化，App 重启或重新开启后恢复同一工作区链接。同一局域网内的浏览器与 App 内置 WebView 使用同一工作区。当前链路支持单机/联机项目创建、IDEA 风格文件树、编辑保存、文件/文件夹新建与删除、上传、Diff、快速批量操作、项目级本地历史、结构化项目校验、运行游戏、联机二维码、SSE 同步、统一日志以及 AI 可读 SDK/接口/项目文档；工作区不嵌入主页面预览。完成事实见 `status/phase-04-web-dev-channel.md`。
+第四阶段网页开发者通道已完成并归档：用户在设置中开启开发者模式后，App 使用独立固定端口（默认 `16666`）启动开发者 Gateway；端口、token 和工作区路径一并持久化，App 重启或重新开启后恢复同一工作区链接。同一局域网内的浏览器与 App 内置 WebView 使用同一工作区。当前链路支持单机/联机项目创建与复制、项目设置和删除、IDEA 风格文件树、编辑保存、文件/文件夹新建与删除、上传、Git 风格双栏 Diff 与差异块应用、快速批量操作、项目级本地历史、结构化项目校验、运行游戏、联机二维码、SSE 同步、统一日志以及 AI 可读 SDK/接口/项目文档；工作区不嵌入主页面预览。完成事实见 `status/phase-04-web-dev-channel.md`。
 
 第五阶段已于 2026-07-17 完成并归档：`playmesh.sync`、自动权威往返延迟、SDK 网页性能层、可配置运行入口、Playmesh 包导入/导出、工作区文件整理、游戏存储收尾、运行重启与最近日志接口、游戏数据清理、正式版移动端界面、扫码加入、资料持久化、Logo 与全平台全屏均已落地。完整代码地图和产品边界见 `status/phase-05-complete.md`，自动验证见 `verification/phase-05-complete-2026-07-17.md`。
 
@@ -66,7 +68,6 @@ Flutter App
 - iOS 发布能力
 - 创意工坊
 - 云端账号
-- 异地联机
 - 房间自动发现（mDNS、局域网广播等）
 - 观看/旁观者模式
 - 体感识别
@@ -75,7 +76,7 @@ Flutter App
 
 ## 当前开发建议
 
-第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `1.8.2+15`、Go Core `0.3.0`、Core 协议 `1.1.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Developer API / OpenAPI `1.6.1`、Developer CLI `1.3.1`；本轮新增角色化全屏方向、角色化能力声明、只读发布元数据、最近打开排序、损坏项目自救与 Agent/CLI 发布历史，并修复单屏多人显示端空能力声明被控制器声明污染的问题。变化统一记录在 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0`、Developer CLI `1.3.1`；本轮对游戏分享运行时进行破坏性收敛，加入 App 本地回环加载、局域网与公共中转双链路、端点持钥透明加密流和统一房间状态。游戏侧 SDK 公共 API、现有游戏包与默认模板保持不变；AI 提示词只同步游戏必须遵守的传输抽象，不披露平台实现。变化统一记录在 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
 
 建议顺序：
 
@@ -106,6 +107,7 @@ tool/build_release.ps1                HarmonyOS/Android/Windows 统一发布入�
 tool/install_harmony_go.ps1           固定 SIG Go 工具链安装与校验
 lib/core/                             Flutter Core 宿主、Client、协议与状态服务
 go-core/internal/session/             会话、Player/Authority 拓扑与 WS 路由
+go-server/                            游戏源声明、空目录与无密钥公共中转服务器
 ```
 
 Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Game SDK 直连 Core；大屏公共显示端不伪装成玩家。
@@ -135,11 +137,13 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 普通模式下主机、其他 App 设备和普通浏览器都使用 `app/index.html`；创建会话的 App 主机固定为 Authority Client，并可同时作为一个 Player，任何玩家进入顺序都不参与 Authority 判定。
 - 游戏运行时公开当前游戏的 `app/`、平台 `public/` 资源和 SDK 上传的 Bucket 文件；分别通过 `/app/...`、`/playmesh/...` 与 `/bucket/{bucket}/{file}` 访问。`data/json`、其他游戏包和 App 私有文件不可通过 URL 读取。
 - 游戏持久化目录固定为 `packages/{gameId}/data/`，不生成 `{userId}` 子目录；JSON 位于 `data/json`，上传文件位于 `data/data`，游戏开发者只能通过合法 Bucket API 组织数据。
-- 所有 SDK 持久化数据统一写入开始游戏的 Authority 主机；浏览器经受 token 保护的主机接口读写，其他 App 玩家经会话路由到主机，不能写入加入设备自己的游戏库。
+- 所有 SDK 持久化数据统一写入开始游戏的 Authority 主机；JSON 读写经 Game SDK 的受控连接完成，文件通过 `/bucket/**` 上传和读取，加入设备不能写入自己的游戏库副本。
 - FPS 默认显示在游戏页左上角，可在悬浮工具坞关闭。SDK 只统计游戏在实际渲染完成处调用 `playmesh.performance.reportFrame()` 上报的帧；未接入时显示 `-- FPS`。
-- 二维码和链接根据当前运行模式指向不同入口；App 加入和浏览器加入遵循同一套入口选择规则。
-- 联机二维码和链接优先使用兼容入口：App 扫码由原生流程接管，浏览器打开则进入兼容页并判断是否唤起 App。
-- 若设备无法可靠兼容，则在开启浏览器加入时同时提供 App 专用入口和浏览器专用入口；两者仍使用同一个联机码。
+- 二维码与链接统一放在游戏分享弹窗中，并与“局域网 / 服务器 / 房间状态”同级页签配合展示；局域网和公共中转可以同时承载同一会话的加入。
+- App 通过局域网或公共中转加入时都从本地回环入口加载；普通浏览器只能直接使用主机公开的局域网 Authority 地址。
+- 局域网分享链接保留 `main.json` 声明的实际 `/app/**` 页面入口，查询参数只包含
+  `channelId + shareToken`；公共中转链接只包含
+  `tunnelId + fragment inviteToken`，不再公开 Core 端口、联机码或游戏元数据。
 - 主游戏网页和控制端网页都可以通过同级可选 `capabilities.json` 声明平台能力；能力 code、中文名、说明和 App/HTML 适配状态由统一能力注册表提供。
 - `permissions` 保留给键盘等既有输入声明；传感器以及后续摄像头、麦克风等受保护能力使用 `capabilities.json`。两者都不控制浏览器自身的 DOM 键盘事件或浏览器原生权限。
 - 是否允许普通浏览器访问游戏，是游玩期间的会话设置，由用户单独确认，默认不公开。

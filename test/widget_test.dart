@@ -97,7 +97,7 @@ void main() {
     await tester.tap(find.text('设置').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 1.8.2'), findsOneWidget);
+    expect(find.text('Playmesh 2.0.0'), findsOneWidget);
     expect(find.text('Go Core'), findsOneWidget);
   });
 
@@ -155,7 +155,7 @@ void main() {
     await tester.tap(find.byTooltip('展开游戏工具'));
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('返回游戏详情'), findsOneWidget);
+    expect(find.byTooltip('返回上一页'), findsOneWidget);
     expect(find.byTooltip('刷新游戏'), findsOneWidget);
     expect(find.byTooltip('退出游戏'), findsNothing);
     expect(find.byTooltip('二维码与链接'), findsOneWidget);
@@ -196,10 +196,50 @@ void main() {
     expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
     expect(find.text('游戏内容已刷新。'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('返回游戏详情'));
+    await tester.tap(find.byTooltip('返回上一页'));
     await tester.pumpAndSettle();
 
     expect(find.text('游戏详情'), findsOneWidget);
+  });
+
+  testWidgets('developer game route returns to the existing workspace route', (
+    WidgetTester tester,
+  ) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigatorKey,
+        home: const Text('HOME'),
+        routes: {'/developer-workspace': (_) => const Text('WORKSPACE')},
+        onGenerateRoute: (settings) {
+          if (settings.name != GamePage.routeName) return null;
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Text('DEVELOPER_GAME'),
+          );
+        },
+      ),
+    );
+
+    unawaited(
+      navigatorKey.currentState!.pushNamed<void>('/developer-workspace'),
+    );
+    await tester.pumpAndSettle();
+    launchDeveloperGameRoute(
+      navigatorKey.currentState!,
+      const GameLaunchArguments(
+        game: _primaryGame,
+        developerProjectId: 'com.playmesh.test-game',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('DEVELOPER_GAME'), findsOneWidget);
+
+    navigatorKey.currentState!.pop();
+    await tester.pumpAndSettle();
+
+    expect(find.text('WORKSPACE'), findsOneWidget);
+    expect(find.text('HOME'), findsNothing);
   });
 
   testWidgets('game page gives the local WebView the full body surface', (

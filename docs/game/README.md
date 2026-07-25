@@ -54,6 +54,7 @@ packages/com.example.hello/
 
 - 游戏只读取自身 `/app/...`、平台 `/playmesh/...` 公共资源，以及 `upload(file)` 返回的 `/bucket/...` 文件地址；不能跨目录读取其他包、`data/json` 或任意数据目录。
 - 游戏只通过 Game SDK 使用会话、玩家、联机、生命周期、存储等平台能力。
+- 不同加入方式的底层传输由平台透明处理；游戏不得读取分享参数、探测底层链路或按加入方式分叉会话协议。
 - 设备能力只在同级 `capabilities.json` 声明；`required` 属于主画面，单屏多人的 `controllerRequired` 属于控制器，新建项目和项目设置均可分开编辑。能力 code、中文名、说明和 App/HTML 适配状态以 `GET /dev/api/capabilities` 返回的统一注册表为准，运行时自检使用 `GET/POST /dev/api/capability-tests`。
 - 游戏页面不得直接连接 Go Core、构造内部 WebSocket 帧或访问原生 Bridge。
 - 多人游戏的最终规则、分数和胜负由 Authority Runtime 决定，Go Core 只负责通用会话与消息路由。

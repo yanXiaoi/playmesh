@@ -75,7 +75,14 @@ void main() {
     expect(workspace.statusCode, HttpStatus.ok);
     expect(workspace.body, contains('Playmesh 开发者工作区'));
     expect(workspace.body, contains('id="aiPanel" class="ai-action"'));
-    expect(workspace.body, contains('id="manifestSettings"'));
+    expect(
+      workspace.body.indexOf('id="aiPanel"'),
+      lessThan(workspace.body.indexOf('</header>')),
+    );
+    expect(workspace.body, contains('id="projectPickerMenu"'));
+    expect(workspace.body, contains('id="projectSettingsFromPicker"'));
+    expect(workspace.body, contains('id="copyProjectFromPicker"'));
+    expect(workspace.body, contains('id="deleteProjectFromPicker"'));
     expect(workspace.body, contains('id="manifestForm"'));
     expect(workspace.body, contains('id="manifestId" readonly'));
     expect(workspace.body, contains('id="manifestTags"'));
@@ -91,8 +98,12 @@ void main() {
     expect(workspace.body, contains('id="copyCurrentFile"'));
     expect(workspace.body, contains('id="projectPicker"'));
     expect(workspace.body, contains('id="projectSearch"'));
-    expect(workspace.body, contains('id="projectPickerClose"'));
     expect(workspace.body, contains('id="toolbarMenu"'));
+    expect(workspace.body, contains('id="diffMergeHost"'));
+    expect(workspace.body, contains('id="quickMergeHost"'));
+    expect(workspace.body, contains('id="historyMergeHost"'));
+    expect(workspace.body, contains('codemirror/addon/merge/merge.js'));
+    expect(workspace.body, contains('diff-match-patch/index.js'));
     expect(workspace.body, contains('id="stop"'));
     expect(workspace.body, contains('id="diffLeftFile"'));
     expect(workspace.body, contains('addon/hint/javascript-hint.js'));
@@ -107,9 +118,29 @@ void main() {
     expect(workspaceScript.statusCode, HttpStatus.ok);
     expect(workspaceScript.body, contains('localStorage.setItem'));
     expect(workspaceScript.body, contains('openProjectPicker()'));
+    expect(workspaceScript.body, contains('positionAnchoredMenu'));
+    expect(workspaceScript.body, contains('CodeMirror.MergeView'));
+    expect(workspaceScript.body, contains('applyQuickSelected'));
+    expect(workspaceScript.body, contains('applyHistoryChunks'));
     expect(workspaceScript.body, contains('appendCapabilityTestResults'));
     expect(workspaceScript.body, contains('while(generation==='));
     expect(workspaceScript.body, contains('copyPlatformCapabilities'));
+    final workspaceStyles = await http.get(
+      base.resolve(
+        '/playmesh/developer/workspace-v1.css?token=custom-dev-token',
+      ),
+    );
+    expect(workspaceStyles.statusCode, HttpStatus.ok);
+    expect(
+      workspaceStyles.body,
+      contains('grid-template-columns: minmax(44px, 1fr) 44px 50px 58px 44px'),
+    );
+    expect(workspaceStyles.body, contains('min-width: 120px'));
+    expect(workspaceStyles.body, contains('@media (max-width: 360px)'));
+    expect(
+      workspaceStyles.body,
+      contains('grid-template-columns: repeat(4, minmax(0, 1fr))'),
+    );
     final status = await http.get(
       base.resolve('/dev/api/status?token=custom-dev-token'),
     );
@@ -186,6 +217,22 @@ void main() {
     );
     expect(editorHint.statusCode, HttpStatus.ok);
     expect(editorHint.body, contains('additionalContext'));
+    final mergeAddon = await http.get(
+      base.resolve(
+        '/playmesh/developer/editor/node_modules/codemirror/'
+        'addon/merge/merge.js',
+      ),
+    );
+    expect(mergeAddon.statusCode, HttpStatus.ok);
+    expect(mergeAddon.body, contains('CodeMirror.MergeView'));
+    final diffMatchPatch = await http.get(
+      base.resolve(
+        '/playmesh/developer/editor/node_modules/'
+        'diff-match-patch/index.js',
+      ),
+    );
+    expect(diffMatchPatch.statusCode, HttpStatus.ok);
+    expect(diffMatchPatch.body, contains('diff_match_patch'));
 
     developerEventHub.beginRuntime(projectId: 'demo', runId: 'run-demo');
     for (var index = 0; index < 60; index += 1) {
@@ -561,6 +608,9 @@ body { color: white; }
     expect(paths, contains('/dev/api/capability-tests'));
     expect(paths, contains('/dev/api/projects/{projectId}/manifest'));
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
+    expect(paths, contains('/dev/api/projects/{projectId}/copy'));
+    expect(paths, contains('/dev/api/projects/{projectId}'));
+    expect((openApiJson['info'] as Map)['version'], '1.7.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );
@@ -891,6 +941,104 @@ body { color: white; }
     );
   });
 
+  test('复制项目允许使用新 ID 且不继承运行数据，删除项目清理目录', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'playmesh-copy-project-',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
+    final repository = GameLibraryRepository(AssetGameLibraryScanner().scan);
+    final catalog = GameLibraryDeveloperProjectCatalog(
+      repository,
+      workspaceRoot: workspace,
+    );
+    final source = await catalog.createProject(
+      DeveloperProjectDraft(
+        id: 'com.example.copy-source',
+        name: 'Copy Source',
+        author: 'Source Author',
+        lastModifiedAt: DateTime.utc(2026, 7, 24),
+        orientation: GameOrientation.landscape,
+        displayMode: 'multi_screen',
+        minPlayers: 2,
+        maxPlayers: 4,
+      ),
+    );
+    await catalog.writeFile(
+      source.id,
+      'app/copied.js',
+      utf8.encode('export const copied = true;\n'),
+      expectedRevision: 0,
+    );
+    await Directory(
+      '${workspace.path}${Platform.pathSeparator}${source.id}'
+      '${Platform.pathSeparator}app${Platform.pathSeparator}cache',
+    ).create(recursive: true);
+    await File(
+      '${workspace.path}${Platform.pathSeparator}${source.id}'
+      '${Platform.pathSeparator}app${Platform.pathSeparator}cache'
+      '${Platform.pathSeparator}asset.js',
+    ).writeAsString('export const assetCache = true;\n');
+    final sourceDirectory = Directory(
+      '${workspace.path}${Platform.pathSeparator}${source.id}',
+    );
+    for (final internalName in ['data', 'cache', '.playmesh']) {
+      final internal = Directory(
+        '${sourceDirectory.path}${Platform.pathSeparator}$internalName',
+      );
+      await internal.create(recursive: true);
+      await File(
+        '${internal.path}${Platform.pathSeparator}private.bin',
+      ).writeAsBytes([1, 2, 3]);
+    }
+
+    final copied = await catalog.copyProject(
+      source.id,
+      id: 'com.example.copy-target',
+      name: 'Copy Target',
+      author: 'Current Nickname',
+      lastModifiedAt: DateTime.utc(2026, 7, 25),
+    );
+    final copiedDirectory = Directory(
+      '${workspace.path}${Platform.pathSeparator}${copied.id}',
+    );
+    final manifest =
+        jsonDecode(
+              utf8.decode(
+                (await catalog.readFile(copied.id, 'main.json')).bytes,
+              ),
+            )
+            as Map;
+
+    expect(copied.id, 'com.example.copy-target');
+    expect(copied.name, 'Copy Target');
+    expect(await catalog.listFiles(copied.id), contains('app/copied.js'));
+    expect(await catalog.listFiles(copied.id), contains('app/cache/asset.js'));
+    expect(manifest['id'], copied.id);
+    expect(manifest['name'], copied.name);
+    expect(manifest['author'], 'Current Nickname');
+    expect(
+      manifest['lastModifiedAt'],
+      DateTime.utc(2026, 7, 25).millisecondsSinceEpoch,
+    );
+    for (final internalName in ['data', 'cache', '.playmesh']) {
+      expect(
+        await Directory(
+          '${copiedDirectory.path}${Platform.pathSeparator}$internalName',
+        ).exists(),
+        isFalse,
+      );
+    }
+
+    await catalog.deleteProject(copied.id);
+
+    expect(await copiedDirectory.exists(), isFalse);
+    expect(
+      (await catalog.listProjects()).map((project) => project.id),
+      isNot(contains(copied.id)),
+    );
+    expect(await sourceDirectory.exists(), isTrue);
+  });
+
   test('开发者 API 可视化保存清单和能力声明但拒绝修改 id', () async {
     final workspace = await Directory.systemTemp.createTemp(
       'playmesh-manifest-api-',
@@ -918,6 +1066,7 @@ body { color: white; }
       client: _StubHealthClient(),
       developerProjectCatalog: catalog,
       developerPreferences: DeveloperPreferences(libraryRoot: workspace),
+      developerAuthorProvider: () => 'API User',
     );
     addTearDown(runtime.close);
     final port = await _availablePort();
@@ -999,6 +1148,43 @@ body { color: white; }
     );
     expect(removedCapabilities.statusCode, HttpStatus.ok);
     expect((jsonDecode(removedCapabilities.body) as Map)['exists'], isFalse);
+
+    final copied = await http.post(
+      endpoint('copy'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'id': 'com.example.visual-settings-copy',
+        'name': 'Visual Settings Copy',
+        'clientId': 'test-client',
+      }),
+    );
+    expect(copied.statusCode, HttpStatus.created, reason: copied.body);
+    final copiedProject = (jsonDecode(copied.body) as Map)['project'] as Map;
+    expect(copiedProject['id'], 'com.example.visual-settings-copy');
+    final copiedManifest =
+        jsonDecode(
+              utf8.decode(
+                (await catalog.readFile(
+                  'com.example.visual-settings-copy',
+                  'main.json',
+                )).bytes,
+              ),
+            )
+            as Map;
+    expect(copiedManifest['author'], 'API User');
+
+    final deleted = await http.delete(
+      base.resolve(
+        '/dev/api/projects/com.example.visual-settings-copy'
+        '?token=manifest-api-token&clientId=test-client',
+      ),
+    );
+    expect(deleted.statusCode, HttpStatus.ok, reason: deleted.body);
+    expect((jsonDecode(deleted.body) as Map)['deleted'], isTrue);
+    expect(
+      (await catalog.listProjects()).map((item) => item.id),
+      isNot(contains('com.example.visual-settings-copy')),
+    );
   });
 
   test('可以创建不包含控制器和 Authority 入口的单机骨架', () async {
@@ -1144,6 +1330,18 @@ class _FakeCatalog implements DeveloperProjectCatalog {
   @override
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft) =>
       throw UnimplementedError();
+
+  @override
+  Future<DeveloperProject> copyProject(
+    String sourceProjectId, {
+    required String id,
+    required String name,
+    required String author,
+    required DateTime lastModifiedAt,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> deleteProject(String projectId) => throw UnimplementedError();
 
   @override
   Future<GameSummary> publishPackage(

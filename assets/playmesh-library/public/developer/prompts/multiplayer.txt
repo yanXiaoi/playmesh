@@ -1,5 +1,6 @@
 【当前模式规则：联机游戏公共规则】
 这是联机游戏。玩家页面只提交业务意图，Authority 通过 playmesh.sync 验证输入并维护唯一权威状态。SDK 负责 tick、输入限频/合并、快照版本与分发；Go Core 只路由协议，不执行游戏规则。只有非 Authority 的多人页面会在就绪时自动请求最新快照；Authority 页面重载会重建同步 runtime，需要恢复的权威状态必须先从 playmesh.storage 读取，再作为 initialState 启动。
+不同加入方式的底层传输由平台透明处理；游戏代码始终使用同一套 Game SDK，不得探测传输实现、读取分享参数或按加入方式分叉会话协议。
 
 强制交付：
 1. main.json 的 authority.entry 指向的文件必须真实存在，并导出可工作的 Authority 状态规则。

@@ -4,7 +4,69 @@
 
 - 状态：开发中，尚未发布。
 - 当前正式基线：App `1.6.1+8`。
-- 当前开发版本：App `1.8.2+15`、Go Core `0.3.0`、Core 协议 `1.1.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Developer API / OpenAPI `1.6.1`、Developer CLI `1.3.1`。
+- 当前开发版本：App `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0`、Developer CLI `1.3.1`。
+
+## 局域网与公共中转双链路
+
+- 游戏分享弹窗统一为“局域网 / 服务器 / 房间状态”三个同级页签，默认显示局域网地址；局域网和服务器可以同时接收加入，不改变同一 Core 会话。
+- “服务器”复用在线游戏库中已启用的源，异步请求 `/apps/info`、筛选中转声明、展示最新探测延迟，并提供搜索、每页 5 项分页、连接、断开和重试状态。
+- Go Server 首期只提供手写声明、空游戏目录和临时 TCP 隧道，不提供登录、后台、游戏管理或通用代理；Source Token 由全局 Gin 中间件和可配置白名单处理。
+- 公共中转的主机与客户端都不需要公网 IP。Go Server 只配对 Host/Client Upgrade 并复制密文字节，不接收目标 Host、端口或 URL。
+- 主机连接池改为动态热池，上限读取
+  `/apps/info.relay.maxConnectionsPerTunnel`；空闲时最多预热 4 条连接，被配对后
+  立即补回，活跃连接结束后自然收缩，不再固定占用 16 条连接。
+- 局域网邀请保留 `main.json` 当前模式声明的实际 `/app/**` 游戏或控制器入口，
+  查询参数缩短为 `channelId + token`；普通浏览器直接打开，App 解析同一链接后
+  在本地回环 Origin 下加载，并建立绑定当前分享 Token 的受控 Core Upgrade。
+- 公共中转邀请缩短为
+  `https://relay.example/j/{tunnelId}#inviteToken={opaqueToken}`；fragment 只由 App
+  解析，不会发送给 Go Server。真实 `/app/**` 入口和 `channelId` 也封装在令牌
+  内，由 App 在回环 Origin 下恢复；`/j/**` 不参与页面资源映射。旧的 Core
+  端口、联机码、游戏 ID、名称、方向和 Relay 连接参数全部退出分享 URL。该
+  破坏性邀请变更将 Relay 协议升级到 `2.0.0`。
+
+## 端点持钥透明加密
+
+- 主机 App 本地生成 256 位随机端点密钥；密钥只进入邀请 URL fragment，不进入中转的创建隧道、Upgrade、响应、运行状态或日志。
+- 每条 TCP 连接建立一次持续的透明加密流，使用随机 Salt、HKDF-SHA256 双向派生和 AES-256-GCM 记录层；HTTP、静态资源、Range 与 WebSocket 均作为原始字节自动传输，不需要业务消息逐条调用加解密。
+- Go Server 没有端点密钥，密码学上无法解密游戏路径、SDK 消息、玩家昵称或内容；外层 TLS 可选。
+- 局域网 App 链路继续透明直传且不增加加密。
+- 局域网 HTML 继续直接加载 Authority 短链接，不依赖 App SDK、回环网关或
+  公共中转；页面由 Authority 按 `channelId` 选择并注入当前运行上下文。
+
+## 本地回环 Origin 与 Authority 收敛
+
+- App 通过局域网或服务器加入时都先建立 `127.0.0.1` 本地网关，再由 WebView 从稳定本地 Origin 加载；普通局域网浏览器继续直连主机 Authority 地址。
+- 游戏分享 Authority 只提供 `/app/**`、`/bucket/**`、`/playmesh/**`，以及 SDK 无法替代的受控底层连接能力（例如当前游戏 WebSocket Upgrade）。
+- 加入、昵称、存储和能力优先由 Game SDK、App Bridge SDK 与 Session WebSocket 实现，删除旧 `/api/join`、`/api/storage`、`/api/player/nickname`、`/api/app-capabilities` 和通用 Core HTTP 代理。
+- 权威 `playmesh.js` 始终由主机提供；加入方 App 本地只提供 `playmesh-app.js`，用于本机 ID、昵称和能力。
+
+## 统一房间状态
+
+- Go Core 玩家快照新增来源和延迟，并区分“服务器 / 局域网 App / 局域网 HTML”；断线玩家保留在当前房间状态中，延迟清空，重连后按 `playerId` 更新。
+- 房间状态独立于具体分享通道，实时显示全部已加入玩家、在线状态和 RTT。
+- Go Core 升级到 `0.4.0`，Core 协议以兼容新增字段升级到 `1.2.0`。游戏侧 Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 公共 API 未改变，现有游戏包和默认模板不变；AI 提示词仅同步传输透明、统一使用 SDK 的约束。
+
+## 游戏返回导航
+
+- 游戏工具区的返回语义统一为“返回上一页”，退出时只弹出当前游戏路由。
+- 从游戏详情启动时返回详情；从开发者工作区发起运行时保留工作区及设置页，
+  不再清空导航栈并跳转首页。
+
+## 开发者工作区项目与差异操作
+
+- 移动端顶部恢复可用的项目入口，并收敛为“项目 / 运行 / 保存 / AI / 更多”紧凑工具栏；项目选择至少保留 `120px`，其他按钮使用明确的最小宽度。一行不足时项目选择独占第一行，四个操作按钮均分第二行，不再压缩入口。
+- 项目入口和“更多”改为 IDEA 风格锚点下拉菜单；新建、复制当前项目、项目设置和删除项目集中在项目菜单。复制时可填写新的项目 ID 和名称，并排除运行数据、缓存及本地历史。
+- 文件 Diff、快速操作预览和本地历史统一使用 CodeMirror MergeView 左右双栏；左侧是来源版本，右侧是当前工作区，可通过块间箭头只应用某个差异块并保存，快速操作仍支持整批原子应用。
+- 新增项目复制和删除的 Developer API，Developer API / OpenAPI 升级到 `1.7.0`。
+
+## 游戏源声明 1.4.0
+
+- 新增 `/apps/info`，可声明名称、作者、主页和公共中转能力；名称缺失时显示 `host:port`，默认 HTTP/HTTPS 端口省略。
+- 中转声明新增由 Go Server 配置的 `publicBaseUrl`。App 使用该公共 Origin 建立 Host/Client Upgrade 并生成二维码，不再从游戏源 Host 推导；HTTP/HTTPS 与对外域名由服务器部署配置决定，协议本身直接决定是否使用外层 TLS，不设置冗余策略字段。
+- 中转声明新增 `maxConnectionsPerTunnel`，由 Go Server 返回当前单隧道容量；
+  App 只把它作为动态池上限，最终限流仍由服务器执行。
+- App 自带游戏库分享服务器固定返回“`{用户昵称}的游戏库`”，不返回作者、主页或 Relay 声明，且永远不支持联机中转。
 
 ## 游戏库兼容与最近打开
 
@@ -36,7 +98,7 @@
 
 - `capabilities.json.required` 只属于主画面；单屏多人新增 `controllerRequired`，只属于控制器。
 - 开发者网页和 CLI 创建项目时分别选择两组能力；非单屏多人声明控制器能力会校验失败。
-- 本地 WebView、浏览器配置与 `/api/app-capabilities` 只返回当前页面角色的能力集合，能力确认和插件实例创建不会越权到另一角色。
+- 本地 WebView 与 App Bridge SDK 只返回当前页面角色的能力集合；`/api/app-capabilities` 已删除，能力确认和插件实例创建不会越权到另一角色。
 - 单屏多人页面角色统一驱动入口、方向和能力选择；权威显示端的空 `required` 是最终结果，不会回退到非空 `controllerRequired`。
 - App WebView 的 Game SDK 只以 App Bridge `getDeclared()` 返回的当前页面声明决定是否弹能力确认。
 
@@ -49,10 +111,17 @@
 ## 契约与资料
 
 - Manifest、能力 Schema、OpenAPI、默认模板、开发者工作区、CLI、AI 提示词、SDK 声明与游戏开发文档均同步到当前字段。
-- Game SDK 升级到 `2.2.1`，App Bridge SDK 保持 `2.1.0`，Developer API 当前为 `1.6.1`，CLI 当前为 `1.3.1`。
-- Go Core 与 Core 协议没有线级字段变化，保持 `0.3.0` / `1.1.0`。
+- AI 游戏提示词遵守最小披露原则，只提供可调用的公开 SDK 和任务必需约束，不暴露回环代理、中转鉴权、密钥协商或加密通道实现。
+- Game SDK 升级到 `2.2.1`，App Bridge SDK 保持 `2.1.0`，Developer API 当前为 `1.7.0`，CLI 当前为 `1.3.1`。
+- Go Core 升级到 `0.4.0`，Core 协议升级到 `1.2.0`；Player 在线状态增加来源与延迟字段，用于统一房间状态展示，现有游戏侧 SDK 公共 API 保持不变。
 
 ## 验证与构建
 
 - 使用固定 SDK 在沙箱外串行执行 Dart/Flutter 静态分析、定向测试、全量测试、SDK JavaScript 契约与 CLI Go 测试。
-- Android 与 Windows 通过统一发布脚本串行构建；1.8.2 产物和 SHA-256 记录在 `docs/verification/playmesh-1.8.2-role-capability-build-2026-07-24.md`。
+- 删除绑定特定版本号、构建号和发行文案的设置页日志测试，避免正常版本升级触发无意义回归；设置页其他行为测试继续保留。
+- Android 与 Windows 已按用户要求通过统一发布脚本在沙箱外串行构建，产物、签名类型、包结构和 SHA-256 记录在 `docs/verification/playmesh-2.0.0-remote-relay-2026-07-24.md`。
+- 声明入口邀请修正后的代码级回归记录在
+  `docs/verification/playmesh-2.0.0-declared-entry-invitation-2026-07-24.md`；
+  现有 `2.0.0+18` 安装包早于该修正，尚未重新构建。
+- Server Info 容量声明与动态中转池回归记录在
+  `docs/verification/playmesh-2.0.0-dynamic-relay-pool-2026-07-24.md`。

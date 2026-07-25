@@ -5,6 +5,7 @@ import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/join_game_page.dart';
 import '../games/game_library_page.dart';
+import '../games/online_game_library_page.dart';
 import '../profile/profile_page.dart';
 import '../settings/settings_page.dart';
 
@@ -202,6 +203,13 @@ class _HomeActionGrid extends StatelessWidget {
         title: '加入对局',
         subtitle: '扫描主机二维码，无需预先安装游戏',
         onTap: () => Navigator.of(context).pushNamed(JoinGamePage.routeName),
+      ),
+      _HomeAction(
+        icon: Icons.public_outlined,
+        title: '在线游戏库',
+        subtitle: '浏览已启用的游戏源',
+        onTap: () =>
+            Navigator.of(context).pushNamed(OnlineGameLibraryPage.routeName),
       ),
       _HomeAction(
         icon: Icons.tune_outlined,

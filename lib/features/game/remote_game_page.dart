@@ -3,16 +3,17 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
+import '../../core/game_web/local_app_sdk_server.dart';
+import '../../core/game_web/local_tunnel_gateway.dart';
+import '../../core/relay/relay_tunnel.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
-import '../../models/game_summary.dart';
 import '../settings/settings_page.dart';
 import 'game_controls.dart';
 import 'windows_local_game_web_view.dart';
@@ -36,30 +37,32 @@ class RemoteGamePage extends StatefulWidget {
 class _RemoteGamePageState extends State<RemoteGamePage> {
   WebViewController? _controller;
   AppWebViewBridge? _appBridge;
+  LocalTunnelGateway? _webGateway;
+  LocalTunnelGateway? _coreGateway;
+  LocalAppSdkServer? _localAppSdkServer;
+  Uri? _localEntryUri;
   Object? _error;
   int _windowsReloadKey = 0;
   late final WebViewMessageQueue _messageQueue;
-  ({
-    String gameId,
-    String gameName,
-    GameOrientation orientation,
-    List<String> required,
-  })?
-  _descriptor;
   Future<void> Function(String)? _runWindowsJavaScript;
   bool _showPerformance = true;
   bool _debugVisible = false;
   final List<Map<String, Object?>> _developerLogs = [];
   StreamSubscription<Map<String, Object?>>? _developerLogSubscription;
 
-  Uri get _launchUri => widget.entryUri.replace(
-    queryParameters: {
-      ...widget.entryUri.queryParameters,
-      'playmeshApp': '1',
-      if (widget.nickname.trim().isNotEmpty)
-        'playmeshNickname': widget.nickname.trim(),
-    },
-  );
+  Uri get _launchUri {
+    final base = _localEntryUri ?? widget.entryUri;
+    return base.replace(
+      queryParameters: {
+        ...base.queryParameters,
+        'playmeshApp': '1',
+        if (_localAppSdkServer case final sdkServer?)
+          'playmeshAppSdkUrl': sdkServer.scriptUri.toString(),
+        if (widget.nickname.trim().isNotEmpty)
+          'playmeshNickname': widget.nickname.trim(),
+      },
+    );
+  }
 
   bool get _usesFlutterWebView => supportsPlatformWebView;
 
@@ -72,22 +75,73 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   }
 
   Future<void> _prepare() async {
+    LocalTunnelGateway? webGateway;
+    LocalTunnelGateway? coreGateway;
+    LocalAppSdkServer? appSdkServer;
     try {
-      final descriptor = await _loadDeclaredCapabilities();
-      if (!mounted) return;
-      _descriptor = descriptor;
+      final entryUri = widget.entryUri;
+      final usesRelay = _isRelayInvitation(entryUri);
+      if (entryUri.host.isEmpty ||
+          (usesRelay
+              ? !{'http', 'https'}.contains(entryUri.scheme)
+              : entryUri.scheme != 'http')) {
+        throw const FormatException('App 游戏入口地址无效');
+      }
+      appSdkServer = await startLocalAppSdkServer();
+      if (usesRelay) {
+        webGateway = await startRelayClientGateway(
+          invitationUri: entryUri,
+          target: RelayTarget.web,
+        );
+        coreGateway = await startRelayClientGateway(
+          invitationUri: entryUri,
+          target: RelayTarget.core,
+        );
+      } else {
+        final shareToken = entryUri.queryParameters['token'];
+        if (shareToken == null || shareToken.isEmpty) {
+          throw const FormatException('局域网游戏邀请缺少 Token');
+        }
+        final authorityBaseUri = Uri(
+          scheme: 'http',
+          host: entryUri.host,
+          port: entryUri.hasPort ? entryUri.port : null,
+          path: '/',
+        );
+        webGateway = await startLocalTunnelGateway(
+          targetBaseUri: authorityBaseUri,
+        );
+        coreGateway = await startLocalUpgradeTunnelGateway(
+          targetBaseUri: authorityBaseUri,
+          path: playmeshCoreTunnelPath,
+          headers: {playmeshShareTokenHeader: shareToken},
+        );
+      }
+      if (!mounted) {
+        await appSdkServer.close();
+        await coreGateway.close();
+        await webGateway.close();
+        return;
+      }
+      _webGateway = webGateway;
+      _coreGateway = coreGateway;
+      _localAppSdkServer = appSdkServer;
+      _localEntryUri = usesRelay
+          ? (webGateway as RelayClientGateway).localEntryUri
+          : webGateway.localBaseUri.replace(
+              path: entryUri.path,
+              queryParameters: entryUri.queryParameters,
+            );
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
         nickname: widget.nickname,
-        gameName: descriptor.gameName,
-        declaredCapabilities: descriptor.required,
+        gameName: 'Playmesh 游戏',
+        acceptRuntimeGameDeclaration: true,
+        coreBaseUri: coreGateway.localBaseUri,
+        playerSource: usesRelay ? 'server' : 'lan_app',
         onExitRequested: () async {
           if (mounted) await Navigator.of(context).maybePop();
         },
-      );
-      await const AppDeviceService().setFullscreen(
-        true,
-        orientation: descriptor.orientation,
       );
       if (_usesFlutterWebView) {
         await _initialize();
@@ -95,50 +149,11 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         setState(() {});
       }
     } on Object catch (error) {
+      await appSdkServer?.close();
+      await coreGateway?.close();
+      await webGateway?.close();
       if (mounted) setState(() => _error = error);
     }
-  }
-
-  Future<
-    ({
-      String gameId,
-      String gameName,
-      GameOrientation orientation,
-      List<String> required,
-    })
-  >
-  _loadDeclaredCapabilities() async {
-    final token = widget.entryUri.queryParameters['token'];
-    if (token == null || token.isEmpty) {
-      throw const FormatException('App 游戏入口缺少分享 token');
-    }
-    final uri = widget.entryUri.replace(
-      path: '/api/app-capabilities',
-      queryParameters: {'token': token},
-      fragment: null,
-    );
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
-    if (response.statusCode != 200) {
-      throw StateError('读取当前游戏设备能力失败：HTTP ${response.statusCode}');
-    }
-    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-    if (decoded is! Map ||
-        decoded['gameId'] is! String ||
-        decoded['gameName'] is! String ||
-        decoded['orientation'] is! String ||
-        decoded['required'] is! List) {
-      throw const FormatException('当前游戏设备能力定义无效');
-    }
-    return (
-      gameId: decoded['gameId']! as String,
-      gameName: decoded['gameName']! as String,
-      orientation: GameOrientation.fromManifestValue(
-        decoded['orientation']! as String,
-      ),
-      required: List<String>.unmodifiable(
-        (decoded['required']! as List).cast<String>(),
-      ),
-    );
   }
 
   Future<void> _initialize() async {
@@ -217,6 +232,9 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     unawaited(_developerLogSubscription?.cancel());
     _developerLogSubscription = null;
     unawaited(_appBridge?.close());
+    unawaited(_localAppSdkServer?.close());
+    unawaited(_coreGateway?.close());
+    unawaited(_webGateway?.close());
     unawaited(
       const AppDeviceService().setFullscreen(false).catchError((Object _) {}),
     );
@@ -353,10 +371,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   void _setFullscreen(bool enabled) {
     unawaited(
       const AppDeviceService()
-          .setFullscreen(
-            enabled,
-            orientation: enabled ? _descriptor?.orientation : null,
-          )
+          .setFullscreen(enabled, orientation: null)
           .catchError((Object error) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -388,20 +403,14 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   }
 
   void _openGameInfo() {
-    final descriptor = _descriptor;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xff20242b),
       barrierColor: const Color(0x99000000),
       builder: (context) => GameToolInfoSheet(
-        title: descriptor?.gameName ?? 'Playmesh 对局',
+        title: 'Playmesh 对局',
         description: '通过主机分享地址加载，无需在本机安装游戏。',
-        labels: [
-          if (widget.entryUri.queryParameters['playmeshJoinCode']
-              case final code?)
-            '加入码 $code',
-          if (descriptor != null) descriptor.gameId,
-        ],
+        labels: const [],
       ),
     );
   }
@@ -430,5 +439,17 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     final subscription = _developerLogSubscription;
     _developerLogSubscription = null;
     await subscription?.cancel();
+  }
+}
+
+bool _isRelayInvitation(Uri value) {
+  final segments = value.pathSegments;
+  if (segments.length != 2 || segments.first != 'j') return false;
+  if (value.fragment.isEmpty) return false;
+  try {
+    return Uri.splitQueryString(value.fragment)['inviteToken']?.isNotEmpty ==
+        true;
+  } on FormatException {
+    return false;
   }
 }

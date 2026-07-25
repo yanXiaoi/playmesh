@@ -40,7 +40,11 @@ void main() {
     final scanner = FileGameLibraryScanner(libraryRoot: root);
     final library = GameLibraryRepository(scanner.scan);
     final transfer = GamePackageTransferService(libraryRoot: root);
-    final server = GameCatalogServer(library, transfer);
+    final server = GameCatalogServer(
+      library,
+      transfer,
+      nicknameProvider: () => '测试玩家',
+    );
     addTearDown(server.stop);
     final port = await _freePort();
     await server.start(port: port, token: 'catalog-token');
@@ -63,7 +67,7 @@ void main() {
       headers: const {HttpHeaders.authorizationHeader: 'Bearer catalog-token'},
     );
     expect(list.statusCode, HttpStatus.ok);
-    expect(list.headers['x-playmesh-catalog-version'], '1.1.0');
+    expect(list.headers['x-playmesh-catalog-version'], '1.4.0');
     final listJson = jsonDecode(list.body) as Map<String, Object?>;
     expect(listJson['total'], 1);
     expect(listJson['current'], 1);
@@ -71,6 +75,17 @@ void main() {
     expect(manifest['id'], 'com.example.catalog');
     expect(manifest['sdkVersion'], '1.3.0');
     expect(manifest['entries'], isA<Map>());
+
+    final info = await http.get(
+      base.resolve('/apps/info'),
+      headers: const {HttpHeaders.authorizationHeader: 'Bearer catalog-token'},
+    );
+    expect(info.statusCode, HttpStatus.ok);
+    expect(jsonDecode(info.body), {
+      'catalogApiVersion': '1.4.0',
+      'name': '测试玩家的游戏库',
+      'supportsGameRelay': false,
+    });
 
     final secondPage = await http.get(
       base.replace(
@@ -184,6 +199,7 @@ void main() {
       library: GameLibraryRepository(() async => const []),
       transfer: GamePackageTransferService(libraryRoot: installRoot),
       onImported: (_) async {},
+      nicknameProvider: () => '测试玩家',
       preferences: preferences,
     );
     addTearDown(controller.close);
@@ -237,6 +253,80 @@ void main() {
     expect(loaded.defaultPageSize, 20);
     expect(loaded.sources.single.host.port, 16668);
     expect(loaded.sources.single.token, 'abc');
+  });
+
+  test('游戏源声明校验中转字段并格式化默认端口', () {
+    final declaration = GameCatalogDeclaration.fromJson({
+      'catalogApiVersion': '1.4.0',
+      'supportsGameRelay': true,
+      'relay': {
+        'protocolVersion': '2.0.0',
+        'transport': 'playmesh-tcp-upgrade',
+        'publicBaseUrl': 'https://relay.example.com:8443',
+        'hostPath': '/relay/v1/host',
+        'clientPath': '/relay/v1/client',
+        'maxConnectionsPerTunnel': 64,
+      },
+    });
+
+    expect(
+      declaration.displayNameFor(Uri.parse('https://example.com:443')),
+      'example.com',
+    );
+    expect(declaration.supportsGameRelay, isTrue);
+    expect(
+      declaration.relay!.publicBaseUrl,
+      Uri.parse('https://relay.example.com:8443'),
+    );
+    expect(declaration.relay!.maxConnectionsPerTunnel, 64);
+    expect(
+      () => GameCatalogDeclaration.fromJson({
+        'catalogApiVersion': '1.4.0',
+        'supportsGameRelay': true,
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => GameCatalogDeclaration.fromJson({
+        'catalogApiVersion': '1.4.0',
+        'supportsGameRelay': true,
+        'relay': {
+          'protocolVersion': '2.0.0',
+          'transport': 'playmesh-tcp-upgrade',
+          'hostPath': '/relay/v1/host',
+          'clientPath': '/relay/v1/client',
+          'maxConnectionsPerTunnel': 64,
+        },
+      }),
+      throwsFormatException,
+    );
+    final httpDeclaration = GameCatalogDeclaration.fromJson({
+      'catalogApiVersion': '1.4.0',
+      'supportsGameRelay': true,
+      'relay': {
+        'protocolVersion': '2.0.0',
+        'transport': 'playmesh-tcp-upgrade',
+        'publicBaseUrl': 'http://relay.example.com',
+        'hostPath': '/relay/v1/host',
+        'clientPath': '/relay/v1/client',
+        'maxConnectionsPerTunnel': 64,
+      },
+    });
+    expect(httpDeclaration.relay!.publicBaseUrl.scheme, 'http');
+    expect(
+      () => GameCatalogDeclaration.fromJson({
+        'catalogApiVersion': '1.4.0',
+        'supportsGameRelay': true,
+        'relay': {
+          'protocolVersion': '2.0.0',
+          'transport': 'playmesh-tcp-upgrade',
+          'publicBaseUrl': 'https://relay.example.com',
+          'hostPath': '/relay/v1/host',
+          'clientPath': '/relay/v1/client',
+        },
+      }),
+      throwsFormatException,
+    );
   });
 }
 

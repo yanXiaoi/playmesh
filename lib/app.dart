@@ -31,6 +31,17 @@ import 'models/game_summary.dart';
 import 'models/user_profile.dart';
 import 'ui/playmesh_ui.dart';
 
+@visibleForTesting
+void launchDeveloperGameRoute(
+  NavigatorState navigator,
+  GameLaunchArguments arguments,
+) {
+  // 开发者运行属于临时覆盖页，必须保留工作区及其之前的导航栈。
+  unawaited(
+    navigator.pushNamed<void>(GamePage.routeName, arguments: arguments),
+  );
+}
+
 class PlaymeshApp extends StatefulWidget {
   const PlaymeshApp({
     super.key,
@@ -98,6 +109,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       library: _gameLibrary,
       transfer: _packageTransfer,
       onImported: _catalogGameImported,
+      nicknameProvider: () => _profile.nickname,
     );
     if (injectedGames == null) unawaited(_catalogController.initialize());
     _games = injectedGames == null
@@ -257,6 +269,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
               localNickname: _profile.nickname,
               orientationController: widget.gameOrientationController,
               goCoreRuntime: _runtime,
+              catalogController: widget.games == null
+                  ? _catalogController
+                  : null,
               joinRequest: launchArguments.joinRequest,
               developerProjectId: launchArguments.developerProjectId,
               initialPerformanceVisible: _performanceVisible,
@@ -392,15 +407,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       navigator = _navigatorKey.currentState;
     }
     if (navigator == null) throw StateError('App 导航尚未就绪');
-    unawaited(
-      navigator.pushNamedAndRemoveUntil<void>(
-        GamePage.routeName,
-        (route) => route.isFirst,
-        arguments: GameLaunchArguments(
-          game: game,
-          developerProjectId: projectId,
-        ),
-      ),
+    launchDeveloperGameRoute(
+      navigator,
+      GameLaunchArguments(game: game, developerProjectId: projectId),
     );
   }
 }

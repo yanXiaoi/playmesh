@@ -13,7 +13,7 @@ import (
 	"unicode"
 )
 
-const protocolVersion = "1.1.0"
+const protocolVersion = "1.2.0"
 
 var fallbackRequestCounter atomic.Uint64
 

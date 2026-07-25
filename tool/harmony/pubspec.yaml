@@ -114,6 +114,8 @@ flutter:
     - assets/playmesh-library/public/developer/editor/node_modules/codemirror/mode/javascript/
     - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/hint/
     - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/edit/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/merge/
+    - assets/playmesh-library/public/developer/editor/node_modules/diff-match-patch/
     - assets/playmesh-library/public/developer/templates/default-game/
     - assets/playmesh-library/public/developer/templates/default-game/package/
     - assets/playmesh-library/public/developer/templates/default-game/package/app/

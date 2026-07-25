@@ -1,6 +1,6 @@
 # Playmesh 在线游戏源与 Catalog API
 
-Catalog API 用于把当前设备已安装的 Playmesh 游戏包作为局域网游戏源分享。它与 Go Core、游戏会话分享和 Developer Gateway 相互独立，当前契约版本为 `1.1.0`。
+Catalog API 用于把当前设备已安装的 Playmesh 游戏包作为局域网游戏源分享，也为在线游戏源声明公共联机中转能力。它与 Go Core、游戏会话分享和 Developer Gateway 相互独立，当前契约版本为 `1.4.0`。
 
 ## 本机分享设置
 
@@ -12,7 +12,57 @@ Catalog API 用于把当前设备已安装的 Playmesh 游戏包作为局域网�
 - 开关、端口和 Token 持久化到 `playmesh-library/catalog/settings.json`。
 - 开启后显示全部可用局域网地址、二维码和可复制的游戏源配置。
 
-所有响应包含 `X-Playmesh-Catalog-Version: 1.1.0`。服务绑定 `0.0.0.0`，只应在可信局域网中启用；Token 不能替代系统防火墙或可信网络边界。
+所有响应包含 `X-Playmesh-Catalog-Version: 1.4.0`。服务绑定 `0.0.0.0`，只应在可信局域网中启用；Token 不能替代系统防火墙或可信网络边界。
+
+## 游戏源声明
+
+```http
+GET /apps/info
+Authorization: Bearer optional-token
+```
+
+支持公共联机中转的游戏源返回：
+
+```json
+{
+  "catalogApiVersion": "1.4.0",
+  "name": "Playmesh 公共游戏源",
+  "author": "可选作者",
+  "homepage": "https://example.com",
+  "supportsGameRelay": true,
+  "relay": {
+    "protocolVersion": "2.0.0",
+    "transport": "playmesh-tcp-upgrade",
+    "publicBaseUrl": "https://relay.example.com",
+    "hostPath": "/relay/v1/host",
+    "clientPath": "/relay/v1/client",
+    "maxConnectionsPerTunnel": 64
+  }
+}
+```
+
+`name`、`author`、`homepage` 可选；名称缺失时显示格式化后的 `host:port`，
+HTTP 80 与 HTTPS 443 省略端口。`supportsGameRelay` 为 `true` 时必须返回
+`relay`，为 `false` 时不得返回 `relay`。`publicBaseUrl` 由 Go Server 配置并返回，
+只能包含 `http`/`https` 协议、主机和可选端口；App 必须以它作为中转连接及
+二维码的 Host 前缀，不能再用游戏源 Host 推导。`hostPath`、`clientPath` 由
+App 拼接到该 Origin。`publicBaseUrl` 使用 HTTPS 即启用外层 TLS，使用 HTTP
+即不启用；不再提供独立 TLS 策略字段。端点间的内容加密始终存在，与外层 TLS
+是否开启无关。`maxConnectionsPerTunnel` 由 Go Server 从当前 Relay 配置返回，
+是 App 主机动态连接池的总上限；App 不复制或猜测该服务器配置，只维持最多 4 条
+热连接，并在热连接被配对时按需补充。最终容量和限流仍由 Go Server 执行。
+
+App 自带的游戏库分享服务器永远不提供公共中转，声明固定为：
+
+```json
+{
+  "catalogApiVersion": "1.4.0",
+  "name": "{用户昵称}的游戏库",
+  "supportsGameRelay": false
+}
+```
+
+该名称不可由用户另行配置，也不返回作者、主页或 `relay`。
 
 ## 分页搜索游戏
 
@@ -80,5 +130,9 @@ Authorization: Bearer optional-token
 - 每次进入和搜索会并发请求全部启用源，再按 `GameManifest.id` 去重；源顺序靠前的同 ID 游戏优先展示。
 - 默认每个源请求 `5` 个游戏，可配置为 `1` 至 `100`。
 - 单个源失败不取消其他源结果，界面会提示部分源不可用。
+
+游戏分享弹窗中的“服务器”页签复用这些已启用源。App 并发请求各源
+`/apps/info`，只显示 `supportsGameRelay == true` 的源，并按本次请求耗时展示
+最新延迟；列表支持搜索和每页 5 项分页。游戏源列表延迟不是玩家会话 RTT。
 
 在线结果支持多选下载。下载队列按顺序处理任务，显示等待、下载进度、已安装、已停止和失败状态；等待或下载中的任务可以停止，任意任务可以从队列删除。下载临时文件完成导入后立即删除，App 退出时先取消活动请求并等待队列结束，再释放资源。

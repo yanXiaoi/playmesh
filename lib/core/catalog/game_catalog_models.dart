@@ -2,7 +2,116 @@ import '../../models/game_manifest.dart';
 
 const defaultGameCatalogPort = 16668;
 const defaultOnlineGamePageSize = 5;
-const gameCatalogApiVersion = '1.1.0';
+const gameCatalogApiVersion = '1.4.0';
+
+class GameRelayDeclaration {
+  const GameRelayDeclaration({
+    required this.protocolVersion,
+    required this.transport,
+    required this.publicBaseUrl,
+    required this.hostPath,
+    required this.clientPath,
+    required this.maxConnectionsPerTunnel,
+  });
+
+  factory GameRelayDeclaration.fromJson(Map<String, Object?> json) {
+    return GameRelayDeclaration(
+      protocolVersion: _requiredString(json, 'protocolVersion'),
+      transport: _requiredString(json, 'transport'),
+      publicBaseUrl: _requiredHttpOrigin(json, 'publicBaseUrl'),
+      hostPath: _requiredAbsolutePath(json, 'hostPath'),
+      clientPath: _requiredAbsolutePath(json, 'clientPath'),
+      maxConnectionsPerTunnel: _requiredPositiveInt(
+        json,
+        'maxConnectionsPerTunnel',
+      ),
+    );
+  }
+
+  final String protocolVersion;
+  final String transport;
+  final Uri publicBaseUrl;
+  final String hostPath;
+  final String clientPath;
+  final int maxConnectionsPerTunnel;
+
+  Map<String, Object?> toJson() => {
+    'protocolVersion': protocolVersion,
+    'transport': transport,
+    'publicBaseUrl': publicBaseUrl.toString(),
+    'hostPath': hostPath,
+    'clientPath': clientPath,
+    'maxConnectionsPerTunnel': maxConnectionsPerTunnel,
+  };
+}
+
+class GameCatalogDeclaration {
+  const GameCatalogDeclaration({
+    required this.catalogApiVersion,
+    required this.supportsGameRelay,
+    this.name,
+    this.author,
+    this.homepage,
+    this.relay,
+  });
+
+  factory GameCatalogDeclaration.fromJson(Map<String, Object?> json) {
+    final supportsGameRelay = json['supportsGameRelay'] == true;
+    final relayRaw = json['relay'];
+    final relay = relayRaw is Map
+        ? GameRelayDeclaration.fromJson(Map<String, Object?>.from(relayRaw))
+        : null;
+    if (supportsGameRelay && relay == null) {
+      throw const FormatException('支持游戏中转的游戏源必须声明 relay');
+    }
+    if (!supportsGameRelay && relay != null) {
+      throw const FormatException('不支持游戏中转的游戏源不能声明 relay');
+    }
+    return GameCatalogDeclaration(
+      catalogApiVersion: _requiredString(json, 'catalogApiVersion'),
+      name: _optionalString(json, 'name'),
+      author: _optionalString(json, 'author'),
+      homepage: _optionalHttpUri(json, 'homepage'),
+      supportsGameRelay: supportsGameRelay,
+      relay: relay,
+    );
+  }
+
+  final String catalogApiVersion;
+  final String? name;
+  final String? author;
+  final Uri? homepage;
+  final bool supportsGameRelay;
+  final GameRelayDeclaration? relay;
+
+  String displayNameFor(Uri host) => name ?? formatCatalogHost(host);
+
+  Map<String, Object?> toJson() => {
+    'catalogApiVersion': catalogApiVersion,
+    if (name != null) 'name': name,
+    if (author != null) 'author': author,
+    if (homepage != null) 'homepage': homepage.toString(),
+    'supportsGameRelay': supportsGameRelay,
+    if (relay != null) 'relay': relay!.toJson(),
+  };
+}
+
+class OnlineGameSourceProbe {
+  const OnlineGameSourceProbe({
+    required this.source,
+    required this.elapsed,
+    this.declaration,
+    this.error,
+  });
+
+  final OnlineGameSource source;
+  final Duration elapsed;
+  final GameCatalogDeclaration? declaration;
+  final String? error;
+
+  bool get supportsGameRelay =>
+      error == null && declaration?.supportsGameRelay == true;
+}
 
 class GameCatalogShareConfig {
   const GameCatalogShareConfig({
@@ -152,10 +261,69 @@ Uri normalizeCatalogHost(String raw) {
   return parsed.replace(path: '', query: null, fragment: null);
 }
 
+String formatCatalogHost(Uri host) {
+  final defaultPort =
+      (host.scheme == 'http' && (!host.hasPort || host.port == 80)) ||
+      (host.scheme == 'https' && (!host.hasPort || host.port == 443));
+  return defaultPort ? host.host : '${host.host}:${host.port}';
+}
+
+String _requiredAbsolutePath(Map<String, Object?> json, String field) {
+  final value = _requiredString(json, field);
+  if (!value.startsWith('/') || value.startsWith('//')) {
+    throw FormatException('$field 必须是绝对路径');
+  }
+  return value;
+}
+
+String? _optionalString(Map<String, Object?> json, String field) {
+  final value = json[field];
+  if (value == null) return null;
+  if (value is! String || value.trim().isEmpty) {
+    throw FormatException('$field 必须是非空字符串或省略');
+  }
+  return value.trim();
+}
+
+Uri? _optionalHttpUri(Map<String, Object?> json, String field) {
+  final value = _optionalString(json, field);
+  if (value == null) return null;
+  final uri = Uri.tryParse(value);
+  if (uri == null ||
+      !{'http', 'https'}.contains(uri.scheme) ||
+      uri.host.isEmpty) {
+    throw FormatException('$field 必须是有效的 HTTP/HTTPS 地址');
+  }
+  return uri;
+}
+
+Uri _requiredHttpOrigin(Map<String, Object?> json, String field) {
+  final value = _requiredString(json, field);
+  final uri = Uri.tryParse(value);
+  if (uri == null ||
+      !{'http', 'https'}.contains(uri.scheme) ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      uri.query.isNotEmpty ||
+      uri.fragment.isNotEmpty ||
+      (uri.path.isNotEmpty && uri.path != '/')) {
+    throw FormatException('$field 必须是只包含协议、主机和端口的 HTTP/HTTPS 地址');
+  }
+  return uri.replace(path: '', query: null, fragment: null);
+}
+
 String _requiredString(Map<String, Object?> json, String field) {
   final value = json[field];
   if (value is! String || value.trim().isEmpty) {
     throw FormatException('$field 必须是非空字符串');
   }
   return value.trim();
+}
+
+int _requiredPositiveInt(Map<String, Object?> json, String field) {
+  final value = json[field];
+  if (value is! int || value < 1) {
+    throw FormatException('$field 必须是正整数');
+  }
+  return value;
 }

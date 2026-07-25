@@ -2,7 +2,7 @@ name: playmesh
 description: "Local-first party game launcher built with Flutter."
 publish_to: 'none'
 
-version: 1.8.2+15
+version: 2.0.0+18
 
 environment:
   sdk: ^3.12.2
@@ -25,6 +25,8 @@ dependencies:
   window_manager: ^0.5.2
   share_plus: ^13.2.1
   sensors_plus: ^7.1.0
+  cryptography: ^2.9.0
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +47,8 @@ flutter:
     - assets/playmesh-library/public/developer/editor/node_modules/codemirror/mode/javascript/
     - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/hint/
     - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/edit/
+    - assets/playmesh-library/public/developer/editor/node_modules/codemirror/addon/merge/
+    - assets/playmesh-library/public/developer/editor/node_modules/diff-match-patch/
     - assets/playmesh-library/public/developer/templates/default-game/
     - assets/playmesh-library/public/developer/templates/default-game/package/
     - assets/playmesh-library/public/developer/templates/default-game/package/app/

@@ -9,6 +9,7 @@ const storageCommands = [];
 const uploadCommands = [];
 const nicknameCommands = [];
 const joinCommands = [];
+const joinUrls = [];
 let joins = 0;
 
 function createPage(appIdentity = null, reconnected = false) {
@@ -134,6 +135,29 @@ function createPage(appIdentity = null, reconnected = false) {
             },
           }),
         }));
+      } else if (message.type === "game.action" &&
+          message.payload?.__playmeshStorageRequest) {
+        const command = message.payload.__playmeshStorageRequest;
+        storageCommands.push(command);
+        const key = `${command.bucket}:${command.key}`;
+        if (command.command === "storage.set") hostData.set(key, command.value);
+        if (command.command === "storage.remove") hostData.delete(key);
+        if (command.command === "storage.clear") {
+          for (const existing of hostData.keys()) {
+            if (existing.startsWith(`${command.bucket}:`)) hostData.delete(existing);
+          }
+        }
+        queueMicrotask(() => this.emit("message", {
+          data: JSON.stringify({
+            type: "game.message",
+            payload: {
+              __playmeshStorageResponse: {
+                requestId: command.requestId,
+                result: command.command === "storage.get" ? hostData.get(key) : null,
+              },
+            },
+          }),
+        }));
       }
     }
 
@@ -153,13 +177,10 @@ function createPage(appIdentity = null, reconnected = false) {
 
   const window = {
     __PLAYMESH_BROWSER__: {
-      joinEndpoint: "/api/join",
       coreBase: "http://192.168.1.20:42000/",
       joinCode: "ABC123",
       shareToken: "game-token",
-      storageEndpoint: "/api/storage",
       bucketEndpoint: "/bucket",
-      nicknameEndpoint: "/api/player/nickname",
       orientation: "portrait",
     },
     localStorage: {
@@ -169,7 +190,8 @@ function createPage(appIdentity = null, reconnected = false) {
     document,
     location: { reload() {} },
     fetch: async (url, options) => {
-      if (url.startsWith("/bucket/")) {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/bucket/")) {
         uploadCommands.push({ url, options });
         return {
           ok: true,
@@ -178,27 +200,9 @@ function createPage(appIdentity = null, reconnected = false) {
           }),
         };
       }
-      if (url === "/api/storage") {
+      if (requestUrl.endsWith("/players/me")) {
         const command = JSON.parse(options.body);
-        storageCommands.push(command);
-        const key = `${command.bucket}:${command.key}`;
-        if (command.command === "storage.set") hostData.set(key, command.value);
-        if (command.command === "storage.remove") hostData.delete(key);
-        if (command.command === "storage.clear") {
-          for (const existing of hostData.keys()) {
-            if (existing.startsWith(`${command.bucket}:`)) hostData.delete(existing);
-          }
-        }
-        return {
-          ok: true,
-          json: async () => ({
-            result: command.command === "storage.get" ? hostData.get(key) : null,
-          }),
-        };
-      }
-      if (url === "/api/player/nickname") {
-        const command = JSON.parse(options.body);
-        nicknameCommands.push(command);
+        nicknameCommands.push({ ...command, url: requestUrl, headers: options.headers });
         currentNickname = command.nickname;
         return {
           ok: true,
@@ -212,10 +216,11 @@ function createPage(appIdentity = null, reconnected = false) {
         };
       }
       const joinCommand = JSON.parse(options.body);
+      joinUrls.push(requestUrl);
       joinCommands.push(joinCommand);
       assert.deepEqual(
         Object.keys(joinCommand).sort(),
-        ["nickname", "playerId", "shareToken"],
+        ["joinCode", "nickname", "playerId", "shareToken", "source"],
       );
       assert.equal(
         joinCommand.nickname,
@@ -267,7 +272,13 @@ function createPage(appIdentity = null, reconnected = false) {
   };
   if (appIdentity) {
     window.playmeshApp = {
-      ready: Promise.resolve({ available: true }),
+      ready: Promise.resolve({
+        available: true,
+        runtime: {
+          coreBase: "http://127.0.0.1:43000/",
+          playerSource: "lan_app",
+        },
+      }),
       isAvailable: () => true,
       identity: { getCurrent: () => ({ ...appIdentity }) },
       capabilities: {
@@ -416,7 +427,8 @@ const hostBucket = firstPage.playmesh.storage.getBucket("browser_save");
 assert.equal(hostBucket.flush, undefined);
 await hostBucket.setData("score", 18);
 assert.equal(await hostBucket.getData("score"), 18);
-assert.equal(storageCommands.every((command) => command.shareToken === "game-token"), true);
+assert.equal(storageCommands.every((command) => command.shareToken === undefined), true);
+assert.equal(storageCommands.every((command) => command.requestId.startsWith("browser-storage-")), true);
 assert.equal(storageCommands.some((command) => command.command === "storage.set"), true);
 const uploadedFile = { name: "avatar.png", size: 4 };
 assert.equal(
@@ -454,8 +466,10 @@ await refreshedPage.__ui.form.onsubmit({ preventDefault() {} });
 assert.equal(refreshedPage.playmesh.player.getCurrent().nickname, "修改后的玩家");
 assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), "修改后的玩家");
 assert.equal(nicknameCommands.length, 1);
-assert.equal(nicknameCommands[0].playerToken, "player-token-3");
-assert.equal(nicknameCommands[0].shareToken, "game-token");
+assert.equal(nicknameCommands[0].nickname, "修改后的玩家");
+assert.equal(nicknameCommands[0].headers.Authorization, "Bearer player-token-3");
+assert.equal(nicknameCommands[0].url, "http://192.168.1.20:42000/v1/sessions/s-1/players/me");
+assert.equal(joinUrls.includes("http://127.0.0.1:43000/v1/sessions/join"), true);
 
 const reconnectPage = createPage(null, true);
 const selfReconnectEvents = [];

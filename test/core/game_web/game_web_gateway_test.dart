@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:playmesh/core/game_web/game_web_gateway.dart';
+import 'package:playmesh/core/game_web/local_tunnel_gateway.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
 import 'package:playmesh/models/game_summary.dart';
 
@@ -11,31 +12,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
 
-  test('分享地址提供控制器、SDK 资源和浏览器昵称代理而不是 404', () async {
+  test('分享网关只公开 App、Bucket、SDK 与受控入口资源', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-web-storage-');
-    final core = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    Map<String, Object?>? nicknameRequest;
-    String? nicknameAuthorization;
-    core.listen((request) async {
-      nicknameAuthorization = request.headers.value(
-        HttpHeaders.authorizationHeader,
-      );
-      nicknameRequest = Map<String, Object?>.from(
-        jsonDecode(await utf8.decoder.bind(request).join()) as Map,
-      );
-      request.response.headers.contentType = ContentType.json;
-      request.response.write(
-        jsonEncode({
-          'player': {
-            'id': 'p-browser',
-            'nickname': nicknameRequest!['nickname'],
-            'role': 'player',
-          },
-          'session': {'id': 's-browser', 'players': <Object?>[]},
-        }),
-      );
-      await request.response.close();
-    });
     final storage = await GameStorageService.create(
       gameId: 'com.playmesh.test-game',
       libraryRoot: root,
@@ -47,10 +25,9 @@ void main() {
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
       controllerOrientation: GameOrientation.portrait,
-      coreEndpoint: Uri.parse('http://127.0.0.1:${core.port}/'),
+      coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
-      gameId: 'com.playmesh.test-game',
       gameName: '测试游戏',
       requiredCapabilities: const ['sensor.accelerometer'],
       controllerRequiredCapabilities: const ['sensor.gyroscope'],
@@ -58,7 +35,6 @@ void main() {
     );
     addTearDown(() async {
       await gateway.close();
-      await core.close(force: true);
       await storage.close();
       await root.delete(recursive: true);
     });
@@ -69,17 +45,17 @@ void main() {
       shareLinks.every(
         (link) =>
             link.queryParameters['token'] == 'share-token' &&
-            !link.queryParameters.containsKey('nickname'),
+            RegExp(
+              r'^[A-Za-z0-9_-]{12}$',
+            ).hasMatch(link.queryParameters['channelId'] ?? '') &&
+            link.path == '/app/controller/index.html' &&
+            link.queryParameters.length == 2 &&
+            !link.hasFragment,
       ),
       isTrue,
     );
 
-    final controller = await http.get(
-      base.replace(
-        path: '/join/ABC123',
-        queryParameters: {'token': 'share-token'},
-      ),
-    );
+    final controller = await http.get(shareLinks.first);
     expect(controller.statusCode, HttpStatus.ok);
     expect(controller.body, contains('window.__PLAYMESH_BROWSER__'));
     expect(controller.body, contains('"gameName"'));
@@ -93,60 +69,53 @@ void main() {
       controller.body,
       isNot(contains('/playmesh/sdk/v1/playmesh-app.js')),
     );
-    expect(controller.body, contains('nicknameEndpoint'));
+    expect(controller.body, isNot(contains('joinEndpoint')));
+    expect(controller.body, isNot(contains('storageEndpoint')));
+    expect(controller.body, isNot(contains('nicknameEndpoint')));
     expect(controller.body, isNot(contains('"nickname":')));
 
     final appController = await http.get(
-      base.replace(
-        path: '/join/ABC123',
+      shareLinks.first.replace(
         queryParameters: {
-          'token': 'share-token',
+          ...shareLinks.first.queryParameters,
           'playmeshNickname': 'App 玩家',
           'playmeshApp': '1',
+          'playmeshAppSdkUrl': 'http://127.0.0.1:45678/playmesh-app.js',
         },
       ),
     );
     expect(appController.statusCode, HttpStatus.ok);
     expect(appController.body, contains('"nickname":"App 玩家"'));
-    expect(appController.body, contains('/playmesh/sdk/v1/playmesh-app.js'));
     expect(
-      appController.body.indexOf('/playmesh/sdk/v1/playmesh-app.js'),
+      appController.body,
+      contains('http://127.0.0.1:45678/playmesh-app.js'),
+    );
+    expect(
+      appController.body,
+      isNot(contains('/playmesh/sdk/v1/playmesh-app.js')),
+    );
+    expect(
+      appController.body.indexOf('http://127.0.0.1:45678/playmesh-app.js'),
       lessThan(appController.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
     );
 
-    final capabilities = await http.get(
+    final relayEntry = await http.get(
       base.replace(
-        path: '/api/app-capabilities',
+        path: '/playmesh/join',
         queryParameters: {'token': 'share-token'},
       ),
     );
-    expect(capabilities.statusCode, HttpStatus.ok);
-    final capabilityBody = jsonDecode(capabilities.body) as Map;
-    expect(capabilityBody, containsPair('gameId', 'com.playmesh.test-game'));
-    expect(capabilityBody, containsPair('gameName', '测试游戏'));
-    expect(capabilityBody, containsPair('required', ['sensor.gyroscope']));
-    expect(
-      capabilityBody['capabilityRegistry'],
-      contains(containsPair('code', 'sensor.accelerometer')),
-    );
-    final deniedCapabilities = await http.get(
-      base.resolve('/api/app-capabilities?token=invalid'),
-    );
-    expect(deniedCapabilities.statusCode, HttpStatus.forbidden);
+    expect(relayEntry.statusCode, HttpStatus.notFound);
 
-    final nickname = await http.post(
-      base.resolve('/api/player/nickname'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'sessionId': 's-browser',
-        'playerToken': 'player-token',
-        'nickname': '新昵称',
-        'shareToken': 'share-token',
-      }),
-    );
-    expect(nickname.statusCode, HttpStatus.ok);
-    expect(nicknameRequest, {'nickname': '新昵称'});
-    expect(nicknameAuthorization, 'Bearer player-token');
+    for (final path in const [
+      '/api/app-capabilities',
+      '/api/join',
+      '/api/storage',
+      '/api/player/nickname',
+    ]) {
+      final response = await http.post(base.resolve(path), body: '{}');
+      expect(response.statusCode, HttpStatus.notFound, reason: path);
+    }
 
     final sdk = await http.get(base.resolve('/playmesh/sdk/v1/playmesh.js'));
     expect(sdk.statusCode, HttpStatus.ok);
@@ -166,44 +135,6 @@ void main() {
       base.resolve('/game/static/css/game.css'),
     );
     expect(legacyAsset.statusCode, HttpStatus.notFound);
-
-    final storageEndpoint = base.resolve('/api/storage');
-    final write = await http.post(
-      storageEndpoint,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'command': 'storage.set',
-        'bucket': 'browser_save',
-        'key': 'score',
-        'value': 12,
-        'shareToken': 'share-token',
-      }),
-    );
-    expect(write.statusCode, HttpStatus.ok);
-    expect(await storage.getData('browser_save', 'score'), 12);
-
-    final rejectedFlush = await http.post(
-      storageEndpoint,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'command': 'storage.flush',
-        'bucket': 'browser_save',
-        'shareToken': 'share-token',
-      }),
-    );
-    expect(rejectedFlush.statusCode, HttpStatus.badRequest);
-
-    final invalidBucket = await http.post(
-      storageEndpoint,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'command': 'storage.get',
-        'bucket': '../other',
-        'key': 'score',
-        'shareToken': 'share-token',
-      }),
-    );
-    expect(invalidBucket.statusCode, HttpStatus.badRequest);
 
     final rejectedUpload = await http.post(
       base.resolve('/bucket/replays?name=round.bin'),
@@ -230,6 +161,53 @@ void main() {
 
     final missing = await http.get(base.resolve('/not-found'));
     expect(missing.statusCode, HttpStatus.notFound);
+  });
+
+  test('局域网 App 通过受控 Upgrade 透明访问当前 Core', () async {
+    final core = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final coreSubscription = core.listen((request) async {
+      request.response.write('CORE_OK:${request.uri.path}');
+      await request.response.close();
+    });
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-web-core-tunnel-',
+    );
+    final storage = await GameStorageService.create(
+      gameId: 'com.playmesh.core-tunnel',
+      libraryRoot: root,
+    );
+    final gateway = await startGameWebGateway(
+      gameRootAssetPath:
+          'assets/playmesh-library/public/developer/templates/default-game/package',
+      multiplayer: true,
+      displayMode: 'single_screen_multiplayer',
+      orientation: GameOrientation.landscape,
+      controllerOrientation: GameOrientation.portrait,
+      coreEndpoint: Uri(scheme: 'http', host: '127.0.0.1', port: core.port),
+      joinCode: 'ABC123',
+      shareToken: 'share-token',
+      storage: storage,
+    );
+    final coreGateway = await startLocalUpgradeTunnelGateway(
+      targetBaseUri: Uri(scheme: 'http', host: '127.0.0.1', port: gateway.port),
+      path: playmeshCoreTunnelPath,
+      headers: const {playmeshShareTokenHeader: 'share-token'},
+    );
+    addTearDown(() async {
+      await coreGateway.close();
+      await gateway.close();
+      await storage.close();
+      await root.delete(recursive: true);
+      await coreSubscription.cancel();
+      await core.close(force: true);
+    });
+
+    final response = await http
+        .get(coreGateway.localBaseUri.resolve('/health'))
+        .timeout(const Duration(seconds: 5));
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(response.body, 'CORE_OK:/health');
   });
 
   test('普通多人多屏分享地址加载主 index 页面', () async {
@@ -272,11 +250,7 @@ void main() {
       await root.delete(recursive: true);
     });
 
-    final response = await http.get(
-      Uri.parse(
-        'http://127.0.0.1:${gateway.port}/join/MULTI1?token=share-token',
-      ),
-    );
+    final response = await http.get((await gateway.shareLinks()).first);
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('MAIN_ENTRY'));
@@ -314,10 +288,12 @@ void main() {
 
     final links = await gateway.shareLinks();
     expect(links, isNotEmpty);
-    expect(links.first.path, '/play');
-    final response = await http.get(
-      Uri.parse('http://127.0.0.1:${gateway.port}/play?token=solo-token'),
+    expect(links.first.path, '/app/index.html');
+    expect(
+      links.first.queryParameters['channelId'],
+      matches(RegExp(r'^[A-Za-z0-9_-]{12}$')),
     );
+    final response = await http.get(links.first);
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('SOLO_ENTRY'));
@@ -325,6 +301,7 @@ void main() {
     expect(response.body, contains('"mode":"solo"'));
     expect(response.body, isNot(contains('joinEndpoint')));
     expect(response.body, isNot(contains('coreBase')));
+    expect(response.body, isNot(contains('storageEndpoint')));
     expect(response.body, isNot(contains('nicknameEndpoint')));
   });
 
@@ -352,8 +329,14 @@ void main() {
       await root.delete(recursive: true);
     });
 
+    final invitation = (await gateway.shareLinks()).first;
     final response = await http.get(
-      Uri.parse('http://127.0.0.1:${gateway.port}/join/ABC123'),
+      Uri(
+        scheme: invitation.scheme,
+        host: invitation.host,
+        port: invitation.port,
+        path: invitation.path,
+      ),
     );
     expect(response.statusCode, HttpStatus.forbidden);
 
@@ -367,7 +350,7 @@ void main() {
         'shareToken': 'wrong-token',
       }),
     );
-    expect(storageResponse.statusCode, HttpStatus.forbidden);
+    expect(storageResponse.statusCode, HttpStatus.notFound);
   });
 
   test('自定义嵌套首页按入口目录注入 base 路径', () async {
@@ -403,9 +386,9 @@ void main() {
       await root.delete(recursive: true);
     });
 
-    final response = await http.get(
-      Uri.parse('http://127.0.0.1:${gateway.port}/play?token=custom-token'),
-    );
+    final invitation = (await gateway.shareLinks()).first;
+    expect(invitation.path, '/app/play/main.html');
+    final response = await http.get(invitation);
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('CUSTOM_ENTRY'));

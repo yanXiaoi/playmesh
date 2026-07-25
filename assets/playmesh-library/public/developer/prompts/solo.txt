@@ -1,7 +1,7 @@
 【当前模式规则：单机游戏】
 这是单机游戏，只实现 main.json 的 entries.game（未声明时使用平台默认主入口）及其玩家页面资源。
 
-浏览器分享同样加载 entries.game，但只提供静态页面和 HTTP 存储，不创建玩家、不加入 Session、不弹昵称，也不建立 WebSocket。Console 只保留在当前浏览器。浏览器单机环境中的 playmesh.session.getCurrent() 和 playmesh.player.getCurrent() 均为 null，游戏不得依赖这些联机接口。
+浏览器分享同样加载 entries.game，页面仍只通过公开 Game SDK 使用平台能力；它不创建玩家、不加入 Session、不弹昵称，也不建立会话 WebSocket。Console 只保留在当前浏览器。浏览器单机环境中的 playmesh.session.getCurrent() 和 playmesh.player.getCurrent() 均为 null，游戏不得依赖这些联机接口。
 
 强制禁止：
 - 不得创建或使用 entries.controller。

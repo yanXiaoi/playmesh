@@ -11,56 +11,87 @@ import 'remote_game_page.dart';
 class GameInvitation {
   const GameInvitation({
     required this.endpoint,
-    required this.joinCode,
+    required this.channelId,
     required this.entryUri,
+    required this.usesRelay,
   });
 
   final Uri endpoint;
-  final String joinCode;
+  final String channelId;
   final Uri entryUri;
+  final bool usesRelay;
 
   static GameInvitation parse(String rawValue) {
     final uri = Uri.tryParse(rawValue.trim());
-    if (uri == null || uri.host.isEmpty) {
+    if (uri == null ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty) {
       throw const FormatException('二维码不是有效的 Playmesh 对局邀请');
     }
-    final code =
-        uri.queryParameters['playmeshJoinCode'] ??
-        uri.queryParameters['joinCode'] ??
-        _codeFromPath(uri.pathSegments);
-    final endpointValue = uri.queryParameters['playmeshEndpoint'];
-    Uri? endpoint = endpointValue == null
-        ? null
-        : Uri.tryParse(Uri.decodeComponent(endpointValue));
-    final corePort = int.tryParse(
-      uri.queryParameters['playmeshCorePort'] ?? '',
-    );
-    if (endpoint == null && corePort != null) {
-      endpoint = Uri(
-        scheme: uri.scheme == 'https' ? 'https' : 'http',
-        host: uri.host,
-        port: corePort,
-      );
-    }
-    if (endpoint == null ||
-        !{'http', 'https'}.contains(endpoint.scheme) ||
-        endpoint.host.isEmpty ||
-        !endpoint.hasPort ||
-        code == null ||
-        !RegExp(r'^[A-Za-z0-9]{6}$').hasMatch(code)) {
-      throw const FormatException('二维码缺少主机端口或 6 位加入码');
+    final fragment = uri.fragment.isEmpty
+        ? const <String, String>{}
+        : _fragmentParameters(uri.fragment);
+    final inviteToken = fragment['inviteToken'];
+    final shareToken = uri.queryParameters['token'];
+    final lanChannelId = uri.queryParameters['channelId'];
+    final usesRelay = inviteToken?.isNotEmpty == true;
+    late final String channelId;
+    if (usesRelay) {
+      if (uri.pathSegments.length != 2 ||
+          uri.pathSegments.first != 'j' ||
+          !_validChannelId(uri.pathSegments.last) ||
+          fragment.length != 1 ||
+          uri.hasQuery) {
+        throw const FormatException('公共中转邀请只能携带 inviteToken');
+      }
+      channelId = uri.pathSegments.last;
+    } else if (!_isLanGameEntryPath(uri) ||
+        uri.scheme != 'http' ||
+        !_validChannelId(lanChannelId ?? '') ||
+        shareToken?.isNotEmpty != true ||
+        uri.queryParametersAll.length != 2 ||
+        uri.queryParametersAll['channelId']?.length != 1 ||
+        uri.queryParametersAll['token']?.length != 1 ||
+        uri.hasFragment) {
+      throw const FormatException('局域网邀请必须使用游戏声明入口和当前分享凭证');
+    } else {
+      channelId = lanChannelId!;
     }
     return GameInvitation(
-      endpoint: endpoint,
-      joinCode: code.toUpperCase(),
+      endpoint: Uri(
+        scheme: uri.scheme,
+        host: uri.host,
+        port: uri.hasPort ? uri.port : null,
+      ),
+      channelId: channelId,
       entryUri: uri,
+      usesRelay: usesRelay,
     );
   }
+}
 
-  static String? _codeFromPath(List<String> segments) {
-    final joinIndex = segments.indexOf('join');
-    if (joinIndex < 0 || joinIndex + 1 >= segments.length) return null;
-    return segments[joinIndex + 1];
+bool _validChannelId(String value) =>
+    RegExp(r'^[A-Za-z0-9_-]{6,128}$').hasMatch(value);
+
+bool _isLanGameEntryPath(Uri value) {
+  final segments = value.pathSegments;
+  return segments.length >= 2 &&
+      segments.first == 'app' &&
+      segments.last.toLowerCase().endsWith('.html') &&
+      segments
+          .skip(1)
+          .every(
+            (segment) =>
+                segment.isNotEmpty && segment != '.' && segment != '..',
+          );
+}
+
+Map<String, String> _fragmentParameters(String value) {
+  try {
+    return Uri.splitQueryString(value);
+  } on FormatException {
+    throw const FormatException('公共中转邀请的 inviteToken 编码无效');
   }
 }
 
@@ -246,9 +277,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
     try {
       final invitation = GameInvitation.parse(raw);
       _endpointController.text = invitation.endpoint.toString();
-      _joinCodeController.text = invitation.joinCode;
-      final shareToken = invitation.entryUri.queryParameters['token'];
-      if (shareToken != null && shareToken.isNotEmpty && mounted) {
+      if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => RemoteGamePage(
@@ -260,9 +289,6 @@ class _JoinGamePageState extends State<JoinGamePage> {
         );
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已识别对局邀请')));
     } on FormatException catch (error) {
       ScaffoldMessenger.of(
         context,

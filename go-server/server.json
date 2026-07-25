@@ -1,0 +1,29 @@
+{
+  "listen": "0.0.0.0:16668",
+  "name": "Playmesh 公共游戏源",
+  "author": "",
+  "homepage": "",
+  "supportsGameRelay": true,
+  "auth": {
+    "token": "",
+    "whitelist": [
+      {
+        "method": "GET",
+        "path": "/health"
+      },
+      {
+        "method": "GET",
+        "path": "/relay/v1/client"
+      }
+    ]
+  },
+  "relay": {
+    "publicBaseUrl": "http://127.0.0.1:16668",
+    "tunnelTTLSeconds": 21600,
+    "pendingConnectionTimeoutSeconds": 15,
+    "idleTimeoutSeconds": 120,
+    "maxTunnels": 1000,
+    "maxConnectionsPerTunnel": 64,
+    "maxConnectionsPerIP": 32
+  }
+}

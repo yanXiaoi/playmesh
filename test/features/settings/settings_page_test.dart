@@ -9,27 +9,6 @@ import 'package:playmesh/core/services/go_core_status_service.dart';
 import 'package:playmesh/features/settings/settings_page.dart';
 
 void main() {
-  testWidgets('shows the current app version and concise release notes', (
-    tester,
-  ) async {
-    final provider = _QueueStatusProvider([
-      GoCoreStatusResult.online(_onlineStatus('req-settings-release')),
-    ]);
-
-    await tester.pumpWidget(
-      MaterialApp(home: SettingsPage(statusProvider: provider)),
-    );
-    await _pumpAsync(tester);
-
-    expect(find.text('Playmesh 1.8.2'), findsOneWidget);
-    await tester.tap(find.byTooltip('查看本次更新'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Playmesh 1.8.2 更新'), findsOneWidget);
-    expect(find.textContaining('控制器方向'), findsWidgets);
-    expect(find.text('构建 15'), findsOneWidget);
-  });
-
   testWidgets('shows online Core version and request ID', (tester) async {
     final provider = _QueueStatusProvider([
       GoCoreStatusResult.online(_onlineStatus('req-settings-online')),

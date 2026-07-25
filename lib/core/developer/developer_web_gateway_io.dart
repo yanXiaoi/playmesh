@@ -463,11 +463,69 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     }
 
     final segments = request.uri.pathSegments;
+    if (segments.length == 4 &&
+        segments[0] == 'dev' &&
+        segments[1] == 'api' &&
+        segments[2] == 'projects' &&
+        request.method == 'DELETE') {
+      final projectId = segments[3];
+      final phase = runController.status(projectId).phase;
+      if (phase == DeveloperRunPhase.starting ||
+          phase == DeveloperRunPhase.running) {
+        await _error(
+          request.response,
+          HttpStatus.conflict,
+          requestId,
+          'game_running',
+          '请先退出当前运行中的游戏，再删除项目',
+        );
+        return;
+      }
+      await catalog.deleteProject(projectId);
+      developerEventHub.emit({
+        'type': 'project.deleted',
+        'projectId': projectId,
+        'clientId': request.uri.queryParameters['clientId'] ?? 'api',
+        'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
+      });
+      await _json(request.response, HttpStatus.ok, {
+        'requestId': requestId,
+        'projectId': projectId,
+        'deleted': true,
+      });
+      return;
+    }
     if (segments.length >= 5 &&
         segments[0] == 'dev' &&
         segments[1] == 'api' &&
         segments[2] == 'projects') {
       final projectId = segments[3];
+      if (request.method == 'POST' &&
+          segments.length == 5 &&
+          segments[4] == 'copy') {
+        final body = await _jsonBody(request);
+        final project = await catalog.copyProject(
+          projectId,
+          id: body['id'] as String? ?? '',
+          name: body['name'] as String? ?? '',
+          author: _requireCurrentAuthor(),
+          lastModifiedAt: clock().toUtc(),
+        );
+        developerEventHub.emit({
+          'type': 'project.created',
+          'projectId': project.id,
+          'sourceProjectId': projectId,
+          'project': project.toJson(),
+          'clientId': body['clientId'] as String? ?? 'api',
+          'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
+        });
+        await _json(request.response, HttpStatus.created, {
+          'requestId': requestId,
+          'sourceProjectId': projectId,
+          'project': project.toJson(),
+        });
+        return;
+      }
       if (request.method == 'GET' &&
           segments.length == 5 &&
           segments[4] == 'files') {
@@ -2064,7 +2122,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         },
         'mainJsonMutable': true,
         'mainJsonWriteEndpoint': '/dev/api/projects/{projectId}/manifest',
-        'mainJsonImmutableFields': ['id'],
+        'mainJsonImmutableFields': ['id', 'author', 'lastModifiedAt'],
         'mainJsonRawFileWriteAllowed': false,
         'capabilitiesWriteEndpoint':
             '/dev/api/projects/{projectId}/capabilities',
@@ -2199,6 +2257,22 @@ class _EmptyDeveloperProjectCatalog implements DeveloperProjectCatalog {
 
   @override
   Future<DeveloperProject> createProject(DeveloperProjectDraft draft) async {
+    throw StateError('开发者项目不可用');
+  }
+
+  @override
+  Future<DeveloperProject> copyProject(
+    String sourceProjectId, {
+    required String id,
+    required String name,
+    required String author,
+    required DateTime lastModifiedAt,
+  }) async {
+    throw StateError('开发者项目不可用');
+  }
+
+  @override
+  Future<void> deleteProject(String projectId) async {
     throw StateError('开发者项目不可用');
   }
 
@@ -2738,6 +2812,8 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 - `POST /dev/api/packages/import`（整包导入或更新，仅替换发布文件并保留 data/cache）
 - `GET /dev/api/projects`
 - `POST /dev/api/projects`
+- `POST /dev/api/projects/{projectId}/copy`（复制源码到新的项目 ID，不复制 data/cache/本地历史）
+- `DELETE /dev/api/projects/{projectId}`（永久删除已停止的项目）
 - `GET /dev/api/projects/{projectId}/files`
 - `GET /dev/api/projects/{projectId}/package`（导出标准 Playmesh ZIP）
 - `GET|PUT /dev/api/projects/{projectId}/manifest`（`id` 永久只读）
@@ -2790,7 +2866,7 @@ Gateway 固定绑定 `0.0.0.0`，端口由设置页配置，默认 `16666`。端
 
 Map<String, Object?> _openApi() => {
   'openapi': '3.1.0',
-  'info': {'title': 'Playmesh Developer Channel', 'version': '1.6.1'},
+  'info': {'title': 'Playmesh Developer Channel', 'version': '1.7.0'},
   'paths': {
     '/dev/api/status': {'get': _operation('读取开发者通道状态')},
     '/dev/api/sdk': {'get': _operation('读取统一生成的 SDK 与类型声明')},
@@ -2807,6 +2883,22 @@ Map<String, Object?> _openApi() => {
       'get': _operation('列出当前开发者项目'),
       'post': _operation(
         '从默认模板创建项目',
+        permission: 'project.create',
+        risk: 'medium',
+        idempotent: false,
+      ),
+    },
+    '/dev/api/projects/{projectId}': {
+      'delete': _operation(
+        '永久删除已停止的项目、数据、缓存和本地历史',
+        permission: 'project.delete',
+        risk: 'high',
+        idempotent: false,
+      ),
+    },
+    '/dev/api/projects/{projectId}/copy': {
+      'post': _operation(
+        '复制项目源码并使用新的项目 ID',
         permission: 'project.create',
         risk: 'medium',
         idempotent: false,
@@ -3067,6 +3159,16 @@ const _interfaceCatalog = [
     'method': 'POST',
     'path': '/dev/api/projects',
     'permission': 'project.create',
+  },
+  {
+    'method': 'POST',
+    'path': '/dev/api/projects/{projectId}/copy',
+    'permission': 'project.create',
+  },
+  {
+    'method': 'DELETE',
+    'path': '/dev/api/projects/{projectId}',
+    'permission': 'project.delete',
   },
   {'method': 'GET', 'path': '/dev/api/events', 'permission': 'event.subscribe'},
   {'method': 'GET', 'path': '/dev/api/logs?limit=50', 'permission': 'log.read'},

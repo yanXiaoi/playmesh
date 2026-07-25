@@ -6,6 +6,8 @@ class GameSessionPlayer {
     required this.nickname,
     required this.connected,
     required this.role,
+    this.source = 'lan_html',
+    this.latencyMs,
   });
 
   factory GameSessionPlayer.fromJson(Map<String, Object?> json) {
@@ -14,6 +16,8 @@ class GameSessionPlayer {
       nickname: json['nickname']! as String,
       connected: json['connected']! as bool,
       role: json['role']! as String,
+      source: json['source'] as String? ?? 'lan_html',
+      latencyMs: json['latencyMs'] as int?,
     );
   }
 
@@ -21,12 +25,16 @@ class GameSessionPlayer {
   final String nickname;
   final bool connected;
   final String role;
+  final String source;
+  final int? latencyMs;
 
   Map<String, Object?> toJson() => {
     'id': id,
     'nickname': nickname,
     'connected': connected,
     'role': role,
+    'source': source,
+    'latencyMs': latencyMs,
   };
 }
 

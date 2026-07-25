@@ -2,17 +2,17 @@
 
 ## 开发模型
 
-Playmesh 游戏是由 App 托管的 HTML/CSS/JavaScript 应用。Flutter 负责游戏容器和平台交互，Go Core 负责局域网会话与消息路由，游戏通过 Game SDK 访问这些能力。
+Playmesh 游戏是由 App 托管的 HTML/CSS/JavaScript 应用。Flutter 负责游戏容器、平台交互和联机链路，Go Core 负责权威会话与消息路由，游戏只通过 Game SDK 访问这些能力。
 
 ```text
 游戏页面
   -> /playmesh/sdk/v1/playmesh.js
-  -> Flutter WebView Bridge 或浏览器网关
+  -> App 宿主或局域网浏览器入口
   -> Go Core 会话
   -> Authority Runtime
 ```
 
-游戏代码不能直接访问 Bridge、Core 地址、内部 token 或任意文件系统。
+局域网 App、公共中转 App 和局域网浏览器使用同一套 SDK 语义；链路选择、加载来源和传输安全由平台处理。游戏代码不能直接访问 Bridge、Core 地址、分享参数、内部 token 或任意文件系统，也不能按玩家的加入方式分叉会话协议。
 
 ## IDEA 与 CLI 开发
 
@@ -69,6 +69,8 @@ export const ActionTypes = {};
 浏览器工作区继续使用 SSE 接收实时事件；不方便维护流式连接的 API Agent 可调用 `GET /dev/api/logs?limit=50` 获取最近最多 50 条运行日志，并调用 `GET /dev/api/projects/{projectId}/run` 轮询运行状态。日志接口接受可选的 `projectId` 和 `runId` 查询参数，仅返回指定运行实例；每条日志包含稳定的 `eventId`，可用于合并缓存回放与 SSE 时去重。底层内存缓存最多保留 500 条且不写磁盘。
 
 API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久工作区 token 的全部接口、鉴权、SDK Manifest、OpenAPI 和 Schema。主工作区点击“AI”直接进入统一页面，接口文档作为只读项与提示模板同页展示。纯聊天 AI 使用 `/dev/api/projects/{projectId}/chat-prompt.txt`，其能力上下文只包含当前项目已勾选能力的完整声明；可直接调用接口的 Agent 使用 `/dev/api/projects/{projectId}/agent-prompt.txt`，不内嵌全量能力声明，而是明确提供 `GET /dev/api/capabilities` 全量注册表 API 与 `GET/POST /dev/api/capability-tests` 测试 API。`GET /dev/api/status` 的 `baseUrls` 枚举当前设备可用的 HTTP 地址；Agent 端点接受可选 `baseUrl` 查询参数，但只允许使用该枚举中的地址。平台按当前 `main.json.modes/displayModes` 只拼接相关 SDK、角色语义、强制文件和当前项目源码；公共“自定义想法”同时合入两类文本，Agent 文本额外包含所选 Gateway 地址、Bearer token 与项目文件、校验、运行/重启、日志轮询和可选 SSE 接口。两份最终文件固定为 UTF-8 BOM TXT，并都在醒目的“获取项目提示词”入口中复制或下载；工作区还可通过“复制全平台能力”独立调用注册表 API，复制与项目勾选无关的全部完整声明。手机端应为 Agent 选择电脑端 AI 能访问的局域网 Base URL。模板覆盖保存在 `playmesh-library/developer/ai-prompts/`；项目本体统一保存在 `playmesh-library/packages/{gameId}/`。平台不内置游戏 Demo。
+
+> **AI 上下文最小披露原则：面向游戏开发 AI 的提示词，只提供完成当前任务所必需、可由游戏代码调用或必须遵守的公开契约。凡属回环代理、内部路由、中转鉴权、密钥协商、加密通道等平台实现，均不得进入提示词；此类信息只保留在平台架构与维护文档中。**
 
 ## 运行模式
 

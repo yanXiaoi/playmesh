@@ -32,6 +32,39 @@ void main() {
     expect(registry, everyElement(contains('methods')));
   });
 
+  test('远程 App 入口由本机 SDK 接收游戏声明和回环 Core 地址', () async {
+    final bridge = AppWebViewBridge(
+      userId: 'u-remote-app',
+      nickname: '远程玩家',
+      acceptRuntimeGameDeclaration: true,
+      coreBaseUri: Uri.parse('http://127.0.0.1:45678/'),
+      playerSource: 'server',
+      motionSource: _FakeMotionSource(),
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.bootstrap',
+      'remote-bootstrap',
+      payload: {
+        'gameName': '权威主机游戏',
+        'declaredCapabilities': ['sensor.gyroscope'],
+      },
+    );
+    final result = response['result']! as Map<String, Object?>;
+    final game = result['game']! as Map<String, Object?>;
+    final runtime = result['runtime']! as Map<String, Object?>;
+    final device = result['device']! as Map<String, Object?>;
+
+    expect(game['name'], '权威主机游戏');
+    expect(game['requiredCapabilities'], ['sensor.gyroscope']);
+    expect(device['declaredCapabilities'], ['sensor.gyroscope']);
+    expect(device['capabilities'], ['sensor.gyroscope']);
+    expect(runtime['coreBase'], 'http://127.0.0.1:45678/');
+    expect(runtime['playerSource'], 'server');
+  });
+
   test('通用能力实例通过 create/invoke/event/dispose 工作', () async {
     final source = _FakeMotionSource();
     final bridge = AppWebViewBridge(

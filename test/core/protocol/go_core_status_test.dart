@@ -6,7 +6,7 @@ void main() {
   test('parses a supported health response', () {
     final status = GoCoreStatus.fromJson({
       'type': 'core.health',
-      'protocolVersion': '1.1.0',
+      'protocolVersion': '1.2.0',
       'timestamp': 1760000000100,
       'requestId': 'req-model-1',
       'data': {
