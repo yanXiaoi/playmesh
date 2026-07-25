@@ -4,7 +4,7 @@
 
 - 状态：开发中，尚未发布。
 - 当前正式基线：App `1.6.1+8`。
-- 当前开发版本：App `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0`、Developer CLI `1.3.1`。
+- 当前开发版本：App `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1`、Developer CLI `1.3.1`。
 
 ## 局域网与公共中转双链路
 
@@ -55,10 +55,18 @@
 
 ## 开发者工作区项目与差异操作
 
+- Developer Gateway 按 system/runtime/projects/files/capabilities/packages/ai/approvals 分组为资源控制器；每个 controller 从自身 `definitions` 自动注册 method/path，核心处理逻辑留在同一资源文件，`developer_web_gateway_io.dart` 只保留生命周期、公共中间件和控制器清单。
+- 路由、OpenAPI、完整操作目录、Chat 基础指令和 Agent 指令全部由同一 `DeveloperOperationDefinition` 注册表生成；鉴权、风险、幂等、危险标识和公共响应由中间件注入。删除静态 OpenAPI 副本和旧快速操作协议，Developer API / OpenAPI 破坏性升级到 `2.0.0`。
+- “快速操作”替换为上下结构的“对话控制台”，执行一个 JSON 指令对象或数组并返回结构化 HTTP 结果。新增 `file-changes/preview/apply`，支持创建、完整替换、锚点精确替换及前后插入，并按 `baseRevisions` 原子应用。
+- 危险接口统一声明 `dangerous=true`。Chat 控制台与 Agent 使用 `X-Playmesh-AI-Channel` 进入审批中间件；SSE 弹窗提供“允许一次 / 此游戏或项目允许 / 始终允许 / 拒绝”，拒绝返回 403，30 秒未决定返回 408。SSE 输出同时改为串行写并消除首个事件订阅竞态。
+- 新增高风险 `POST /dev/api/projects/{projectId}/webview/javascript`，通过当前 `GamePage` 注册的移动端 WebView / Windows WebView2 求值入口执行任意 JavaScript 并返回结果。工作区新增复用 CodeMirror 的 WebView JS 操作台、结构化返回区和按项目隔离的最近 30 次本地历史；Chat/Agent 调用统一进入危险审批。
+- 所有非静态 Developer API 响应增加 `X-Playmesh-Operation-ID`；回归测试强制完整操作目录与 OpenAPI 路由一致，并禁止 `developer_web_gateway_io.dart` 手写 `/dev/api/**` 旁路。
+- Android 开启开发者模式时启动 `specialUse` Foreground Service，持有当前 FlutterEngine、CPU WakeLock 与高性能 Wi-Fi Lock；切换后台或锁屏后文件、校验、日志、状态等 Developer API 继续服务，关闭开发者模式时同步释放服务和锁。
+- Developer 操作定义新增 `requiresForegroundView` 元数据并同步到操作目录与 OpenAPI。启动/重启游戏、执行 WebView JavaScript 和运行平台能力自检在 App 后台、锁屏、熄屏或窗口失焦时返回 `409 app_view_unavailable`，错误详情包含准确的 Activity、窗口、屏幕和锁屏状态；停止运行仍可在后台执行。
 - 移动端顶部恢复可用的项目入口，并收敛为“项目 / 运行 / 保存 / AI / 更多”紧凑工具栏；项目选择至少保留 `120px`，其他按钮使用明确的最小宽度。一行不足时项目选择独占第一行，四个操作按钮均分第二行，不再压缩入口。
 - 项目入口和“更多”改为 IDEA 风格锚点下拉菜单；新建、复制当前项目、项目设置和删除项目集中在项目菜单。复制时可填写新的项目 ID 和名称，并排除运行数据、缓存及本地历史。
-- 文件 Diff、快速操作预览和本地历史统一使用 CodeMirror MergeView 左右双栏；左侧是来源版本，右侧是当前工作区，可通过块间箭头只应用某个差异块并保存，快速操作仍支持整批原子应用。
-- 新增项目复制和删除的 Developer API，Developer API / OpenAPI 升级到 `1.7.0`。
+- 文件 Diff 和本地历史继续使用 CodeMirror MergeView 左右双栏；AI 批量文件修改统一由 `file-changes/preview/apply` 结构化接口预览并原子应用。
+- 新增项目复制和删除的 Developer API；本轮统一操作注册表最终将 Developer API / OpenAPI 升级到 `2.0.0`。
 
 ## 游戏源声明 1.4.0
 
@@ -112,7 +120,7 @@
 
 - Manifest、能力 Schema、OpenAPI、默认模板、开发者工作区、CLI、AI 提示词、SDK 声明与游戏开发文档均同步到当前字段。
 - AI 游戏提示词遵守最小披露原则，只提供可调用的公开 SDK 和任务必需约束，不暴露回环代理、中转鉴权、密钥协商或加密通道实现。
-- Game SDK 升级到 `2.2.1`，App Bridge SDK 保持 `2.1.0`，Developer API 当前为 `1.7.0`，CLI 当前为 `1.3.1`。
+- Game SDK 升级到 `2.2.1`，App Bridge SDK 保持 `2.1.0`，Developer API 当前为 `2.0.1`，CLI 当前为 `1.3.1`。
 - Go Core 升级到 `0.4.0`，Core 协议升级到 `1.2.0`；Player 在线状态增加来源与延迟字段，用于统一房间状态展示，现有游戏侧 SDK 公共 API 保持不变。
 
 ## 验证与构建
@@ -125,3 +133,6 @@
   现有 `2.0.0+18` 安装包早于该修正，尚未重新构建。
 - Server Info 容量声明与动态中转池回归记录在
   `docs/verification/playmesh-2.0.0-dynamic-relay-pool-2026-07-24.md`。
+- Android 后台开发者工作区的 Foreground Service、View 可用性错误契约、
+  全量 Flutter 回归和 debug APK 编译记录在
+  `docs/verification/playmesh-2.1.1-android-background-developer-gateway-2026-07-25.md`。

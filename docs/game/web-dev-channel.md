@@ -34,11 +34,39 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 
 实际实现中 token 不应只依赖 URL 路径；服务端应同时校验 token 和当前开发者模式状态。端口、token 和工作区路径构成持久工作区身份，关闭开发者模式或 App 退出时链接暂时不可访问，重新开启后恢复同一链接。
 
+### Android 后台与锁屏
+
+Android 开启开发者模式时必须启动 `specialUse` Foreground Service，并由该服务持有当前 App 的同一个 FlutterEngine。服务期间使用 CPU WakeLock 与高性能 Wi-Fi Lock，使 Developer Gateway 在切换到其他 App、Activity 被系统回收或设备锁屏后仍能处理局域网请求。系统必须持续披露前台服务：取得通知权限时显示常驻通知；Android 13 及以上若用户拒绝通知权限，系统仍会在 Foreground Service 任务管理入口披露。关闭开发者模式时同步停止服务并释放两个锁。
+
+后台可用接口包括状态、项目与文件读写、Diff、本地历史、校验、文档、日志、事件、包操作和停止当前运行。需要真实 Activity/View 的操作必须在统一操作定义中声明 `requiresForegroundView=true`；当前包括启动项目、重启项目、执行 WebView JavaScript 和运行平台能力自检。App 位于后台、设备锁定、屏幕关闭、Activity 不存在或窗口失焦时，这些操作返回 HTTP `409`：
+
+```json
+{
+  "requestId": "dev-...",
+  "error": {
+    "code": "app_view_unavailable",
+    "message": "设备已锁定，当前操作需要可见且可交互的 App 页面",
+    "details": {
+      "requiresForegroundView": true,
+      "available": false,
+      "reason": "device_locked",
+      "activityAttached": true,
+      "activityResumed": false,
+      "windowFocused": false,
+      "screenInteractive": false,
+      "deviceLocked": true
+    }
+  }
+}
+```
+
+`reason` 只允许 `foreground`、`device_locked`、`screen_off`、`app_backgrounded`、`activity_unavailable` 或 `window_not_focused`。`GET /dev/api/status` 始终可用，并通过 `appView` 返回同一状态模型。后台限制必须先于危险操作审批执行，避免为当前必然无法执行的 WebView 操作请求无效审批。
+
 ## 网页工作区
 
 工作区至少包含：
 
-- 顶部只保留项目、运行、保存、AI 开发和“更多”五个入口。移动端项目选择具有 `120px` 最小宽度，四个操作按钮保留固定可点击宽度；一行不足时允许响应式换行，由项目选择独占第一行，四个操作按钮均分第二行，禁止继续压缩任一入口。空间足够时仍保持单行，尽量把纵向视口留给项目树和代码。快速操作、新建文件、重启、停止、校验、文件 Diff、删除文件和数据清理统一收纳到“更多”下拉菜单。
+- 顶部只保留项目、运行、保存、AI 开发和“更多”五个入口。移动端项目选择具有 `120px` 最小宽度，四个操作按钮保留固定可点击宽度；一行不足时允许响应式换行，由项目选择独占第一行，四个操作按钮均分第二行，禁止继续压缩任一入口。空间足够时仍保持单行，尽量把纵向视口留给项目树和代码。对话控制台、WebView JS 操作台、新建文件、重启、停止、校验、文件 Diff、删除文件和数据清理统一收纳到“更多”下拉菜单。
 - 项目入口与“更多”都使用 IDEA 风格的锚点下拉菜单，按触发按钮的实时视口位置展开，不使用整页选择弹窗或固定坐标。项目菜单聚合新建项目、复制当前项目、项目设置和删除项目，列表可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，项目菜单保持展开，选定或新建项目后才能编辑。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
 - 复制项目以当前项目为来源，新项目名称和 ID 均可修改；源码、清单和公开资源进入副本，项目根目录的 `data/`、`cache/`、`.playmesh/` 不复制。普通项目设置不允许修改稳定 `id`、`author` 和 `lastModifiedAt`；复制操作通过创建新项目提供变更 ID 的正式入口。删除项目会删除源码、运行数据、缓存和本地历史，必须在项目未运行时二次确认。
 - IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑和可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
@@ -53,6 +81,7 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 - 本地历史按时间操作展示资源新增、修改、删除、文本前后内容、增删行数与二进制大小变化。文本文件使用左右双栏 Diff，左栏可切换该操作的变更前或变更后版本，右栏始终是当前工作区；用户既可以只把某一个差异块应用并保存到当前文件，也可以用整次恢复全量替换选中文件、文件夹或整个工作区。恢复前必须自动生成独立且不参与后续合并的历史操作；恢复整个工作区时继续保留平台管理的当前 `main.json`。
 - HTML/CSS/JavaScript 编辑区。编辑器提供 HTML 标签/属性、CSS 属性/值、JavaScript 和 `playmesh` SDK 方法补全；可用 `Ctrl+Space` 或 `Alt+/` 主动触发。
 - 开始、重启与停止操作；由 App 启动当前游戏，不在工作区嵌入主页面预览。重启只作用于当前 App 中运行的该项目实例，并保留已有联机码和分享链接；停止会关闭会话并返回游戏库。
+- WebView JS 操作台复用 JavaScript CodeMirror 编辑器，执行按钮调用 `POST /dev/api/projects/{projectId}/webview/javascript`，下方原样显示结构化求值结果或错误。历史记录按项目保存在工作区浏览器的 `localStorage`，最多保留最近 30 次代码、返回和时间，可重新载入；它不是游戏 Bucket 或服务端项目历史。
 - 游戏运行状态、分享二维码和可复制链接。普通多人多屏与单机分享加载 `entries.game`（默认 `app/index.html`），单屏多人分享加载 `entries.controller`（默认 `app/controller/index.html`）；单机分享不加入 Session、不创建玩家且不建立 WebSocket。
 - 运行状态使用 `run.status` SSE 即时同步；内置 WebView 从游戏页返回后必须重新确认当前状态，不能继续显示已经退出的游戏仍在运行。
 - 由工作区启动的游戏在悬浮工具中提供按需开启的调试日志面板。日志由 App WebView 宿主层捕获，只包含当前设备页面的 `console` 输出，不通过 Game SDK 或游戏网关转发其他设备日志；普通浏览器在自身开发者工具查看本机 Console。
@@ -68,7 +97,7 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 
 开发者网页本身也应通过 SDK/开发者通道 API 与 App/Go Core 通讯，不让页面直接猜测内部 WebSocket 帧格式。
 
-文件 Diff、快速操作预览和本地历史统一使用 Git 风格左右双栏：左栏是来源版本或待应用结果，右栏是可编辑的当前工作区内容。差异块之间的箭头只把该块从左栏应用到右栏，用户确认后再通过带修订号的正式文件或 Manifest API 保存；快速操作还保留整批原子应用。二进制、目录、过大或被截断的内容不开放块级应用，只提供元数据和原有整次恢复能力。
+文件 Diff 和本地历史使用 Git 风格左右双栏。AI 多文件修改改用对话控制台的结构化 `file-changes/preview/apply`，按 `baseRevisions` 原子应用；旧快速操作文本与对应预览面板不再保留。二进制、目录、过大或被截断的内容不开放块级应用，只提供元数据和原有整次恢复能力。
 
 ## 机器可读接口文档
 
@@ -106,6 +135,8 @@ AI 应优先使用高层开发者 API，例如“创建项目”“修改文件�
 项目级管理使用 `POST /dev/api/projects/{projectId}/copy` 和 `DELETE /dev/api/projects/{projectId}`。复制请求必须提供新的唯一 ID 与名称，作者取当前 App 用户昵称，并排除源项目的运行数据、缓存和本地历史；删除接口拒绝删除正在启动或运行的项目。两项操作都由 Developer Project Catalog 执行，网页不得直接操作目录。
 
 项目运行生命周期使用四个正式接口：`GET /dev/api/projects/{projectId}/run` 读取当前状态，`POST /run` 开始，`POST /run/restart` 刷新当前运行内容，`POST /run/stop` 停止并关闭当前游戏会话。首次启动会先移除旧游戏路由再创建新的游戏 WebView；刷新只重建当前 WebView 内容并保留现有会话。没有对应运行实例时，刷新和停止返回结构化错误。AI 在非流式调用中应优先轮询 `GET /dev/api/projects/{projectId}/run` 获取状态，并使用 `GET /dev/api/logs?limit=50` 读取诊断日志；SSE 仍用于浏览器工作区的实时体验。
+
+运行中游戏的顶层 WebView 通过 `POST /dev/api/projects/{projectId}/webview/javascript` 接收非空 `source` 并返回脚本最后一个表达式的 JSON 可序列化求值结果。链路固定为 `Developer Gateway -> DeveloperRunController -> GamePage -> LocalGameWebView/WindowsLocalGameWebView`；移动端使用 `runJavaScriptReturningResult`，Windows 使用 WebView2 `executeScript`。执行前必须同时确认当前活动状态为 `running`、活动项目 ID 与路径 `projectId` 完全一致、该项目仍持有当前 WebView 执行器；不能用其他项目 ID 命中后台页面或旧 WebView。没有匹配的当前 WebView 时返回 404，脚本执行异常返回 `422 javascript_execution_failed`。该接口是 `risk=high`、`dangerous=true`，并进入 Chat/Agent 操作目录；任何带 `X-Playmesh-AI-Channel` 的调用都必须先取得开发者批准。
 
 开发者工作区提供“清理游戏数据”高风险操作，对应 `DELETE /dev/api/projects/{projectId}/data`。接口只删除当前项目的 `data/`，保留 `cache/`、源码与开发历史；游戏处于 `starting` 或 `running` 时返回 `409 game_running`，必须退出游戏后再调用，避免内存中的旧数据被 App 最终写回。
 
@@ -187,7 +218,7 @@ main.json 内容
 - 用户修改 token 并成功重新开启后覆盖持久配置，旧 token 立即失效；工作区路径保持稳定。
 - Gateway 绑定 `0.0.0.0` 以覆盖当前设备全部 IPv4 接口；App 只生成局域网地址。设备存在公网直连接口时必须依赖系统防火墙或网络边界阻止外部访问，后续如需更细粒度限制再增加接口白名单。
 - 所有工作区请求都检查 token、来源会话和开发者模式状态。
-- 关闭开发者模式或 App 退出时现有工作区连接断开；重新开启后使用持久链接重新连接。Go Core 生命周期不改变开发者工作区身份。
+- 关闭开发者模式或 App 进程退出时现有工作区连接断开；Android 仅切换后台、Activity 回收或锁屏不关闭 Gateway，重新开启后使用持久链接重新连接。Go Core 生命周期不改变开发者工作区身份。
 - 日志不记录完整 token，只记录 token 哈希或短标识。
 
 联机游戏分享链接和二维码使用另一类会话 token：关闭分享面板、浏览器玩家刷新和 App 刷新游戏都不撤销；离开游戏、会话结束、App/Core 重启后失效。同一会话重新展示分享信息或刷新游戏时复用原 token，退出后创建的新会话不能复用旧链接或二维码。联机浏览器刷新会读取 `localStorage` 中由 SDK 管理的玩家 ID 和昵称重新加入；运行中的旧连接掉线后可用同 ID 恢复，在线同 ID 的后续连接会被拒绝。单机分享使用独立随机访问 token，只加载主 `index.html` 和 HTTP 资源/存储，不调用 Core 加入接口；其 Console 只保留在当前浏览器。

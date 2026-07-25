@@ -6,6 +6,7 @@ import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/developer/webview_console_capture.dart';
+import '../../core/developer/developer_run_controller.dart';
 
 class WindowsLocalGameWebView extends StatefulWidget {
   const WindowsLocalGameWebView({
@@ -16,6 +17,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
     this.bridge,
     this.appBridge,
     this.onRunJavaScriptReady,
+    this.onEvaluateJavaScriptReady,
   });
 
   final String assetPath;
@@ -24,6 +26,8 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
+  final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
+  onEvaluateJavaScriptReady;
 
   @override
   State<WindowsLocalGameWebView> createState() =>
@@ -36,6 +40,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   bool _ready = false;
   StreamSubscription<dynamic>? _webMessageSubscription;
   StreamSubscription<WebErrorStatus>? _loadErrorSubscription;
+  StreamSubscription<LoadingState>? _loadingStateSubscription;
   StreamSubscription<String>? _bridgeSubscription;
 
   @override
@@ -52,6 +57,13 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       }
 
       await _controller.initialize();
+      _loadingStateSubscription = _controller.loadingState.listen((state) {
+        if (state == LoadingState.loading) {
+          widget.onEvaluateJavaScriptReady?.call(null);
+        } else if (state == LoadingState.navigationCompleted) {
+          widget.onEvaluateJavaScriptReady?.call(_controller.executeScript);
+        }
+      });
       _loadErrorSubscription = _controller.onLoadError.listen((error) {
         recordLocalWebViewConsole(
           level: 'error',
@@ -96,6 +108,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       widget.onRunJavaScriptReady?.call((script) async {
         await _controller.executeScript(script);
       });
+      widget.onEvaluateJavaScriptReady?.call(_controller.executeScript);
 
       if (mounted) {
         setState(() => _ready = true);
@@ -132,8 +145,10 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
 
   @override
   void dispose() {
+    widget.onEvaluateJavaScriptReady?.call(null);
     unawaited(_webMessageSubscription?.cancel());
     unawaited(_loadErrorSubscription?.cancel());
+    unawaited(_loadingStateSubscription?.cancel());
     unawaited(_bridgeSubscription?.cancel());
     unawaited(_controller.dispose());
     super.dispose();

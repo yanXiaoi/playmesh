@@ -31,30 +31,17 @@ playmesh-cli dev
 
 `playmesh-cli create` 从统一能力注册表读取与网页 Dev Tool 相同的新建选项，调用现有 Developer API 创建项目后下载到当前空目录。`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新 `playmesh/sdk/` 到目标 App 当前版本，不支持选择历史版本。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。完整命令、目录和安全边界见 `dev-cli/README.md`。
 
-## 开发者工作区快速操作
+## 开发者工作区对话控制台
 
-Playmesh 不提供独立的 App 文件编辑器。电脑浏览器与 App 内置 WebView 均打开同一个开发者工作区，AI 可以生成分段文本供用户粘贴到工作区的快速操作面板。面板不执行自然语言命令，只解析以下固定操作：
+Playmesh 不提供独立的 App 文件编辑器。电脑浏览器与 App 内置 WebView 均打开同一个开发者工作区。纯聊天 AI 输出一个 JSON 指令对象或数组，用户只需粘贴到“对话控制台”；控制台在上方接收指令，在下方返回状态码、请求 ID、修订号和响应体。
 
-```text
-----create_file:static/js/shared/types.js
-export const ActionTypes = {};
-----end
+每条指令使用 `method`、同源 `/dev/api/**` `path` 和可选 JSON `body`。默认提示词只内嵌操作目录、项目/文件读取、创建或完整替换文件、精确替换/插入、批量文件变更和校验等基础指令；完整目录通过 `GET /dev/api/operations?target=chat` 获取。旧分段文本快速操作协议已经删除，不再兼容。
 
-----replace_file:index.html
-<!doctype html>
-<html>...</html>
-----end
+`POST /dev/api/projects/{projectId}/file-changes/preview` 接受 `create`、`replace`、`replace_text`、`insert_before`、`insert_after` 结构化变更，返回结果和 `baseRevisions`；`apply` 端点校验同一批修订后原子写入。所有路径相对于项目根，源码通常使用 `app/...`；不能访问 `data/`、`cache/`、其他游戏、App 私有目录或系统路径。每次确认的修改进入项目级本地历史，并通过 SSE 同步到所有已打开工作区。
 
-----insert_lines:static/js/service/index.js:20
-// TODO：处理玩家动作
-----end
+对话控制台自动携带 `X-Playmesh-AI-Channel: chat`；Agent 必须携带值为 `agent` 的同一请求头。注册表中 `dangerous=true` 的接口在所有 AI 通道上先暂停，通过 SSE 向工作区展示“允许一次 / 此游戏或项目允许 / 始终允许 / 拒绝”。30 秒未决定时原请求返回 `408 ai_approval_timeout`，拒绝返回 `403 ai_operation_rejected`。
 
-----replace_lines:static/js/service/index.js:20-35
-// TODO：替换指定范围
-----end
-```
-
-路径默认相对于当前游戏的 `app/` 目录，支持 `create_file`、`replace_file`、`insert_lines` 和 `replace_lines`。`create_file` 要求目标不存在；`replace_file` 为完整内容 upsert，目标不存在时自动创建文件及缺失的父目录；行操作仍要求目标文件已经存在或已在同一批操作中先创建。工作区必须先展示 Diff，确认后原子执行；不能访问 `data/`、`cache/`、其他游戏、App 私有目录或系统路径。每次确认的修改进入项目级本地历史；修改通过 SSE 同步到所有已打开的工作区。
+当前项目运行后，“更多 → WebView JS 操作台”可复用 JavaScript CodeMirror 编辑器，在当前游戏的顶层 WebView 文档中执行代码，并在下方展示 `resultType`、返回值、运行实例和请求 ID。成功结果与执行错误按项目保存在浏览器本地历史中，可由“历史记录”重新载入。对应接口为 `POST /dev/api/projects/{projectId}/webview/javascript`，请求体是 `{"source":"document.title"}`；它声明为高风险 `dangerous=true` 并同时暴露给 Chat 和 Agent，因此 AI 调用必须先走上述 SSE 审批，开发者从操作台手动执行则不附加 AI 通道头。
 
 工作区还支持在项目树中右键新建或删除文件与文件夹，并将本地文件上传到指定目录。也可以把文件拖到根节点、文件夹或某个文件上；拖到文件时上传到其所在目录。只有 `.zip` 文件提供解压入口，剪切后目标目录才显示“移动到这里”。当前编辑缓冲区尚未保存内容的撤销与重做由 CodeMirror 管理；服务端不提供独立的单文件撤销接口。
 

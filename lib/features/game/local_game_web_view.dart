@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'windows_local_game_web_view.dart';
+import '../../core/developer/developer_run_controller.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
@@ -25,6 +26,7 @@ class LocalGameWebView extends StatefulWidget {
     this.localNickname = '本机玩家',
     this.declaredCapabilities = const [],
     this.onExitRequested,
+    this.onJavaScriptExecutorChanged,
   });
 
   final String assetPath;
@@ -36,6 +38,8 @@ class LocalGameWebView extends StatefulWidget {
   final String localNickname;
   final List<String> declaredCapabilities;
   final Future<void> Function()? onExitRequested;
+  final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
+  onJavaScriptExecutorChanged;
 
   @override
   State<LocalGameWebView> createState() => _LocalGameWebViewState();
@@ -127,10 +131,12 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
               );
             },
             onPageStarted: (_) {
+              widget.onJavaScriptExecutorChanged?.call(null);
               _messageQueue.pause(clearPending: true);
               unawaited(_appBridge.resetCapabilities());
             },
             onPageFinished: (_) {
+              widget.onJavaScriptExecutorChanged?.call(_evaluateJavaScript);
               unawaited(
                 _messageQueue.resume().catchError((Object error) {
                   debugPrint('发送启动阶段 WebView Bridge 消息失败: $error');
@@ -175,8 +181,15 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     await controller.runJavaScript(script);
   }
 
+  Future<Object?> _evaluateJavaScript(String source) async {
+    final controller = _controller;
+    if (controller == null) throw StateError('游戏 WebView 尚未创建');
+    return controller.runJavaScriptReturningResult(source);
+  }
+
   @override
   void dispose() {
+    widget.onJavaScriptExecutorChanged?.call(null);
     unawaited(_appBridge.close());
     unawaited(_bridgeSubscription?.cancel());
     unawaited(_assetGateway?.close());
@@ -202,6 +215,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   title: widget.title,
                   bridge: widget.bridge,
                   appBridge: _appBridge,
+                  onEvaluateJavaScriptReady: (executor) {
+                    widget.onJavaScriptExecutorChanged?.call(executor);
+                  },
                 )
         : controller == null || _loadFailed
         ? _WebViewFallback(assetPath: widget.assetPath, title: widget.title)

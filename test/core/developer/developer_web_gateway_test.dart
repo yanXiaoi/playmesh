@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -5,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:playmesh/core/developer/developer_ai_prompt_templates.dart';
+import 'package:playmesh/core/developer/developer_background_host.dart';
 import 'package:playmesh/core/developer/developer_capability_test_service.dart';
 import 'package:playmesh/core/developer/developer_event_hub.dart';
 import 'package:playmesh/core/developer/developer_project_catalog.dart';
@@ -32,6 +34,7 @@ void main() {
     );
     var restartCount = 0;
     var stopCount = 0;
+    final executedJavaScript = <String>[];
     final runController = DeveloperRunController(onLaunch: (_) async {});
     final unregisterRestart = runController.registerRestartHandler(
       'demo',
@@ -43,10 +46,18 @@ void main() {
       () async => stopCount += 1,
     );
     addTearDown(unregisterStop);
+    final unregisterJavaScript = runController.registerJavaScriptExecutor(
+      'demo',
+      (source) async {
+        executedJavaScript.add(source);
+        return {'title': 'Demo', 'answer': 42};
+      },
+    );
+    addTearDown(unregisterJavaScript);
     final runtime = GoCoreRuntime(
       host: _StubHost(),
       client: _StubHealthClient(),
-      developerProjectCatalog: const _FakeCatalog(),
+      developerProjectCatalog: _FakeCatalog(),
       developerAiPromptTemplates: DeveloperAiPromptTemplateStore(
         root: promptRoot,
       ),
@@ -100,7 +111,11 @@ void main() {
     expect(workspace.body, contains('id="projectSearch"'));
     expect(workspace.body, contains('id="toolbarMenu"'));
     expect(workspace.body, contains('id="diffMergeHost"'));
-    expect(workspace.body, contains('id="quickMergeHost"'));
+    expect(workspace.body, contains('对话控制台'));
+    expect(workspace.body, contains('id="aiApprovalModal"'));
+    expect(workspace.body, contains('允许一次'));
+    expect(workspace.body, contains('此游戏/项目允许'));
+    expect(workspace.body, contains('始终允许'));
     expect(workspace.body, contains('id="historyMergeHost"'));
     expect(workspace.body, contains('codemirror/addon/merge/merge.js'));
     expect(workspace.body, contains('diff-match-patch/index.js'));
@@ -110,6 +125,9 @@ void main() {
     expect(workspace.body, contains('✨ 获取项目提示词'));
     expect(workspace.body, contains('id="copyPlatformCapabilities"'));
     expect(workspace.body, contains('id="agentBaseUrl"'));
+    expect(workspace.body, contains('id="webviewJavaScriptPanel"'));
+    expect(workspace.body, contains('id="webviewJavaScriptModal"'));
+    expect(workspace.body, contains('id="webviewJavaScriptHistory"'));
 
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
     final workspaceScript = await http.get(
@@ -120,11 +138,28 @@ void main() {
     expect(workspaceScript.body, contains('openProjectPicker()'));
     expect(workspaceScript.body, contains('positionAnchoredMenu'));
     expect(workspaceScript.body, contains('CodeMirror.MergeView'));
-    expect(workspaceScript.body, contains('applyQuickSelected'));
+    expect(workspaceScript.body, contains('executeConversationConsole'));
+    expect(workspaceScript.body, contains("'X-Playmesh-AI-Channel':'chat'"));
+    expect(workspaceScript.body, contains("'ai.approval.requested'"));
+    expect(workspaceScript.body, contains('executeWebViewJavaScript'));
+    expect(workspaceScript.body, contains('webviewJavaScriptHistory'));
     expect(workspaceScript.body, contains('applyHistoryChunks'));
     expect(workspaceScript.body, contains('appendCapabilityTestResults'));
     expect(workspaceScript.body, contains('while(generation==='));
     expect(workspaceScript.body, contains('copyPlatformCapabilities'));
+    final gatewaySource = await File(
+      'lib/core/developer/developer_web_gateway_io.dart',
+    ).readAsString();
+    expect(gatewaySource, contains('_developerOperationRegistry.dispatch'));
+    final dispatchSource = gatewaySource.substring(
+      gatewaySource.indexOf('Future<void> _dispatch'),
+      gatewaySource.indexOf('String _requireCurrentAuthor'),
+    );
+    expect(
+      RegExp(r'''['"]/dev(?:/|['"])''').allMatches(dispatchSource),
+      isEmpty,
+      reason: '所有 Developer 接口必须通过统一操作注册表，不得在网关分发入口手写旁路路由',
+    );
     final workspaceStyles = await http.get(
       base.resolve(
         '/playmesh/developer/workspace-v1.css?token=custom-dev-token',
@@ -145,6 +180,7 @@ void main() {
       base.resolve('/dev/api/status?token=custom-dev-token'),
     );
     expect(status.statusCode, HttpStatus.ok);
+    expect(status.headers['x-playmesh-operation-id'], 'workspace.status');
     final statusJson = Map<String, Object?>.from(
       jsonDecode(status.body) as Map,
     );
@@ -264,9 +300,69 @@ void main() {
     expect((logs.last as Map)['message'], 'gateway-line-59');
     expect((logs.last as Map)['eventId'], isNotEmpty);
 
-    final cleared = await http.delete(
-      base.resolve('/dev/api/projects/demo/data?token=custom-dev-token'),
+    final sseClient = http.Client();
+    addTearDown(sseClient.close);
+    final sseRequest = http.Request(
+      'GET',
+      base.resolve('/dev/api/events?token=custom-dev-token'),
     );
+    final sseResponse = await sseClient.send(sseRequest);
+    expect(sseResponse.statusCode, HttpStatus.ok);
+    final approvalEvent = sseResponse.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .where((line) => line.startsWith('data: '))
+        .map((line) => jsonDecode(line.substring(6)) as Map)
+        .firstWhere((event) => event['type'] == 'ai.approval.requested')
+        .timeout(const Duration(seconds: 3));
+
+    final rejectedDelete = http.delete(
+      base.resolve('/dev/api/projects/demo/data?token=custom-dev-token'),
+      headers: const {'X-Playmesh-AI-Channel': 'agent'},
+    );
+    final rejectedApproval = await _waitForAiApproval(
+      base,
+      token: 'custom-dev-token',
+    );
+    expect(rejectedApproval['operationId'], 'projects.clear_data');
+    expect(rejectedApproval['channel'], 'agent');
+    expect(rejectedApproval['timeoutSeconds'], 30);
+    final notifiedApproval = await approvalEvent;
+    expect(notifiedApproval['approvalId'], rejectedApproval['approvalId']);
+    final rejectDecision = await http.post(
+      base.resolve(
+        '/dev/api/ai-approvals/${rejectedApproval['approvalId']}'
+        '?token=custom-dev-token',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'decision': 'reject'}),
+    );
+    expect(rejectDecision.statusCode, HttpStatus.ok);
+    final rejectedResponse = await rejectedDelete;
+    expect(rejectedResponse.statusCode, HttpStatus.forbidden);
+    expect(
+      jsonDecode(rejectedResponse.body)['error']['code'],
+      'ai_operation_rejected',
+    );
+
+    final approvedDelete = http.delete(
+      base.resolve('/dev/api/projects/demo/data?token=custom-dev-token'),
+      headers: const {'X-Playmesh-AI-Channel': 'chat'},
+    );
+    final approvedApproval = await _waitForAiApproval(
+      base,
+      token: 'custom-dev-token',
+    );
+    final allowDecision = await http.post(
+      base.resolve(
+        '/dev/api/ai-approvals/${approvedApproval['approvalId']}'
+        '?token=custom-dev-token',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'decision': 'once'}),
+    );
+    expect(allowDecision.statusCode, HttpStatus.ok);
+    final cleared = await approvedDelete;
     expect(cleared.statusCode, HttpStatus.ok, reason: cleared.body);
     expect(jsonDecode(cleared.body)['directory'], 'data');
     expect(jsonDecode(cleared.body)['cachePreserved'], isTrue);
@@ -287,6 +383,60 @@ void main() {
     expect(activeRun.statusCode, HttpStatus.ok);
     expect(jsonDecode(activeRun.body)['run']['projectId'], 'demo');
     expect(restartCount, 1);
+    final executeJavaScript = await http.post(
+      base.resolve(
+        '/dev/api/projects/demo/webview/javascript'
+        '?token=custom-dev-token',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'source': 'document.title'}),
+    );
+    expect(executeJavaScript.statusCode, HttpStatus.ok);
+    final executeJavaScriptJson = jsonDecode(executeJavaScript.body) as Map;
+    expect(executeJavaScriptJson['resultType'], 'object');
+    expect(executeJavaScriptJson['result'], {'title': 'Demo', 'answer': 42});
+    expect(executedJavaScript, ['document.title']);
+    final mismatchedJavaScript = await http.post(
+      base.resolve(
+        '/dev/api/projects/another-project/webview/javascript'
+        '?token=custom-dev-token',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'source': 'window.location.href'}),
+    );
+    expect(mismatchedJavaScript.statusCode, HttpStatus.notFound);
+    expect(executedJavaScript, ['document.title']);
+
+    final aiExecuteJavaScript = http.post(
+      base.resolve(
+        '/dev/api/projects/demo/webview/javascript'
+        '?token=custom-dev-token',
+      ),
+      headers: const {
+        'Content-Type': 'application/json',
+        'X-Playmesh-AI-Channel': 'agent',
+      },
+      body: jsonEncode({'source': '1 + 1'}),
+    );
+    final javaScriptApproval = await _waitForAiApproval(
+      base,
+      token: 'custom-dev-token',
+    );
+    expect(
+      javaScriptApproval['operationId'],
+      'runtime.webview.execute_javascript',
+    );
+    final approveJavaScript = await http.post(
+      base.resolve(
+        '/dev/api/ai-approvals/${javaScriptApproval['approvalId']}'
+        '?token=custom-dev-token',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'decision': 'once'}),
+    );
+    expect(approveJavaScript.statusCode, HttpStatus.ok);
+    expect((await aiExecuteJavaScript).statusCode, HttpStatus.ok);
+    expect(executedJavaScript, ['document.title', '1 + 1']);
     final clearWhileRunning = await http.delete(
       base.resolve('/dev/api/projects/demo/data?token=custom-dev-token'),
     );
@@ -321,7 +471,7 @@ void main() {
     expect(aiPrompt.headers['content-type'], startsWith('text/plain'));
     expect(aiPrompt.headers['content-disposition'], contains('.txt'));
     expect(aiPrompt.bodyBytes.take(3), orderedEquals([0xef, 0xbb, 0xbf]));
-    expect(aiPrompt.body, contains('统一 SDK TypeScript 声明（唯一接口事实源）'));
+    expect(aiPrompt.body, contains('统一 SDK TypeScript 声明（唯一游戏接口事实源）'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
@@ -336,7 +486,7 @@ void main() {
     expect(aiPrompt.body, contains('playmesh.sync.submitAction(input)'));
     expect(aiPrompt.body, contains('playmesh.sync.startAuthority(options)'));
     expect(aiPrompt.body, contains('playmesh.sync.observe'));
-    expect(aiPrompt.body, contains('playmesh.app.isAvailable()'));
+    expect(aiPrompt.body, contains('isAvailable(): boolean'));
     expect(aiPrompt.body, contains('playmesh.app.capabilities.create'));
     expect(aiPrompt.body, contains('onPlayerReconnect(callback)'));
     expect(aiPrompt.body, contains('playmesh.session.finish()'));
@@ -346,21 +496,24 @@ void main() {
     );
     expect(aiPrompt.body, contains('manifest API'));
     expect(aiPrompt.body, contains('绝对不能修改 `id`'));
-    expect(aiPrompt.body, contains('entries.game（快速操作路径）: index.html'));
-    expect(aiPrompt.body, contains('===== BEGIN WORKSPACE FILE: index.html'));
-    expect(aiPrompt.body, isNot(contains('- [file] app/index.html')));
-    expect(aiPrompt.body, contains('操作头数量必须等于 ----end 数量'));
-    expect(aiPrompt.body, contains('不能只输出 body 内片段'));
+    expect(aiPrompt.body, contains('entries.game: app/index.html'));
+    expect(
+      aiPrompt.body,
+      contains('===== BEGIN WORKSPACE FILE: app/index.html'),
+    );
+    expect(aiPrompt.body, contains('- [file] app/index.html'));
+    expect(aiPrompt.body, contains('对话控制台默认基础指令'));
+    expect(aiPrompt.body, contains('X-Playmesh-AI-Channel: chat'));
+    expect(aiPrompt.body, isNot(contains('----replace_file:')));
     expect(aiPrompt.body, contains('只有非 Authority 的多人页面'));
     expect(aiPrompt.body, contains('stateType 可选'));
     expect(aiPrompt.body, contains('getState()'));
     expect(aiPrompt.body, contains('仅浏览器联机玩家可用'));
     expect(aiPrompt.body, isNot(contains('仅浏览器控制器可用')));
     expect(aiPrompt.body, isNot(contains('重载后 SDK 会自动请求最新快照')));
-    expect(aiPrompt.body, contains('Authority 入口当前存在：false'));
     expect(aiPrompt.body, contains('static/js/service/index.js'));
     expect(aiPrompt.body, contains('===== BEGIN WORKSPACE FILE: main.json'));
-    expect(aiPrompt.body, contains('当前项目已勾选能力的完整声明'));
+    expect(aiPrompt.body, contains('当前项目已声明的平台能力'));
     expect(aiPrompt.body, contains('未声明平台能力。'));
     expect(aiPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
 
@@ -379,48 +532,40 @@ void main() {
     expect(agentPrompt.headers['content-disposition'], contains('.txt'));
     expect(agentPrompt.bodyBytes.take(3), orderedEquals([0xef, 0xbb, 0xbf]));
     expect(agentPrompt.body, contains('PLAYMESH API AGENT'));
-    expect(agentPrompt.body, contains('Base URL: $takeoverBaseUrl'));
+    expect(agentPrompt.body, contains('baseUrl: $takeoverBaseUrl'));
     expect(
       agentPrompt.body,
       contains('Authorization: Bearer custom-dev-token'),
     );
-    final cliWorkspaceUrl = Uri.parse(takeoverBaseUrl).replace(
-      path: session.workspacePath,
-      queryParameters: {'token': 'custom-dev-token'},
-    );
-    expect(agentPrompt.body, contains('playmesh-cli to "$cliWorkspaceUrl"'));
+    expect(agentPrompt.body, contains('X-Playmesh-AI-Channel: agent'));
+    expect(agentPrompt.body, contains('拒绝返回 403'));
+    expect(agentPrompt.body, contains('30 秒未决定返回 408'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/file'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/run/restart'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/run/stop'));
+    expect(
+      agentPrompt.body,
+      contains('/dev/api/projects/demo/webview/javascript'),
+    );
     expect(agentPrompt.body, contains('DELETE'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/data'));
     expect(agentPrompt.body, contains('保留 cache'));
-    expect(agentPrompt.body, contains('/dev/api/logs?limit=50'));
-    expect(agentPrompt.body, contains('不强制消费 SSE'));
-    expect(agentPrompt.body, contains('/dev/sdk-manifest.json'));
-    expect(agentPrompt.body, contains('/dev/openapi.json'));
-    expect(agentPrompt.body, contains('playmesh.app.isAvailable()'));
+    expect(agentPrompt.body, contains('/dev/api/logs'));
+    expect(agentPrompt.body, contains('不必维持 SSE'));
+    expect(agentPrompt.body, contains('isAvailable(): boolean'));
     expect(agentPrompt.body, contains('onPlayerReconnect(callback)'));
     expect(agentPrompt.body, contains('playmesh.session.finish()'));
     expect(agentPrompt.body, contains('manifest API'));
-    expect(agentPrompt.body, contains('禁止修改 `id`'));
+    expect(agentPrompt.body, contains('`id`、`author`、`lastModifiedAt` 不可修改'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/manifest'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/capabilities'));
     expect(agentPrompt.body, contains('/dev/api/capabilities'));
-    expect(agentPrompt.body, contains('读取当前全平台注册能力列表及每项完整声明'));
-    expect(
-      agentPrompt.body,
-      contains('GET $takeoverBaseUrl/dev/api/capability-tests'),
-    );
-    expect(
-      agentPrompt.body,
-      contains('POST $takeoverBaseUrl/dev/api/capability-tests'),
-    );
-    expect(agentPrompt.body, contains('"timeoutMs":3000'));
-    expect(agentPrompt.body, contains('当前 capabilities.json.required：未声明'));
+    expect(agentPrompt.body, contains('读取平台注册表中的全部能力声明'));
+    expect(agentPrompt.body, contains('/dev/api/capability-tests'));
+    expect(agentPrompt.body, contains('"timeoutMs": 3000'));
+    expect(agentPrompt.body, contains('capabilities.required: 未声明'));
     expect(agentPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
     expect(agentPrompt.body, isNot(contains('平台统一能力注册表（code')));
-    expect(agentPrompt.body, contains('playmesh.app.*'));
     expect(agentPrompt.body, contains('entries.game: app/index.html'));
     expect(
       agentPrompt.body,
@@ -516,24 +661,29 @@ void main() {
     );
     expect(promptWithIdeas.body, contains('CUSTOM_GAME_IDEA'));
 
-    final quickPreview = await http.post(
+    final fileChanges = [
+      {
+        'type': 'create',
+        'path': 'app/static/js/new/module.js',
+        'content': 'export const createdByReplace = true;\n',
+      },
+      {
+        'type': 'create',
+        'path': 'app/static/css/new/theme.css',
+        'content': 'body { color: white; }\n',
+      },
+    ];
+    final changePreview = await http.post(
       base.resolve(
-        '/dev/api/projects/demo/quick-operations/preview'
+        '/dev/api/projects/demo/file-changes/preview'
         '?token=custom-dev-token',
       ),
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'commands': '''----replace_file:static/js/new/module.js
-export const createdByReplace = true;
-----end
-
-----create_file:static/css/new/theme.css
-body { color: white; }
-----end''',
-      }),
+      body: jsonEncode({'changes': fileChanges}),
     );
-    expect(quickPreview.statusCode, HttpStatus.ok);
-    final previewFiles = (jsonDecode(quickPreview.body)['files'] as List)
+    expect(changePreview.statusCode, HttpStatus.ok);
+    final previewJson = jsonDecode(changePreview.body) as Map;
+    final previewFiles = (previewJson['files'] as List)
         .cast<Map<String, Object?>>();
     expect(
       previewFiles.map((file) => file['path']),
@@ -543,6 +693,20 @@ body { color: white; }
       ]),
     );
     expect(previewFiles.every((file) => file['created'] == true), isTrue);
+    final changeApply = await http.post(
+      base.resolve(
+        '/dev/api/projects/demo/file-changes/apply'
+        '?token=custom-dev-token',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'changes': fileChanges,
+        'baseRevisions': previewJson['baseRevisions'],
+        'clientId': 'gateway-test',
+      }),
+    );
+    expect(changeApply.statusCode, HttpStatus.ok, reason: changeApply.body);
+    expect((jsonDecode(changeApply.body)['applied'] as List), hasLength(2));
 
     final manifest = await http.get(
       base.resolve(
@@ -596,12 +760,16 @@ body { color: white; }
     expect(paths, contains('/dev/api/projects/{projectId}/validate'));
     expect(paths, contains('/dev/api/projects/{projectId}/run/restart'));
     expect(paths, contains('/dev/api/projects/{projectId}/run/stop'));
+    expect(paths, contains('/dev/api/projects/{projectId}/webview/javascript'));
     expect(paths, contains('/dev/api/projects/{projectId}/data'));
     expect(paths, contains('/dev/api/logs'));
+    expect(paths, contains('/dev/api/projects/{projectId}/file-changes/apply'));
     expect(
       paths,
-      contains('/dev/api/projects/{projectId}/quick-operations/apply'),
+      isNot(contains('/dev/api/projects/{projectId}/quick-operations/apply')),
     );
+    expect(paths, contains('/dev/api/ai-approvals'));
+    expect(paths, contains('/dev/api/ai-approvals/{approvalId}'));
     expect(paths, contains('/dev/api/projects/{projectId}/chat-prompt.txt'));
     expect(paths, contains('/dev/api/projects/{projectId}/agent-prompt.txt'));
     expect(paths, contains('/dev/api/capabilities'));
@@ -610,15 +778,35 @@ body { color: white; }
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '1.7.0');
+    expect((openApiJson['info'] as Map)['version'], '2.0.1');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );
-    final schemas = Map<String, Object?>.from(components['schemas']! as Map);
-    expect(schemas, contains('CapabilityDefinition'));
-    expect(schemas, contains('CapabilityTestResponse'));
-    expect(schemas, contains('CapabilityUpdate'));
-    expect(schemas, contains('ManifestUpdate'));
+    expect(components, contains('securitySchemes'));
+    final clearDataOperation =
+        (paths['/dev/api/projects/{projectId}/data'] as Map)['delete'] as Map;
+    expect(clearDataOperation['x-dangerous'], isTrue);
+    expect((clearDataOperation['responses'] as Map), contains('403'));
+    expect((clearDataOperation['responses'] as Map), contains('408'));
+    final createProjectOperation =
+        (paths['/dev/api/projects'] as Map)['post'] as Map;
+    expect((createProjectOperation['responses'] as Map), contains('201'));
+    final startRuntimeOperation =
+        (paths['/dev/api/projects/{projectId}/run'] as Map)['post'] as Map;
+    expect((startRuntimeOperation['responses'] as Map), contains('202'));
+    expect(startRuntimeOperation['x-requires-foreground-view'], isTrue);
+    final executeJavaScriptOperation =
+        (paths['/dev/api/projects/{projectId}/webview/javascript']
+                as Map)['post']
+            as Map;
+    expect(executeJavaScriptOperation['x-dangerous'], isTrue);
+    expect(executeJavaScriptOperation['x-requires-foreground-view'], isTrue);
+    final executeJavaScriptResponses =
+        executeJavaScriptOperation['responses'] as Map;
+    expect(executeJavaScriptResponses, contains('403'));
+    expect(executeJavaScriptResponses, contains('408'));
+    expect(executeJavaScriptResponses, contains('409'));
+    expect(executeJavaScriptResponses, contains('422'));
 
     final aiContext = await http.get(
       base.resolve('/dev/api/ai-context?token=custom-dev-token'),
@@ -627,6 +815,15 @@ body { color: white; }
     final aiContextJson = Map<String, Object?>.from(
       jsonDecode(aiContext.body) as Map,
     );
+    expect(
+      (aiContextJson['aiExecution'] as Map)['channelHeader'],
+      'X-Playmesh-AI-Channel',
+    );
+    final allOperationsResponse = await http.get(
+      base.resolve('/dev/api/operations?target=all&token=custom-dev-token'),
+    );
+    expect(allOperationsResponse.statusCode, HttpStatus.ok);
+    final allOperationsJson = jsonDecode(allOperationsResponse.body) as Map;
     final documentedOperations = <String>{};
     const httpMethods = {'get', 'post', 'put', 'patch', 'delete'};
     for (final pathEntry in paths.entries) {
@@ -635,15 +832,25 @@ body { color: white; }
         documentedOperations.add('${method.toUpperCase()} ${pathEntry.key}');
       }
     }
-    final exposedOperations = (aiContextJson['operations']! as List)
-        .cast<Map>()
+    final operationDocuments = (allOperationsJson['operations']! as List)
+        .cast<Map>();
+    final exposedOperationRoutes = operationDocuments
         .map(
           (operation) =>
               '${operation['method']} ${(operation['path']! as String).split('?').first}',
         )
-        .where((operation) => operation.contains(' /dev/api/'))
-        .toSet();
-    expect(exposedOperations, documentedOperations);
+        .toList();
+    expect(
+      exposedOperationRoutes.toSet(),
+      hasLength(exposedOperationRoutes.length),
+      reason: '统一操作注册表不允许重复 method/path',
+    );
+    expect(
+      operationDocuments.map((operation) => operation['id']).toSet(),
+      hasLength(operationDocuments.length),
+      reason: '统一操作注册表不允许重复 operation id',
+    );
+    expect(exposedOperationRoutes.toSet(), documentedOperations);
 
     final unauthorized = await http.get(base.resolve('/dev/api/projects'));
     expect(unauthorized.statusCode, HttpStatus.unauthorized);
@@ -1116,7 +1323,7 @@ body { color: white; }
     expect(capabilityPrompt.statusCode, HttpStatus.ok);
     expect(
       capabilityPrompt.body,
-      contains('当前 capabilities.json.required：sensor.accelerometer'),
+      contains('capabilities.required: sensor.accelerometer'),
     );
     expect(
       capabilityPrompt.body,
@@ -1124,7 +1331,7 @@ body { color: white; }
     );
     final capabilityChatPrompt = await http.get(endpoint('chat-prompt.txt'));
     expect(capabilityChatPrompt.statusCode, HttpStatus.ok);
-    expect(capabilityChatPrompt.body, contains('当前项目已勾选能力的完整声明'));
+    expect(capabilityChatPrompt.body, contains('当前项目已声明的平台能力'));
     expect(
       capabilityChatPrompt.body,
       contains('"code": "sensor.accelerometer"'),
@@ -1304,6 +1511,109 @@ body { color: white; }
       DateTime.utc(2026, 7, 23).millisecondsSinceEpoch,
     );
   });
+
+  test('锁屏时后台安全接口继续工作并准确拒绝 View 操作', () async {
+    final port = await _availablePort();
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-background-gateway-',
+    );
+    final backgroundHost = _FakeDeveloperBackgroundHost(
+      const DeveloperViewAvailability(
+        available: false,
+        reason: 'device_locked',
+        activityAttached: true,
+        activityResumed: false,
+        windowFocused: false,
+        screenInteractive: false,
+        deviceLocked: true,
+      ),
+    );
+    var launchCount = 0;
+    var stopCount = 0;
+    final runController = DeveloperRunController(
+      onLaunch: (_) async => launchCount += 1,
+    );
+    runController
+      ..reportRunning(projectId: 'demo')
+      ..registerStopHandler('demo', () async => stopCount += 1)
+      ..registerJavaScriptExecutor('demo', (_) async => 'unexpected');
+    final runtime = GoCoreRuntime(
+      host: _StubHost(),
+      client: _StubHealthClient(),
+      developerProjectCatalog: _FakeCatalog(),
+      developerPreferences: DeveloperPreferences(libraryRoot: root),
+      developerRunController: runController,
+      developerCapabilityTests: DeveloperCapabilityTestService(
+        motionSource: const _UnavailableMotionSource(),
+      ),
+      developerBackgroundHost: backgroundHost,
+    );
+    addTearDown(runtime.close);
+    addTearDown(() => root.delete(recursive: true));
+    await runtime.enableDeveloperMode(
+      port: port,
+      token: 'background-dev-token',
+    );
+    final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
+    Uri api(String path) => base.resolve('$path?token=background-dev-token');
+
+    final status = await http.get(api('/dev/api/status'));
+    expect(status.statusCode, HttpStatus.ok);
+    expect(jsonDecode(status.body)['appView']['reason'], 'device_locked');
+    expect(
+      (await http.get(api('/dev/api/projects'))).statusCode,
+      HttpStatus.ok,
+    );
+
+    for (final request in [
+      http.post(api('/dev/api/projects/demo/run')),
+      http.post(
+        api('/dev/api/capability-tests'),
+        headers: const {'Content-Type': 'application/json'},
+        body: '{}',
+      ),
+      http.post(
+        api('/dev/api/projects/demo/webview/javascript'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'source': 'document.title'}),
+      ),
+    ]) {
+      final response = await request;
+      expect(response.statusCode, HttpStatus.conflict, reason: response.body);
+      final error = jsonDecode(response.body)['error'] as Map;
+      expect(error['code'], 'app_view_unavailable');
+      expect(error['details']['reason'], 'device_locked');
+      expect(error['details']['requiresForegroundView'], isTrue);
+    }
+    expect(launchCount, 0);
+
+    final stopped = await http.post(api('/dev/api/projects/demo/run/stop'));
+    expect(stopped.statusCode, HttpStatus.ok, reason: stopped.body);
+    expect(stopCount, 1);
+    expect(backgroundHost.active, isTrue);
+
+    await runtime.disableDeveloperMode();
+    expect(backgroundHost.active, isFalse);
+  });
+}
+
+Future<Map<String, Object?>> _waitForAiApproval(
+  Uri base, {
+  required String token,
+}) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 3));
+  while (DateTime.now().isBefore(deadline)) {
+    final response = await http.get(
+      base.resolve('/dev/api/ai-approvals?token=$token'),
+    );
+    expect(response.statusCode, HttpStatus.ok, reason: response.body);
+    final approvals = (jsonDecode(response.body) as Map)['approvals'] as List;
+    if (approvals.isNotEmpty) {
+      return Map<String, Object?>.from(approvals.single as Map);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  throw TimeoutException('没有收到 AI 危险操作审批请求');
 }
 
 Future<int> _availablePort() async {
@@ -1314,7 +1624,22 @@ Future<int> _availablePort() async {
 }
 
 class _FakeCatalog implements DeveloperProjectCatalog {
-  const _FakeCatalog();
+  _FakeCatalog()
+    : _files = {
+        'app/index.html': Uint8List.fromList(
+          utf8.encode('<!doctype html><title>Demo</title>'),
+        ),
+        'main.json': Uint8List.fromList(
+          utf8.encode(
+            '{"id":"demo","modes":["multiplayer"],'
+            '"displayModes":["multi_screen"],'
+            '"authority":{"entry":"app/static/js/service/index.js"}}',
+          ),
+        ),
+      };
+
+  final Map<String, Uint8List> _files;
+  final Map<String, int> _revisions = {};
 
   @override
   Future<List<DeveloperProject>> listProjects() async => const [
@@ -1351,10 +1676,8 @@ class _FakeCatalog implements DeveloperProjectCatalog {
   }) => throw UnimplementedError();
 
   @override
-  Future<List<String>> listFiles(String projectId) async => const [
-    'app/index.html',
-    'main.json',
-  ];
+  Future<List<String>> listFiles(String projectId) async =>
+      _files.keys.toList()..sort();
 
   @override
   Future<List<String>> listDirectories(String projectId) async => const ['app'];
@@ -1384,17 +1707,19 @@ class _FakeCatalog implements DeveloperProjectCatalog {
 
   @override
   Future<DeveloperProjectFile> readFile(String projectId, String path) async {
-    final content = path == 'main.json'
-        ? '{"id":"demo","modes":["multiplayer"],'
-              '"displayModes":["multi_screen"],'
-              '"authority":{"entry":"app/static/js/service/index.js"}}'
-        : '<!doctype html><title>Demo</title>';
+    final bytes = _files[path];
+    if (bytes == null) throw StateError('文件不存在：$path');
     return DeveloperProjectFile(
       path: path,
-      bytes: Uint8List.fromList(utf8.encode(content)),
+      bytes: Uint8List.fromList(bytes),
       contentType: path.endsWith('.json')
           ? 'application/json; charset=utf-8'
-          : 'text/html; charset=utf-8',
+          : path.endsWith('.html')
+          ? 'text/html; charset=utf-8'
+          : path.endsWith('.css')
+          ? 'text/css; charset=utf-8'
+          : 'text/javascript; charset=utf-8',
+      revision: _revisions[path] ?? 0,
     );
   }
 
@@ -1418,7 +1743,22 @@ class _FakeCatalog implements DeveloperProjectCatalog {
     String projectId,
     Map<String, List<int>> files, {
     Map<String, int>? expectedRevisions,
-  }) => throw UnimplementedError();
+  }) async {
+    for (final path in files.keys) {
+      final expected = expectedRevisions?[path];
+      final current = _revisions[path] ?? 0;
+      if (expected != null && expected != current) {
+        throw StateError('revision 冲突：$path');
+      }
+    }
+    final saved = <DeveloperProjectFile>[];
+    for (final entry in files.entries) {
+      _files[entry.key] = Uint8List.fromList(entry.value);
+      _revisions[entry.key] = (_revisions[entry.key] ?? 0) + 1;
+      saved.add(await readFile(projectId, entry.key));
+    }
+    return saved;
+  }
 
   @override
   Future<void> deleteFile(
@@ -1501,6 +1841,26 @@ class _UnavailableMotionSource implements MotionSensorSource {
   @override
   Stream<MotionSample> gyroscopeEvents(Duration samplingPeriod) =>
       Stream.error(UnsupportedError('测试环境无陀螺仪'));
+}
+
+class _FakeDeveloperBackgroundHost implements DeveloperBackgroundHost {
+  _FakeDeveloperBackgroundHost(this.availability);
+
+  DeveloperViewAvailability availability;
+  bool active = false;
+
+  @override
+  Future<void> start({required int port}) async {
+    active = true;
+  }
+
+  @override
+  Future<void> stop() async {
+    active = false;
+  }
+
+  @override
+  Future<DeveloperViewAvailability> viewAvailability() async => availability;
 }
 
 class _StubHost implements GoCoreHost {

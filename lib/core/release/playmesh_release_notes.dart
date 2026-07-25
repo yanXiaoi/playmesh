@@ -1,7 +1,9 @@
-const playmeshVersion = '2.0.0';
-const playmeshBuildNumber = 18;
+const playmeshVersion = '2.1.1';
+const playmeshBuildNumber = 20;
 
 const playmeshReleaseHighlights = <String>[
+  '开发者工作区以统一操作注册表生成真实路由、OpenAPI、Chat 与 Agent 指令，并用对话控制台替代旧快速操作。',
+  'AI 调用危险接口时会暂停并通过 SSE 请求开发者批准，支持单次、当前项目、始终允许或拒绝，30 秒未决定自动超时。',
   '游戏分享面板统一为“局域网 / 服务器 / 房间状态”，局域网与公共中转可以同时接受玩家加入。',
   '新增仅供 Playmesh App 使用的公共中转联机：主机和客户端都不需要公网 IP，中转服务器只负责临时 TCP 配对与密文字节转发。',
   '公共中转采用端到端透明加密流；密钥仅存在于主机与客户端 App，中转服务器无法获得或解密游戏内容。',
@@ -11,5 +13,6 @@ const playmeshReleaseHighlights = <String>[
   '在线游戏源声明升级到 1.4.0，可声明名称、作者、主页、公共中转地址及单隧道容量；主机按服务器声明维护动态热连接池。',
   '分享 Authority 收敛为 /app/**、/bucket/**、/playmesh/** 和 SDK 无法替代的受控底层连接能力。',
   '开发者工作区采用紧凑项目下拉菜单，并新增项目复制、Git 风格双栏差异和差异块级应用。',
+  'Android 开发者模式由前台服务保持后台和锁屏访问；依赖可见页面的运行、重启、WebView 脚本和能力测试会返回明确的不可用状态。',
   'Go Core 升级到 0.4.0，Core 协议升级到 1.2.0；Game SDK 2.2.1 与 App Bridge SDK 2.1.0 的游戏侧公共 API 保持不变。',
 ];

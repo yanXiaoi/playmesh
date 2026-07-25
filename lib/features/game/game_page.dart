@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/catalog/game_catalog_models.dart';
 import '../../core/catalog/online_game_catalog.dart';
 import '../../core/developer/developer_event_hub.dart';
+import '../../core/developer/developer_run_controller.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/game_runtime_bridge.dart';
 import '../../core/game_sdk/standalone_game_runtime_bridge.dart';
@@ -119,6 +120,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   StreamSubscription<RelayConnectionStatus>? _relayStatusSubscription;
   void Function()? _unregisterDeveloperRestart;
   void Function()? _unregisterDeveloperStop;
+  void Function()? _unregisterDeveloperJavaScript;
+  DeveloperWebViewJavaScriptExecutor? _developerJavaScriptExecutor;
   String? _developerRunId;
   RelayHostSession? _relaySession;
   OnlineGameSourceProbe? _relaySource;
@@ -154,6 +157,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         developerProjectId,
         _exitGame,
       );
+      _unregisterDeveloperJavaScript = runtime
+          .registerDeveloperGameJavaScriptExecutor(
+            developerProjectId,
+            _executeDeveloperJavaScript,
+          );
     }
     _initializeSession();
   }
@@ -179,6 +187,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _unregisterDeveloperRestart = null;
     _unregisterDeveloperStop?.call();
     _unregisterDeveloperStop = null;
+    _unregisterDeveloperJavaScript?.call();
+    _unregisterDeveloperJavaScript = null;
+    _developerJavaScriptExecutor = null;
     unawaited(_developerLogSubscription?.cancel());
     _developerLogSubscription = null;
     final developerProjectId = widget.developerProjectId;
@@ -336,6 +347,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             localNickname: widget.localNickname,
             controllerRole: _controllerRole,
             onExitRequested: _returnToPrevious,
+            onJavaScriptExecutorChanged: (executor) {
+              _developerJavaScriptExecutor = executor;
+            },
           ),
     );
   }
@@ -912,6 +926,14 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('游戏内容已刷新。')));
+  }
+
+  Future<Object?> _executeDeveloperJavaScript(String source) {
+    final executor = _developerJavaScriptExecutor;
+    if (executor == null) {
+      throw StateError('当前游戏 WebView 尚未完成加载');
+    }
+    return executor(source);
   }
 
   void _clearLogsForNewRun() {

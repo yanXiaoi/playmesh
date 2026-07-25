@@ -156,7 +156,7 @@ AI 心智负担要求：
 文档同步要求：
 
 - 实施第五阶段任何 SDK/API/模板改动时，必须同步更新所有相关项目文档、SDK 文档和 AI 提示词文档。
-- 至少检查并更新：`docs/00-context.md`、`docs/01-architecture.md`、`docs/02-roadmap.md`、`docs/05-next-steps.md`、`docs/06-engineering-standards.md`、`docs/game/README.md`、`docs/game/development-guide.md`、`docs/game/sdk-v1.md`、`docs/game/web-dev-channel.md`、`assets/playmesh-library/public/developer/contracts/sdk-manifest.json`、`assets/playmesh-library/public/developer/contracts/schemas/sdk-v1.json`、`assets/playmesh-library/public/developer/contracts/openapi.json` 和 `assets/playmesh-library/public/developer/prompts/`。
+- 至少检查并更新：`docs/00-context.md`、`docs/01-architecture.md`、`docs/02-roadmap.md`、`docs/05-next-steps.md`、`docs/06-engineering-standards.md`、`docs/game/README.md`、`docs/game/development-guide.md`、`docs/game/sdk-v1.md`、`docs/game/web-dev-channel.md`、`assets/playmesh-library/public/developer/contracts/sdk-manifest.json`、`assets/playmesh-library/public/developer/contracts/schemas/sdk-v1.json` 和 `assets/playmesh-library/public/developer/prompts/`。Developer OpenAPI 必须由运行时操作注册表生成，不维护静态副本。
 - 如果新增 `playmesh.sync` 或等价能力导致 SDK 版本、模板结构或 AI 可读契约变化，必须直接替换当前契约，并同步更新最小数据流说明和开发者工作区校验规则；开发期不保留历史兼容实现。
 
 验收：

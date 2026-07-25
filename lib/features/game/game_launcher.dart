@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/game_package/asset_game_package_loader.dart';
 import '../../models/game_summary.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
+import '../../core/developer/developer_run_controller.dart';
 import 'local_game_web_view.dart';
 
 class GameLauncher extends StatefulWidget {
@@ -14,6 +15,7 @@ class GameLauncher extends StatefulWidget {
     this.bridge,
     this.controllerRole = false,
     this.onExitRequested,
+    this.onJavaScriptExecutorChanged,
   });
 
   final GameSummary game;
@@ -22,6 +24,8 @@ class GameLauncher extends StatefulWidget {
   final GameSdkBridge? bridge;
   final bool controllerRole;
   final Future<void> Function()? onExitRequested;
+  final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
+  onJavaScriptExecutorChanged;
 
   @override
   State<GameLauncher> createState() => _GameLauncherState();
@@ -84,6 +88,7 @@ class _GameLauncherState extends State<GameLauncher> {
               .requiredForRole(controller: widget.controllerRole)
               .toList(),
           onExitRequested: widget.onExitRequested,
+          onJavaScriptExecutorChanged: widget.onJavaScriptExecutorChanged,
         );
       },
     );

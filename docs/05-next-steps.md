@@ -11,7 +11,7 @@
 - `docs/status/phase-05-complete.md`
 - `docs/status/phase-06-complete.md`
 
-当前保持 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。当前开发版本为 App `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0`，Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的游戏侧公共 API 保持不变。第六阶段后不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和 CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
+当前保持 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。当前开发版本为 App `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1`，Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的游戏侧公共 API 保持不变。第六阶段后不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和 CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
 
 ## 当前稳定基线
 

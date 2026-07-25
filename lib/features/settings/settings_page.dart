@@ -726,6 +726,14 @@ class _DeveloperLinksState extends State<_DeveloperLinks> {
                   ),
                 ),
             const Text('点击地址可切换二维码。关闭开发者模式后当前地址立即失效。'),
+            if (Theme.of(context).platform == TargetPlatform.android) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Android 会持续披露开发者模式前台服务，并在后台或锁屏时保持工作区服务；'
+                '启动游戏等需要可见页面的操作会返回明确的不可用状态。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ],
         );
         final qr = selectedLink == null

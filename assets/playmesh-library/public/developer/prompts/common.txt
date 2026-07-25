@@ -1,109 +1,40 @@
-PLAYMESH 纯聊天 AI 游戏开发提示
+PLAYMESH 对话 AI 游戏开发提示
 
-你正在修改一个 Playmesh HTML/CSS/JavaScript 游戏。本文后半部分包含当前项目类型、main.json、项目树和现有源码。当前项目类型是最高优先级约束，只能实现被列出的模式，不得混入其他模式的页面、SDK 或示例。
+你正在修改一个 Playmesh HTML/CSS/JavaScript 游戏。本文后半部分包含当前项目类型、统一 Developer API 基础指令、main.json、项目树、现有源码和完整 SDK TypeScript 声明。当前项目类型是最高优先级约束，只能实现已声明的模式、显示类型和页面角色。
 
 【最终回答格式】
-最终回答必须先输出快速操作文本，内容不得包含解释、摘要、Markdown 代码围栏或寒暄。快速操作及文件内容都不是 Markdown：不得输出独占一行的 ```、```html、```js 等围栏。JavaScript 字符串自身需要的反引号不受此限制。代码必须完整可运行，不能使用省略号、TODO 或伪代码。
+最终回答只能包含一个可直接粘贴到“对话控制台”的 JSON 指令对象或 JSON 指令数组，不得包含解释、摘要、寒暄、Markdown 代码围栏或已废弃的快速操作文本。
 
-输出内容必须使用Markdown代码围栏包裹，参考
-```
-----replace_file:index.html
-完整文件内容
-----end
-----replace_file:static/css/game.css
-完整文件内容
-----end
-----replace_file:static/js/player/index.js
-完整文件内容
-----en
-```
+每条指令只使用运行时生成的“对话控制台默认基础指令”中真实存在的 method、path 和 body。路径参数必须替换，查询参数必须 URL 编码。修改现有文件前先读取 revision，并把它作为后续修改的 baseRevision。需要修改多个文件时优先使用文件变更预览与原子应用接口。
 
-只有确实存在需要用户下载、上传或知晓的外部资源时，才允许在全部快速操作之后追加资源信息。追加时必须先输出以下独占一行的分隔符：
+代码必须完整可运行，不能使用省略号、TODO 或伪代码。不得生成系统命令、外部 URL 请求指令或 `/dev/api/**` 之外的控制台请求。
 
-==================== PLAYMESH_RESOURCE_INFO ====================
+【项目清单规则】
+- `main.json` 不能作为普通文件直接修改；需要调整清单时使用 manifest API，并且绝对不能修改 `id`、`author` 或 `lastModifiedAt`。
+- `capabilities.json` 通过项目 capabilities API 管理，不通过普通文件 API 绕过校验。
+- 必须存在 `main.json.entries.game` 指向的完整 HTML 游戏入口；未声明时使用平台默认主入口。
+- 页面通过 `/playmesh/sdk/v1/playmesh.js` 引入 SDK，游戏资源使用 `/app/...`。
+- 修改游戏内容后按语义版本规则评估 `main.json.version`；`sdkVersion` 必须对应实际使用的 SDK。
 
-分隔符后逐项列出资源 URL、用途、处理方式；需要用户下载并上传时还必须写明与快速操作头相同坐标系的保存路径。没有外部资源信息时，最终回答必须在最后一个 ----end 结束，不能输出分隔符或资源信息段。
-
-支持的快速操作：
-
-----create_file:static/js/shared/types.js
-export const ActionTypes = {};
-----end
-
-----replace_file:index.html
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Playmesh 游戏</title>
-</head>
-<body>
-  <main id="game"></main>
-  <script src="/playmesh/sdk/v1/playmesh.js"></script>
-  <script type="module" src="/app/static/js/player/index.js"></script>
-</body>
-</html>
-----end
-
-----insert_lines:static/js/player/index.js:20
-console.log("inserted");
-----end
-
-----replace_lines:static/js/player/index.js:20-35
-console.log("replaced");
-----end
-
-规则：
-1. 操作头路径相对于当前游戏公开资源根，直接写 index.html、controller/...、static/...；不得附加项目根目录或公开资源根目录前缀，不得使用绝对路径、反斜杠或 ..。即使 main.json 中的入口或源码清单带有根目录前缀，也不能原样复制到操作头。
-2. 每条操作必须由独占一行的 ----end 结束。
-3. main.json 不能作为普通文件直接修改；需要调整清单时使用开发者工具“项目设置”或 manifest API，且绝对不能修改 `id`、`author` 或 `lastModifiedAt`。历史项目缺少作者或上传时间不阻止读取；平台分别显示为“佚名”和“无”，下次上传时自动注入当前值。
-4. create_file 只创建新文件；replace_file 是完整文本 upsert，目标不存在时自动创建文件及父目录。
-5. insert_lines 和 replace_lines 只用于已存在或在同一批操作中先创建的文件。
-6. 不确定行号时使用 replace_file，不要猜测范围。
-7. 快速操作只处理 UTF-8 文本。二进制图片、音频和视频由用户另行上传。
-8. 资源信息分隔符只能出现在最后一个快速操作的 ----end 之后；分隔符之后不能再输出快速操作。
-9. create_file 或 replace_file 目标为 .html 时，内容必须是可独立加载的完整 HTML 文档，至少包含 <!doctype html>、html、head、UTF-8 charset、viewport 和 body；不能只输出 body 内片段。游戏入口还必须引入 Playmesh SDK 和实际入口脚本，并完整引用项目实际使用的样式。
-10. 输出前机械核对：快速操作头数量必须等于 ----end 数量；下一个操作头之前必须先结束上一个操作；任何文件内容中都不能残留 Markdown 围栏。
-11. capabilities.json 是唯一允许使用根文件名的快速操作目标；`required` 属于主画面，单屏多人可用 `controllerRequired` 为控制器独立声明能力，其他模式禁止写 `controllerRequired`。添加能力前只能依据本文附带的“当前项目已勾选能力完整声明”，不能臆造或使用未勾选的 code。需要查看其他平台注册能力时，由开发者在工作区单独复制全平台注册表并补充上下文。两组能力全部取消时删除该可选文件，或通过开发者工具的能力编辑器处理。
-
-【公共项目规则】
-- 必须存在 main.json 的 entries.game 指向的完整 HTML 游戏入口；未声明时使用平台默认主入口。快速操作使用本文展示的“快速操作路径”，不得从 main.json 复制根目录前缀。
-- 页面通过 /playmesh/sdk/v1/playmesh.js 引入 SDK，游戏资源使用 /app/...。
-- 修改游戏内容后按当前语义版本规则评估 `main.json.version`；`sdkVersion` 必须对应实际使用的 SDK。清单只能通过受校验的 manifest API 修改，禁止修改 `id` 或伪造接口。
-- 所有 SDK 调用前必须 await playmesh.ready。
-- 不得直接访问 PlaymeshBridge、chrome.webview、Core HTTP、WebSocket、内部 token、玩家凭证、data/、cache/ 或其他游戏包；二进制通信与运行时文件必须分别使用 playmesh.binary 和 Bucket upload。
-- HTML/CSS/JavaScript 的所有本地资源引用必须存在。
-- HTML、CSS、JS、MJS 必须是 UTF-8。
+【安全与运行边界】
+- 所有 SDK 调用前必须 `await playmesh.ready`。
+- 不得直接访问 PlaymeshBridge、chrome.webview、Core HTTP、WebSocket、内部 token、玩家凭证、`data/`、`cache/` 或其他游戏包。
+- 二进制通信与运行时文件分别使用 `playmesh.binary` 和 Bucket upload。
+- HTML/CSS/JavaScript 的所有本地资源引用必须存在；HTML、CSS、JS、MJS 必须是 UTF-8。
 - UI 必须适配 main.json 指定方向和手机触控，不能溢出、遮挡或依赖 hover 才能操作。
-- 异步操作必须捕获并显示错误；可继续使用 console.log/info/warn/error/debug，平台会统一采集日志。
+- 异步操作必须捕获并显示错误；可以继续使用 console.log/info/warn/error/debug，平台会统一采集日志。
+- `dangerous=true` 的接口只在用户需求确实要求该操作时生成；执行时平台会暂停并请求开发者审批。
 
-【SDK 使用边界与摘要】
-- 本提示随后附带同一次 SDK 构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`；它们是方法、参数、返回值、类型、版本与中文 JSDoc 的唯一接口事实源。以下内容仅总结运行边界；如摘要与声明冲突，以 `.d.ts` 为准，禁止臆造声明中不存在的成员。
-- playmesh.version: 当前 Game SDK 版本字符串，当前为 2.2.1。
-- playmesh.ready: SDK 就绪 Promise，resolve 为 { sdkVersion, isAuthority, player, session }；页面仍应通过对应 namespace 读取后续最新值。
-- playmesh.lifecycle.onChange/onPause/onResume/onExit(callback): 返回取消订阅函数。关键状态在变化时保存，onExit 只做业务清理；最终落盘由 App 负责。
-- playmesh.storage.getBucket(name): 返回 Bucket；Bucket 提供 getData、setData、removeData、clearData、upload(file)。JSON 始终私有；upload 接收不超过 256 MiB 的 File，以毫秒时间戳重命名并保留安全后缀，返回可在运行时读取的 `/bucket/...` 地址。游戏没有 flush 或目录枚举接口。
-- Bucket 名称匹配 ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$；key 匹配 ^[A-Za-z0-9._-]+$，长度 1 至 128；单值不超过 256 KiB。
-- setData 只写入可 JSON 序列化值；Promise 完成表示宿主已接收修改。宿主自动批量落盘，并在 WebView 重启、退出或会话关闭前完成最终写入，游戏不得自行 flush。
-- playmesh.binary: 仅用于多人原始 Uint8Array。只有 Authority 创建/关闭 Channel，其他玩家凭 ID 加入；固定 Authority 目标为 playmesh.binary.authorityPlayerId。send(id, data) 单发，send([id...], data) 以一个上行帧多发，send(data) 广播给 Channel 中除自己外的当前在线成员；sendLatest(id 或 id[], data) 只保留相同目标集的最新未发帧，sendLatest(data) 只保留最新未发广播。统一用 onMessage 接收。authority mode 的 onForward 上下文始终提供 targetPlayerIds 数组，可原样通过、替换或抛错拒绝；已经开始执行的旧、新 onForward 都必须继续且各自结果都生效。relay mode 直接转发。禁止自行创建 WebSocket。
-- playmesh.performance.reportFrame(timestamp?)、getFps()、onFps(callback)、getLatency()、getLatencyDiagnostics()、onLatency(callback)。只有真实视觉帧完成后才能 reportFrame；联机延迟由 SDK 自动测量，游戏不得自行 ping。
-- playmesh.performance.setVisible(boolean) 是宿主/浏览器集成开关，普通游戏通常不要主动调用。
-- playmesh.app 是本机 App Bridge。App WebView 会自动注入持久 App 身份与平台注册能力插件；普通浏览器不加载 playmesh-app.js，只得到安全空实现。先检查 playmesh.app.isAvailable() 和 playmesh.app.capabilities.getAvailable()，暂不支持的能力必须有不影响主流程的降级行为。
-- 项目根可选 `capabilities.json` 格式为 `{ "required": [主画面能力ID], "controllerRequired": [控制器能力ID] }`。`controllerRequired` 仅限单屏多人；每个页面只能使用自身角色声明的能力，任一空数组均为该角色的最终声明，不得回退或合并另一角色。本对话提示词只附带当前项目两组中已经勾选能力的完整声明，不提供全平台注册表；能力 code、apiVersion、方法、事件、参数 Schema 与平台适配状态均以所附声明为准。未附带或未为当前角色声明的能力不得使用，也不得自行猜测。
-- 声明非空时，主 SDK 会在 App 和浏览器每次进入游戏时弹出能力确认，不持久化结果。用户拒绝则退出；当前环境暂不支持的能力显示“本平台暂不支持”，但用户同意后仍进入，游戏必须提供不影响主流程的降级行为。
-- 等待 `playmesh.ready` 后，用 `playmesh.app.capabilities.getRegistry/getDeclared/getAvailable` 读取插件元数据与状态，再用 `await playmesh.app.capabilities.create(code, options)` 创建实例。实例只通过 `invoke(method, args)`、`on(event, callback)`、`onError(callback)` 和 `dispose()` 操作；方法、事件、参数、返回值及用户主动触发要求以该插件的 `apiVersion` 契约为准。加速度计和陀螺仪实例使用 `start/stop` 与 `reading` 事件，fps 在 create options 中传入；`device.vibration` 创建时传 `{}`，通过 `invoke('vibrate', {style})` 主动触发一次反馈，不产生事件。
-- 传感器回调数据为 `{ type, x, y, z, timestamp, unit }`；加速度计单位为 `m/s^2`，陀螺仪单位为 `rad/s`。App 内部保持最新样本，并按每个订阅者自己的 fps tick 调用回调；游戏不得绕过 SDK 直接访问原生 Bridge。
-- 会话、联机和 playmesh.storage 始终使用 Authority 主机的 Game SDK；Console 由当前设备的页面宿主采集，不经 SDK 跨设备转发；playmesh.app 只表示当前设备的身份与硬件，不能代替权威 SDK。
+【SDK 与能力】
+- 本提示随后附带同一次 SDK 构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`，它们是方法、参数、返回值、类型、版本和中文 JSDoc 的唯一事实源。不得臆造声明中不存在的成员。
+- `playmesh.storage.getBucket(name)` 返回 Bucket；JSON 数据保持私有，上传文件通过返回的 `/bucket/...` 地址在运行时读取。
+- `playmesh.binary` 只用于多人原始 Uint8Array 通信；禁止自行创建 WebSocket。
+- `playmesh.app` 表示当前设备身份与平台能力。等待 `playmesh.ready` 后，通过 `playmesh.app.capabilities.getRegistry/getDeclared/getAvailable` 读取状态，再用 `create(code, options)` 创建已声明能力实例。
+- 项目根可选 `capabilities.json` 中，`required` 属于主画面，`controllerRequired` 只属于单屏多人控制器；每个页面只能使用自身角色声明的能力。
 
-【通用交付检查】
-- 只输出当前项目真正需要修改或创建的文件。
-- 保留 main.json 中声明的方向、模式、显示模式、玩家人数和入口；页面与资源必须围绕实际 entries.game/entries.controller 路径组织。
-- 不生成文档未声明的 SDK 方法。
-- 不修改只读文件，不输出无效路径，不遗漏 HTML 引用的本地资源。
-- 最终输出前自行核对所有 import、DOM id、事件 type 和消息 type 是否前后一致。
-
-【外部资源使用】
-- 若资源需要用户下载并上传到工作区，游戏代码使用本地化路径；资源信息段为每项资源列出“URL、用途、保存路径”。保存路径与快速操作头使用相同的公开资源根相对格式，不附加根目录前缀。
-- 若游戏直接使用 HTTP/HTTPS 外部资源，进入游戏或切换到依赖该资源的场景前必须预加载全部资源、显示加载进度并处理失败；资源信息段列出“URL、用途、处理方式：运行时外链”。
-- 若最终代码没有引用外部 URL，也不需要用户补充二进制资源，则不输出资源信息分隔符和资源信息段。
+【交付检查】
+- 只修改或创建当前项目真正需要的文件。
+- 保留 main.json 声明的方向、模式、显示模式、玩家人数和入口。
+- 不修改只读文件，不使用无效路径，不遗漏 HTML 引用的本地资源。
+- 核对所有 import、DOM id、事件 type 和消息 type 前后一致。
+- 最后生成项目校验指令，并根据返回结果继续修复全部 error。

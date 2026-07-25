@@ -65,7 +65,7 @@ Flutter GoCoreRuntime
 
 `go-core/` 已提供可启动、可停止的 HTTP 服务。宿主必须使用 `0.0.0.0:0` 请求系统分配空闲端口，并在启动成功后把实际端口上报给 Flutter；Flutter 本机连接时使用回环地址，分享时使用当前设备全部可用的局域网 IPv4 地址。页面不得猜测、缓存固定端口或自行拼接 Core 地址。
 
-网页开发者通道不复用或重绑 Core 端口。Flutter App 另行启动 `DeveloperWebGateway`，按当前产品决策绑定 `0.0.0.0`，默认端口为 `16666`，用户可在设置页修改；设置页只发布当前设备解析到的局域网 IPv4 链接。Developer API status 同时返回当前请求地址、解析到的局域网 IPv4 与回环地址，Agent 提示词只能从这些本机 HTTP Base URL 中选择一个嵌入接口清单，避免把持久开发者 token 指向任意外部地址。端口被占用时返回明确错误，不得通过重启 Core 解决。关闭开发者模式或 App 退出时只关闭开发者 Gateway，不中断现有 Core 会话。
+网页开发者通道不复用或重绑 Core 端口。Flutter App 另行启动 `DeveloperWebGateway`，按当前产品决策绑定 `0.0.0.0`，默认端口为 `16666`，用户可在设置页修改；设置页只发布当前设备解析到的局域网 IPv4 链接。Developer API status 同时返回当前请求地址、解析到的局域网 IPv4、回环地址和当前 App View 可用性，Agent 提示词只能从这些本机 HTTP Base URL 中选择一个嵌入接口清单，避免把持久开发者 token 指向任意外部地址。端口被占用时返回明确错误，不得通过重启 Core 解决。Android 开启开发者模式后由 Foreground Service 持有同一个 FlutterEngine、CPU WakeLock 和 Wi-Fi Lock，Activity 进入后台或设备锁屏不停止 Gateway；需要可见 Activity/View 的操作由统一元数据声明并在不可用时返回 `409 app_view_unavailable`。关闭开发者模式或 App 进程退出时只关闭开发者 Gateway，不中断现有 Core 会话。
 
 Developer CLI 是 Gateway 的客户端，不是第二个游戏运行时。CLI 从完整工作区 URL 解析 Base URL 和 token，通过标准包导出接口拉取 `main.json + capabilities.json + app/`，并通过 SDK bundle 接口建立 `playmesh/sdk/`。拉取是修复通道，不执行 Manifest、能力或入口语义校验；只要项目能由 `main.json.id` 识别，即使缺少 `app/` 也必须下载现有内容。`create` 命令从统一能力注册表读取选项，交互式收集与网页工作区一致的项目字段，调用现有项目创建接口后继续走同一套项目包与 SDK 下载链路。本地 `app/`、`playmesh/` 分别直接镜像运行时 `/app/`、`/playmesh/`，使 IDEA 能解析 JS/CSS/HTML 绝对路径。上传时只打包 `main.json + capabilities.json + app/`，`playmesh/` 永远排除，再复用应用正式游戏包导入器完成校验和提交。App 游戏安装目录不创建 CLI 辅助目录。
 
@@ -623,38 +623,25 @@ SDK 无法替代的受控底层连接能力，例如当前游戏的 WebSocket Up
 - 按文件、文件夹或整个工作区查看本地历史；文本文件可以把指定时间操作的变更前或变更后差异块应用到当前工作区，也可以全量恢复所选范围。
 - 未保存文本的撤销与重做由 CodeMirror 编辑器负责。
 
-### 快速文本文件操作格式
+### 统一 Developer Operation 注册表与对话控制台
 
-开发者工作区必须支持用户直接粘贴 AI 生成的分段操作文本。默认以当前游戏的 `app/` 公开目录作为网页文件操作根目录，因此 `static/js/shared/types.js` 表示 `packages/{gameId}/app/static/js/shared/types.js`：
+`developer_web_gateway_io.dart` 只负责网关生命周期、公共请求中间件和控制器注册。每个资源控制器位于 `operations/{module}/`，在同一 Dart 文件声明真实 method/path/Schema/示例/权限/风险/幂等/危险标识并实现处理逻辑；注册表从 controller 的 `definitions` 自动建立路由，不再维护大段条件分派。
 
-```text
-----create_file:static/js/shared/types.js
-export const ActionTypes = {};
-----end
+运行时路由、OpenAPI、操作目录、Chat 提示词和 Agent 提示词使用同一份 `DeveloperOperationDefinition`。鉴权、安全元数据、标准响应和危险审批响应通过文档中间件注入，不在每个接口重复声明。新增接口只增加资源文件并注册 controller，禁止手写第二份静态 OpenAPI。
 
-----replace_file:index.html
-<!doctype html>
-<html>...</html>
-----end
+除工作区和 `/playmesh/**` 静态资源外，所有开发者接口都必须由 `_DeveloperOperationRegistry.dispatch` 分发，响应带 `X-Playmesh-Operation-ID` 标识。回归测试同时比较完整操作目录与 OpenAPI 的 method/path 集合，并扫描网关入口，禁止出现手写 `/dev/api/**` 旁路；新增接口若绕过统一注册链路必须直接使测试失败。
 
-----insert_lines:static/js/service/index.js:20
-// TODO：处理玩家动作
-----end
+纯聊天 AI 输出可直接粘贴到对话控制台的 JSON 指令对象或数组；Agent 直接调用相同 HTTP API。基础提示词只附带读项目/文件、创建或替换文件、精确替换或插入、批量变更和校验，其他操作从 `/dev/api/operations` 动态获取。结构化批量变更使用 `file-changes/preview` 和 `file-changes/apply`，以文本锚点、精确匹配数和 `baseRevisions` 保证可验证、原子提交和本地历史一致。
 
-----replace_lines:static/js/service/index.js:20-35
-// TODO：替换指定范围
-----end
-```
+所有 AI 执行适配器都必须附加 `X-Playmesh-AI-Channel`。当操作声明 `dangerous=true` 时，统一执行中间件暂停原请求，SSE 发布 `ai.approval.requested`，前端提供允许一次、按游戏/项目允许、始终允许和拒绝。批准后继续原 handler；拒绝返回 403；30 秒超时返回 408。普通开发者 UI 调用不带 AI 通道头，沿用各自已有的人机确认。
 
-支持的操作为 `create_file`、`replace_file`、`insert_lines` 和 `replace_lines`。`create_file` 要求目标不存在；`replace_file` 为完整内容 upsert，目标不存在时自动创建文件及父目录；行操作要求目标已经存在或在同一批操作中先创建。每个操作必须有 `----end` 结束标记；工作区解析后按文件显示左右双栏 Diff，用户可选择将某个差异块写入当前工作区，也可确认后把全部文件作为一个原子事务执行；路径越界、行号失效、编码异常或任一文件写入失败时，整批操作取消。底层可以转换成结构化操作对象，用于校验、原子提交和本地历史差异记录，但用户和 AI 默认不需要编辑 JSON。
-
-编辑操作只能作用于当前 `packages/{gameId}/` 目录，禁止访问其他游戏、App 私有目录和系统路径。保存前必须校验路径、编码和文件大小；多文件修改应作为一个原子操作，任一文件失败时整体取消。
+当前运行游戏可注册一个项目级 `DeveloperWebViewJavaScriptExecutor`。`GamePage` 将执行器绑定到 `DeveloperRunController`，移动端 `LocalGameWebView` 使用 `runJavaScriptReturningResult`，Windows 宿主使用 WebView2 `executeScript`；页面开始导航、销毁或退出时立即撤销执行器，避免请求落到旧 WebView。执行前必须同时校验活动状态为 `running`、`activeStatus.projectId` 等于接口路径的 `projectId`、执行器也登记在同一项目 ID 下，禁止跨项目或命中已退到后台的 WebView。`POST /dev/api/projects/{projectId}/webview/javascript` 通过统一注册表调用该执行器并返回结果；它是暴露给 Chat/Agent 的高风险危险操作，AI 请求必须经过同一审批中间件。工作区操作台复用 CodeMirror，显示返回或错误，并在浏览器本地维护按项目隔离的最近执行历史。
 
 ### 开发者本地历史
 
 项目级本地历史固定写入当前游戏包中的 `cache/developer/local-history/`，与 `app/`、`data/` 同级。历史不单独保存每次变更前的重复副本，而是由一份初始 `baseline/` 和按时间操作保存的变更后 `snapshot/` 组成；某次操作的变更前状态由上一操作的变更后快照推导，第一项操作则以初始基线为准。
 
-连续变更按 5 分钟滚动窗口合并为一个时间操作，最多保留 100 个操作。淘汰最旧操作时，先将其变更后快照提升为新基线，确保后续 Diff 仍可还原。保存、上传、新建、删除、快速操作和历史恢复都进入同一条项目历史链；手动恢复会创建一个独立且封口的时间操作，不与后续编辑合并。
+连续变更按 5 分钟滚动窗口合并为一个时间操作，最多保留 100 个操作。淘汰最旧操作时，先将其变更后快照提升为新基线，确保后续 Diff 仍可还原。保存、上传、新建、删除、结构化批量文件变更和历史恢复都进入同一条项目历史链；手动恢复会创建一个独立且封口的时间操作，不与后续编辑合并。
 
 历史快照排除 `data/` 和 `cache/`，项目树与开发者文件 API 也不允许通过普通路径访问这些内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和删除差异；文本文件以历史版本为左栏、当前工作区为右栏，允许应用单个差异块并经带修订号的正式 API 保存，也可用指定操作的变更前或变更后状态全量替换当前范围。二进制、目录、过大或截断内容只支持全量恢复。单文件接口禁止直接恢复平台管理的 `main.json`，但恢复项目根时会连同当次历史中的完整 `main.json` 一并恢复。浏览器工作区、Agent 和 CLI 发布都必须进入同一项目历史链。恢复完成后通过统一 SSE 通道发送 `workspace.restored`，使其他工作区刷新状态。
 

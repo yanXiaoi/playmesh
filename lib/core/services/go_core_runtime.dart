@@ -1,6 +1,7 @@
 import '../developer/developer_channel.dart';
 import '../developer/developer_capability_test_service.dart';
 import '../developer/developer_ai_prompt_templates.dart';
+import '../developer/developer_background_host.dart';
 import '../developer/developer_project_catalog.dart';
 import '../developer/developer_preferences.dart';
 import '../developer/developer_run_controller.dart';
@@ -27,10 +28,13 @@ class GoCoreRuntime
     DeveloperRunController? developerRunController,
     this.developerCapabilityTests,
     this.developerAuthorProvider,
+    DeveloperBackgroundHost? developerBackgroundHost,
   }) : assert(client != null || clientFactory != null),
        _client = client,
        _clientFactory = clientFactory,
        _developerPreferences = developerPreferences ?? DeveloperPreferences(),
+       _developerBackgroundHost =
+           developerBackgroundHost ?? const PlatformDeveloperBackgroundHost(),
        developerRunController =
            developerRunController ?? DeveloperRunController();
 
@@ -42,6 +46,7 @@ class GoCoreRuntime
     DeveloperRunController? developerRunController,
     DeveloperCapabilityTestService? developerCapabilityTests,
     String Function()? developerAuthorProvider,
+    DeveloperBackgroundHost? developerBackgroundHost,
   }) {
     final host = createBundledGoCoreHost(address: address);
     return GoCoreRuntime(
@@ -55,6 +60,7 @@ class GoCoreRuntime
       developerRunController: developerRunController,
       developerCapabilityTests: developerCapabilityTests,
       developerAuthorProvider: developerAuthorProvider,
+      developerBackgroundHost: developerBackgroundHost,
     );
   }
 
@@ -67,6 +73,7 @@ class GoCoreRuntime
   final DeveloperCapabilityTestService? developerCapabilityTests;
   final String Function()? developerAuthorProvider;
   final DeveloperPreferences _developerPreferences;
+  final DeveloperBackgroundHost _developerBackgroundHost;
   GoCoreStatusService? _statusService;
   DeveloperWebGateway? _developerGateway;
   DeveloperSession? _developerSession;
@@ -86,6 +93,7 @@ class GoCoreRuntime
     String? token,
   }) async {
     await _developerGateway?.close();
+    await _developerBackgroundHost.stop();
     _developerGateway = null;
     _developerSession = null;
     _developerLinks = const [];
@@ -101,11 +109,13 @@ class GoCoreRuntime
       runController: developerRunController,
       capabilityTests: developerCapabilityTests,
       currentAuthor: developerAuthorProvider,
+      viewAvailability: _developerBackgroundHost.viewAvailability,
     );
-    _developerGateway = gateway;
-    _developerSession = gateway.session;
-    _developerLinks = await gateway.workspaceLinks();
     try {
+      await _developerBackgroundHost.start(port: gateway.session.port!);
+      _developerGateway = gateway;
+      _developerSession = gateway.session;
+      _developerLinks = await gateway.workspaceLinks();
       await _developerPreferences.save(
         DeveloperWorkspacePreference(
           port: gateway.session.port!,
@@ -115,6 +125,7 @@ class GoCoreRuntime
       );
     } on Object {
       await gateway.close();
+      await _developerBackgroundHost.stop();
       _developerGateway = null;
       _developerSession = null;
       _developerLinks = const [];
@@ -138,7 +149,11 @@ class GoCoreRuntime
     _developerGateway = null;
     _developerSession = null;
     _developerLinks = const [];
-    await gateway?.close();
+    try {
+      await gateway?.close();
+    } finally {
+      await _developerBackgroundHost.stop();
+    }
   }
 
   void reportDeveloperGameRunning({
@@ -183,6 +198,11 @@ class GoCoreRuntime
     String projectId,
     Future<void> Function() handler,
   ) => developerRunController.registerStopHandler(projectId, handler);
+
+  void Function() registerDeveloperGameJavaScriptExecutor(
+    String projectId,
+    DeveloperWebViewJavaScriptExecutor executor,
+  ) => developerRunController.registerJavaScriptExecutor(projectId, executor);
 
   @override
   Future<List<Uri>> developerWorkspaceLinks(DeveloperSession session) async {

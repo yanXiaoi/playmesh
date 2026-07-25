@@ -1,5 +1,6 @@
 import 'developer_ai_prompt_templates.dart';
 import 'developer_capability_test_service.dart';
+import 'developer_background_host.dart';
 import 'developer_project_catalog.dart';
 import 'developer_run_controller.dart';
 import 'developer_web_gateway_contract.dart';
@@ -20,6 +21,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
   String Function()? currentAuthor,
+  DeveloperViewAvailabilityProvider? viewAvailability,
   DateTime Function()? clock,
 }) {
   return implementation.startDeveloperWebGateway(
@@ -32,6 +34,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
     capabilityTests: capabilityTests,
     packageTransfer: packageTransfer,
     currentAuthor: currentAuthor,
+    viewAvailability: viewAvailability,
     clock: clock,
   );
 }

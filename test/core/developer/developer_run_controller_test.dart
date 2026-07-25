@@ -81,4 +81,43 @@ void main() {
       DeveloperRunPhase.running,
     );
   });
+
+  test('向当前游戏 WebView 执行 JavaScript 并返回结果', () async {
+    final controller = DeveloperRunController();
+    final sources = <String>[];
+    controller.reportRunning(projectId: 'com.example.game');
+    final unregister = controller.registerJavaScriptExecutor(
+      'com.example.game',
+      (source) async {
+        sources.add(source);
+        return {'title': 'Playmesh', 'count': 2};
+      },
+    );
+
+    final result = await controller.executeJavaScript(
+      'com.example.game',
+      '({title: document.title, count: 1 + 1})',
+    );
+
+    expect(sources, ['({title: document.title, count: 1 + 1})']);
+    expect(result, {'title': 'Playmesh', 'count': 2});
+
+    await expectLater(
+      controller.executeJavaScript('com.example.other', 'document.title'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('不属于项目 com.example.other'),
+        ),
+      ),
+    );
+    expect(sources, ['({title: document.title, count: 1 + 1})']);
+
+    unregister();
+    await expectLater(
+      controller.executeJavaScript('com.example.game', 'document.title'),
+      throwsStateError,
+    );
+  });
 }

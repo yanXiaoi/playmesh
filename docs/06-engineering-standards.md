@@ -37,6 +37,8 @@ Game Package
 - UI 只负责展示状态和传递用户意图，不直接拼接 HTTP、WebSocket 或本地文件路径。
 - Application Service 编排一个完整用例，例如创建会话、加入会话、启动游戏。
 - Repository/Client 负责外部通讯和持久化，不包含页面业务判断。
+- Android Developer Gateway 在开发者模式开启期间必须由用户可感知的 Foreground Service 持有同一个 FlutterEngine；锁屏和后台时只继续执行不依赖 Activity/View 的操作，关闭开发者模式时必须释放前台服务、CPU WakeLock 和 Wi-Fi Lock。
+- Developer API 是否依赖可见 View 必须声明在统一 `DeveloperOperationDefinition.requiresForegroundView` 元数据中，并同步进入 OpenAPI 和操作目录；禁止只在某个 Handler 内临时判断。后台、锁屏、熄屏或窗口失焦时统一返回 `409 app_view_unavailable` 和机器可读状态详情，不得等待超时或伪造成功。
 - Domain 负责用户、游戏声明、会话、玩家和输入事件的规则。
 - Go Handler 只负责解析请求、鉴权、调用服务和生成响应，不直接修改会话内部状态。
 - Game SDK 是游戏访问平台能力的唯一入口，游戏页面不直接调用 Flutter、Go、原生桥接或任意端口。
@@ -148,7 +150,7 @@ Game Package
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
-当前未发布开发线在 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `2.0.0+18`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `1.7.0` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
+当前未发布开发线在 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 

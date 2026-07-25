@@ -5,6 +5,8 @@ import 'developer_event_hub.dart';
 typedef DeveloperProjectLaunch = Future<void> Function(String projectId);
 typedef DeveloperProjectRestart = Future<void> Function();
 typedef DeveloperProjectStop = Future<void> Function();
+typedef DeveloperWebViewJavaScriptExecutor =
+    Future<Object?> Function(String source);
 
 enum DeveloperRunPhase { idle, starting, running, stopped, error }
 
@@ -45,6 +47,8 @@ class DeveloperRunController {
   final Map<String, DeveloperRunStatus> _statuses = {};
   final Map<String, DeveloperProjectRestart> _restartHandlers = {};
   final Map<String, DeveloperProjectStop> _stopHandlers = {};
+  final Map<String, DeveloperWebViewJavaScriptExecutor> _javaScriptExecutors =
+      {};
   var _runSequence = 0;
 
   DeveloperRunStatus? get activeStatus {
@@ -158,6 +162,32 @@ class DeveloperRunController {
       );
       rethrow;
     }
+  }
+
+  void Function() registerJavaScriptExecutor(
+    String projectId,
+    DeveloperWebViewJavaScriptExecutor executor,
+  ) {
+    _javaScriptExecutors[projectId] = executor;
+    return () {
+      if (identical(_javaScriptExecutors[projectId], executor)) {
+        _javaScriptExecutors.remove(projectId);
+      }
+    };
+  }
+
+  Future<Object?> executeJavaScript(String projectId, String source) async {
+    final active = activeStatus;
+    if (active == null ||
+        active.phase != DeveloperRunPhase.running ||
+        active.projectId != projectId) {
+      throw StateError('当前运行游戏的 WebView 不属于项目 $projectId');
+    }
+    final executor = _javaScriptExecutors[projectId];
+    if (executor == null) {
+      throw StateError('当前项目没有可执行 JavaScript 的运行中游戏 WebView');
+    }
+    return await executor(source);
   }
 
   DeveloperRunStatus status(String projectId) =>
