@@ -29,7 +29,7 @@ playmesh-cli dev
 
 `get` 拉取包内现有的 `main.json`、可选 `capabilities.json`、已有 `app/` 文件，并把目标 App 构建时生成的两套 SDK 与 `.d.ts` 放入 `playmesh/sdk/`。这是损坏项目自救通道，不执行 Manifest、能力或入口语义校验；只要 `main.json` 仍有有效 `id`，即使缺少 `app/` 也能拉回已有内容。项目根的 `app/` 与 `playmesh/` 直接镜像运行时 `/app/...` 与 `/playmesh/...` 两个 URL 空间，IDEA 能解析 HTML、JavaScript、CSS 中的绝对引用。`playmesh/` 只属于本地开发副本，不会出现在 App 安装目录或上传包中。
 
-`playmesh-cli create` 从统一能力注册表读取与网页 Dev Tool 相同的新建选项，调用现有 Developer API 创建项目后下载到当前空目录。`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新 `playmesh/sdk/` 到目标 App 当前版本，不支持选择历史版本。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。完整命令、目录和安全边界见 `dev-cli/README.md`。
+`playmesh-cli create` 从统一能力注册表读取与网页 Dev Tool 相同的新建选项，调用现有 Developer API 创建项目后下载到当前空目录。`playmesh-cli push` 直接把本地 `app/` 作为发布包内容上传；`playmesh-cli dev` 在提交后切换 App 运行项目并跟随日志；`playmesh-cli sdk` 只更新开发副本到目标 App 的最新版，不用于下载历史静态文件。`push/dev` 每次都从本地 SDK 文件读取版本，覆盖 `main.json.sdkVersion/appSdkVersion` 后再打包。已安装旧游戏不依赖 CLI 文件：App 运行时按清单版本从 Dart 注册表选择兼容发行版。完整命令、目录和安全边界见 `dev-cli/README.md`。
 
 ## 开发者工作区对话控制台
 

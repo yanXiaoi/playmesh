@@ -17,8 +17,8 @@ SDK：
 - playmesh.session.onStateChange(callback): 立即及后续接收会话快照，返回取消订阅函数。
 - playmesh.session.onPlayerJoin(callback)、onPlayerLeave(callback)、onPlayerReconnect(callback): 分别处理首次加入、掉线和同 ID 重连，均返回取消订阅函数。不要用昵称或 players 数组位置判断同一玩家。
 - playmesh.session.isAuthority(): 当前页面是否为创建并运行会话的 App Authority Client；玩家加入顺序不会改变结果。
-- playmesh.session.start(): 仅 Authority 请求开始满足人数条件的会话；SDK 没有内置“玩家准备”方法，准备状态由游戏通过 sync 输入和权威状态实现。
-- playmesh.session.finish(): 仅 Authority 在一局玩法真正结束时调用，使会话进入 stopped 并清理本局离线成员。不要把页面隐藏、临时断线或暂停当作游戏结束。
+- playmesh.session.start(): 仅 Authority 请求 Core 把满足基础人数条件的会话切换为 running。SDK 不判断准备、倒计时或玩法开始条件；这些业务状态由游戏通过 sync 输入和 Authority 权威状态实现。
+- playmesh.session.finish(): 仅 Authority 在游戏规则已确认本局真正结束后，请求 Core 切换为 stopped 并清理本局离线成员。SDK 不判断胜负或结束条件；不要把页面隐藏、临时断线或暂停当作游戏结束。
 - playmesh.player.getCurrent(): 当前 Player；公共显示端可能为 null。
 - playmesh.player.setNickname(name): 仅浏览器联机玩家可用，App WebView 和浏览器单机不可用；SDK 已提供昵称界面，游戏不重复制作昵称控件。
 - playmesh.sync.startAuthority(options): 仅 Authority 可用。initialState 必填；stateType 可选；tickRate 可选且默认为 10，必须是 1 至 20 的整数；onInput 和 onTick 均可选。

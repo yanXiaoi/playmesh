@@ -258,7 +258,7 @@ assert.equal(sdkBootstrap.binaryTransport, undefined);
 assert.equal(window.playmesh.session.isAuthority(), true);
 assert.equal(window.playmesh.player.getCurrent(), null);
 assert.equal(window.playmesh.session.getCurrent().joinCode, "ABC123");
-assert.equal(window.playmesh.version, "2.2.1");
+assert.equal(window.playmesh.version, "2.2.2");
 assert.equal((await window.playmesh.session.finish()).state, "stopped");
 assert.equal(window.playmesh.performance.getLatency() >= 0, true);
 assert.equal(

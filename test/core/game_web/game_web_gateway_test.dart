@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:playmesh/core/game_web/game_web_gateway.dart';
 import 'package:playmesh/core/game_web/local_tunnel_gateway.dart';
+import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
 import 'package:playmesh/models/game_summary.dart';
 
@@ -29,6 +30,8 @@ void main() {
       joinCode: 'ABC123',
       shareToken: 'share-token',
       gameName: '测试游戏',
+      gameSdkVersion: '1.4.2',
+      appSdkVersion: '1.2.1',
       requiredCapabilities: const ['sensor.accelerometer'],
       controllerRequiredCapabilities: const ['sensor.gyroscope'],
       storage: storage,
@@ -88,14 +91,16 @@ void main() {
     expect(appController.body, contains('"nickname":"App 玩家"'));
     expect(
       appController.body,
-      contains('http://127.0.0.1:45678/playmesh-app.js'),
+      contains('http://127.0.0.1:45678/playmesh-app.js?version=2.1.1'),
     );
     expect(
       appController.body,
       isNot(contains('/playmesh/sdk/v1/playmesh-app.js')),
     );
     expect(
-      appController.body.indexOf('http://127.0.0.1:45678/playmesh-app.js'),
+      appController.body.indexOf(
+        'http://127.0.0.1:45678/playmesh-app.js?version=2.1.1',
+      ),
       lessThan(appController.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
     );
 
@@ -119,6 +124,10 @@ void main() {
 
     final sdk = await http.get(base.resolve('/playmesh/sdk/v1/playmesh.js'));
     expect(sdk.statusCode, HttpStatus.ok);
+    expect(
+      sdk.body,
+      SdkFeatureRegistry.sdkFile('playmesh.js', version: '1.4.2'),
+    );
     expect(sdk.body, contains('global.playmesh = playmesh'));
     expect(sdk.body, isNot(contains('/playmesh/developer/log')));
 

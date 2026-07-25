@@ -1,11 +1,10 @@
 {
-  "listen": "0.0.0.0:16668",
+  "externalListen": "0.0.0.0:16668",
   "name": "Playmesh 公共游戏源",
   "author": "",
   "homepage": "",
   "supportsGameRelay": true,
   "auth": {
-    "token": "",
     "whitelist": [
       {
         "method": "GET",
@@ -16,6 +15,29 @@
         "path": "/relay/v1/client"
       }
     ]
+  },
+  "admin": {
+    "listen": "127.0.0.1:16669",
+    "captchaMode": "math",
+    "sessionTtlMinutes": 480,
+    "loginIntervalMilliseconds": 1000,
+    "captchaIntervalMilliseconds": 1000
+  },
+  "storage": {
+    "databasePath": "data/playmesh-server.db",
+    "gamesDirectory": "data/games",
+    "quarantineDirectory": "data/quarantine",
+    "maxUploadBytes": 67108864,
+    "maxExpandedBytes": 268435456,
+    "maxFileBytes": 67108864,
+    "maxFiles": 4096,
+    "maxCompressionRatio": 100,
+    "publicUploadIntervalSeconds": 60
+  },
+  "scanner": {
+    "clamScanPath": "clamscan",
+    "required": true,
+    "timeoutSeconds": 120
   },
   "relay": {
     "publicBaseUrl": "http://127.0.0.1:16668",

@@ -11,6 +11,7 @@ import '../storage/game_storage_service.dart';
 import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../capabilities/default_capability_plugins.dart';
+import '../game_sdk/sdk_feature_registry.dart';
 import 'game_web_gateway_contract.dart';
 import 'local_tunnel_gateway_contract.dart';
 
@@ -24,6 +25,8 @@ Future<GameWebGateway> startGameWebGateway({
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
   String gameName = 'Playmesh 游戏',
+  String? gameSdkVersion,
+  String? appSdkVersion,
   List<String> requiredCapabilities = const [],
   List<String> controllerRequiredCapabilities = const [],
   Uri? coreEndpoint,
@@ -45,6 +48,12 @@ Future<GameWebGateway> startGameWebGateway({
   if (multiplayer && (coreEndpoint == null || joinCode?.isNotEmpty != true)) {
     throw const FormatException('联机分享缺少 Core 地址或联机码');
   }
+  final resolvedGameSdkVersion = SdkFeatureRegistry.resolveGameSdkVersion(
+    gameSdkVersion,
+  );
+  final resolvedAppSdkVersion = SdkFeatureRegistry.resolveAppSdkVersion(
+    appSdkVersion,
+  );
   _appRelativeHtmlEntry(gameEntryPath, field: 'entries.game');
   _appRelativeHtmlEntry(controllerEntryPath, field: 'entries.controller');
   final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
@@ -60,6 +69,8 @@ Future<GameWebGateway> startGameWebGateway({
     gameEntryPath: gameEntryPath,
     controllerEntryPath: controllerEntryPath,
     gameName: gameName,
+    gameSdkVersion: resolvedGameSdkVersion,
+    appSdkVersion: resolvedAppSdkVersion,
     requiredCapabilities: List.unmodifiable(requiredCapabilities),
     controllerRequiredCapabilities: List.unmodifiable(
       controllerRequiredCapabilities,
@@ -86,6 +97,8 @@ class _IoGameWebGateway implements GameWebGateway {
     required this.gameEntryPath,
     required this.controllerEntryPath,
     required this.gameName,
+    required this.gameSdkVersion,
+    required this.appSdkVersion,
     required this.requiredCapabilities,
     required this.controllerRequiredCapabilities,
     required this.coreEndpoint,
@@ -105,6 +118,8 @@ class _IoGameWebGateway implements GameWebGateway {
   final String gameEntryPath;
   final String controllerEntryPath;
   final String gameName;
+  final String gameSdkVersion;
+  final String appSdkVersion;
   final List<String> requiredCapabilities;
   final List<String> controllerRequiredCapabilities;
   final Uri? coreEndpoint;
@@ -259,7 +274,7 @@ class _IoGameWebGateway implements GameWebGateway {
     if (request.uri.queryParameters['playmeshApp'] == '1') {
       final appSdkUri = _localAppSdkUri(
         request.uri.queryParameters['playmeshAppSdkUrl'],
-      );
+      ).replace(queryParameters: {'version': appSdkVersion});
       final appSdkSource = const HtmlEscape(
         HtmlEscapeMode.attribute,
       ).convert(appSdkUri.toString());
@@ -307,6 +322,19 @@ class _IoGameWebGateway implements GameWebGateway {
       await file.openRead().pipe(request.response);
       return;
     }
+    if (path.startsWith('/playmesh/')) {
+      final liveSdk = SdkFeatureRegistry.sdkFileForPublicPath(
+        path.substring('/playmesh/'.length),
+        gameVersion: gameSdkVersion,
+        appVersion: appSdkVersion,
+      );
+      if (liveSdk != null) {
+        request.response.headers.contentType = _contentType(path);
+        request.response.write(liveSdk);
+        await request.response.close();
+        return;
+      }
+    }
     final assetPath = path.startsWith('/app/')
         ? '$gameRootAssetPath/app/${path.substring('/app/'.length)}'
         : 'assets/playmesh-library/public/'
@@ -333,10 +361,7 @@ class _IoGameWebGateway implements GameWebGateway {
         .map(
           (base) => base.replace(
             path: '/$_pageEntryPath',
-            queryParameters: {
-              'channelId': channelId,
-              'token': shareToken,
-            },
+            queryParameters: {'channelId': channelId, 'token': shareToken},
           ),
         )
         .toList(growable: false);
@@ -448,6 +473,9 @@ Future<void> _text(HttpResponse response, int status, String body) async {
 ContentType _contentType(String path) {
   if (path.endsWith('.html')) {
     return ContentType.html;
+  }
+  if (path.endsWith('.d.ts')) {
+    return ContentType.text;
   }
   if (path.endsWith('.js')) {
     return ContentType('text', 'javascript', charset: 'utf-8');

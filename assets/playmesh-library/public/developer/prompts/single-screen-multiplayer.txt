@@ -54,4 +54,4 @@ document.querySelector("#action").addEventListener("click", async () => {
 });
 playmesh.sync.observe((snapshot) => render(snapshot.state));
 
-单屏多人没有公共显示端供玩家手动点击的“开始游戏”按钮。玩家从控制器提交准备状态；Authority 在权威 onInput/onTick 中确认人数和准备状态满足条件后调用并捕获 playmesh.session.start() 的错误。不得假设 SDK 存在 readyPlayer、setReady 等未声明方法。
+单屏多人没有公共显示端供玩家手动点击的“开始游戏”按钮。玩家从控制器提交准备状态；Authority 在权威 onInput/onTick 中自行判断人数、准备状态和倒计时，再调用并捕获 playmesh.session.start() 的错误。该方法只请求 Core 切换基础会话状态，不替游戏判断业务条件；不得假设 SDK 存在 readyPlayer、setReady 等未声明方法。

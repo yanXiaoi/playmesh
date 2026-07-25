@@ -123,9 +123,16 @@ Game Package
 - HTTP 接口使用 OpenAPI，数据、事件和错误使用 JSON Schema；每个接口记录权限、风险等级、幂等性、重试规则和示例。
 - `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。WebView 必须按当前页面角色在方向应用完成后创建，进入全屏时把对应方向传到原生宿主，退出游戏后恢复系统方向。
 - `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描，分别显示“佚名”和“无”，有时间值时按设备本地时区换算。
-- `sdkVersion` 用于声明游戏包要求的当前 Game SDK 版本；开发期只接受当前实现明确支持的版本，不能静默降级。
-- SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本，但开发期版本号不承诺向后兼容。
-- 协议字段、语义或入口变化时必须升级版本，并在同一次变更中删除旧实现和旧契约。
+- `sdkVersion/appSdkVersion` 用于声明游戏包要求的 SDK 版本；运行时必须通过统一 Dart
+  发行注册表选择明确兼容的 bundle，不能静默改用未声明兼容的版本。
+- SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本。`PATCH/MINOR` 必须保持已注册范围内向后
+  兼容；`MAJOR` 可以不兼容，但必须保留仍受支持的旧 Dart 发行快照。
+- Dart 执行器通过 `supportedVersions` 自行声明适用 bundle；未改变调用契约时以
+  `SdkVersionRange.last` 作为开放上界。相同命令名允许分版本注册，但同一版本不能
+  同时命中两个执行器。
+- 参数、消息结构、返回值、事件、错误语义或入口发生不兼容变化时必须升级主版本，
+  封口旧执行器范围并注册不重叠的新范围；旧游戏继续选择旧发行版，不能由静态 JS、
+  文件读取或 Bridge 分支形成旁路。
 
 ## 版本与升级策略
 
@@ -143,18 +150,20 @@ Game Package
 | --- | --- | --- |
 | Playmesh App | `1.6.1+8` | `pubspec.yaml` |
 | Go Core | `0.2.0` | `go-core/main.go`、`go-core/mobile/core.go` |
-| Game SDK | `1.4.2` | `sdk-src/playmesh.ts` 及生成的 JS、类型、Manifest 与 Schema |
-| App Bridge SDK | `1.2.1` | `sdk-src/playmesh-app.ts` 及生成的 JS、类型与 App 注入配置 |
+| Game SDK | `1.4.2` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
+| App Bridge SDK | `1.2.1` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
 | Developer API / OpenAPI | `1.4.0` | Developer Gateway 契约 |
 | Developer CLI | `1.1.0` | `dev-cli/`、`playmesh-cli` 文件名、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
 | Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
 
-当前未发布开发线在 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
+当前发布线在 `docs/version/2.2.0.md` 与 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `2.2.0+21`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.2`、App Bridge SDK `2.1.1`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.1.0` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 
-Game SDK 与 App Bridge SDK 的唯一手写源分别是 `assets/playmesh-library/sdk-src/playmesh.ts` 和 `playmesh-app.ts`。正式构建先执行 `tool/generate_sdk.ps1`，生成 `public/sdk/v1/` 下的 `.js`、`.d.ts` 以及 Dart 版本常量；运行时注入、IDEA 类型提示、Developer Gateway 下载和版本校验只能使用这些生成产物。一次版本变更必须同步更新代码常量、默认模板、机器契约、编辑器补全、测试断言和开发文档，并在版本或验证记录中写明升级原因。App、SDK、默认骨架、示例契约、AI 提示词和项目校验器始终只维护一套当前版本；版本升级后，不提供旧 SDK 入口、兼容矩阵、字段适配、自动迁移或双写逻辑。
+Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。每个命令执行器必须声明 `supportedVersions`，未改变调用契约的实现以 `SdkVersionRange.last` 表示持续支持后续已注册最新版。命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时按 `main.json` 声明解析 Game/App bundle，SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。只有调用契约发生不兼容变化时，才冻结旧范围并可在 `features/game/v3/`、`features/app/v3/` 等版本目录注册新实现；未变化的旧 feature 不复制、不改版本上界。
+
+开发运行时、游戏资源网关、分享网关、本地 App SDK 服务、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `tool/generate_sdk.ps1`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、兼容范围、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架、Schema、AI 提示词和开发下载只暴露最新版；已安装旧游戏运行时按其清单版本选择已注册的兼容发行版，不依赖历史静态文件、字段双写或网关旁路。
 
 ## 错误和日志
 

@@ -97,7 +97,7 @@ void main() {
     await tester.tap(find.text('设置').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 2.1.1'), findsOneWidget);
+    expect(find.text('Playmesh 2.2.0'), findsOneWidget);
     expect(find.text('Go Core'), findsOneWidget);
   });
 

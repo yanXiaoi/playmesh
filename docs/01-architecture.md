@@ -695,8 +695,8 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
   "name": "多人抢答",
   "remarks": "局域网多人抢答游戏",
   "version": "0.1.0",
-  "sdkVersion": "2.1.0",
-  "appSdkVersion": "2.0.0",
+  "sdkVersion": "2.2.2",
+  "appSdkVersion": "2.1.1",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "players": {
@@ -730,7 +730,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 - `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
 - `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。单屏多人还必须声明 `controllerOrientation`，其他显示模式禁止声明。App 必须在创建游戏 WebView 前按当前角色应用方向，并在退出游戏后恢复系统方向。
-- `sdkVersion` 和 `appSdkVersion` 用于检查游戏与两套平台 SDK 的兼容性，当前模板分别使用 `2.2.1` 和 `2.1.0`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。
+- `sdkVersion` 和 `appSdkVersion` 用于选择游戏要求的两套平台 SDK 兼容发行版，当前模板分别使用 `2.2.2` 和 `2.1.1`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。运行时按注册表中的明确范围解析到不可变 Dart bundle，未注册版本拒绝启动。
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。`required` 用于主游戏页面，单屏多人可用 `controllerRequired` 独立声明控制器页面需求；能力 ID 按功能命名，不绑定 App 或浏览器实现，平台按运行角色和环境选择适配器。
 - 平台能力由 `lib/core/capabilities/` 下的插件注册表统一维护。每个能力拥有独立目录，并在同一插件中定义描述符、`apiVersion`、方法、事件、可用性、实例创建、自检与释放；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。Flutter 不支持运行时目录扫描，新增插件后只需在默认注册入口增加该插件，不再维护平行元数据或测试适配器。
 - 当前支持声明 `sensor.accelerometer`、`sensor.gyroscope` 和 `device.vibration`。文件缺失或 `required` 为空时不弹确认框；非空时主 SDK 在 App 和浏览器每次加载游戏时展示全部所需能力，并等待用户“同意并进入”或“拒绝并退出”。当前平台不支持的能力显示“本平台暂不支持”，但不会阻止同意后进入。授权结果不持久化，也不写入权威主机。
@@ -745,12 +745,15 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 
 ## SDK 与组件版本策略
 
-后续所有更改都必须评估受影响组件并按需升级版本号，完整规则和当前版本矩阵见 `docs/06-engineering-standards.md`。Game SDK 与 App Bridge SDK 分别以 `sdk-src/playmesh.ts`、`sdk-src/playmesh-app.ts` 为唯一手写源，构建生成运行 JS、`.d.ts`、版本常量和关联契约。App、默认项目骨架、Schema、Manifest、OpenAPI、AI 提示词和校验器始终只维护一套当前契约。`sdkVersion/appSdkVersion` 不用于选择历史兼容层。
+后续所有更改都必须评估受影响组件并按需升级版本号，完整规则和当前版本矩阵见 `docs/06-engineering-standards.md`。Game SDK 与 App Bridge SDK 以 `lib/core/game_sdk/features/` 下注册的 Dart feature 为唯一手写源；同一 feature 文件同时保存网页端 TypeScript 片段和对应宿主命令执行器，`sdk_feature_registry.dart` 是唯一注册位置。运行时按 `sdkVersion/appSdkVersion` 从注册表选择兼容发行版并直接组装 JS、`.d.ts` 与版本，构建再按注册顺序落盘 `sdk-src/*.ts`、公开 JS、`.d.ts` 和关联契约，并校验网页端发出的命令与当前 bundle 可用的 Dart 执行器集合一致。每个执行器自行声明 `supportedVersions`；调用契约未变时以 `SdkVersionRange.last` 自动覆盖未来已注册最新版。相同命令允许按不重叠范围提供不同执行器，注册时禁止同一版本出现解析歧义。只有调用契约不兼容时才封口旧范围，并可在 v3 等版本目录新增实现；未改变的 feature 不复制。默认项目骨架、Schema、Manifest、OpenAPI、AI 提示词和校验器只维护最新契约，但已安装旧游戏继续由其声明版本选择旧兼容发行版。
 
 规则：
 
-- 契约调整后直接更新当前 SDK 版本及全部关联资源。
-- 不保留旧 SDK 入口、字段别名、消息适配器、迁移器或双写逻辑。
+- 兼容契约调整后更新当前 SDK 版本、发行范围及全部关联资源；已有执行器保持
+  `SdkVersionRange.last`。
+- 不兼容调整新增主版本和发行范围，封口受影响旧执行器并注册新执行器；URL 仍保持
+  统一入口。
+- 不通过字段别名、静态 SDK、消息适配器、迁移器或双写逻辑伪造兼容。
 - 与当前版本不一致的开发数据可以清理，并使用当前模板重新生成。
 - 启动前必须检查受支持的 SDK 主版本、权限和协议能力；不允许静默降级或伪造能力。
 
@@ -839,8 +842,8 @@ MVP 建议默认关闭普通浏览器发布，由用户在每次游玩时单独�
   "author": "小明",
   "lastModifiedAt": 1784851200000,
   "version": "0.1.0",
-  "sdkVersion": "2.2.1",
-  "appSdkVersion": "2.1.0",
+  "sdkVersion": "2.2.2",
+  "appSdkVersion": "2.1.1",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": ["multiplayer"],

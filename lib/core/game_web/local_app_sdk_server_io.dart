@@ -1,26 +1,20 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/services.dart';
-
+import '../game_sdk/sdk_feature_registry.dart';
 import 'local_app_sdk_server_contract.dart';
 
-const _appSdkAssetPath =
-    'assets/playmesh-library/public/sdk/v1/playmesh-app.js';
-
-Future<LocalAppSdkServer> startLocalAppSdkServer({String? scriptSource}) async {
-  final source = scriptSource ?? await rootBundle.loadString(_appSdkAssetPath);
+Future<LocalAppSdkServer> startLocalAppSdkServer() async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-  final result = _IoLocalAppSdkServer(server, source);
+  final result = _IoLocalAppSdkServer(server);
   result.start();
   return result;
 }
 
 class _IoLocalAppSdkServer implements LocalAppSdkServer {
-  _IoLocalAppSdkServer(this.server, this.source);
+  _IoLocalAppSdkServer(this.server);
 
   final HttpServer server;
-  final String source;
   StreamSubscription<HttpRequest>? _subscription;
 
   @override
@@ -43,7 +37,28 @@ class _IoLocalAppSdkServer implements LocalAppSdkServer {
       if (request.method != 'GET' || request.uri.path != scriptUri.path) {
         request.response.statusCode = HttpStatus.notFound;
       } else {
-        request.response.write(source);
+        final unexpectedParameters = request.uri.queryParameters.keys.where(
+          (name) => name != 'version',
+        );
+        if (unexpectedParameters.isNotEmpty) {
+          request.response.statusCode = HttpStatus.badRequest;
+          request.response.write('App SDK 请求参数无效');
+        } else {
+          try {
+            request.response.write(
+              SdkFeatureRegistry.sdkFile(
+                'playmesh-app.js',
+                version: request.uri.queryParameters['version'],
+              ),
+            );
+          } on FormatException catch (error) {
+            request.response.statusCode = HttpStatus.badRequest;
+            request.response.write(error.message);
+          } on UnsupportedError catch (error) {
+            request.response.statusCode = HttpStatus.badRequest;
+            request.response.write(error.message);
+          }
+        }
       }
       await request.response.close();
     });

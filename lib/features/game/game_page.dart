@@ -617,6 +617,12 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         gameEntryPath: widget.game.entry.gameEntryPath,
         controllerEntryPath: widget.game.entry.controllerEntryPath,
         gameName: widget.game.name,
+        gameSdkVersion: widget.game.sdkVersion.isEmpty
+            ? null
+            : widget.game.sdkVersion,
+        appSdkVersion: widget.game.appSdkVersion.isEmpty
+            ? null
+            : widget.game.appSdkVersion,
         requiredCapabilities: widget.game.capabilities.required.toList(),
         controllerRequiredCapabilities: widget
             .game

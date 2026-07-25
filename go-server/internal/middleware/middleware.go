@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,15 +13,24 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-server/internal/config"
+	"go-server/internal/store"
 )
 
-const sourceAuthenticatedKey = "playmesh.source_authenticated"
+const (
+	sourceAuthenticatedKey = "playmesh.source_authenticated"
+	catalogStatusKey       = "playmesh.catalog_status"
+)
 
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := strings.TrimSpace(c.GetHeader("X-Request-ID"))
-		if requestID == "" {
-			requestID = time.Now().UTC().Format("20060102T150405.000000000")
+		if requestID == "" || len(requestID) > 128 {
+			value := make([]byte, 16)
+			if _, err := rand.Read(value); err == nil {
+				requestID = hex.EncodeToString(value)
+			} else {
+				requestID = time.Now().UTC().Format("20060102T150405.000000000")
+			}
 		}
 		c.Header("X-Request-ID", requestID)
 		c.Set("requestID", requestID)
@@ -42,12 +53,26 @@ func AccessLog(logger *slog.Logger) gin.HandlerFunc {
 	}
 }
 
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		c.Header("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "+
+				"base-uri 'none'; form-action 'self'")
+		c.Next()
+	}
+}
+
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Headers",
 			"Authorization, Content-Type, X-Playmesh-Host-Lease, X-Playmesh-Join-Capability")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -56,27 +81,34 @@ func CORS() gin.HandlerFunc {
 	}
 }
 
-func SourceToken(auth config.Auth) gin.HandlerFunc {
-	token := strings.TrimSpace(auth.Token)
+// CatalogToken authenticates both App tokens and records which package status
+// the request may read. Whitelist entries are exact method/path pairs.
+func CatalogToken(auth config.Auth) gin.HandlerFunc {
+	publishedToken := strings.TrimSpace(auth.PublishedToken)
+	if publishedToken == "" {
+		publishedToken = strings.TrimSpace(auth.Token)
+	}
+	reviewToken := strings.TrimSpace(auth.ReviewToken)
 	whitelist := make(map[string]struct{}, len(auth.Whitelist))
 	for _, entry := range auth.Whitelist {
 		whitelist[strings.ToUpper(strings.TrimSpace(entry.Method))+" "+entry.Path] = struct{}{}
 	}
 	return func(c *gin.Context) {
-		if token == "" {
-			c.Set(sourceAuthenticatedKey, true)
-			c.Next()
-			return
-		}
 		if _, ok := whitelist[c.Request.Method+" "+c.Request.URL.Path]; ok {
+			c.Set(catalogStatusKey, store.StatusApproved)
 			c.Next()
 			return
 		}
-		provided := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
-		if !secureEqual(provided, token) {
+		provided, ok := bearerToken(c.GetHeader("Authorization"))
+		switch {
+		case ok && SecureEqual(provided, publishedToken):
+			c.Set(catalogStatusKey, store.StatusApproved)
+		case ok && SecureEqual(provided, reviewToken):
+			c.Set(catalogStatusKey, store.StatusPending)
+		default:
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error":   "unauthorized",
-				"message": "需要有效的 Bearer Token",
+				"message": "需要有效的正式发布或待审核 Bearer Token",
 			})
 			return
 		}
@@ -85,11 +117,81 @@ func SourceToken(auth config.Auth) gin.HandlerFunc {
 	}
 }
 
-func secureEqual(left, right string) bool {
-	if len(left) != len(right) {
+// SourceToken keeps the older middleware entry point while using dual-token
+// semantics.
+func SourceToken(auth config.Auth) gin.HandlerFunc {
+	return CatalogToken(auth)
+}
+
+func CatalogStatus(c *gin.Context) string {
+	value := c.GetString(catalogStatusKey)
+	if value == store.StatusPending {
+		return store.StatusPending
+	}
+	return store.StatusApproved
+}
+
+func BearerToken(c *gin.Context) (string, bool) {
+	return bearerToken(c.GetHeader("Authorization"))
+}
+
+func bearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	token = strings.TrimSpace(token)
+	return token, token != ""
+}
+
+func SecureEqual(left, right string) bool {
+	if len(left) != len(right) || len(left) == 0 {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
+}
+
+type IntervalLimiter struct {
+	mutex    sync.Mutex
+	interval time.Duration
+	lastSeen map[string]time.Time
+}
+
+func NewIntervalLimiter(interval time.Duration) *IntervalLimiter {
+	return &IntervalLimiter{interval: interval, lastSeen: make(map[string]time.Time)}
+}
+
+func (l *IntervalLimiter) Allow(key string) bool {
+	now := time.Now()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if previous, ok := l.lastSeen[key]; ok && now.Sub(previous) < l.interval {
+		return false
+	}
+	l.lastSeen[key] = now
+	if len(l.lastSeen) > 10000 {
+		cutoff := now.Add(-10 * l.interval)
+		for candidate, seen := range l.lastSeen {
+			if seen.Before(cutoff) {
+				delete(l.lastSeen, candidate)
+			}
+		}
+	}
+	return true
+}
+
+func RateLimit(limiter *IntervalLimiter, scope string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !limiter.Allow(scope + ":" + c.ClientIP()) {
+			c.Header("Retry-After", "1")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":   "rate_limited",
+				"message": "请求过于频繁，请稍后重试",
+			})
+			return
+		}
+		c.Next()
+	}
 }
 
 type IPLimiter struct {
@@ -122,4 +224,14 @@ func (l *IPLimiter) Acquire(ip string) (func(), bool) {
 			}
 		})
 	}, true
+}
+
+func (l *IPLimiter) Current() int {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	total := 0
+	for _, count := range l.inUse {
+		total += count
+	}
+	return total
 }

@@ -1,4 +1,5 @@
 import 'game_summary.dart';
+import '../core/game_sdk/sdk_feature_registry.dart';
 
 enum GameMode {
   solo('solo'),
@@ -81,14 +82,14 @@ class GameManifest {
           );
     final version = _requiredVersion(json, 'version');
     final sdkVersion = _requiredVersion(json, 'sdkVersion');
-    if (!sdkVersion.startsWith('1.') && !sdkVersion.startsWith('2.')) {
-      throw const FormatException('当前 App 只支持 1.x 或 2.x Game SDK');
-    }
     final appSdkVersion = json['appSdkVersion'] == null
         ? '1.0.0'
         : _requiredVersion(json, 'appSdkVersion');
-    if (!appSdkVersion.startsWith('1.') && !appSdkVersion.startsWith('2.')) {
-      throw const FormatException('当前 App 只支持 1.x 或 2.x App SDK');
+    try {
+      SdkFeatureRegistry.resolveGameSdkVersion(sdkVersion);
+      SdkFeatureRegistry.resolveAppSdkVersion(appSdkVersion);
+    } on UnsupportedError catch (error) {
+      throw FormatException(error.message ?? error.toString());
     }
 
     final orientation = GameOrientation.fromManifestValue(

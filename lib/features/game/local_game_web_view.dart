@@ -21,6 +21,8 @@ class LocalGameWebView extends StatefulWidget {
     this.gameRootAssetPath,
     this.gameRootFilePath,
     required this.title,
+    this.gameSdkVersion,
+    this.appSdkVersion,
     this.bridge,
     this.localUserId = 'u_local',
     this.localNickname = '本机玩家',
@@ -33,6 +35,8 @@ class LocalGameWebView extends StatefulWidget {
   final String? gameRootAssetPath;
   final String? gameRootFilePath;
   final String title;
+  final String? gameSdkVersion;
+  final String? appSdkVersion;
   final GameSdkBridge? bridge;
   final String localUserId;
   final String localNickname;
@@ -86,6 +90,8 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         gameRootAssetPath: widget.gameRootAssetPath,
         gameRootFilePath: widget.gameRootFilePath,
         entryAssetPath: widget.assetPath,
+        gameSdkVersion: widget.gameSdkVersion,
+        appSdkVersion: widget.appSdkVersion,
         storage: storage,
       );
       _assetGateway = gateway;

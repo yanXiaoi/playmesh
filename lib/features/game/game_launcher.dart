@@ -81,6 +81,12 @@ class _GameLauncherState extends State<GameLauncher> {
           gameRootAssetPath: fileRoot == null ? package?.rootAssetPath : null,
           gameRootFilePath: fileRoot,
           title: widget.game.name,
+          gameSdkVersion: widget.game.sdkVersion.isEmpty
+              ? null
+              : widget.game.sdkVersion,
+          appSdkVersion: widget.game.appSdkVersion.isEmpty
+              ? null
+              : widget.game.appSdkVersion,
           bridge: widget.bridge,
           localUserId: widget.localUserId,
           localNickname: widget.localNickname,

@@ -29,19 +29,20 @@ class _SdkBundleOperation implements _DeveloperHttpOperation {
       'playmesh.d.ts',
       'playmesh-app.d.ts',
     ];
-    final files = <String, String>{};
-    for (final name in names) {
-      final data = await rootBundle.load(
-        'assets/playmesh-library/public/sdk/v1/$name',
-      );
-      files[name] = base64Encode(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-      );
-    }
+    final files = <String, String>{
+      for (final name in names)
+        name: base64Encode(utf8.encode(SdkFeatureRegistry.sdkFile(name))),
+    };
     await _json(request.response, HttpStatus.ok, {
       'requestId': requestId,
-      'gameSdkVersion': generatedGameSdkVersion,
-      'appSdkVersion': generatedAppSdkVersion,
+      'gameSdkVersion': SdkFeatureRegistry.gameSdkVersion,
+      'appSdkVersion': SdkFeatureRegistry.appSdkVersion,
+      'gameSdkCompatibility': SdkFeatureRegistry.gameSdkReleases
+          .map((release) => release.toJson())
+          .toList(),
+      'appSdkCompatibility': SdkFeatureRegistry.appSdkReleases
+          .map((release) => release.toJson())
+          .toList(),
       'encoding': 'base64',
       'files': files,
     });

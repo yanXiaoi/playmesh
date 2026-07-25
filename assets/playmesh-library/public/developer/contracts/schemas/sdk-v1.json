@@ -421,7 +421,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "2.2.1"
+          "const": "2.2.2"
         },
         "isAuthority": {
           "type": "boolean"

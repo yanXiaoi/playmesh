@@ -26,11 +26,13 @@ PLAYMESH 对话 AI 游戏开发提示
 - `dangerous=true` 的接口只在用户需求确实要求该操作时生成；执行时平台会暂停并请求开发者审批。
 
 【SDK 与能力】
+- 当前 Game SDK 版本字符串，当前为 2.2.2。
 - 本提示随后附带同一次 SDK 构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`，它们是方法、参数、返回值、类型、版本和中文 JSDoc 的唯一事实源。不得臆造声明中不存在的成员。
 - `playmesh.storage.getBucket(name)` 返回 Bucket；JSON 数据保持私有，上传文件通过返回的 `/bucket/...` 地址在运行时读取。
 - `playmesh.binary` 只用于多人原始 Uint8Array 通信；禁止自行创建 WebSocket。
 - `playmesh.app` 表示当前设备身份与平台能力。等待 `playmesh.ready` 后，通过 `playmesh.app.capabilities.getRegistry/getDeclared/getAvailable` 读取状态，再用 `create(code, options)` 创建已声明能力实例。
 - 项目根可选 `capabilities.json` 中，`required` 属于主画面，`controllerRequired` 只属于单屏多人控制器；每个页面只能使用自身角色声明的能力。
+- SDK 只提供通信、存储、平台能力和受控会话状态切换。准备、倒计时、开始条件、回合推进、胜负与结束条件必须由游戏 Authority 判断；`session.start/finish` 只提交 Core 会话状态请求，不替游戏执行玩法规则。
 
 【交付检查】
 - 只修改或创建当前项目真正需要的文件。

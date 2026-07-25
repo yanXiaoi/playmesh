@@ -11,7 +11,7 @@ import '../../models/game_capabilities.dart';
 import '../../models/game_summary.dart';
 import '../../models/local_game_entry.dart';
 import '../game_package/game_package_transfer_service.dart';
-import '../game_sdk/generated_sdk_versions.dart';
+import '../game_sdk/sdk_feature_registry.dart';
 import '../network/lan_endpoint_resolver.dart';
 import 'developer_ai_prompt_templates.dart';
 import 'developer_capability_test_service.dart';

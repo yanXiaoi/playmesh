@@ -111,6 +111,15 @@ Future<void> _servePublicAsset(HttpRequest request, String route) async {
   if (relativePath.isEmpty || relativePath.split('/').contains('..')) {
     throw const FormatException('平台资源路径无效');
   }
+  final liveSdk = SdkFeatureRegistry.sdkFileForPublicPath(relativePath);
+  if (liveSdk != null) {
+    request.response.headers.contentType = ContentType.parse(
+      _publicContentType(relativePath),
+    );
+    request.response.write(liveSdk);
+    await request.response.close();
+    return;
+  }
   final data = await rootBundle.load(
     'assets/playmesh-library/public/$relativePath',
   );

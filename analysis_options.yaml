@@ -13,6 +13,12 @@ analyzer:
   # This directory is a staging package template. Its paths only become valid
   # after build_release.ps1 copies it beside the application lib/assets trees.
   exclude:
+    # Release staging mirrors are generated from source and may target another
+    # Flutter/Dart toolchain. Analyze the real source tree, not prior artifacts.
+    - build/**
+    # This standalone compatibility package keeps a lower Dart SDK floor and is
+    # validated by the Harmony build instead of the root app analyzer.
+    - ohos/share_plus_compat/**
     - tool/harmony/**
 
 linter:

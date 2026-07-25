@@ -11,7 +11,7 @@
 - `docs/status/phase-05-complete.md`
 - `docs/status/phase-06-complete.md`
 
-当前保持 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。当前开发版本为 App `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1`，Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的游戏侧公共 API 保持不变。第六阶段后不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和 CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
+当前保持 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0` 正式基线。当前开发版本为 App `2.2.0+21`、Go Core `0.4.0`、Core 协议 `1.2.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.1.0`，Game SDK `2.2.2` 与 App Bridge SDK `2.1.1` 的游戏侧公开方法保持不变。第六阶段后不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和 CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
 
 ## 当前稳定基线
 
@@ -75,7 +75,7 @@ OpenHarmony Public SDK 不包含 HMS `@kit.ScanKit`，因此当前鸿蒙包的�
 
 第六阶段已于 2026-07-18 完成。加入 App 不再要求预装游戏，而是直接加载权威主机提供的当前入口；游戏与控制器的全屏请求不再参与运行前置条件，失败时只提示，并可在 WebView 悬浮工具中按需进入或退出。Android 已接通系统文件打开/分享入口：压缩包复用 Playmesh 包导入，单个 HTML 使用无 SDK 的独立 WebView，游戏包导出交给系统保存或分享。
 
-运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。当前 Game SDK 为 `2.2.1`，App Bridge SDK 为 `2.1.0`；能力统一通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`。单屏多人按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
+运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。当前 Game SDK 为 `2.2.2`，App Bridge SDK 为 `2.1.1`；能力统一通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`。单屏多人按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 

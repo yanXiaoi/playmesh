@@ -1,6 +1,6 @@
 # Game SDK / App 能力插件 API
 
-本文记录 Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 的公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`sdk-src/playmesh.ts` 和 `sdk-src/playmesh-app.ts` 是唯一手写源；构建生成 `/playmesh/sdk/v1/*.js` 与 `.d.ts`，内置工作区、AI 项目提示词和 CLI/IDEA 均使用这些同源产物。
+本文记录 Game SDK `2.2.2` 与 App Bridge SDK `2.1.1` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 明确兼容 `1.0.0-2.2.2` 请求，当前 App SDK 明确兼容 `1.0.0-2.1.1` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -49,7 +49,7 @@ Authority 面向游戏只公开 `/app/**`、`/bucket/**`、`/playmesh/**` 资源
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "2.2.1"
+console.log(playmesh.version); // "2.2.2"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若当前页面角色在 `capabilities.json` 中对应的能力列表非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
@@ -148,11 +148,11 @@ const offReconnect = playmesh.session.onPlayerReconnect(({ player, session, isCu
 
 ### `playmesh.session.start()`
 
-请求把满足开始条件的会话切换为运行状态，返回 Promise。普通游戏可在 Authority 规则确认开始后调用；大屏游戏应由全员准备和 Authority 倒计时触发，不能在公共显示端提供玩家可点击的开始按钮。
+仅请求 Core 把满足基础状态与人数约束的会话切换为 `running`，返回 Promise。SDK 不判断准备、倒计时或玩法开始条件；这些业务规则必须由游戏 Authority 自行维护并确认后调用。大屏游戏应由控制器提交准备状态，再由 Authority 倒计时触发，不能在公共显示端提供玩家可点击的开始按钮。
 
 ### `playmesh.session.finish()`
 
-仅 Authority 可调用。把本局切换为 `stopped` 并自动释放所有已掉线成员；仍在线玩家继续保留，可在下一局再次开始。Core 仅在 `running` 或 `paused` 状态保留 `connected: false` 的掉线玩家；大厅掉线、`finish()`、App 重置或重新开始都会自动清理离线席位，因此游戏不需要自行维护幽灵成员列表。
+仅 Authority 可调用，并且应由游戏规则先确认胜负或本局结束；SDK 本身不判断结束条件。该请求把基础会话切换为 `stopped` 并自动释放所有已掉线成员；仍在线玩家继续保留，可在下一局再次开始。Core 仅在 `running` 或 `paused` 状态保留 `connected: false` 的掉线玩家；大厅掉线、`finish()`、App 重置或重新开始都会自动清理离线席位，因此游戏不需要自行维护幽灵成员列表。
 
 ## 玩家
 

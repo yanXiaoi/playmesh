@@ -5,6 +5,5 @@ import 'local_app_sdk_server_stub.dart'
 
 export 'local_app_sdk_server_contract.dart';
 
-Future<LocalAppSdkServer> startLocalAppSdkServer({String? scriptSource}) {
-  return implementation.startLocalAppSdkServer(scriptSource: scriptSource);
-}
+Future<LocalAppSdkServer> startLocalAppSdkServer() =>
+    implementation.startLocalAppSdkServer();

@@ -1,34 +1,76 @@
 # Playmesh 游戏开发文档
 
-本目录是 Playmesh 游戏作者和 Game SDK 使用者的文档入口。平台内部架构、阶段计划和历史验证仍保留在 `docs/`、`docs/status/` 与 `docs/verification/`。
+本目录面向 Playmesh 游戏作者。平台内部架构、SDK 实现和 Developer Gateway
+扩展约定统一放在 [`docs/platform/`](../platform/README.md)；阶段与版本历史分别位于
+[`docs/status/`](../status/)和 [`docs/version/`](../version/)。
 
-## 阅读顺序
+## 按开发方式选择
 
-1. AI 提示词：主工作区点击“AI”直接进入统一 AI 开发页，API 接口文档与公共、游戏模式、显示模式模板位于同一页面。公共“自定义想法”会同时合入对话和 Agent 提示词；对话文本只附带当前项目已勾选能力的完整声明，Agent 文本则写入全平台注册表 API 与能力测试 API，不直接内嵌全量声明。“复制全平台能力”可独立获取全部平台注册能力，醒目的“获取项目提示词”用于切换、复制或下载两份 UTF-8 TXT。Agent 类型还可从本机 IP 枚举中选择电脑端 AI 能访问的 Base URL，用于从电脑接管手机上的开发工作区。
-2. [游戏开发指南](development-guide.md)：内置工作区与 IDEA/CLI 开发流程、运行模式、页面职责和 Authority 边界。
-3. [游戏包与 main.json](package-format.md)：目录结构、公开资源、清单字段、安装与数据目录。
-4. [Game SDK v1](sdk-v1.md)：当前 `playmesh.js` 已实现的 API、设备能力回调、存储和 FPS 上报。
-5. [网页开发者通道](web-dev-channel.md)：第四阶段工作区规格；单机/联机项目创建、`main.json` 与能力声明可视化编辑、IDEA 风格文件树、项目级本地历史、结构化校验、运行入口、SSE 同步、统一日志以及 AI 可读的 SDK、接口和 Schema。
-6. [在线游戏源与 Catalog API](../catalog-api.md)：本机游戏库分享、多源聚合搜索与游戏包下载接口。
-7. [能力插件开发](capability-plugins.md)：插件目录、描述符 Schema、有状态实例协议、编译期注册、工作区全平台注册表测试，以及当前传感器与震动插件契约。
+### AI 开发
 
-## 当前版本
+从 [AI 游戏开发](ai-development.md) 开始。
 
-- Game SDK：`2.2.1`
-- App Bridge SDK：`2.1.0`
-- Developer CLI：`1.3.1`（当前开发版本；正式基线 `1.1.0`）
-- SDK 地址：`/playmesh/sdk/v1/playmesh.js`
+适用于：
+
+- 把项目提示词交给普通对话 AI；
+- 在工作区“对话控制台”执行 AI 返回的 JSON 指令；
+- 让可调用 HTTP API 的 Agent 直接读取项目、修改文件、校验、运行和诊断日志。
+
+AI 开发与手工开发使用同一个项目目录、SDK、校验器、运行时和本地历史，不存在独立的
+“AI 项目格式”。
+
+### IDEA / CLI 开发
+
+从 [IDEA 与 CLI 游戏开发](idea-cli-development.md) 开始。
+
+适用于：
+
+- 在 IDEA、WebStorm、VS Code 等外部 IDE 中使用完整 `.d.ts` 和中文 JSDoc；
+- 从 App 拉取已有项目或创建新项目；
+- 使用 `playmesh-cli push/dev` 原子发布，并在目标 App WebView 中运行和跟随日志；
+- 拉取损坏但仍有有效游戏 ID 的项目进行修复。
+
+CLI 命令的权威说明位于 [`dev-cli/README.md`](../../dev-cli/README.md)。
+
+### 网页工作区
+
+从 [网页开发者通道](web-dev-channel.md) 开始。电脑浏览器和 App 内置 WebView 使用
+同一工作区，提供项目管理、编辑器、Diff、本地历史、校验、运行、日志、能力测试、
+AI 提示词和操作审批。
+
+## 通用游戏契约
+
+无论使用 AI、CLI 还是网页工作区，都应按以下顺序了解公共契约：
+
+1. [游戏开发指南](development-guide.md)：运行模式、Player/Authority 分层、生命周期、
+   状态同步、Binary Channel、存储和性能。
+2. [游戏包与 main.json](package-format.md)：目录结构、清单、入口、能力声明、数据目录
+   和导入导出边界。
+3. [Game SDK / App Bridge SDK](sdk-v1.md)：当前公开 API、类型、角色限制和错误语义。
+4. [游戏能力使用指南](capability-plugins.md)：如何在 `capabilities.json` 中声明能力，
+   并通过 `playmesh.app.capabilities` 创建和释放实例。
+5. [在线游戏源与 Catalog API](../catalog-api.md)：游戏源声明、搜索、下载与认证。
+
+## 当前契约
+
+- SDK 稳定地址：`/playmesh/sdk/v1/playmesh.js`
 - 游戏公开资源：`/app/...`
-- 游戏包根目录：`playmesh-library/packages/{gameId}/`
-- 平台不内置游戏 Demo；开发者工作区新建的项目直接进入统一游戏库。
-- 页面入口：`entries.game` 默认 `app/index.html`；`entries.controller` 默认 `app/controller/index.html`；多人权威 JavaScript 使用 `authority.entry`。
+- Bucket 上传文件：`/bucket/...`
+- 游戏包目录：`playmesh-library/packages/{gameId}/`
+- 游戏入口：`entries.game`，默认 `app/index.html`
+- 单屏多人控制器入口：`entries.controller`，默认 `app/controller/index.html`
+- 多人 Authority 入口：`authority.entry`
+- 实际 SDK 版本及兼容范围：以目标 App 的 SDK 注册表和开发者工作区状态为准
+
+URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。目标 App 会根据
+`main.json.sdkVersion/appSdkVersion` 选择兼容 SDK Bundle 和对应宿主执行器。
 
 ## 最小游戏
 
 ```text
 packages/com.example.hello/
   main.json
-  capabilities.json  # 可选，仅在需要平台能力时创建
+  capabilities.json  # 可选
   app/
     index.html
 ```
@@ -39,24 +81,34 @@ packages/com.example.hello/
   <body>
     <main id="game">Hello Playmesh</main>
     <script src="/playmesh/sdk/v1/playmesh.js"></script>
-    <script>
-      playmesh.ready.then(() => {
-        console.log(playmesh.session.getCurrent());
-      });
+    <script type="module">
+      await playmesh.ready;
+      console.log(playmesh.session.getCurrent());
     </script>
   </body>
 </html>
 ```
 
-单机游戏也必须声明 `orientation`、`modes`、`displayModes` 和玩家人数。完整字段说明见[游戏包与 main.json](package-format.md)。
+单机游戏也必须声明方向、模式、显示模式和玩家人数。完整字段见
+[游戏包与 main.json](package-format.md)。
 
-## 必须遵守的边界
+## 游戏代码必须遵守的边界
 
-- 游戏只读取自身 `/app/...`、平台 `/playmesh/...` 公共资源，以及 `upload(file)` 返回的 `/bucket/...` 文件地址；不能跨目录读取其他包、`data/json` 或任意数据目录。
-- 游戏只通过 Game SDK 使用会话、玩家、联机、生命周期、存储等平台能力。
-- 不同加入方式的底层传输由平台透明处理；游戏不得读取分享参数、探测底层链路或按加入方式分叉会话协议。
-- 设备能力只在同级 `capabilities.json` 声明；`required` 属于主画面，单屏多人的 `controllerRequired` 属于控制器，新建项目和项目设置均可分开编辑。能力 code、中文名、说明和 App/HTML 适配状态以 `GET /dev/api/capabilities` 返回的统一注册表为准，运行时自检使用 `GET/POST /dev/api/capability-tests`。
-- 游戏页面不得直接连接 Go Core、构造内部 WebSocket 帧或访问原生 Bridge。
-- 多人游戏的最终规则、分数和胜负由 Authority Runtime 决定，Go Core 只负责通用会话与消息路由。
-- 启动会话的 App 游戏运行端固定为 Authority Client。大屏主机不属于 `players`；普通多屏 App 主机可同时作为 Player，但玩家顺序不参与 Authority 判定。
-- 持久化数据统一写入开始游戏的 Authority 主机；浏览器和加入设备不保存独立副本。
+- 只读取自身 `/app/...`、平台 `/playmesh/...` 和 SDK 返回的 `/bucket/...`。
+- 只通过 Game SDK 使用会话、玩家、联机、生命周期、存储和平台能力。
+- 不读取分享参数、内部 token、Core 地址、原生 Bridge 或 WebSocket 帧。
+- 不根据局域网、公共中转、浏览器或 App 加入方式分叉游戏协议。
+- 最终规则、分数和胜负由 Authority Runtime 决定，Go Core 只负责通用会话与路由。
+- 大屏 Authority 主机不属于 `players`；普通多屏主机可同时作为 Player，但玩家顺序
+  没有 Authority 语义。
+- 持久化数据写入 Authority 主机；浏览器和加入设备不建立独立 Bucket 副本。
+- 设备能力必须先在 `capabilities.json` 按页面角色声明，再由用户确认并通过 SDK 创建。
+
+## 文档扩展规则
+
+新增游戏作者文档时：
+
+1. 一个主题只保留一个事实源，其他文档使用链接而不是复制完整规则。
+2. AI、CLI、网页工作区只描述各自入口；游戏包和 SDK 语义放在通用契约中。
+3. 平台实现、内部协议和维护约定放入 [`docs/platform/`](../platform/README.md)。
+4. 新文档必须加入本目录索引；公开契约变化还要同步版本日志、Schema、模板和测试。

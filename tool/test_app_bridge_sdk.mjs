@@ -20,7 +20,7 @@ const window = {
       if (command.command === "app.bootstrap") {
         result = {
           available: true,
-          sdkVersion: "2.1.0",
+          sdkVersion: "2.1.1",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
@@ -65,7 +65,7 @@ window.window = window;
 vm.runInNewContext(source, window, { filename: "playmesh-app.js" });
 
 await window.playmeshApp.ready;
-assert.equal(window.playmeshApp.version, "2.1.0");
+assert.equal(window.playmeshApp.version, "2.1.1");
 assert.equal(window.playmeshApp.isAvailable(), true);
 assert.deepEqual(
   JSON.parse(JSON.stringify(window.playmeshApp.identity.getCurrent())),

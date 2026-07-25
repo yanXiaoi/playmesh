@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'generated_sdk_versions.dart';
+import 'sdk_feature_registry.dart';
 
 import '../capabilities/capability_registry.dart';
 import '../capabilities/capability_runtime.dart';
@@ -66,19 +66,27 @@ class AppWebViewBridge {
       final payload = command['payload'] is Map
           ? Map<String, Object?>.from(command['payload']! as Map)
           : const <String, Object?>{};
-      final result = switch (command['command']) {
-        'app.bootstrap' => await _bootstrap(payload),
-        'app.capabilities.confirm' => _confirmCapabilities(),
-        'app.capability.create' => await _capabilityRuntime.create(
-          payload,
-          (message) => send(jsonEncode(message)),
+      final name = command['command'];
+      if (name is! String || name.isEmpty) {
+        throw const FormatException('command 必须是非空字符串');
+      }
+      final result = await SdkFeatureRegistry.dispatchApp(
+        AppSdkCommandContext(
+          bootstrap: _bootstrap,
+          confirmCapabilities: _confirmCapabilities,
+          capabilityRuntime: _capabilityRuntime,
+          sendCapabilityEvent: (message) => send(jsonEncode(message)),
+          disposeCapability: _disposeCapability,
+          setFullscreen: _fullscreen,
+          requestExit: _requestExit,
         ),
-        'app.capability.invoke' => await _capabilityRuntime.invoke(payload),
-        'app.capability.dispose' => await _disposeCapability(payload),
-        'app.device.fullscreen' => await _fullscreen(payload),
-        'app.game.exit' => _requestExit(),
-        _ => throw FormatException('未知 App SDK 命令：${command['command']}'),
-      };
+        SdkCommandEnvelope(
+          name: name,
+          requestId: requestId,
+          payload: payload,
+          raw: command,
+        ),
+      );
       await send(
         jsonEncode({
           'type': 'app.command.result',
@@ -104,7 +112,10 @@ class AppWebViewBridge {
     return send(jsonEncode({'type': 'app.device.input', 'input': input}));
   }
 
-  Future<Map<String, Object?>> _bootstrap(Map<String, Object?> payload) async {
+  Future<Map<String, Object?>> _bootstrap(
+    Map<String, Object?> payload,
+    String sdkVersion,
+  ) async {
     if (acceptRuntimeGameDeclaration) {
       final runtimeGameName = payload['gameName'];
       final runtimeCapabilities = payload['declaredCapabilities'];
@@ -134,7 +145,7 @@ class AppWebViewBridge {
     }
     return {
       'available': true,
-      'sdkVersion': generatedAppSdkVersion,
+      'sdkVersion': sdkVersion,
       'identity': {
         'userId': userId,
         'nickname': nickname,

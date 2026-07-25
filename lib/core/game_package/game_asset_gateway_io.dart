@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'game_asset_gateway_contract.dart';
+import '../game_sdk/sdk_feature_registry.dart';
 import '../storage/game_bucket_http.dart';
 import '../storage/game_storage_service.dart';
 
@@ -12,6 +13,8 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
   String? gameRootAssetPath,
   String? gameRootFilePath,
   required String entryAssetPath,
+  String? gameSdkVersion,
+  String? appSdkVersion,
   GameStorageService? storage,
 }) async {
   if ((gameRootAssetPath == null) == (gameRootFilePath == null)) {
@@ -24,6 +27,12 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
   final entryRelativePath = fileRoot == null
       ? _assetEntryRelative(assetRoot!, entryAssetPath)
       : _fileEntryRelative(entryAssetPath);
+  final resolvedGameSdkVersion = SdkFeatureRegistry.resolveGameSdkVersion(
+    gameSdkVersion,
+  );
+  final resolvedAppSdkVersion = SdkFeatureRegistry.resolveAppSdkVersion(
+    appSdkVersion,
+  );
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final gateway = _IoGameAssetGateway(
     server: server,
@@ -32,6 +41,8 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
         ? null
         : Directory('${fileRoot.path}${Platform.pathSeparator}app'),
     entryRelativePath: entryRelativePath,
+    gameSdkVersion: resolvedGameSdkVersion,
+    appSdkVersion: resolvedAppSdkVersion,
     storage: storage,
   );
   gateway.listen();
@@ -44,6 +55,8 @@ class _IoGameAssetGateway implements GameAssetGateway {
     this.gameAppAssetPath,
     this.gameAppDirectory,
     required this.entryRelativePath,
+    required this.gameSdkVersion,
+    required this.appSdkVersion,
     this.storage,
   });
 
@@ -51,6 +64,8 @@ class _IoGameAssetGateway implements GameAssetGateway {
   final String? gameAppAssetPath;
   final Directory? gameAppDirectory;
   final String entryRelativePath;
+  final String gameSdkVersion;
+  final String appSdkVersion;
   final GameStorageService? storage;
 
   @override
@@ -107,10 +122,21 @@ class _IoGameAssetGateway implements GameAssetGateway {
       return;
     }
     if (path.startsWith('/playmesh/')) {
-      await _asset(
-        request.response,
-        '$playmeshPublicAssetRoot/${path.substring('/playmesh/'.length)}',
+      final relativePath = path.substring('/playmesh/'.length);
+      final liveSdk = SdkFeatureRegistry.sdkFileForPublicPath(
+        relativePath,
+        gameVersion: gameSdkVersion,
+        appVersion: appSdkVersion,
       );
+      if (liveSdk != null) {
+        request.response.headers.contentType = gameAssetContentType(
+          relativePath,
+        );
+        request.response.write(liveSdk);
+        await request.response.close();
+        return;
+      }
+      await _asset(request.response, '$playmeshPublicAssetRoot/$relativePath');
       return;
     }
     await _text(request.response, HttpStatus.notFound, '资源不存在');
@@ -217,6 +243,7 @@ File _safeGameFile(Directory appDirectory, String relativePath) {
 
 ContentType gameAssetContentType(String path) {
   if (path.endsWith('.html')) return ContentType.html;
+  if (path.endsWith('.d.ts')) return ContentType.text;
   if (path.endsWith('.js')) {
     return ContentType('text', 'javascript', charset: 'utf-8');
   }

@@ -28,7 +28,7 @@
 
 ## 当前基线
 
-- 最新详细日志：`docs/version/1.8.2.md`
+- 最新详细日志：`docs/version/2.2.0.md`
 - 下一版本临时日志：`docs/version/NEXT.md`（开发中，不代表正式版本）
 - 历史阶段终点：`docs/status/phase-06-complete.md`
 - 当前 App 简略日志：`lib/core/release/playmesh_release_notes.dart`

@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import '../storage/game_storage_service.dart';
 import 'game_sdk_bridge.dart';
-import 'generated_sdk_versions.dart';
+import 'sdk_feature_registry.dart';
 
 class StandaloneGameRuntimeBridge implements GameSdkBridge {
   StandaloneGameRuntimeBridge({
@@ -56,58 +56,48 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
       final payload = command['payload'] is Map
           ? Map<String, Object?>.from(command['payload']! as Map)
           : const <String, Object?>{};
-      switch (command['command']) {
-        case 'sdk.ready':
-          _send({
-            'type': 'sdk.bootstrap',
-            'requestId': requestId,
-            'sdkVersion': generatedGameSdkVersion,
-            'player': {'id': userId, 'nickname': nickname, 'connected': true},
-            'isAuthority': true,
-            'session': null,
-          });
-          return;
-        case 'storage.get':
-        case 'storage.set':
-        case 'storage.remove':
-        case 'storage.clear':
-          _sendResult(
-            requestId,
-            await _executeStorageCommand(
-              command['command']! as String,
-              payload,
-            ),
-          );
-          return;
-        case 'performance.fps':
-          final fps = payload['fps'];
-          if (fps is! num || !fps.isFinite || fps < 0) {
-            throw const FormatException('fps 必须是非负有限数值');
-          }
-          if (!_fpsValues.isClosed) _fpsValues.add(fps.toDouble());
-          _sendResult(requestId, null);
-          return;
-        case 'performance.latency':
-          final latency = payload['latencyMs'];
-          if (latency != null &&
-              (latency is! num || !latency.isFinite || latency < 0)) {
-            throw const FormatException('latencyMs 必须为空或非负有限数值');
-          }
-          if (!_latencyValues.isClosed) {
-            _latencyValues.add((latency as num?)?.toDouble());
-          }
-          _sendResult(requestId, null);
-          return;
-        case 'lifecycle.complete':
-          final lifecycleRequestId = _requiredString(
-            payload,
-            'lifecycleRequestId',
-          );
-          _lifecycleOperations.remove(lifecycleRequestId)?.complete();
-          _sendResult(requestId, null);
-          return;
-        default:
-          throw FormatException('单机模式不支持 SDK 命令: ${command['command']}');
+      final name = command['command'];
+      if (name is! String || name.isEmpty) {
+        throw const FormatException('command 必须是非空字符串');
+      }
+      final execution = await SdkFeatureRegistry.dispatchGame(
+        GameSdkCommandContext(
+          standalonePlayer: {
+            'id': userId,
+            'nickname': nickname,
+            'connected': true,
+          },
+          ensureStorage: ensureStorage,
+          emitFps: (value) {
+            if (!_fpsValues.isClosed) _fpsValues.add(value);
+          },
+          emitLatency: (value) {
+            if (!_latencyValues.isClosed) _latencyValues.add(value);
+          },
+          completeLifecycle: (lifecycleRequestId) {
+            final operation = _lifecycleOperations.remove(lifecycleRequestId);
+            if (operation == null || operation.isCompleted) return false;
+            operation.complete();
+            return true;
+          },
+          routeRemoteStorage: (_, _, _) async {
+            throw StateError('单机模式不会路由远程存储');
+          },
+        ),
+        SdkCommandEnvelope(
+          name: name,
+          requestId: requestId,
+          payload: payload,
+          raw: command,
+        ),
+      );
+      switch (execution) {
+        case SdkCommandResult():
+          _sendResult(requestId, execution.value);
+        case SdkCommandMessage():
+          _send(execution.message);
+        case SdkCommandDeferred():
+          break;
       }
     } on Object catch (error) {
       _send({
@@ -115,33 +105,6 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
         'requestId': requestId,
         'error': error.toString(),
       });
-    }
-  }
-
-  Future<Object?> _executeStorageCommand(
-    String command,
-    Map<String, Object?> payload,
-  ) async {
-    final storage = await ensureStorage();
-    final bucket = _requiredString(payload, 'bucket');
-    switch (command) {
-      case 'storage.get':
-        return storage.getData(bucket, _requiredString(payload, 'key'));
-      case 'storage.set':
-        await storage.setData(
-          bucket,
-          _requiredString(payload, 'key'),
-          payload['value'],
-        );
-        return null;
-      case 'storage.remove':
-        await storage.removeData(bucket, _requiredString(payload, 'key'));
-        return null;
-      case 'storage.clear':
-        await storage.clearData(bucket);
-        return null;
-      default:
-        throw FormatException('未知存储命令: $command');
     }
   }
 
@@ -198,12 +161,4 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
   void _send(Map<String, Object?> message) {
     if (!_outbound.isClosed) _outbound.add(jsonEncode(message));
   }
-}
-
-String _requiredString(Map<String, Object?> payload, String key) {
-  final value = payload[key];
-  if (value is! String || value.isEmpty) {
-    throw FormatException('$key 必须是非空字符串');
-  }
-  return value;
 }

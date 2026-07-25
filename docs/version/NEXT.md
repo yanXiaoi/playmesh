@@ -4,7 +4,7 @@
 
 - 状态：开发中，尚未发布。
 - 当前正式基线：App `1.6.1+8`。
-- 当前开发版本：App `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1`、Developer CLI `1.3.1`。
+- 当前开发版本：App `2.2.0+21`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.2`、App Bridge SDK `2.1.1`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.1.0`、Developer CLI `1.3.1`。
 
 ## 局域网与公共中转双链路
 
@@ -45,7 +45,9 @@
 
 - Go Core 玩家快照新增来源和延迟，并区分“服务器 / 局域网 App / 局域网 HTML”；断线玩家保留在当前房间状态中，延迟清空，重连后按 `playerId` 更新。
 - 房间状态独立于具体分享通道，实时显示全部已加入玩家、在线状态和 RTT。
-- Go Core 升级到 `0.4.0`，Core 协议以兼容新增字段升级到 `1.2.0`。游戏侧 Game SDK `2.2.1` 与 App Bridge SDK `2.1.0` 公共 API 未改变，现有游戏包和默认模板不变；AI 提示词仅同步传输透明、统一使用 SDK 的约束。
+- Go Core 当前为 `0.4.0`，Core 协议为 `1.2.0`。游戏侧 Game SDK `2.2.2` 与 App
+  Bridge SDK `2.1.1` 的公共 API 未改变，现有游戏包继续由兼容发行范围承接；AI
+  提示词仅同步传输透明、统一使用 SDK 的约束。
 
 ## 游戏返回导航
 
@@ -67,6 +69,30 @@
 - 项目入口和“更多”改为 IDEA 风格锚点下拉菜单；新建、复制当前项目、项目设置和删除项目集中在项目菜单。复制时可填写新的项目 ID 和名称，并排除运行数据、缓存及本地历史。
 - 文件 Diff 和本地历史继续使用 CodeMirror MergeView 左右双栏；AI 批量文件修改统一由 `file-changes/preview/apply` 结构化接口预览并原子应用。
 - 新增项目复制和删除的 Developer API；本轮统一操作注册表最终将 Developer API / OpenAPI 升级到 `2.0.0`。
+
+## SDK 单一 Dart 源
+
+- Game SDK 与 App Bridge SDK 参考 Developer Gateway 的 operation 注册方式，改为
+  `lib/core/game_sdk/features/` 下按功能组织；网页端 TypeScript 片段与对应 Dart
+  宿主执行器保存在同一 feature 文件，并只在 `sdk_feature_registry.dart` 注册一次。
+- 正式构建从 Dart 注册表自动组装 `sdk-src/*.ts`、公开 `.js/.d.ts` 和版本/契约产物；
+  生成器同时比较网页端实际发出的命令与 Dart 执行器集合，不一致时立即失败。
+- App 开发运行时、游戏/分享/Developer Gateway、SDK 下载与 AI 声明不再读取
+  打包静态 SDK，而是直接从当前 Dart 注册表即时组装；日常修改后只需重新运行，
+  正式打包脚本会自动刷新静态产物，无需手动执行生成命令。
+- 新增单一源架构断言，扫描并禁止 `rootBundle`、文件系统和旧生成版本常量旁路，
+  同时逐个验证所有 SDK 网关/API 响应与注册表即时组装内容一致。
+- 注册表新增不可重叠的 Game/App SDK 兼容发行范围；游戏清单版本在网关启动时解析，
+  SDK Bridge 命令携带实际 bundle 版本并再次校验。当前 Game SDK 明确承接
+  `1.0.0-2.2.2`，App SDK 明确承接 `1.0.0-2.1.1`，未知版本仍直接拒绝。
+- 每个 Dart 命令执行器通过 `supportedVersions` 自行声明支持范围；调用契约未变化时
+  使用 `SdkVersionRange.last` 开放上界，后续 SDK 升级无需逐个修改。相同命令名允许
+  存在多个不重叠版本实现，但注册器和生成器都会拒绝同一版本命中两个执行器。只有
+  参数、消息、返回值、事件或错误语义不兼容时，才封口旧范围并在 v3 等目录注册新实现。
+- 本地 App SDK 服务删除测试脚本注入参数，所有版本响应都必须经过同一注册表；
+  未注册或格式错误的版本请求直接失败。
+- 本次公开方法签名保持不变；因单一源、版本选择与执行器注册修正，Game SDK 升级到
+  `2.2.2`，App Bridge SDK 升级到 `2.1.1`。现有已注册游戏包继续按清单版本运行。
 
 ## 游戏源声明 1.4.0
 
@@ -120,14 +146,18 @@
 
 - Manifest、能力 Schema、OpenAPI、默认模板、开发者工作区、CLI、AI 提示词、SDK 声明与游戏开发文档均同步到当前字段。
 - AI 游戏提示词遵守最小披露原则，只提供可调用的公开 SDK 和任务必需约束，不暴露回环代理、中转鉴权、密钥协商或加密通道实现。
-- Game SDK 升级到 `2.2.1`，App Bridge SDK 保持 `2.1.0`，Developer API 当前为 `2.0.1`，CLI 当前为 `1.3.1`。
+- Game SDK 升级到 `2.2.2`，App Bridge SDK 升级到 `2.1.1`，Developer API / OpenAPI 升级到 `2.1.0`，CLI 当前为 `1.3.1`。
 - Go Core 升级到 `0.4.0`，Core 协议升级到 `1.2.0`；Player 在线状态增加来源与延迟字段，用于统一房间状态展示，现有游戏侧 SDK 公共 API 保持不变。
 
 ## 验证与构建
 
 - 使用固定 SDK 在沙箱外串行执行 Dart/Flutter 静态分析、定向测试、全量测试、SDK JavaScript 契约与 CLI Go 测试。
 - 删除绑定特定版本号、构建号和发行文案的设置页日志测试，避免正常版本升级触发无意义回归；设置页其他行为测试继续保留。
-- Android 与 Windows 已按用户要求通过统一发布脚本在沙箱外串行构建，产物、签名类型、包结构和 SHA-256 记录在 `docs/verification/playmesh-2.0.0-remote-relay-2026-07-24.md`。
+- App `2.2.0+21` 的 SDK 注册表、175 项 Flutter 回归、5 组 Node SDK 契约、Go 测试、
+  Android/Windows 构建、签名、架构、包内 SDK 版本和 SHA-256 记录在
+  `docs/verification/playmesh-2.2.0-sdk-registry-build-2026-07-25.md`。
+- App `2.0.0+18` 的 Android 与 Windows 历史产物记录在
+  `docs/verification/playmesh-2.0.0-remote-relay-2026-07-24.md`。
 - 声明入口邀请修正后的代码级回归记录在
   `docs/verification/playmesh-2.0.0-declared-entry-invitation-2026-07-24.md`；
   现有 `2.0.0+18` 安装包早于该修正，尚未重新构建。

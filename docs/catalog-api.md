@@ -121,6 +121,25 @@ Authorization: Bearer optional-token
 
 成功返回 `application/zip`，内容只包含根目录 `main.json`、可选 `capabilities.json` 与 `app/`。找不到游戏返回 `404`，Token 错误返回 `401`。接收端不能直接信任下载内容，必须继续经过 Playmesh 的压缩大小、展开大小、文件数量、目录穿越、危险扩展名、Manifest、能力声明和必需入口校验后才能原子安装。
 
+## 服务端上传与分享
+
+`/apps/info`、`/apps/list` 和 `/apps/download` 是供 Playmesh 客户端读取的 Catalog
+契约。轻量 Go Server 还可以提供游戏包上传与管理面，使团队或公共游戏源能够接收、
+校验、保存并分享游戏包。
+
+上传管理面不属于匿名 Catalog 读取协议，具体方法和路径以当前服务端管理契约为准；
+客户端和文档不得根据下载路径猜测上传路径。服务端实现必须：
+
+- 对写操作启用鉴权、请求大小限制、限流和审计。
+- 只接受 `main.json`、可选 `capabilities.json` 与 `app/`。
+- 在临时目录完成压缩包、路径、Manifest、能力、入口和 SDK 版本校验。
+- 校验成功后原子提交；失败时保留旧包并清理临时文件。
+- 让上传、列表、搜索和下载读取同一个已提交包存储。
+- 让下载端继续执行完整的不可信包校验，不能因来源是 Go Server 而跳过。
+
+服务端内部结构、覆盖策略、配置与 Relay 隔离规则见
+[Go Server 开发约定](platform/go-server-development.md)。
+
 ## 在线游戏库
 
 在线游戏库可以持久化多个 `{host, token}` 源：

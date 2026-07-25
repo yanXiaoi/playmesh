@@ -16,6 +16,7 @@ import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_package/asset_game_library_scanner.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
+import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/lifecycle/go_core_host.dart';
 import 'package:playmesh/core/network/go_core_client.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
@@ -187,16 +188,32 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '2.2.1');
-    expect(statusJson['appSdkVersion'], '2.1.0');
+    expect(statusJson['gameSdkVersion'], '2.2.2');
+    expect(statusJson['appSdkVersion'], '2.1.1');
+    expect(
+      statusJson['gameSdkCompatibility'],
+      contains(containsPair('minimumRequestedVersion', '1.0.0')),
+    );
+    expect(
+      statusJson['appSdkCompatibility'],
+      contains(containsPair('maximumRequestedVersion', '2.1.1')),
+    );
 
     final sdkBundle = await http.get(
       base.resolve('/dev/api/sdk?token=custom-dev-token'),
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '2.2.1');
-    expect(sdkBundleJson['appSdkVersion'], '2.1.0');
+    expect(sdkBundleJson['gameSdkVersion'], '2.2.2');
+    expect(sdkBundleJson['appSdkVersion'], '2.1.1');
+    expect(
+      sdkBundleJson['gameSdkCompatibility'],
+      contains(containsPair('bundleVersion', '2.2.2')),
+    );
+    expect(
+      sdkBundleJson['appSdkCompatibility'],
+      contains(containsPair('bundleVersion', '2.1.1')),
+    );
     expect(
       (sdkBundleJson['files'] as Map).keys,
       containsAll([
@@ -206,6 +223,25 @@ void main() {
         'playmesh-app.d.ts',
       ]),
     );
+    for (final name in const [
+      'playmesh.js',
+      'playmesh-app.js',
+      'playmesh.d.ts',
+      'playmesh-app.d.ts',
+    ]) {
+      expect(
+        utf8.decode(
+          base64Decode((sdkBundleJson['files'] as Map)[name] as String),
+        ),
+        SdkFeatureRegistry.sdkFile(name),
+        reason: name,
+      );
+    }
+    final publicSdk = await http.get(
+      base.resolve('/playmesh/sdk/v1/playmesh.js?token=custom-dev-token'),
+    );
+    expect(publicSdk.statusCode, HttpStatus.ok);
+    expect(publicSdk.body, SdkFeatureRegistry.sdkFile('playmesh.js'));
 
     final capabilityRegistry = await http.get(
       base.resolve('/dev/api/capabilities?token=custom-dev-token'),
@@ -476,7 +512,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "2.1.0"'));
+    expect(aiPrompt.body, contains('readonly version: "2.1.1"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -778,7 +814,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '2.0.1');
+    expect((openApiJson['info'] as Map)['version'], '2.1.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );

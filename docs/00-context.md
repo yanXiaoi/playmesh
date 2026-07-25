@@ -76,7 +76,7 @@ Flutter App
 
 ## 当前开发建议
 
-第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `2.1.1+20`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.1`、App Bridge SDK `2.1.0`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.0.1`、Developer CLI `1.3.1`；Developer Gateway 已收敛为统一操作注册表、动态 OpenAPI、Chat/Agent 指令生成、对话控制台和跨 AI 通道危险操作审批。游戏侧 SDK 公共 API、现有游戏包与默认模板保持不变；AI 提示词只同步游戏必须遵守的传输抽象，不披露平台实现。变化统一记录在 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `2.2.0+21`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.2`、App Bridge SDK `2.1.1`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.1.0`、Developer CLI `1.3.1`；两套 SDK 已收敛为 Dart 唯一手写源、统一 feature 注册、运行时自动组装和显式多版本兼容发行。所有游戏/分享/Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority 决定玩法开始和结束条件，SDK 只提交受控会话状态请求。变化统一记录在 `docs/version/2.2.0.md` 与 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
 
 建议顺序：
 
@@ -92,7 +92,8 @@ lib/main.dart                         Playmesh App 入口
 lib/features/games/                   游戏库与游戏详情页
 lib/features/game/                    全屏游戏页、Launcher 和本地 WebView
 assets/playmesh-library/packages/     直接按 `{gameId}/main.json` 存放游戏包
-assets/playmesh-library/sdk-src/      Game SDK 与 App Bridge SDK 的 TypeScript 唯一手写源
+lib/core/game_sdk/features/           Game SDK/App Bridge 的 Dart 唯一手写源、宿主执行器与生成片段
+assets/playmesh-library/sdk-src/      构建生成的 TypeScript 中间产物，不直接修改
 assets/playmesh-library/public/       平台统一公开资源，包含生成的 JS 与 .d.ts
 dev-cli/                              Go Developer CLI
 test/widget_test.dart                 首页、导航、启动、刷新、返回和退出测试

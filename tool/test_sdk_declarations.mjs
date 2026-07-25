@@ -30,8 +30,8 @@ const developerSources = [
 
 assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
-assert.match(game, /readonly version: "2\.2\.1"/);
-assert.match(game, /readonly version: "2\.1\.0"/);
+assert.match(game, /readonly version: "2\.2\.2"/);
+assert.match(game, /readonly version: "2\.1\.1"/);
 assert.match(
   game,
   /setFullscreen\(enabled: boolean, orientation\?: PlaymeshOrientation\)/,
@@ -48,6 +48,8 @@ assert.match(game, /onChange\(callback: \(event: PlaymeshLifecycleEvent\) => voi
 assert.match(game, /当前会话中的玩家/);
 assert.match(game, /固定 Authority Client/);
 assert.match(game, /Authority 主机上的持久 JSON Bucket/);
+assert.match(game, /准备、倒计时和玩法条件由游戏 Authority 判断/);
+assert.match(game, /SDK 不判断胜负/);
 assert.match(game, /send\(data: Uint8Array\): Promise<void>/);
 assert.match(game, /send\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
 assert.match(game, /sendLatest\(data: Uint8Array\): Promise<void>/);

@@ -119,12 +119,8 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
           isSingleScreen ? 'single-screen-multiplayer' : 'multi-screen',
         ),
     ];
-    final gameSdkDeclaration = await rootBundle.loadString(
-      'assets/playmesh-library/public/sdk/v1/playmesh.d.ts',
-    );
-    final appSdkDeclaration = await rootBundle.loadString(
-      'assets/playmesh-library/public/sdk/v1/playmesh-app.d.ts',
-    );
+    final gameSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh.d.ts');
+    final appSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh-app.d.ts');
     final allDirectories = [...await gateway.catalog.listDirectories(projectId)]
       ..sort();
     final allFiles = [...projectFiles]..sort();

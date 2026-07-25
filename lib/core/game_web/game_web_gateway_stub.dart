@@ -12,6 +12,8 @@ Future<GameWebGateway> startGameWebGateway({
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
   String gameName = 'Playmesh 游戏',
+  String? gameSdkVersion,
+  String? appSdkVersion,
   List<String> requiredCapabilities = const [],
   List<String> controllerRequiredCapabilities = const [],
   Uri? coreEndpoint,

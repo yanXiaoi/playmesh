@@ -31,8 +31,14 @@ class _StatusOperation implements _DeveloperHttpOperation {
       'port': gateway.server.port,
       'baseUrls': baseUrls.map((uri) => uri.toString()).toList(),
       'tokenHint': gateway.session.tokenHint,
-      'gameSdkVersion': generatedGameSdkVersion,
-      'appSdkVersion': generatedAppSdkVersion,
+      'gameSdkVersion': SdkFeatureRegistry.gameSdkVersion,
+      'appSdkVersion': SdkFeatureRegistry.appSdkVersion,
+      'gameSdkCompatibility': SdkFeatureRegistry.gameSdkReleases
+          .map((release) => release.toJson())
+          .toList(),
+      'appSdkCompatibility': SdkFeatureRegistry.appSdkReleases
+          .map((release) => release.toJson())
+          .toList(),
       'createdAt': gateway.session.createdAt?.millisecondsSinceEpoch,
       'appView': viewAvailability.toJson(),
     });

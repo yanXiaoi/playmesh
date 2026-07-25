@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:playmesh/core/game_package/game_asset_gateway.dart';
+import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
 
 void main() {
@@ -27,6 +28,8 @@ void main() {
           'assets/playmesh-library/public/developer/templates/default-game/package',
       entryAssetPath:
           'assets/playmesh-library/public/developer/templates/default-game/package/app/index.html',
+      gameSdkVersion: '1.3.0',
+      appSdkVersion: '1.2.0',
       storage: storage,
     );
     addTearDown(gateway.close);
@@ -41,6 +44,10 @@ void main() {
       gateway.entryUri.resolve('/playmesh/sdk/v1/playmesh.js'),
     );
     expect(sdk.statusCode, HttpStatus.ok);
+    expect(
+      sdk.body,
+      SdkFeatureRegistry.sdkFile('playmesh.js', version: '1.3.0'),
+    );
     expect(sdk.body, isNot(contains('/playmesh/developer/log')));
     expect(sdk.body, contains('Playmesh Game SDK 注入成功'));
 
@@ -48,6 +55,10 @@ void main() {
       gateway.entryUri.resolve('/playmesh/sdk/v1/playmesh-app.js'),
     );
     expect(appSdk.statusCode, HttpStatus.ok);
+    expect(
+      appSdk.body,
+      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '1.2.0'),
+    );
     expect(appSdk.body, contains('global.playmeshApp = playmeshApp'));
     expect(appSdk.body, contains('Playmesh App SDK 注入成功'));
 
@@ -84,6 +95,19 @@ void main() {
 
     final legacy = await http.get(gateway.entryUri.resolve('/game/index.html'));
     expect(legacy.statusCode, HttpStatus.notFound);
+  });
+
+  test('资源网关在启动时拒绝未注册的 SDK 版本', () async {
+    expect(
+      () => startGameAssetGateway(
+        gameRootAssetPath:
+            'assets/playmesh-library/public/developer/templates/default-game/package',
+        entryAssetPath:
+            'assets/playmesh-library/public/developer/templates/default-game/package/app/index.html',
+        gameSdkVersion: '2.2.3',
+      ),
+      throwsUnsupportedError,
+    );
   });
 
   test('资源网关不接收客户端 console 日志', () async {
