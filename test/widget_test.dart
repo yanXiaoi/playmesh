@@ -48,7 +48,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(JoinGamePage), findsOneWidget);
-    expect(find.text('扫码加入主机对局'), findsOneWidget);
+    expect(find.text('加入主机对局'), findsOneWidget);
+    expect(find.text('对局邀请链接'), findsOneWidget);
+    expect(find.text('主机地址'), findsNothing);
+    expect(find.text('加入码'), findsNothing);
+    expect(find.text('玩家昵称'), findsNothing);
+    expect(find.text(_primaryGame.name), findsNothing);
   });
 
   testWidgets('shows Playmesh home and primary navigation entries', (

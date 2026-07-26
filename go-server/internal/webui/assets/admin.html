@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playmesh 管理后台</title>
+  <link rel="stylesheet" href="{{ADMIN_ASSET_BASE}}/style.css">
+  <script defer src="{{ADMIN_ASSET_BASE}}/admin.js"></script>
+</head>
+<body>
+  <section id="login-view" class="login-wrap">
+    <article class="panel login-card">
+      <div class="brand"><span class="brand-mark">P</span> Playmesh 管理后台</div>
+      <h1>管理员登录</h1>
+      <form id="login-form" class="stack">
+        <label>管理员账号<input name="username" required autocomplete="username"></label>
+        <label>管理员密码<input name="password" type="password" required autocomplete="current-password"></label>
+        <div>
+          <div id="captcha-prompt" class="muted">正在生成图形验证码…</div>
+          <img id="captcha-prompt-image" class="captcha-prompt-image hidden" alt="请按此顺序点选">
+          <div id="captcha-canvas" class="captcha-canvas">
+            <img id="captcha-image" alt="图形验证码">
+            <div id="captcha-markers" class="captcha-markers"></div>
+          </div>
+          <input id="captcha-answer" placeholder="请输入图片中的计算结果" autocomplete="off">
+          <button id="refresh-captcha" type="button" class="secondary">换一张图形验证码</button>
+        </div>
+        <button type="submit">登录管理后台</button>
+        <div id="login-notice" class="notice"></div>
+      </form>
+    </article>
+  </section>
+
+  <main id="admin-view" class="shell hidden">
+    <div class="admin-layout">
+      <aside class="panel sidebar">
+        <div class="brand"><span class="brand-mark">P</span> Playmesh</div>
+        <div class="nav">
+          <button class="active" data-section="overview">运行概览</button>
+          <button data-section="games">游戏包审核</button>
+          <button data-section="settings">游戏源设置</button>
+          <button data-section="config">运行配置</button>
+          <a id="public-page-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer">查看公开页面</a>
+          <button id="logout" class="danger">退出登录</button>
+        </div>
+      </aside>
+      <section>
+        <div id="overview-section" class="admin-section">
+          <div class="section-head"><div><div class="eyebrow">Live relay</div><h2>透明通道负载</h2></div><span id="stats-time" class="muted"></span></div>
+          <div id="stats" class="stats"></div>
+          <div class="panel">
+            <h2>运行边界</h2>
+            <p class="muted">这里显示的是 Relay 可观察的连接和字节负载。端到端密钥与明文游戏内容不会进入 Go Server。</p>
+          </div>
+        </div>
+        <div id="games-section" class="admin-section hidden">
+          <div class="section-head"><div><div class="eyebrow">Package review</div><h2>游戏包审核</h2></div></div>
+          <div class="admin-filters">
+            <select id="admin-status">
+              <option value="">全部状态</option><option value="pending">待审核</option>
+              <option value="approved">已通过</option><option value="rejected">已拒绝</option>
+            </select>
+            <input id="admin-search" placeholder="搜索 ID、名称、作者、邮箱或版本">
+            <button id="admin-refresh">刷新</button>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th>游戏</th><th>作者 / 邮箱</th><th>状态</th><th>扫描</th><th>上传时间</th><th>操作</th></tr></thead>
+            <tbody id="game-rows"></tbody></table>
+          </div>
+          <div class="pager"><button id="admin-previous" class="secondary">上一页</button><span id="admin-page" class="muted"></span><button id="admin-next" class="secondary">下一页</button></div>
+        </div>
+        <div id="settings-section" class="admin-section hidden">
+          <div class="section-head"><div><div class="eyebrow">Catalog declaration</div><h2>游戏源声明</h2></div></div>
+          <form id="settings-form" class="panel stack">
+            <label>游戏源名称<input name="name"></label>
+            <label>作者<input name="author"></label>
+            <label>主页<input name="homepage" type="url" placeholder="https://example.com"></label>
+            <label class="choice-field"><input name="supportsGameRelay" type="checkbox"><span>对外声明支持公共联机中转</span></label>
+            <button type="submit">保存 /apps/info 设置</button>
+            <div id="settings-notice" class="notice"></div>
+          </form>
+        </div>
+        <div id="config-section" class="admin-section hidden">
+          <div class="section-head">
+            <div><div class="eyebrow">Managed server.json</div><h2>运行配置</h2></div>
+          </div>
+          <form id="config-form" class="panel stack">
+            <p class="muted">此表单由后台读取并原子更新 server.json。监听器、数据库路径、
+              限流和 Relay 等运行级参数在安全重启后生效；内容规则与 ClamAV 设置立即
+              热更新，publicBaseUrl 会同步更新 `/apps/info`，密钥仍只来自 .env。</p>
+            <h3>端口与后台</h3>
+            <div class="filters">
+              <label class="wide">App 外部监听<input name="externalListen" required></label>
+              <label class="wide">管理监听<input name="adminListen" required></label>
+              <label class="wide">publicBaseUrl（对外地址）<input name="relayBaseURL" type="url" placeholder="https://relay.example.com"></label>
+              <label class="choice-field wide"><input name="showPublicSourceQRCode" type="checkbox"><span>在用户界面显示快速添加游戏源二维码</span></label>
+              <label>验证码模式<select name="captchaMode"><option value="math">数字计算</option><option value="text">文字点选</option></select></label>
+              <label>会话分钟<input name="sessionTTL" type="number" min="1"></label>
+              <label>登录限流 ms<input name="loginInterval" type="number" min="100"></label>
+              <label>验证码限流 ms<input name="captchaInterval" type="number" min="100"></label>
+            </div>
+            <h3>SQLite 与游戏包</h3>
+            <div class="filters">
+              <label class="wide">数据库路径<input name="databasePath" required></label>
+              <label class="wide">游戏包目录<input name="gamesDirectory" required></label>
+              <label class="wide">隔离目录<input name="quarantineDirectory" required></label>
+              <label>上传上限 MiB<input name="maxUploadMiB" type="number" min="1"></label>
+              <label>展开上限 MiB<input name="maxExpandedMiB" type="number" min="1"></label>
+              <label>单文件上限 MiB<input name="maxFileMiB" type="number" min="1"></label>
+              <label>文件数量<input name="maxFiles" type="number" min="1"></label>
+              <label>最大压缩比<input name="maxRatio" type="number" min="1"></label>
+              <label>并发扫描数<input name="maxConcurrentScans" type="number" min="1" max="64"></label>
+              <label>公开上传间隔秒<input name="uploadInterval" type="number" min="1"></label>
+            </div>
+            <h3>ClamAV</h3>
+            <p class="muted">未安装时请使用
+              <a href="https://docs.clamav.net/manual/Installing.html" target="_blank" rel="noopener noreferrer">ClamAV 官方跨平台安装文档</a>。
+              安装完成后在下方填写 <code>clamscan</code> 或其绝对路径。</p>
+            <div class="filters">
+              <label class="wide">clamscan 路径<input name="clamScanPath"></label>
+              <label>扫描超时秒<input name="scanTimeout" type="number" min="1"></label>
+              <label class="choice-field"><input name="scanRequired" type="checkbox"><span>扫描失败时拒绝上传</span></label>
+            </div>
+            <label>活动内容扫描规则（JSON 数组）
+              <textarea name="contentRules" rows="16" spellcheck="false"></textarea>
+            </label>
+            <h3>Relay</h3>
+            <div class="filters">
+              <label>隧道 TTL 秒<input name="tunnelTTL" type="number" min="1"></label>
+              <label>配对超时秒<input name="pendingTimeout" type="number" min="1"></label>
+              <label>空闲超时秒<input name="idleTimeout" type="number" min="1"></label>
+              <label>最大隧道<input name="maxTunnels" type="number" min="1"></label>
+              <label>单隧道连接<input name="maxPerTunnel" type="number" min="1"></label>
+              <label>单 IP 连接<input name="maxPerIP" type="number" min="1"></label>
+              <label class="choice-field"><input name="supportsRelay" type="checkbox"><span>注册 Relay 路由</span></label>
+            </div>
+            <label>App Token 鉴权白名单（JSON 数组）
+              <textarea name="whitelist" rows="7" spellcheck="false"></textarea>
+            </label>
+            <button type="submit">保存运行配置</button>
+            <div id="config-notice" class="notice"></div>
+          </form>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="detail-dialog">
+    <div class="section-head"><h2>安全扫描与审核详情</h2><button id="close-dialog" class="secondary">关闭</button></div>
+    <pre id="detail-content"></pre>
+  </dialog>
+</body>
+</html>

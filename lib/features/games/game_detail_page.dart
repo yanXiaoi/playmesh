@@ -346,12 +346,12 @@ class _ManifestFacts extends StatelessWidget {
       (
         Icons.schedule_outlined,
         '最后上传',
-        _formatOptionalTimestamp(context, game.lastModifiedAt),
+        _formatOptionalTimestamp(game.lastModifiedAt),
       ),
       (
         Icons.history_outlined,
         '最近打开',
-        _formatOptionalTimestamp(context, game.lastOpenedAt),
+        _formatOptionalTimestamp(game.lastOpenedAt),
       ),
       if (game.manifestError != null)
         (Icons.warning_amber_rounded, '清单状态', '待修复'),
@@ -362,15 +362,12 @@ class _ManifestFacts extends StatelessWidget {
       if (game.controllerOrientation case final orientation?)
         (Icons.smartphone_outlined, '控制器', orientation.label),
       (Icons.hub_outlined, '游戏模式', game.modeLabel),
-      if (game.sdkVersion.isNotEmpty)
-        (Icons.code_outlined, 'Game SDK', game.sdkVersion),
       if (game.appSdkVersion.isNotEmpty)
         (
           Icons.integration_instructions_outlined,
           'App SDK',
           game.appSdkVersion,
         ),
-      (Icons.web_asset_outlined, '运行入口', game.entry.statusLabel),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -387,6 +384,7 @@ class _ManifestFacts extends StatelessWidget {
                   icon: fact.$1,
                   label: fact.$2,
                   value: fact.$3,
+                  shrinkToFit: fact.$2 == '最后上传' || fact.$2 == '最近打开',
                 ),
               ),
           ],
@@ -395,19 +393,17 @@ class _ManifestFacts extends StatelessWidget {
     );
   }
 
-  String _formatLocalTimestamp(BuildContext context, DateTime value) {
+  String _formatLocalTimestamp(DateTime value) {
     final local = value.toLocal();
-    final localizations = MaterialLocalizations.of(context);
-    final date = localizations.formatShortDate(local);
-    final time = localizations.formatTimeOfDay(
-      TimeOfDay.fromDateTime(local),
-      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
-    );
-    return '$date $time';
+    String twoDigits(int part) => part.toString().padLeft(2, '0');
+    return '${local.year.toString().padLeft(4, '0')}-'
+        '${twoDigits(local.month)}-${twoDigits(local.day)} '
+        '${twoDigits(local.hour)}:${twoDigits(local.minute)}:'
+        '${twoDigits(local.second)}';
   }
 
-  String _formatOptionalTimestamp(BuildContext context, DateTime? value) =>
-      value == null ? '无' : _formatLocalTimestamp(context, value);
+  String _formatOptionalTimestamp(DateTime? value) =>
+      value == null ? '无' : _formatLocalTimestamp(value);
 }
 
 class _ManifestFact extends StatelessWidget {
@@ -415,11 +411,13 @@ class _ManifestFact extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.shrinkToFit = false,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final bool shrinkToFit;
 
   @override
   Widget build(BuildContext context) {
@@ -448,14 +446,28 @@ class _ManifestFact extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 1),
-                  Text(
-                    value,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+                  if (shrinkToFit)
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  else
+                    Text(
+                      value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

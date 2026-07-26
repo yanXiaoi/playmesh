@@ -20,8 +20,12 @@ func main() {
 		logger.Error("初始化服务失败", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("Playmesh 游戏源服务启动", "listen", cfg.Listen)
-	if err := app.Run(cfg.Listen); err != nil {
+	defer app.Close()
+	logger.Info("Playmesh 游戏源服务启动",
+		"externalListen", cfg.ExternalListen,
+		"adminListen", cfg.Admin.Listen,
+	)
+	if err := app.Run(cfg.ExternalListen); err != nil {
 		logger.Error("服务退出", "error", err)
 		os.Exit(1)
 	}

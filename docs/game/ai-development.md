@@ -98,7 +98,7 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 游戏开发 AI 只需要知道：
 
 - 可调用的 Game SDK / App Bridge SDK；
-- 当前项目文件、模式、角色和能力声明；
+- 当前项目树、模式、角色和能力声明；项目文件内容通过 Developer API 按任务需要读取；
 - Developer Operation API；
 - 校验结果、运行状态和当前设备日志。
 

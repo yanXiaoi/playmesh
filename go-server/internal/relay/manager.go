@@ -3,11 +3,13 @@ package relay
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go-server/internal/config"
@@ -33,6 +35,11 @@ type Manager struct {
 	mutex   sync.RWMutex
 	tunnels map[string]*Tunnel
 	stop    chan struct{}
+
+	activePairs       atomic.Int64
+	totalPairs        atomic.Int64
+	bytesHostToClient atomic.Int64
+	bytesClientToHost atomic.Int64
 }
 
 type Tunnel struct {
@@ -46,6 +53,18 @@ type Tunnel struct {
 	closed      bool
 	pending     chan net.Conn
 	connections map[net.Conn]struct{}
+}
+
+type Stats struct {
+	Tunnels                int   `json:"tunnels"`
+	PendingHostConnections int   `json:"pendingHostConnections"`
+	TrackedConnections     int   `json:"trackedConnections"`
+	ActivePairs            int64 `json:"activePairs"`
+	TotalPairs             int64 `json:"totalPairs"`
+	BytesHostToClient      int64 `json:"bytesHostToClient"`
+	BytesClientToHost      int64 `json:"bytesClientToHost"`
+	MaxTunnels             int   `json:"maxTunnels"`
+	UpdatedAt              int64 `json:"updatedAt"`
 }
 
 func NewManager(cfg config.Relay) *Manager {
@@ -110,22 +129,30 @@ func (m *Manager) Create() (Credentials, error) {
 }
 
 func (m *Manager) AuthenticateHost(id, lease string) (*Tunnel, error) {
+	if len(id) != 24 || len(lease) != 43 {
+		return nil, ErrUnauthorized
+	}
 	tunnel, err := m.get(id)
 	if err != nil {
 		return nil, err
 	}
-	if sha256.Sum256([]byte(lease)) != tunnel.hostLeaseHash {
+	actual := sha256.Sum256([]byte(lease))
+	if subtle.ConstantTimeCompare(actual[:], tunnel.hostLeaseHash[:]) != 1 {
 		return nil, ErrUnauthorized
 	}
 	return tunnel, nil
 }
 
 func (m *Manager) AuthenticateClient(id, capability string) (*Tunnel, error) {
+	if len(id) != 24 || len(capability) != 43 {
+		return nil, ErrUnauthorized
+	}
 	tunnel, err := m.get(id)
 	if err != nil {
 		return nil, err
 	}
-	if sha256.Sum256([]byte(capability)) != tunnel.capabilityHash {
+	actual := sha256.Sum256([]byte(capability))
+	if subtle.ConstantTimeCompare(actual[:], tunnel.capabilityHash[:]) != 1 {
 		return nil, ErrUnauthorized
 	}
 	return tunnel, nil
@@ -184,6 +211,9 @@ func (m *Manager) PairClient(tunnel *Tunnel, client net.Conn) error {
 }
 
 func (m *Manager) pipe(tunnel *Tunnel, host, client net.Conn) {
+	m.activePairs.Add(1)
+	m.totalPairs.Add(1)
+	defer m.activePairs.Add(-1)
 	hostConnection := host
 	clientConnection := client
 	host = &idleConn{Conn: hostConnection, timeout: m.config.IdleTimeout()}
@@ -195,12 +225,38 @@ func (m *Manager) pipe(tunnel *Tunnel, host, client net.Conn) {
 			tunnel.remove(clientConnection)
 		})
 	}
-	copyOne := func(destination, source net.Conn) {
-		_, _ = io.Copy(destination, source)
+	copyOne := func(destination, source net.Conn, counter *atomic.Int64) {
+		count, _ := io.Copy(destination, source)
+		counter.Add(count)
 		closePair()
 	}
-	go copyOne(host, client)
-	copyOne(client, host)
+	go copyOne(host, client, &m.bytesClientToHost)
+	copyOne(client, host, &m.bytesHostToClient)
+}
+
+func (m *Manager) Stats() Stats {
+	m.mutex.RLock()
+	tunnels := make([]*Tunnel, 0, len(m.tunnels))
+	for _, tunnel := range m.tunnels {
+		tunnels = append(tunnels, tunnel)
+	}
+	m.mutex.RUnlock()
+	pending := 0
+	connections := 0
+	for _, tunnel := range tunnels {
+		tunnel.mutex.Lock()
+		pending += len(tunnel.pending)
+		connections += len(tunnel.connections)
+		tunnel.mutex.Unlock()
+	}
+	return Stats{
+		Tunnels: len(tunnels), PendingHostConnections: pending,
+		TrackedConnections: connections, ActivePairs: m.activePairs.Load(),
+		TotalPairs:        m.totalPairs.Load(),
+		BytesHostToClient: m.bytesHostToClient.Load(),
+		BytesClientToHost: m.bytesClientToHost.Load(),
+		MaxTunnels:        m.config.MaxTunnels, UpdatedAt: time.Now().UnixMilli(),
+	}
 }
 
 // idleConn 在每次读写时刷新超时，避免活跃的大文件传输被固定截止时间中断。

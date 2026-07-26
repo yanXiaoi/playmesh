@@ -188,7 +188,7 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '2.2.2');
+    expect(statusJson['gameSdkVersion'], '2.2.3');
     expect(statusJson['appSdkVersion'], '2.1.1');
     expect(
       statusJson['gameSdkCompatibility'],
@@ -204,11 +204,11 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '2.2.2');
+    expect(sdkBundleJson['gameSdkVersion'], '2.2.3');
     expect(sdkBundleJson['appSdkVersion'], '2.1.1');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '2.2.2')),
+      contains(containsPair('bundleVersion', '2.2.3')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
@@ -533,11 +533,13 @@ void main() {
     expect(aiPrompt.body, contains('manifest API'));
     expect(aiPrompt.body, contains('绝对不能修改 `id`'));
     expect(aiPrompt.body, contains('entries.game: app/index.html'));
-    expect(
-      aiPrompt.body,
-      contains('===== BEGIN WORKSPACE FILE: app/index.html'),
-    );
     expect(aiPrompt.body, contains('- [file] app/index.html'));
+    expect(aiPrompt.body, contains('按需读取项目文件'));
+    expect(aiPrompt.body, contains('本提示词不预载任何项目文件内容'));
+    expect(aiPrompt.body, contains('通过 files.read 读取必要的文本文件'));
+    expect(aiPrompt.body, contains('### files.read'));
+    expect(aiPrompt.body, isNot(contains('===== BEGIN WORKSPACE FILE:')));
+    expect(aiPrompt.body, isNot(contains('<title>Demo</title>')));
     expect(aiPrompt.body, contains('对话控制台默认基础指令'));
     expect(aiPrompt.body, contains('X-Playmesh-AI-Channel: chat'));
     expect(aiPrompt.body, isNot(contains('----replace_file:')));
@@ -548,7 +550,6 @@ void main() {
     expect(aiPrompt.body, isNot(contains('仅浏览器控制器可用')));
     expect(aiPrompt.body, isNot(contains('重载后 SDK 会自动请求最新快照')));
     expect(aiPrompt.body, contains('static/js/service/index.js'));
-    expect(aiPrompt.body, contains('===== BEGIN WORKSPACE FILE: main.json'));
     expect(aiPrompt.body, contains('当前项目已声明的平台能力'));
     expect(aiPrompt.body, contains('未声明平台能力。'));
     expect(aiPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
@@ -603,10 +604,13 @@ void main() {
     expect(agentPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
     expect(agentPrompt.body, isNot(contains('平台统一能力注册表（code')));
     expect(agentPrompt.body, contains('entries.game: app/index.html'));
-    expect(
-      agentPrompt.body,
-      contains('===== BEGIN WORKSPACE FILE: app/index.html'),
-    );
+    expect(agentPrompt.body, contains('- [file] app/index.html'));
+    expect(agentPrompt.body, contains('按需读取项目文件'));
+    expect(agentPrompt.body, contains('本提示词不预载任何项目文件内容'));
+    expect(agentPrompt.body, contains('通过 files.read 读取必要的文本文件'));
+    expect(agentPrompt.body, contains('### files.read'));
+    expect(agentPrompt.body, isNot(contains('===== BEGIN WORKSPACE FILE:')));
+    expect(agentPrompt.body, isNot(contains('<title>Demo</title>')));
     expect(agentPrompt.body, isNot(contains('最终回答只能包含可直接粘贴')));
 
     final invalidAgentBaseUrl = await http.get(

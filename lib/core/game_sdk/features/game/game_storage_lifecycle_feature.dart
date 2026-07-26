@@ -4,7 +4,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   id: 'game.storage-lifecycle',
   target: SdkSourceTarget.game,
   order: 70,
-  typeScript: r'''  const playmesh = {
+  typeScript: r'''  const browserConsoleLogs = [];
+  const BROWSER_CONSOLE_LOG_LIMIT = 500;
+  let browserConsoleCaptureInstalled = false;
+  const playmesh = {
     version: PLAYMESH_SDK_VERSION,
     ready: null,
     app: appSdk,
@@ -202,6 +205,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     __receive: receive,
   };
 
+  installBrowserConsoleCapture();
   global.playmesh = playmesh;
   global.console?.info?.("Playmesh Game SDK 注入成功", {
     version: PLAYMESH_SDK_VERSION,
@@ -478,6 +482,147 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     });
   }
 
+  function formatBrowserConsoleValue(value) {
+    if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
+    if (typeof value === "string") return value;
+    if (typeof value === "bigint") return value.toString();
+    try {
+      const encoded = JSON.stringify(value);
+      return encoded === undefined ? String(value) : encoded;
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  function recordBrowserConsole(level, args, eventType = "console") {
+    browserConsoleLogs.push({
+      timestamp: Date.now(),
+      level,
+      eventType,
+      message: args.map(formatBrowserConsoleValue).join(" "),
+    });
+    if (browserConsoleLogs.length > BROWSER_CONSOLE_LOG_LIMIT) {
+      browserConsoleLogs.splice(0, browserConsoleLogs.length - BROWSER_CONSOLE_LOG_LIMIT);
+    }
+    if (browserNicknameUi?.logsOverlay && !browserNicknameUi.logsOverlay.hidden) {
+      renderBrowserConsoleLogs(browserNicknameUi);
+    }
+  }
+
+  function installBrowserConsoleCapture() {
+    if (!global.__PLAYMESH_BROWSER__ ||
+        appSdk.isAvailable() ||
+        browserConsoleCaptureInstalled ||
+        !global.console) {
+      return;
+    }
+    browserConsoleCaptureInstalled = true;
+    for (const level of ["log", "info", "warn", "error", "debug"]) {
+      const nativeMethod = typeof global.console[level] === "function"
+        ? global.console[level].bind(global.console)
+        : null;
+      if (!nativeMethod) continue;
+      global.console[level] = (...args) => {
+        nativeMethod(...args);
+        recordBrowserConsole(level, args);
+      };
+    }
+    global.addEventListener?.("error", (event) => {
+      const resource = event.target && event.target !== global
+        ? event.target.currentSrc || event.target.src || event.target.href
+        : null;
+      const error = event.error instanceof Error ? event.error : null;
+      recordBrowserConsole(
+        "error",
+        [resource ? `Resource load failed: ${resource}` : error || event.message],
+        resource ? "resource.error" : "uncaught.error",
+      );
+    }, true);
+    global.addEventListener?.("unhandledrejection", (event) => {
+      recordBrowserConsole("error", [event.reason], "unhandled.rejection");
+    });
+  }
+
+  function formatBrowserConsoleTimestamp(timestamp) {
+    const value = new Date(timestamp);
+    const pad = (part) => String(part).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ` +
+      `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  }
+
+  function renderBrowserConsoleLogs(ui) {
+    if (!ui?.logsOutput) return;
+    ui.logsOutput.textContent = browserConsoleLogs.length
+      ? browserConsoleLogs.map((entry) => {
+          const eventType = entry.eventType === "console" ? "" : ` [${entry.eventType}]`;
+          return `[${formatBrowserConsoleTimestamp(entry.timestamp)}] [${entry.level}]${eventType} ${entry.message}`;
+        }).join("\n")
+      : "暂无运行日志";
+    ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
+  }
+
+  function installBrowserDockDrag(ui) {
+    const dock = ui?.dock;
+    if (!dock?.addEventListener) return;
+    let drag = null;
+    let suppressClick = false;
+    const clampPosition = (left, top, rect) => ({
+      left: Math.max(4, Math.min(left, Math.max(4, (global.innerWidth || 0) - rect.width - 4))),
+      top: Math.max(4, Math.min(top, Math.max(4, (global.innerHeight || 0) - rect.height - 4))),
+    });
+    const moveDock = (left, top, rect) => {
+      const position = clampPosition(left, top, rect);
+      dock.style.left = `${position.left}px`;
+      dock.style.top = `${position.top}px`;
+      dock.style.right = "auto";
+      dock.style.bottom = "auto";
+    };
+    dock.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary === false || (event.button != null && event.button !== 0)) return;
+      const rect = dock.getBoundingClientRect();
+      drag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        moved: false,
+      };
+      dock.setPointerCapture?.(event.pointerId);
+    });
+    dock.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const deltaX = event.clientX - drag.startX;
+      const deltaY = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(deltaX, deltaY) < 6) return;
+      drag.moved = true;
+      event.preventDefault?.();
+      ui.menu.hidden = true;
+      moveDock(drag.left + deltaX, drag.top + deltaY, drag);
+    });
+    const finishDrag = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      suppressClick = drag.moved;
+      dock.releasePointerCapture?.(event.pointerId);
+      drag = null;
+    };
+    dock.addEventListener("pointerup", finishDrag);
+    dock.addEventListener("pointercancel", finishDrag);
+    dock.addEventListener("click", (event) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+    }, true);
+    global.addEventListener?.("resize", () => {
+      if (!dock.style.left) return;
+      const rect = dock.getBoundingClientRect();
+      moveDock(rect.left, rect.top, rect);
+    });
+  }
+
   async function ensureBrowserNicknameUi() {
     if (browserNicknameUi) return browserNicknameUi;
     if (!global.document) return null;
@@ -490,7 +635,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     root.innerHTML = `<style>
       :host{all:initial;font-family:system-ui,"Microsoft YaHei",sans-serif;letter-spacing:0}
       button,input{box-sizing:border-box;font:inherit;letter-spacing:0}
-      .dock{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483646;display:flex;align-items:flex-end;flex-direction:column;color:#f4f7fb;filter:drop-shadow(0 8px 20px #0008)}
+      .dock{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483646;display:flex;align-items:flex-end;flex-direction:column;color:#f4f7fb;filter:drop-shadow(0 8px 20px #0008);touch-action:none;user-select:none}
       .tools{display:flex;flex-direction:column;overflow:hidden;border:1px solid #ffffff35;border-radius:8px;background:#121720eb}
       .tool,.expand{display:grid;place-items:center;width:48px;height:48px;padding:0;border:0;border-bottom:1px solid #ffffff18;background:transparent;color:#f4f7fb;font:800 21px/1 system-ui;cursor:pointer}
       .tool:last-child{border-bottom:0}.tool:hover,.tool:focus-visible,.expand:hover,.expand:focus-visible{background:#ffffff18;outline:none}.tool.active{color:#b7ffb5}
@@ -499,7 +644,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       .menu{position:absolute;right:56px;top:0;width:190px;overflow:hidden;border:1px solid #596272;border-radius:12px;background:#20242b;color:#f4f7fb;box-shadow:0 12px 30px #0009}
       .menu button{display:flex;align-items:center;width:100%;height:48px;padding:0 15px;border:0;border-bottom:1px solid #ffffff16;background:#20242b;color:#f4f7fb;font:700 14px/1 system-ui,"Microsoft YaHei",sans-serif;cursor:pointer}.menu button:last-child{border-bottom:0}.menu button:hover,.menu button:focus-visible{background:#343b46;outline:none}
       .overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:#0008}
-      .overlay[hidden],.panel[hidden],.menu[hidden],.expand[hidden],.tools[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden]{display:none}
+      .overlay[hidden],.panel[hidden],.menu[hidden],.expand[hidden],.tools[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden],.logs-overlay[hidden]{display:none}
       form,.info-card{box-sizing:border-box;width:min(100%,380px);max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid #596272;border-radius:12px;background:#20242b;color:#f4f7fb;box-shadow:0 16px 40px #0008}
       h2{margin:0 0 16px;font-size:20px;line-height:1.3;letter-spacing:0}
       label{display:block;margin-bottom:6px;font-size:14px;font-weight:700}
@@ -509,6 +654,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       .actions button{height:40px;padding:0 14px;border:1px solid #748091;border-radius:6px;background:#343b46;color:#f4f7fb;cursor:pointer}
       .actions .save{border-color:#10b981;background:#0f766e;color:#fff;font-weight:700}
       .info-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:#0008}.info-card p{margin:8px 0;color:#d5dbe4;line-height:1.6}.info-card strong{color:#fff}.info-card .actions{margin-top:18px}
+      .logs-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:14px;background:#0008}.logs-card{box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,760px);height:min(78vh,620px);height:min(78dvh,620px);padding:16px;border:1px solid #596272;border-radius:12px;background:#20242b;color:#f4f7fb;box-shadow:0 16px 40px #0008}.logs-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}.logs-head h2{flex:1;margin:0}.logs-head button{height:36px;padding:0 12px;border:1px solid #748091;border-radius:6px;background:#343b46;color:#f4f7fb;cursor:pointer}.logs-output{min-width:0;min-height:0;margin:0;padding:10px;overflow:auto;border:1px solid #ffffff24;border-radius:8px;background:#0b0f15;color:#dbe5f0;white-space:pre-wrap;word-break:break-word;user-select:text;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.logs-card .actions{margin-top:10px}
       button:disabled{cursor:wait;opacity:.65}
       @media (max-height:360px) and (min-width:500px){.tools{flex-direction:row}.tool{border-right:1px solid #ffffff18;border-bottom:0}.tool:last-child{border-right:0}.panel{position:absolute;right:0;top:56px;margin:0}.menu{right:0;top:56px}}
     </style>
@@ -532,9 +678,11 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       <button class="close" type="button">取消</button><button class="save" type="submit">保存</button>
       </div></form>
     </div>
-    <div class="info-overlay" hidden><div class="info-card"><h2 class="info-title">游戏信息</h2><p class="game-name"></p><p class="session-info"></p><div class="actions"><button class="info-close" type="button">关闭</button></div></div></div>`;
+    <div class="info-overlay" hidden><div class="info-card"><h2 class="info-title">游戏信息</h2><p class="game-name"></p><p class="session-info"></p><div class="actions"><button class="info-close" type="button">关闭</button></div></div></div>
+    <div class="logs-overlay" hidden><div class="logs-card"><div class="logs-head"><h2>运行日志</h2><button class="logs-clear" type="button">清空</button></div><pre class="logs-output">暂无运行日志</pre><div class="actions"><button class="logs-close" type="button">关闭</button></div></div></div>`;
     global.document.body.appendChild(host);
     browserNicknameUi = {
+      dock: root.querySelector(".dock"),
       panel: root.querySelector(".panel"),
       fps: root.querySelector(".fps"),
       latency: root.querySelector(".latency"),
@@ -562,6 +710,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       infoTitle: root.querySelector(".info-title"),
       gameName: root.querySelector(".game-name"),
       sessionInfo: root.querySelector(".session-info"),
+      logsOverlay: root.querySelector(".logs-overlay"),
+      logsOutput: root.querySelector(".logs-output"),
+      logsClear: root.querySelector(".logs-clear"),
+      logsClose: root.querySelector(".logs-close"),
     };
     const ui = browserNicknameUi;
     ui.collapse.onclick = () => {
@@ -604,15 +756,21 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       ui.infoOverlay.hidden = false;
     };
     ui.logs.onclick = () => {
-      ui.infoTitle.textContent = "运行日志";
-      ui.gameName.textContent = "普通浏览器日志仅保留在当前设备。";
-      ui.sessionInfo.textContent = "请使用浏览器开发者工具的 Console 查看完整输出。";
+      renderBrowserConsoleLogs(ui);
       ui.menu.hidden = true;
-      ui.infoOverlay.hidden = false;
+      ui.logsOverlay.hidden = false;
     };
     ui.infoClose.onclick = () => {
       ui.infoOverlay.hidden = true;
     };
+    ui.logsClear.onclick = () => {
+      browserConsoleLogs.length = 0;
+      renderBrowserConsoleLogs(ui);
+    };
+    ui.logsClose.onclick = () => {
+      ui.logsOverlay.hidden = true;
+    };
+    installBrowserDockDrag(ui);
     performanceUi = browserNicknameUi;
     return browserNicknameUi;
   }

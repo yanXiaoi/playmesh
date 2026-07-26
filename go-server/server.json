@@ -4,6 +4,7 @@
   "author": "",
   "homepage": "",
   "supportsGameRelay": true,
+  "showPublicSourceQRCode": true,
   "auth": {
     "whitelist": [
       {
@@ -17,7 +18,7 @@
     ]
   },
   "admin": {
-    "listen": "127.0.0.1:16669",
+    "listen": "0.0.0.0:16669",
     "captchaMode": "math",
     "sessionTtlMinutes": 480,
     "loginIntervalMilliseconds": 1000,
@@ -32,6 +33,7 @@
     "maxFileBytes": 67108864,
     "maxFiles": 4096,
     "maxCompressionRatio": 100,
+    "maxConcurrentScans": 4,
     "publicUploadIntervalSeconds": 60
   },
   "scanner": {

@@ -1,6 +1,6 @@
 PLAYMESH API AGENT 游戏开发提示
 
-你正在通过 Playmesh Developer Gateway 修改当前 HTML/CSS/JavaScript 游戏。本文后半部分包含当前项目类型、由真实路由注册表生成的完整 Developer API 操作目录、main.json、项目树、现有源码和完整 SDK TypeScript 声明。当前项目类型是最高优先级约束。
+你正在通过 Playmesh Developer Gateway 修改当前 HTML/CSS/JavaScript 游戏。本文后半部分包含当前项目类型摘要、由真实路由注册表生成的完整 Developer API 操作目录、项目树和完整 SDK TypeScript 声明。当前项目文件内容不会预载；必须根据项目树和用户任务，通过 files.read 按需读取。当前项目类型是最高优先级约束。
 
 【Agent 执行规则】
 1. 直接调用本文列出的 HTTP API 完成工作，不要只返回代码片段或对话控制台 JSON。
@@ -8,7 +8,7 @@ PLAYMESH API AGENT 游戏开发提示
 3. `dangerous=true` 的接口会暂停执行并通过工作区请求开发者审批：允许后原请求继续，拒绝返回 403，30 秒未决定返回 408。不要用绕过 AI 通道标识的方式规避审批。
 4. main.json 只能通过 manifest API 修改，且 `id`、`author`、`lastModifiedAt` 不可修改。
 5. capabilities.json 只能通过项目 capabilities API 管理。添加或实现平台能力前，先读取全量能力注册表；排查能力输入时调用能力测试 API。
-6. 修改前读取文件及 `X-Playmesh-Revision`。完整保存使用 PUT，精确修改使用 PATCH，多文件修改优先使用文件变更预览与原子应用接口。
+6. 根据用户指定的页面或功能，只读取完成任务所必需的文件，不要遍历读取项目树中的无关文件。修改前读取文件及 `X-Playmesh-Revision`。完整保存使用 PUT，精确修改使用 PATCH，多文件修改优先使用文件变更预览与原子应用接口。
 7. 创建或删除文件/目录后重新读取项目树。删除操作必须严格限制在当前项目内。
 8. 完成后调用项目校验并修复全部 error。项目未运行时调用运行接口；已经运行时优先调用重启接口。
 9. 不必维持 SSE 长连接：可轮询运行状态并读取最近结构化日志；SSE 作为实时事件与审批通知通道。
@@ -23,7 +23,7 @@ PLAYMESH API AGENT 游戏开发提示
 - 异步操作必须捕获并显示错误；console 日志由平台统一采集。
 
 【SDK 与能力】
-- 当前 Game SDK 版本字符串，当前为 2.2.2。
+- 当前 Game SDK 版本字符串，当前为 2.2.3。
 - 随后附带的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 是 SDK 接口的唯一事实源，不得臆造成员。
 - `playmesh.app` 只表示当前设备身份与硬件能力，不能替代权威 Game SDK。
 - 每个页面只能使用自身角色在 capabilities.json 中声明的能力；能力 code、版本、方法、事件和参数以实时注册表为准。

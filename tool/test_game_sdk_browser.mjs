@@ -16,20 +16,49 @@ function createPage(appIdentity = null, reconnected = false) {
   const consoleEntries = [];
   const fullscreenRequests = [];
   const orientationLocks = [];
+  const windowListeners = new Map();
+  function fakeElement(selector) {
+    const listeners = new Map();
+    return {
+      hidden: false, textContent: "", value: "", disabled: false,
+      scrollTop: 0, scrollHeight: 100, style: {},
+      focus() {}, insertBefore() {}, onclick: null, onsubmit: null,
+      classList: { toggle() {} }, setAttribute() {},
+      addEventListener(type, listener) {
+        const current = listeners.get(type) || [];
+        current.push(listener);
+        listeners.set(type, current);
+      },
+      emit(type, event = {}) {
+        for (const listener of listeners.get(type) || []) listener(event);
+      },
+      getBoundingClientRect() {
+        if (selector === ".dock") {
+          return {
+            left: Number.parseFloat(this.style.left) || 740,
+            top: Number.parseFloat(this.style.top) || 12,
+            width: 48,
+            height: 260,
+          };
+        }
+        return { left: 0, top: 0, width: 48, height: 48 };
+      },
+      setPointerCapture() {},
+      releasePointerCapture() {},
+    };
+  }
   const elements = Object.fromEntries([
     ".panel", ".fps", ".latency", ".edit", ".overlay", ".enter", ".card", "form", "h2", "input", ".error", ".close", ".save",
     ".performance", ".expand", ".tools", ".collapse", ".reload", ".enter-fullscreen", ".exit-fullscreen", ".more", ".menu", ".info", ".logs", ".info-overlay", ".info-close", ".info-title", ".game-name", ".session-info",
-  ].map((selector) => [selector, {
-    hidden: false, textContent: "", value: "", disabled: false,
-    focus() {}, insertBefore() {}, onclick: null, onsubmit: null,
-    classList: { toggle() {} }, setAttribute() {},
-  }]));
+    ".dock", ".logs-overlay", ".logs-card", ".logs-output", ".logs-clear", ".logs-close",
+  ].map((selector) => [selector, fakeElement(selector)]));
   elements[".edit"].hidden = true;
   elements[".latency"].hidden = true;
   elements[".overlay"].hidden = true;
   elements[".expand"].hidden = true;
   elements[".menu"].hidden = true;
   elements[".info-overlay"].hidden = true;
+  elements[".logs-overlay"].hidden = true;
   const mountedHosts = [];
   const shadowHtml = [];
   const shadowRoot = {
@@ -54,6 +83,8 @@ function createPage(appIdentity = null, reconnected = false) {
     },
   };
   document.documentElement = {
+    clientWidth: 800,
+    clientHeight: 600,
     async requestFullscreen() {
       document.fullscreenElement = document.documentElement;
     },
@@ -263,7 +294,13 @@ function createPage(appIdentity = null, reconnected = false) {
         },
       },
     },
-    addEventListener() {},
+    innerWidth: 800,
+    innerHeight: 600,
+    addEventListener(type, listener) {
+      const current = windowListeners.get(type) || [];
+      current.push(listener);
+      windowListeners.set(type, current);
+    },
     queueMicrotask,
     setTimeout,
     clearTimeout,
@@ -303,6 +340,9 @@ function createPage(appIdentity = null, reconnected = false) {
   window.__fullscreenRequests = fullscreenRequests;
   window.__orientationLocks = orientationLocks;
   window.__sockets = FakeWebSocket.instances;
+  window.__dispatchWindowEvent = (type, event) => {
+    for (const listener of windowListeners.get(type) || []) listener(event);
+  };
   return window;
 }
 
@@ -340,6 +380,7 @@ assert.equal(
 );
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("更多游戏操作")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("运行日志")), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("logs-output")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏设置")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("返回游戏")), false);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("退出游戏")), false);
@@ -355,6 +396,37 @@ assert.equal(firstPage.__ui[".menu"].hidden, false);
 firstPage.__ui[".info"].onclick();
 assert.equal(firstPage.__ui[".info-overlay"].hidden, false);
 assert.equal(firstPage.__ui[".game-name"].textContent, "Playmesh 游戏");
+firstPage.console.log("浏览器本地日志", { score: 7 });
+firstPage.__dispatchWindowEvent("unhandledrejection", {
+  reason: "浏览器 Promise 失败",
+});
+firstPage.__ui[".logs"].onclick();
+assert.equal(firstPage.__ui[".logs-overlay"].hidden, false);
+assert.match(firstPage.__ui[".logs-output"].textContent, /浏览器本地日志 \{"score":7\}/);
+assert.match(firstPage.__ui[".logs-output"].textContent, /unhandled\.rejection/);
+assert.match(
+  firstPage.__ui[".logs-output"].textContent,
+  /\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/,
+);
+firstPage.__ui[".logs-clear"].onclick();
+assert.equal(firstPage.__ui[".logs-output"].textContent, "暂无运行日志");
+firstPage.__ui[".logs-close"].onclick();
+assert.equal(firstPage.__ui[".logs-overlay"].hidden, true);
+firstPage.__ui[".dock"].emit("pointerdown", {
+  pointerId: 1,
+  button: 0,
+  clientX: 760,
+  clientY: 30,
+});
+firstPage.__ui[".dock"].emit("pointermove", {
+  pointerId: 1,
+  clientX: 620,
+  clientY: 110,
+  preventDefault() {},
+});
+firstPage.__ui[".dock"].emit("pointerup", { pointerId: 1 });
+assert.equal(firstPage.__ui[".dock"].style.left, "600px");
+assert.equal(firstPage.__ui[".dock"].style.top, "92px");
 firstPage.__ui[".performance"].onclick();
 await new Promise((resolve) => setTimeout(resolve, 0));
 const persistedBrowserId = browserLocalStorage.get("playmesh.player-id.v1");

@@ -7,5 +7,6 @@ const playmeshReleaseHighlights = <String>[
   '游戏资源网关、分享网关、Developer Gateway、SDK 下载和 AI 提示均禁止绕过统一 SDK 注册表。',
   '新增明确的 SDK 多版本兼容发行范围；已安装旧游戏按清单版本选择兼容实现，未知版本会被拒绝。',
   '正式 Android 与 Windows 构建会自动生成并校验 SDK 静态产物，不再要求日常手动执行生成命令。',
-  'Game SDK 升级到 2.2.2，App Bridge SDK 升级到 2.1.1，Developer API 升级到 2.1.0。',
+  '浏览器扫码加入页可在本机查看运行日志并拖动游戏工具；游戏详情精简重复信息并统一时间显示。',
+  'Game SDK 升级到 2.2.3，App Bridge SDK 保持 2.1.1，Developer API 保持 2.1.0。',
 ];

@@ -151,10 +151,79 @@ func SecureEqual(left, right string) bool {
 	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
+func SecureBytesEqual(left, right []byte) bool {
+	return len(left) == len(right) && len(left) > 0 &&
+		subtle.ConstantTimeCompare(left, right) == 1
+}
+
+func NoStore() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Next()
+	}
+}
+
 type IntervalLimiter struct {
 	mutex    sync.Mutex
 	interval time.Duration
 	lastSeen map[string]time.Time
+}
+
+type windowRecord struct {
+	count     int
+	expiresAt time.Time
+}
+
+type WindowLimiter struct {
+	mutex   sync.Mutex
+	limit   int
+	window  time.Duration
+	records map[string]windowRecord
+}
+
+func NewWindowLimiter(limit int, window time.Duration) *WindowLimiter {
+	return &WindowLimiter{
+		limit: limit, window: window, records: make(map[string]windowRecord),
+	}
+}
+
+func (l *WindowLimiter) Allow(key string) bool {
+	now := time.Now()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	record := l.records[key]
+	if record.expiresAt.IsZero() || !now.Before(record.expiresAt) {
+		record = windowRecord{expiresAt: now.Add(l.window)}
+	}
+	if record.count >= l.limit {
+		l.records[key] = record
+		return false
+	}
+	record.count++
+	l.records[key] = record
+	if len(l.records) > 10000 {
+		for candidate, value := range l.records {
+			if !now.Before(value.expiresAt) {
+				delete(l.records, candidate)
+			}
+		}
+	}
+	return true
+}
+
+func WindowRateLimit(limiter *WindowLimiter, scope string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !limiter.Allow(scope + ":" + c.ClientIP()) {
+			c.Header("Retry-After", "1")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":   "rate_limited",
+				"message": "请求过于频繁，请稍后重试",
+			})
+			return
+		}
+		c.Next()
+	}
 }
 
 func NewIntervalLimiter(interval time.Duration) *IntervalLimiter {

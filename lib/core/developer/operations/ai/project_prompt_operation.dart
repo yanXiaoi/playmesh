@@ -222,27 +222,11 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
     output
       ..writeln()
       ..writeln('============================================================')
-      ..writeln('当前项目文件')
-      ..writeln('============================================================');
-    for (final path in files) {
-      final file = await gateway.catalog.readFile(projectId, path);
-      final content = _chatAiTextContent(file);
-      output
-        ..writeln('===== BEGIN WORKSPACE FILE: $path =====')
-        ..writeln('content-type: ${file.contentType}')
-        ..writeln('size: ${file.bytes.length} bytes')
-        ..writeln('revision: ${file.revision}')
-        ..writeln('read-only: ${file.readOnly}');
-      if (content == null) {
-        output.writeln('content: [binary omitted]');
-      } else {
-        output
-          ..writeln('----- CONTENT -----')
-          ..writeln(content);
-      }
-      output.writeln('===== END WORKSPACE FILE: $path =====');
-    }
-    output
+      ..writeln('按需读取项目文件')
+      ..writeln('============================================================')
+      ..writeln('为避免无关文件占用上下文，本提示词不预载任何项目文件内容。')
+      ..writeln('根据当前项目树、用户指定的页面和任务范围，通过 files.read 读取必要的文本文件。')
+      ..writeln('不要遍历读取与任务无关的文件；修改现有文件时使用读取响应中的 revision。')
       ..writeln()
       ..writeln('============================================================')
       ..writeln('最终执行要求')

@@ -14,6 +14,17 @@ Catalog API 用于把当前设备已安装的 Playmesh 游戏包作为局域网�
 
 所有响应包含 `X-Playmesh-Catalog-Version: 1.4.0`。服务绑定 `0.0.0.0`，只应在可信局域网中启用；Token 不能替代系统防火墙或可信网络边界。
 
+独立部署的 Go Server 使用两个不同的 App Token，而不是本机分享服务的单个可选
+Token：
+
+- 正式发布 Token 只返回 `approved` 游戏。
+- 待审核 Token 只返回 `pending` 游戏，并在每个 Manifest 的 `tags` 中追加
+  `待审核` 临时标签。
+- `rejected` 游戏不会通过 Catalog 返回。
+
+两个 Token 均由 `.env` 提供。Gin 鉴权中间件按 `server.json` 中精确的
+`{method, path}` 白名单跳过 Token；业务 Handler 不自行实现白名单。
+
 ## 游戏源声明
 
 ```http
@@ -139,6 +150,17 @@ Authorization: Bearer optional-token
 
 服务端内部结构、覆盖策略、配置与 Relay 隔离规则见
 [Go Server 开发约定](platform/go-server-development.md)。
+
+Go Server 的公开门户与 App Catalog 位于同一个外部监听；管理监听只承载安全路径
+下的管理员功能。用户可以浏览已通过和待审核游戏并提交带
+邮箱的 ZIP；待审核游戏只展示元数据，不提供下载链接，公开下载 Handler 也会强制
+校验 `approved`。这不影响持有待审核 App Token 的审核客户端通过外部 Catalog
+下载待审核包。平台默认显示快速添加当前源的二维码，由后端将显式
+`publicBaseUrl`、正式发布 Token 和当前源名称编码为
+`playmesh://catalog-source`；管理员可通过 `showPublicSourceQRCode` 关闭，关闭后
+公开二维码端点返回 404。二维码公开分发的正式 Token 只能承担已发布游戏的只读访问。
+公开首页同时显示浏览器当前访问地址、配置的 `publicBaseUrl` 与正式 Token，并提供
+复制按钮供用户手动添加；待审核 Token 不会通过该页面或公开信息接口返回。
 
 ## 在线游戏库
 

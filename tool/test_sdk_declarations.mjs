@@ -30,7 +30,7 @@ const developerSources = [
 
 assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
-assert.match(game, /readonly version: "2\.2\.2"/);
+assert.match(game, /readonly version: "2\.2\.3"/);
 assert.match(game, /readonly version: "2\.1\.1"/);
 assert.match(
   game,

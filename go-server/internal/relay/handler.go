@@ -75,7 +75,7 @@ func (h *Handler) Create(c *gin.Context) {
 
 func (h *Handler) Delete(c *gin.Context) {
 	tunnel := c.MustGet(tunnelContextKey).(*Tunnel)
-	h.manager.Delete(c.Query("tunnelId"), tunnel)
+	h.manager.Delete(strings.TrimSpace(c.Query("tunnelId")), tunnel)
 	c.Status(http.StatusNoContent)
 }
 

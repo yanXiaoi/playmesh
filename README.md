@@ -155,9 +155,13 @@ tool/                        SDK 生成、Core 构建和统一发布脚本
 小型公共或团队游戏源，为游戏包分享、上传与下载提供服务，并为跨网络 App 联机提供
 临时隧道。只在本机或局域网运行游戏不依赖它。
 
-服务端配置入口为 `go-server/server.json`，默认监听 `16668`。Catalog、游戏包管理
-和 Relay 的职责边界、安全要求与扩展方式见：
+敏感凭证从 `go-server/.env` 读取，非敏感运行参数由后台表单管理并原子持久化到
+`go-server/server.json`。默认 App 外部端口为 `16668`，承载公开门户、上传、
+Catalog、已审核下载与 Relay；`16669` 是只承载 `PLAYMESH_ADMIN_PATH` 隐藏后台的
+独立管理监听。两者使用独立 Gin Engine，管理页面、脚本、登录和 API 都不会注册到
+外部端口。Catalog、游戏包管理和 Relay 的职责边界、安全要求与扩展方式见：
 
+- [Go Server 部署与接口](go-server/README.md)
 - [Go Server 开发约定](docs/platform/go-server-development.md)
 - [在线游戏源与 Catalog API](docs/catalog-api.md)
 - [局域网与公共联机中转](docs/remote-game-relay.md)

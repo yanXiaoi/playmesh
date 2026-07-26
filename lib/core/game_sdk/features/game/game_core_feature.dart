@@ -408,7 +408,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "2.2.2";
+  const PLAYMESH_SDK_VERSION = "2.2.3";
 
   let sequence = 0;
   let bootstrap = null;

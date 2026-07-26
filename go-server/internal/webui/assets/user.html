@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playmesh 游戏源</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script defer src="/assets/user.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">P</span> Playmesh 游戏源</div>
+    </header>
+
+    <section class="hero">
+      <article class="hero-copy">
+        <div class="eyebrow">Community game packages</div>
+        <h1>发现，也分享<br>你的下一局游戏</h1>
+        <p>浏览已经通过审核的 Playmesh 游戏包，或提交包含根目录
+          <strong>main.json</strong> 的标准 ZIP 包。每次上传都会经过病毒扫描、
+          归档边界检查与活动内容静态分析。</p>
+      </article>
+      <aside class="panel upload-panel">
+        <h2>提交游戏包</h2>
+        <form id="upload-form" class="stack">
+          <label>联系邮箱
+            <input name="email" type="email" required autocomplete="email" placeholder="you@example.com">
+          </label>
+          <label>Playmesh ZIP 游戏包
+            <input name="package" type="file" accept=".zip,application/zip" required>
+          </label>
+          <button type="submit">安全扫描并提交</button>
+          <div id="upload-notice" class="notice">公开上传严格限流，请确认文件后再提交。</div>
+        </form>
+      </aside>
+    </section>
+
+    <section class="panel manual-source-panel">
+      <div>
+        <div class="eyebrow">Manual source setup</div>
+        <h2>手动添加当前游戏源</h2>
+        <p class="muted">无法扫码时，复制下面的地址和正式加入 Token，在 Playmesh App 中手动添加。</p>
+      </div>
+      <div class="manual-source-fields">
+        <label>当前访问地址
+          <div class="copy-row">
+            <input id="current-source-url" readonly>
+            <button type="button" class="secondary" data-copy-target="current-source-url">复制</button>
+          </div>
+        </label>
+        <label>配置公开地址
+          <div class="copy-row">
+            <input id="configured-source-url" readonly>
+            <button type="button" class="secondary" data-copy-target="configured-source-url">复制</button>
+          </div>
+        </label>
+        <label>正式加入 Token
+          <div class="copy-row">
+            <input id="published-source-token" readonly autocomplete="off">
+            <button type="button" class="secondary" data-copy-target="published-source-token">复制</button>
+          </div>
+        </label>
+        <div id="source-info-notice" class="notice">正在读取游戏源连接信息…</div>
+      </div>
+    </section>
+
+    <section id="source-qr-panel" class="panel source-qr-panel hidden">
+      <div>
+        <div class="eyebrow">Quick add source</div>
+        <h2>扫码快速添加当前游戏源</h2>
+        <p class="muted">使用 Playmesh App 扫描二维码，即可添加此游戏源并浏览已发布游戏。</p>
+        <div class="notice">二维码包含此公开游戏源的正式访问凭据，请只在可信页面扫描。</div>
+      </div>
+      <div class="source-qr-image">
+        <img id="source-qr-image" alt="快速添加当前游戏源二维码">
+      </div>
+    </section>
+
+    <section>
+      <div class="toolbar">
+        <div>
+          <div class="eyebrow">Package catalog</div>
+          <h2>游戏包目录</h2>
+        </div>
+        <div class="tabs">
+          <button class="active" data-status="approved">已通过</button>
+          <button data-status="pending">待审核</button>
+        </div>
+      </div>
+      <form id="filters" class="filters">
+        <input name="id" placeholder="游戏 ID">
+        <input name="name" placeholder="游戏名称">
+        <input name="author" placeholder="作者">
+        <input name="from" type="date" title="上传起始时间">
+        <input name="to" type="date" title="上传结束时间">
+        <select name="sort">
+          <option value="time">按上传时间</option>
+          <option value="id">按游戏 ID</option>
+          <option value="name">按名称</option>
+          <option value="author">按作者</option>
+        </select>
+        <select name="order">
+          <option value="desc">降序</option>
+          <option value="asc">升序</option>
+        </select>
+      </form>
+      <div id="games" class="cards"></div>
+      <div class="pager">
+        <button id="previous" class="secondary">上一页</button>
+        <span id="page-label" class="muted"></span>
+        <button id="next" class="secondary">下一页</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

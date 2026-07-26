@@ -37,7 +37,7 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	}
 
 	request, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/apps/info", nil)
-	request.Header.Set("Authorization", "Bearer source-secret")
+	request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
 	response, err = http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -76,9 +76,8 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	}
 }
 
-func TestCatalogListIsEmptyAndKeepsPagingContract(t *testing.T) {
+func TestCatalogListKeepsPagingContract(t *testing.T) {
 	cfg := testConfig()
-	cfg.Auth.Token = ""
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +85,7 @@ func TestCatalogListIsEmptyAndKeepsPagingContract(t *testing.T) {
 	defer app.Close()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/apps/list?page=3&size=7", nil)
+	request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
 	app.Engine.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("状态 = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -116,7 +116,7 @@ func TestRelayPairsOpaqueBidirectionalStreams(t *testing.T) {
 
 	credentials := createTunnel(t, httpServer.URL)
 	host := openUpgrade(t, httpServer.URL, "/relay/v1/host?tunnelId="+credentials.TunnelID, map[string]string{
-		"Authorization":         "Bearer source-secret",
+		"Authorization":         "Bearer test-source-secret-at-least-32-bytes",
 		"X-Playmesh-Host-Lease": credentials.HostLease,
 	})
 	defer host.Close()
@@ -150,7 +150,6 @@ func TestRelayClientWhitelistStillRequiresCapability(t *testing.T) {
 
 func TestRelayRoutesAreAbsentWhenDeclarationDisablesRelay(t *testing.T) {
 	cfg := testConfig()
-	cfg.Auth.Token = ""
 	cfg.SupportsGameRelay = false
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
@@ -165,6 +164,7 @@ func TestRelayRoutesAreAbsentWhenDeclarationDisablesRelay(t *testing.T) {
 	} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
 		app.Engine.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("%s status = %d, body = %s", path, recorder.Code, recorder.Body.String())
@@ -181,7 +181,7 @@ type relayCredentials struct {
 func createTunnel(t *testing.T, baseURL string) relayCredentials {
 	t.Helper()
 	request, _ := http.NewRequest(http.MethodPost, baseURL+"/relay/v1/host", bytes.NewReader(nil))
-	request.Header.Set("Authorization", "Bearer source-secret")
+	request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func (c *bufferedConn) Read(buffer []byte) (int, error) {
 
 func testConfig() config.Config {
 	cfg := config.Default()
-	cfg.Auth.Token = "source-secret"
+	cfg.Auth.Token = "test-source-secret-at-least-32-bytes"
 	cfg.Relay.PublicBaseURL = "https://relay.example.com"
 	cfg.Relay.PendingConnectionTimeoutSeconds = 1
 	cfg.Relay.IdleTimeoutSeconds = 5

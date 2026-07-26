@@ -237,7 +237,7 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.2.2` 与 App Bridge SDK `2.1.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL，但响应内容由按游戏清单版本选择的 Dart 兼容发行即时组装；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.2.3` 与 App Bridge SDK `2.1.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL，但响应内容由按游戏清单版本选择的 Dart 兼容发行即时组装；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
 
 > **AI 上下文最小披露原则：提示词只暴露游戏代码可调用的公开 SDK、当前项目声明与完成任务所必需的约束。回环代理、内部路由、中转鉴权、密钥协商和加密通道等平台实现不得进入游戏 AI 上下文。**
 

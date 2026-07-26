@@ -201,7 +201,7 @@ class _HomeActionGrid extends StatelessWidget {
       _HomeAction(
         icon: Icons.qr_code_scanner_rounded,
         title: '加入对局',
-        subtitle: '扫描主机二维码，无需预先安装游戏',
+        subtitle: '扫描主机二维码加入游戏',
         onTap: () => Navigator.of(context).pushNamed(JoinGamePage.routeName),
       ),
       _HomeAction(

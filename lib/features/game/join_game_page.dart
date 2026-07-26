@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/platform/app_platform.dart';
-import '../../models/game_summary.dart';
 import '../../ui/playmesh_ui.dart';
-import 'game_page.dart';
 import 'remote_game_page.dart';
 
 class GameInvitation {
@@ -27,7 +25,7 @@ class GameInvitation {
         !{'http', 'https'}.contains(uri.scheme) ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty) {
-      throw const FormatException('二维码不是有效的 Playmesh 对局邀请');
+      throw const FormatException('请输入有效的 Playmesh 对局邀请链接');
     }
     final fragment = uri.fragment.isEmpty
         ? const <String, String>{}
@@ -98,14 +96,12 @@ Map<String, String> _fragmentParameters(String value) {
 class JoinGamePage extends StatefulWidget {
   const JoinGamePage({
     super.key,
-    this.game,
     this.initialUserId = 'u_local',
     this.initialNickname = '本机玩家',
   });
 
   static const routeName = '/join-game';
 
-  final GameSummary? game;
   final String initialUserId;
   final String initialNickname;
 
@@ -115,9 +111,8 @@ class JoinGamePage extends StatefulWidget {
 
 class _JoinGamePageState extends State<JoinGamePage> {
   final _formKey = GlobalKey<FormState>();
-  final _endpointController = TextEditingController();
-  final _joinCodeController = TextEditingController();
-  late final TextEditingController _nicknameController;
+  final _invitationController = TextEditingController();
+  bool _joining = false;
 
   bool get _scannerSupported =>
       kIsWeb ||
@@ -127,16 +122,8 @@ class _JoinGamePageState extends State<JoinGamePage> {
       isHarmonyOS;
 
   @override
-  void initState() {
-    super.initState();
-    _nicknameController = TextEditingController(text: widget.initialNickname);
-  }
-
-  @override
   void dispose() {
-    _endpointController.dispose();
-    _joinCodeController.dispose();
-    _nicknameController.dispose();
+    _invitationController.dispose();
     super.dispose();
   }
 
@@ -173,7 +160,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        widget.game?.name ?? '扫码加入主机对局',
+                                        '加入主机对局',
                                         style: Theme.of(context)
                                             .textTheme
                                             .titleLarge
@@ -182,7 +169,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
                                             ),
                                       ),
                                       const SizedBox(height: 3),
-                                      const Text('扫描邀请二维码，或手动填写对局信息'),
+                                      const Text('扫描二维码，或粘贴完整的对局邀请链接'),
                                     ],
                                   ),
                                 ),
@@ -191,7 +178,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
                             if (_scannerSupported) ...[
                               const SizedBox(height: 22),
                               FilledButton.tonalIcon(
-                                onPressed: _scanInvitation,
+                                onPressed: _joining ? null : _scanInvitation,
                                 icon: const Icon(Icons.qr_code_scanner),
                                 label: const Text('扫码加入'),
                               ),
@@ -213,47 +200,27 @@ class _JoinGamePageState extends State<JoinGamePage> {
                             ] else
                               const SizedBox(height: 22),
                             TextFormField(
-                              controller: _endpointController,
+                              controller: _invitationController,
                               decoration: const InputDecoration(
-                                labelText: '主机地址',
-                                hintText: 'http://192.168.1.20:54321',
-                                prefixIcon: Icon(Icons.lan_outlined),
+                                labelText: '对局邀请链接',
+                                hintText: '粘贴局域网或服务器邀请链接',
+                                helperText: '无需拆分主机地址、加入码或邀请凭证',
+                                prefixIcon: Icon(Icons.link_rounded),
                               ),
                               keyboardType: TextInputType.url,
-                              validator: _validateEndpoint,
-                            ),
-                            const SizedBox(height: 14),
-                            TextFormField(
-                              controller: _joinCodeController,
-                              decoration: const InputDecoration(
-                                labelText: '加入码',
-                                prefixIcon: Icon(Icons.key_outlined),
-                              ),
-                              textCapitalization: TextCapitalization.characters,
-                              maxLength: 6,
-                              validator: (value) =>
-                                  value == null || value.trim().length != 6
-                                  ? '请输入 6 位加入码'
-                                  : null,
-                            ),
-                            const SizedBox(height: 4),
-                            TextFormField(
-                              controller: _nicknameController,
-                              decoration: const InputDecoration(
-                                labelText: '玩家昵称',
-                                prefixIcon: Icon(Icons.person_outline),
-                              ),
-                              maxLength: 32,
-                              validator: (value) =>
-                                  value == null || value.trim().isEmpty
-                                  ? '请输入玩家昵称'
-                                  : null,
+                              textInputAction: TextInputAction.go,
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              validator: _validateInvitation,
+                              onFieldSubmitted: _joining
+                                  ? null
+                                  : (_) => _joinFromInput(),
                             ),
                             const SizedBox(height: 8),
                             FilledButton.icon(
-                              onPressed: _join,
+                              onPressed: _joining ? null : _joinFromInput,
                               icon: const Icon(Icons.login),
-                              label: const Text('进入游戏'),
+                              label: Text(_joining ? '正在加入…' : '加入对局'),
                             ),
                           ],
                         ),
@@ -274,59 +241,36 @@ class _JoinGamePageState extends State<JoinGamePage> {
       MaterialPageRoute(builder: (_) => const _InvitationScannerPage()),
     );
     if (raw == null || !mounted) return;
+    _invitationController.text = raw.trim();
+    await _joinFromInput();
+  }
+
+  String? _validateInvitation(String? value) {
     try {
-      final invitation = GameInvitation.parse(raw);
-      _endpointController.text = invitation.endpoint.toString();
-      if (mounted) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => RemoteGamePage(
-              entryUri: invitation.entryUri,
-              userId: widget.initialUserId,
-              nickname: _nicknameController.text.trim(),
-            ),
-          ),
-        );
-        return;
-      }
+      GameInvitation.parse(value ?? '');
+      return null;
     } on FormatException catch (error) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return error.message.toString();
     }
   }
 
-  String? _validateEndpoint(String? value) {
-    final endpoint = Uri.tryParse(value?.trim() ?? '');
-    if (endpoint == null ||
-        !{'http', 'https'}.contains(endpoint.scheme) ||
-        endpoint.host.isEmpty ||
-        !endpoint.hasPort) {
-      return '请输入包含动态端口的主机地址';
-    }
-    return null;
-  }
-
-  void _join() {
+  Future<void> _joinFromInput() async {
     if (!_formKey.currentState!.validate()) return;
-    final game = widget.game;
-    if (game == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('请扫描主机分享二维码以直接加入对局')));
-      return;
-    }
-    Navigator.of(context).pushNamed(
-      GamePage.routeName,
-      arguments: GameLaunchArguments(
-        game: game,
-        joinRequest: GameJoinRequest(
-          coreEndpoint: Uri.parse(_endpointController.text.trim()),
-          joinCode: _joinCodeController.text.trim().toUpperCase(),
-          nickname: _nicknameController.text.trim(),
+    final invitation = GameInvitation.parse(_invitationController.text);
+    setState(() => _joining = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => RemoteGamePage(
+            entryUri: invitation.entryUri,
+            userId: widget.initialUserId,
+            nickname: widget.initialNickname,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) setState(() => _joining = false);
+    }
   }
 }
 

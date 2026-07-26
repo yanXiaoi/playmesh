@@ -79,10 +79,23 @@ void main() {
 
     expect(clipboardText, game.id);
     expect(find.text('Test Author'), findsOneWidget);
-    expect(find.text('2.2.0'), findsOneWidget);
+    expect(find.text('Game SDK'), findsNothing);
+    expect(find.text('2.2.0'), findsNothing);
+    expect(find.text('运行入口'), findsNothing);
     expect(find.text('2.1.0'), findsOneWidget);
     expect(find.text('游戏 ID 已复制'), findsOneWidget);
     expect(find.text('最近打开'), findsOneWidget);
+    final uploadedAt = _formatExpectedTimestamp(game.lastModifiedAt!);
+    final openedAt = _formatExpectedTimestamp(game.lastOpenedAt!);
+    expect(find.text(uploadedAt), findsOneWidget);
+    expect(find.text(openedAt), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text(uploadedAt),
+        matching: find.byType(FittedBox),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('缺省上传元数据显示为佚名和无', (tester) async {
@@ -108,4 +121,13 @@ void main() {
     expect(find.text('佚名'), findsOneWidget);
     expect(find.text('无'), findsNWidgets(2));
   });
+}
+
+String _formatExpectedTimestamp(DateTime value) {
+  final local = value.toLocal();
+  String twoDigits(int part) => part.toString().padLeft(2, '0');
+  return '${local.year.toString().padLeft(4, '0')}-'
+      '${twoDigits(local.month)}-${twoDigits(local.day)} '
+      '${twoDigits(local.hour)}:${twoDigits(local.minute)}:'
+      '${twoDigits(local.second)}';
 }

@@ -52,33 +52,6 @@ List<Map<String, Object?>> _minimalOperations(String before, String after) {
   ];
 }
 
-String? _chatAiTextContent(DeveloperProjectFile file) {
-  const additionalTextExtensions = {
-    '.csv',
-    '.frag',
-    '.glsl',
-    '.graphql',
-    '.jsx',
-    '.ts',
-    '.tsx',
-    '.vert',
-    '.xml',
-    '.yaml',
-    '.yml',
-  };
-  final lowerPath = file.path.toLowerCase();
-  final isKnownText =
-      file.isText ||
-      file.contentType.startsWith('image/svg+xml') ||
-      additionalTextExtensions.any(lowerPath.endsWith);
-  if (!isKnownText) return null;
-  try {
-    return utf8.decode(file.bytes);
-  } on FormatException {
-    return null;
-  }
-}
-
 List<String> _stringValues(Object? value) {
   if (value is! List) return const [];
   return value

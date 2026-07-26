@@ -230,7 +230,6 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
         OnlineGameLibraryPage.routeName: (_) =>
             OnlineGameLibraryPage(controller: _catalogController),
         JoinGamePage.routeName: (_) => JoinGamePage(
-          game: primaryGame,
           initialUserId: _profile.userId,
           initialNickname: _profile.nickname,
         ),
