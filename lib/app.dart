@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/game_package/file_game_library_scanner.dart';
 import 'core/game_package/game_library_local_metadata.dart';
@@ -10,13 +11,18 @@ import 'core/catalog/online_game_catalog.dart';
 import 'core/game_package/game_library_manager.dart';
 import 'core/game_package/game_library_repository.dart';
 import 'core/game_package/game_package_transfer_service.dart';
+import 'core/localization/playmesh_localization.dart';
+import 'core/localization/playmesh_ui_controller.dart';
+import 'core/localization/playmesh_ui_preferences.dart';
+import 'core/developer/developer_background_host.dart';
+import 'core/developer/developer_game_catalog_publisher.dart';
 import 'core/developer/developer_project_catalog.dart';
 import 'core/developer/developer_run_controller.dart';
+import 'core/developer/developer_web_gateway_contract.dart';
 import 'core/profile/user_profile_store.dart';
 import 'core/platform/incoming_file_service.dart';
 import 'core/services/go_core_runtime.dart';
 import 'core/services/go_core_status_service.dart';
-import 'core/settings/game_display_preferences.dart';
 import 'features/game/game_page.dart';
 import 'features/game/game_orientation_controller.dart';
 import 'features/game/join_game_page.dart';
@@ -29,6 +35,7 @@ import 'features/profile/profile_page.dart';
 import 'features/settings/settings_page.dart';
 import 'models/game_summary.dart';
 import 'models/user_profile.dart';
+import 'ui/focus/playmesh_shortcuts.dart';
 import 'ui/playmesh_ui.dart';
 
 @visibleForTesting
@@ -48,23 +55,24 @@ class PlaymeshApp extends StatefulWidget {
     this.goCoreStatusProvider,
     this.gameOrientationController,
     this.games,
+    this.uiBootstrap,
   });
 
   final GoCoreStatusProvider? goCoreStatusProvider;
   final GameOrientationController? gameOrientationController;
   final List<GameSummary>? games;
+  final PlaymeshUiBootstrap? uiBootstrap;
 
   static UserProfile createLocalUser() => UserProfile(
     userId: UserProfileStore.generateUserId(),
-    nickname: '本机玩家',
-    avatarLabel: 'PM',
+    nickname: playmeshDefaultLocalNickname,
   );
 
   @override
   State<PlaymeshApp> createState() => _PlaymeshAppState();
 }
 
-class _PlaymeshAppState extends State<PlaymeshApp> {
+class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
   GoCoreRuntime? _runtime;
   late final GoCoreStatusProvider _statusProvider;
   late final bool _ownsRuntime;
@@ -75,22 +83,37 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
   late final GameCatalogController _catalogController;
   late final GameLibraryDeveloperProjectCatalog _developerCatalog;
   late final DeveloperRunController _developerRuns;
-  late final GameDisplayPreferences _displayPreferences;
   late final UserProfileStore _profileStore;
   IncomingFileService? _incomingFiles;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late Future<List<GameSummary>> _games;
+  late final Future<PlaymeshUiBootstrap> _uiBootstrap;
+  PlaymeshUiController? _uiController;
+  late final DeveloperWorkspaceLocalizationBridge
+  _developerWorkspaceLocalizationBridge;
   late UserProfile _profile;
-  bool _performanceVisible = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _developerWorkspaceLocalizationBridge =
+        DeveloperWorkspaceLocalizationBridge(
+          current: _currentDeveloperWorkspaceLocalization,
+          useLocale: _useDeveloperWorkspaceLocale,
+          useTheme: _useDeveloperWorkspaceTheme,
+        );
+    final injectedUiBootstrap = widget.uiBootstrap;
+    _uiBootstrap = injectedUiBootstrap == null
+        ? PlaymeshUiBootstrap.load()
+        : SynchronousFuture(injectedUiBootstrap);
+    if (injectedUiBootstrap != null) {
+      _attachUiController(injectedUiBootstrap);
+    }
     _profile = PlaymeshApp.createLocalUser();
     final injectedGames = widget.games;
     _gameLibraryManager = GameLibraryManager();
     _packageTransfer = GamePackageTransferService();
-    _displayPreferences = GameDisplayPreferences();
     _profileStore = const UserProfileStore();
     late GameLibraryScan scan;
     _gameLibrary = GameLibraryRepository(
@@ -113,12 +136,11 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
     );
     if (injectedGames == null) unawaited(_catalogController.initialize());
     _games = injectedGames == null
-        ? _gameLibrary.refresh()
+        ? _recoverImportsAndRefreshLibrary()
         : SynchronousFuture(_gameLibrary.cachedGames);
     _developerRuns = DeveloperRunController(onLaunch: _launchDeveloperProject);
+    unawaited(cleanupStaleGamePackageExport());
     // The Android embedding currently owns the ACTION_VIEW/open-file bridge.
-    // Harmony file picking is provided through file_selector_ohos, but external
-    // file intents are not advertised until an equivalent native bridge exists.
     if (!kIsWeb && Platform.isAndroid) {
       final incomingFiles = IncomingFileService();
       _incomingFiles = incomingFiles;
@@ -135,15 +157,16 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
           if (mounted) setState(() => _profile = profile);
         }),
       );
-      unawaited(
-        _displayPreferences.loadPerformanceVisible().then((visible) {
-          if (mounted) setState(() => _performanceVisible = visible);
-        }),
-      );
     }
     final injectedProvider = widget.goCoreStatusProvider;
     if (injectedProvider is GoCoreRuntime) {
       _runtime = injectedProvider;
+      injectedProvider.setDeveloperWorkspaceLocalizationBridge(
+        _developerWorkspaceLocalizationBridge,
+      );
+      injectedProvider.setDeveloperBackgroundNotificationLocalizationProvider(
+        _currentDeveloperBackgroundNotificationLocalization,
+      );
       _statusProvider = injectedProvider;
       _ownsRuntime = false;
     } else if (injectedProvider != null) {
@@ -154,6 +177,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
         developerProjectCatalog: _developerCatalog,
         developerRunController: _developerRuns,
         developerAuthorProvider: () => _profile.nickname,
+        developerProjectPublisher: GameCatalogDeveloperProjectPublisher(
+          _catalogController,
+        ),
+        developerWorkspaceLocalizationBridge:
+            _developerWorkspaceLocalizationBridge,
+        developerBackgroundNotificationLocalizationProvider:
+            _currentDeveloperBackgroundNotificationLocalization,
       );
       _statusProvider = _runtime!;
       _ownsRuntime = true;
@@ -170,6 +200,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _uiController?.removeListener(_uiChanged);
+    _uiController?.dispose();
     _incomingFiles?.dispose();
     unawaited(_catalogController.close());
     if (_ownsRuntime) {
@@ -180,14 +213,18 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<GameSummary>>(
-      future: _games,
+    return FutureBuilder<PlaymeshUiBootstrap>(
+      future: _uiBootstrap,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             home: Scaffold(
-              body: Center(child: Text('游戏库扫描失败\n${snapshot.error}')),
+              body: Center(
+                child: Text(
+                  'playmesh_localization_bootstrap_failed\n${snapshot.error}',
+                ),
+              ),
             ),
           );
         }
@@ -197,19 +234,204 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
             home: Scaffold(body: Center(child: CircularProgressIndicator())),
           );
         }
-        return _buildApp(snapshot.data!);
+        final uiController = _attachUiController(snapshot.data!);
+        return FutureBuilder<List<GameSummary>>(
+          future: _games,
+          builder: (context, gameSnapshot) {
+            if (gameSnapshot.hasError) {
+              return _buildShell(
+                uiController,
+                _LibraryScanFailure(error: gameSnapshot.error!),
+              );
+            }
+            if (!gameSnapshot.hasData) {
+              return _buildShell(
+                uiController,
+                const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                ),
+              );
+            }
+            return _buildApp(gameSnapshot.data!, uiController);
+          },
+        );
       },
     );
   }
 
-  Widget _buildApp(List<GameSummary> games) {
+  PlaymeshUiController _attachUiController(PlaymeshUiBootstrap bootstrap) {
+    final existing = _uiController;
+    if (existing != null) return existing;
+    final created = PlaymeshUiController(bootstrap)..addListener(_uiChanged);
+    _uiController = created;
+    return created;
+  }
+
+  void _uiChanged() {
+    if (mounted) setState(() {});
+    _refreshDeveloperBackgroundNotification();
+  }
+
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    final ui = _uiController;
+    if (ui?.preferences.localeMode != PlaymeshLocaleMode.system) return;
+    if (mounted) setState(() {});
+    _refreshDeveloperBackgroundNotification();
+  }
+
+  DeveloperWorkspaceLocalization _currentDeveloperWorkspaceLocalization() {
+    final ui = _uiController;
+    if (ui == null) {
+      throw StateError('app_localization_not_ready');
+    }
+    final manifest = ui.catalog.manifest;
+    final preferences = ui.preferences;
+    final localeId = preferences.localeMode == PlaymeshLocaleMode.fixed
+        ? manifest.resolveEnabledLocale(preferences.localeId!)
+        : manifest.resolvePlatformLocales(
+            WidgetsBinding.instance.platformDispatcher.locales,
+          );
+    final effectiveTheme = switch (preferences.theme) {
+      PlaymeshThemePreference.light => 'light',
+      PlaymeshThemePreference.dark => 'dark',
+      PlaymeshThemePreference.system =>
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                Brightness.dark
+            ? 'dark'
+            : 'light',
+    };
+    return DeveloperWorkspaceLocalization(
+      localeId: localeId,
+      localeMode: preferences.localeMode.wireName,
+      defaultLocale: manifest.defaultLocale,
+      allowLocaleSwitch: manifest.allowLocaleSwitch,
+      themeMode: preferences.theme.wireName,
+      effectiveTheme: effectiveTheme,
+      allowThemeSwitch: manifest.allowThemeSwitch,
+      locales: manifest.enabledLocales
+          .map(
+            (locale) =>
+                DeveloperWorkspaceLocale(id: locale.id, label: locale.label),
+          )
+          .toList(growable: false),
+      messages: Map.unmodifiable({
+        for (final entry
+            in ui.catalog
+                .resolvedMessages(localeId, PlaymeshLocalizationBundle.app)
+                .entries)
+          if (entry.key.startsWith('workspace.')) entry.key: entry.value,
+      }),
+    );
+  }
+
+  DeveloperBackgroundNotificationLocalization?
+  _currentDeveloperBackgroundNotificationLocalization() {
+    final ui = _uiController;
+    if (ui == null) return null;
+    final manifest = ui.catalog.manifest;
+    final preferences = ui.preferences;
+    final localeId = preferences.localeMode == PlaymeshLocaleMode.fixed
+        ? manifest.resolveEnabledLocale(preferences.localeId!)
+        : manifest.resolvePlatformLocales(
+            WidgetsBinding.instance.platformDispatcher.locales,
+          );
+    return DeveloperBackgroundNotificationLocalization.fromAppMessages(
+      localeId: localeId,
+      messages: ui.catalog.resolvedMessages(
+        localeId,
+        PlaymeshLocalizationBundle.app,
+      ),
+    );
+  }
+
+  void _refreshDeveloperBackgroundNotification() {
+    final runtime = _runtime;
+    if (runtime == null) return;
+    unawaited(
+      runtime.refreshDeveloperBackgroundNotification().catchError((
+        Object error,
+      ) {
+        debugPrint('developer_foreground_notification_refresh_failed: $error');
+      }),
+    );
+  }
+
+  Future<void> _useDeveloperWorkspaceLocale(String? localeId) async {
+    final ui = _uiController;
+    if (ui == null) {
+      throw StateError('app_localization_not_ready');
+    }
+    final normalized = localeId?.trim() ?? '';
+    if (normalized.isEmpty) {
+      await ui.useSystemLocale();
+      return;
+    }
+    await ui.useLocale(normalized);
+  }
+
+  Future<void> _useDeveloperWorkspaceTheme(String themeMode) async {
+    final ui = _uiController;
+    if (ui == null) {
+      throw StateError('app_localization_not_ready');
+    }
+    final normalized = themeMode.trim();
+    final theme = PlaymeshThemePreference.values
+        .where((candidate) => candidate.wireName == normalized)
+        .firstOrNull;
+    if (theme == null) {
+      throw FormatException('Unknown themeMode: $themeMode');
+    }
+    await ui.useTheme(theme);
+  }
+
+  Widget _buildShell(PlaymeshUiController ui, Widget home) {
+    return MaterialApp(
+      title: 'Playmesh',
+      debugShowCheckedModeBanner: false,
+      locale: ui.fixedLocale,
+      supportedLocales: ui.supportedLocales,
+      localeResolutionCallback: (locale, _) => ui.resolveLocale(
+        locale,
+        WidgetsBinding.instance.platformDispatcher.locales,
+      ),
+      localizationsDelegates: [
+        PlaymeshLocalizationsDelegate(ui.catalog),
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: PlaymeshTheme.light(),
+      darkTheme: PlaymeshTheme.dark(),
+      themeMode: ui.themeMode,
+      builder: _buildRootInteractionLayer,
+      home: home,
+    );
+  }
+
+  Widget _buildApp(List<GameSummary> games, PlaymeshUiController uiController) {
     final primaryGame = games.isEmpty ? null : games.first;
     return MaterialApp(
       navigatorKey: _navigatorKey,
       title: 'Playmesh',
       debugShowCheckedModeBanner: false,
+      locale: uiController.fixedLocale,
+      supportedLocales: uiController.supportedLocales,
+      localeResolutionCallback: (locale, _) => uiController.resolveLocale(
+        locale,
+        WidgetsBinding.instance.platformDispatcher.locales,
+      ),
+      localizationsDelegates: [
+        PlaymeshLocalizationsDelegate(uiController.catalog),
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: PlaymeshTheme.light(),
-      home: HomePage(user: _profile, featuredGame: primaryGame),
+      darkTheme: PlaymeshTheme.dark(),
+      themeMode: uiController.themeMode,
+      builder: _buildRootInteractionLayer,
+      home: HomePage(user: _profile, games: games),
       routes: {
         ProfilePage.routeName: (_) =>
             ProfilePage(user: _profile, onSave: _saveProfile),
@@ -217,6 +439,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
           games: _gameLibrary.cachedGames,
           onRefresh: _gameLibrary.refresh,
           onImport: _importGame,
+          onQuery: (search) => _gameLibrary.query(search: search),
+          onCheckUpdates: widget.games == null
+              ? _catalogController.checkUpdates
+              : null,
+          onDownloadUpdate: widget.games == null
+              ? (offer) => _catalogController.downloads.enqueue([offer])
+              : null,
           onOpenOnline: widget.games == null
               ? () => _navigatorKey.currentState?.pushNamed<void>(
                   OnlineGameLibraryPage.routeName,
@@ -226,9 +455,18 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
         SettingsPage.routeName: (_) => SettingsPage(
           statusProvider: _statusProvider,
           catalogController: widget.games == null ? _catalogController : null,
+          uiController: uiController,
         ),
-        OnlineGameLibraryPage.routeName: (_) =>
-            OnlineGameLibraryPage(controller: _catalogController),
+        OnlineGameLibraryPage.routeName: (_) => OnlineGameLibraryPage(
+          controller: _catalogController,
+          usage: {
+            for (final game in _gameLibrary.cachedGames)
+              game.id: GameLibraryUsageStats(
+                lastOpenedAt: game.lastOpenedAt,
+                launchCount: game.launchCount,
+              ),
+          },
+        ),
         JoinGamePage.routeName: (_) => JoinGamePage(
           initialUserId: _profile.userId,
           initialNickname: _profile.nickname,
@@ -273,10 +511,6 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
                   : null,
               joinRequest: launchArguments.joinRequest,
               developerProjectId: launchArguments.developerProjectId,
-              initialPerformanceVisible: _performanceVisible,
-              onPerformanceVisibilityChanged: widget.games == null
-                  ? _savePerformanceVisible
-                  : null,
             ),
           );
         }
@@ -286,14 +520,37 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
     );
   }
 
+  Widget _buildRootInteractionLayer(BuildContext context, Widget? child) {
+    return Shortcuts(
+      shortcuts: PlaymeshShortcutRegistry.shortcuts,
+      child: Actions(
+        actions: _rootShortcutActions(),
+        child: FocusTraversalGroup(
+          policy: PlaymeshFocusPolicy(),
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
+    );
+  }
+
+  Map<Type, Action<Intent>> _rootShortcutActions() => {
+    PlaymeshBackIntent: CallbackAction<PlaymeshBackIntent>(
+      onInvoke: (_) {
+        final navigator = _navigatorKey.currentState;
+        if (navigator != null && navigator.canPop()) navigator.maybePop();
+        return null;
+      },
+    ),
+  };
+
   Future<void> _recordGameOpened(String gameId) async {
     final openedAt = DateTime.now().toUtc();
     try {
-      await _gameLibraryMetadata?.markOpened(gameId, openedAt);
+      await _gameLibraryMetadata?.markLaunched(gameId, openedAt);
     } on Object catch (error) {
       debugPrint('保存最近打开时间失败: $error');
     }
-    _gameLibrary.markOpened(gameId, openedAt);
+    _gameLibrary.markLaunched(gameId, openedAt);
     if (!mounted) return;
     setState(() {
       _games = SynchronousFuture(_gameLibrary.cachedGames);
@@ -334,12 +591,17 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
     return game;
   }
 
-  Future<void> _catalogGameImported(GameSummary game) async {
-    _gameLibrary.upsert(game);
+  Future<void> _catalogGameImported(GameSummary _) async {
+    await _gameLibrary.refresh();
     if (!mounted) return;
     setState(() {
       _games = SynchronousFuture(_gameLibrary.cachedGames);
     });
+  }
+
+  Future<List<GameSummary>> _recoverImportsAndRefreshLibrary() async {
+    await _packageTransfer.recoverInterruptedImports();
+    return _gameLibrary.refresh();
   }
 
   Future<void> _exportGame(GameSummary game, String destinationPath) async {
@@ -353,13 +615,19 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       await WidgetsBinding.instance.endOfFrame;
       navigator = _navigatorKey.currentState;
     }
-    if (navigator == null) throw StateError('App 导航尚未就绪');
-
+    if (navigator == null) {
+      throw StateError('App navigator is not ready.');
+    }
     if (file.isArchive) {
       final game = await _importGame(file.path);
-      if (!mounted) return;
+      if (!mounted || !navigator.mounted) return;
       unawaited(navigator.pushNamed<void>(GameLibraryPage.routeName));
-      _showAppMessage('已导入 ${game.name} ${game.version}');
+      _showAppMessage(
+        navigator.context.tr(
+          'app.file_imported',
+          arguments: {'name': game.name, 'version': game.version},
+        ),
+      );
       return;
     }
     if (file.isHtml) {
@@ -370,12 +638,22 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       );
       return;
     }
-    throw FormatException('不支持的外部文件：${file.name}');
+    if (!mounted || !navigator.mounted) return;
+    throw FormatException(
+      navigator.context.tr(
+        'app.file_unsupported',
+        arguments: {'name': file.name},
+      ),
+    );
   }
 
   void _showIncomingFileError(Object error) {
-    debugPrint('处理外部文件失败: $error');
-    _showAppMessage('打开文件失败：$error');
+    debugPrint('incoming_file_open_failed: $error');
+    final context = _navigatorKey.currentContext;
+    if (context == null) return;
+    _showAppMessage(
+      context.tr('app.file_open_failed', arguments: {'error': error}),
+    );
   }
 
   void _showAppMessage(String message) {
@@ -386,17 +664,6 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
     )?.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _savePerformanceVisible(bool visible) {
-    _performanceVisible = visible;
-    unawaited(
-      _displayPreferences.savePerformanceVisible(visible).catchError((
-        Object error,
-      ) {
-        debugPrint('保存性能悬浮层设置失败: $error');
-      }),
-    );
-  }
-
   Future<void> _launchDeveloperProject(String projectId) async {
     await _games;
     final game = await _developerCatalog.prepareGame(projectId);
@@ -405,10 +672,29 @@ class _PlaymeshAppState extends State<PlaymeshApp> {
       await WidgetsBinding.instance.endOfFrame;
       navigator = _navigatorKey.currentState;
     }
-    if (navigator == null) throw StateError('App 导航尚未就绪');
+    if (navigator == null) {
+      throw StateError('App navigator is not ready.');
+    }
     launchDeveloperGameRoute(
       navigator,
       GameLaunchArguments(game: game, developerProjectId: projectId),
+    );
+  }
+}
+
+class _LibraryScanFailure extends StatelessWidget {
+  const _LibraryScanFailure({required this.error});
+
+  final Object error;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Text(
+          context.tr('error.library_scan', arguments: {'error': error}),
+        ),
+      ),
     );
   }
 }

@@ -1,13 +1,18 @@
 # Go Server 开发约定
 
 本文面向维护 `go-server/` 的平台开发者。Go Server 是可选、轻量、可独立部署的
-服务端实现，承担两类能力：
+服务端实现，承担三类能力：
 
-- 游戏包源：分享、上传、检索和下载 Playmesh 游戏包。
+- 账号与游戏包源：邮箱账号、上传密钥、所有权、审核、发布、检索和下载。
 - 公共联机中转：为不同网络中的 App 配对临时连接并复制加密字节。
+- 用户/管理员 Web：只负责同一业务服务的可访问 UI，不改变 API 契约。
 
 它不是 App 内置的 Go Core，不运行 HTML 游戏，不执行 Authority 规则，也不负责
-用户账号、计分、房间规则或游戏状态。
+计分、房间规则或游戏状态。
+
+当前 Catalog API 为 `2.0.0`，SQLite 只接受 schema v3。完整部署说明见
+`go-server/README.md`，本轮实现说明见
+[Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
 ## 职责边界
 
@@ -17,6 +22,8 @@ Go Server
   │    Request ID / 日志 / CORS / 鉴权 / 限流 / 请求上限
   ├─ Catalog 与游戏包服务
   │    服务声明 / 列表与搜索 / 上传与校验 / 下载
+  ├─ 用户与发布治理
+  │    注册 / 验证 / Session / 上传密钥 / 所有权 / 审核 / 上下架 / 删除
   └─ Relay
        临时隧道 / Host Lease / Join Capability / 字节复制
 ```
@@ -25,6 +32,7 @@ Go Server
 
 - HTTP 中间件只处理通用请求上下文，不解释游戏包和隧道业务。
 - Catalog 与游戏包服务只处理可发布包，不读取游戏运行数据，不参与联机会话。
+- 用户身份与所有权只使用稳定账号 ID；邮箱、展示名称和包内 author 不能代替账号 ID。
 - Relay 只处理隧道鉴权、配对、限制、超时和字节复制，不解析加密后的游戏内容。
 
 Go Server 与 App 自带的本机游戏库可以实现同一 Catalog 读取契约，但两者不是同一
@@ -49,6 +57,7 @@ Catalog 读取面由 [Catalog API](../catalog-api.md) 定义：
 ```text
 GET /apps/info
 GET /apps/list
+GET /apps/icon
 GET /apps/download
 ```
 
@@ -64,11 +73,15 @@ GET    /relay/v1/client
 App 外部端口提供：
 
 ```text
-POST /api/public/upload
 GET  /api/public/games
 GET  /api/public/games/:id/download
 GET  /api/public/source-qrcode
 GET  /api/public/source-info
+GET/POST /api/user/auth/**
+GET/PATCH /api/user/me
+PUT  /api/user/upload-key
+GET/POST/DELETE /api/user/games/**
+POST /api/user/uploads
 ```
 
 管理端口只提供：
@@ -79,13 +92,10 @@ GET  /api/public/source-info
 <ADMIN_PATH>/api/admin/**      全部要求管理员 Session
 ```
 
-公开页面可以查询 `approved` 与 `pending` 元数据，但公开下载 Handler 必须再次校验
-记录是 `approved`。隐藏按钮不是安全边界，待审核包即使被手工构造 URL 也不能从公开
-下载接口获得。
-
-外部 App 端口使用正式 Token 和待审核 Token 分流。正式 Token 只读取 `approved`；
-待审核 Token 只读取 `pending`，并在返回 Manifest 的 `tags` 中追加 `待审核`。
-`rejected` 永不进入 Catalog。
+公开页面和 Catalog 只查询每个 gameId 当前语义版本最高的
+`approved + published` 记录。pending、rejected、deleting、历史版本和已下架版本
+不得进入公开元数据、图标或下载。若最高 approved 版本下架，不回退任何历史版本。
+管理员页面可查看审核状态，但管理员下载也拒绝 deleting。
 
 Catalog API、上传管理面和 Relay 协议分别评估版本。只修改其中一个领域时，不得
 机械提升其他领域的版本。
@@ -97,6 +107,7 @@ Catalog API、上传管理面和 Relay 协议分别评估版本。只修改其�
 ```text
 main.json
 capabilities.json           可选
+icon.png                     可选
 app/
 ```
 
@@ -117,9 +128,19 @@ playmesh/
 1. 限制压缩包大小、展开后总大小、文件数量和单文件大小。
 2. 拒绝绝对路径、目录穿越、符号链接和危险扩展名。
 3. 校验 `main.json`、能力声明、入口和受支持的 SDK 版本。
-4. 在临时目录完整校验，成功后原子替换；失败时保留旧版本。
+4. 在临时目录完整校验，成功后原子提交新版本；失败时不产生版本或所有权残留。
 5. 清理超时或失败的临时文件，并对同一游戏 ID 的并发写入串行化。
-6. 列表、搜索和下载必须读取同一个已提交包存储，不能各自维护事实副本。
+6. 列表、搜索、图标和下载必须读取同一个已提交包存储，不能各自维护事实副本。
+7. 根 `icon.png` 执行 PNG 结构、CRC、尺寸、像素和解码预算校验；无效图标忽略，
+   其他恶意包错误仍拒绝。
+8. `main.json` 只投影当前已知字段及已知嵌套字段；任何未知键均静默忽略并从数据库
+   与规范化 ZIP 丢弃，不创建按旧字段名区分的校验、告警或兼容分支。
+
+上传失败或版本冲突后的即时删除如果失败，必须返回可观察错误，并由持久化恢复路径
+继续处理。当前实现以 SQLite 中全部 `stored_path` / `icon_path` 为引用白名单，
+启动时及每 30 秒扫描一次：游戏目录只删除符合服务端随机命名规则且未被引用的常规
+文件，隔离目录只删除 `upload-*` / `normalized-*` 临时 ZIP；不匹配的文件、目录和
+符号链接一律保留。
 
 默认使用 ClamAV 执行跨平台病毒扫描。`scanner.required == true` 时，扫描器缺失、
 超时、病毒库错误或非明确干净结果都必须拒绝上传。ClamAV 之外仍需执行活动内容
@@ -157,25 +178,32 @@ Origin，二维码和 App Relay 都以该值为准。管理监听仍应默认绑
 游戏源都会重新请求 `/apps/info`，不得把源 Host 当作 Relay 地址，也不得沿用进程
 启动时的旧声明。Relay 容量、超时和监听器仍属于重启生效配置。
 
-包 ID 是存储主键。覆盖、保留多版本或禁止重复必须由服务端配置和管理契约明确，
-不能根据文件名猜测。下载端仍必须把远程包视为不可信输入并重新校验。
+版本记录是存储主键，gameId 所有权单独存储。首次有效上传在事务中取得所有权；
+同 gameId 的新版本必须由同一账号上传并严格高于数据库当前最高语义版本。不能根据
+文件名、邮箱、展示名称或 author 猜测所有权。下载端仍把远程包视为不可信输入。
 
 ## 鉴权与访问控制
 
-Source Token 由领域中间件处理，Handler 不自行比较 Token。独立 Go Server 的正式
-Token 与待审核 Token 均不得为空；只有 App 本机局域网分享服务保留可选单 Token
-语义。
+Source Token 由领域中间件处理，Handler 不自行比较。用户上传不接受匿名邮箱参数：
+浏览器必须使用 HttpOnly/SameSite=Lax Session Cookie 与 CSRF；App/Workspace 必须
+使用账号上传密钥：
 
-- 匿名公开上传是受限例外：它只能创建 `pending` 记录，必须经过邮箱、严格限流、
-  并发扫描上限和完整恶意包检查，不能覆盖、批准或删除游戏。管理员上传、状态修改
-  和删除必须验证管理员 Session，不能进入 App Token 白名单。
+```http
+Authorization: UploadKey <key>
+```
+
+上传密钥只存 HMAC-SHA256，明文只在创建/轮换时返回一次。读取 Token 与上传密钥是
+不同权限，不能复用或互相回退。
+
+- `allowUserRegistration=false` 时注册 API 返回 `403 registration_disabled`，
+  但已有账号登录和待验证账号完成验证不受影响。
+- 密码长度 10–128；上传密钥必须含大小写、数字和特殊字符。
+- 上传按凭据/IP 做 30 秒限流，并受并发扫描和完整恶意包检查约束。
+- App 包内 author 始终由账号展示名称覆盖，不能通过 ZIP 冒充发布者。
 - `/relay/v1/client` 可以免 Source Token，但仍必须校验限定隧道的 Join Capability。
 - Host Lease 只允许管理创建它的隧道，不能替代全局 Source Token。
 - 日志不得记录完整 Source Token、Host Lease、Join Capability、邀请 Token 或端点密钥。
 - 生产部署应在反向代理或服务入口使用 HTTPS，并设置防火墙、请求速率和存储配额。
-
-若未来引入账号或多租户，必须作为独立身份与授权层设计，不能把单个 Source Token
-扩展成隐式用户系统。
 
 管理员账号密码、App 双 Token 和 SMTP 凭证来自 `.env`。验证码支持数字计算与文字
 点选两种模式：计算图使用 `mojocn/base64Captcha`，文字行为验证码使用
@@ -220,7 +248,7 @@ Relay 无法检查端到端加密内容是否属于游戏流量。Source Token�
 - 启动前完成全部范围、URL 和必填项校验。
 - 对外地址使用显式 `publicBaseUrl`，不得从监听地址、请求 `Host` 或转发头猜测。
 - `showPublicSourceQRCode` 默认开启。开启时公开门户由后端把 `publicBaseUrl`、
-  正式发布 Token 与当前源名称编码为 `playmesh://catalog-source` 二维码；关闭时
+  正式发布 Token 编码为唯一 `publicURL?token=...` 二维码；关闭时
   公开端点返回 404 且前端不渲染模块。正式 Token 因此属于公开只读凭据，绝不能与
   待审核 Token、管理员 Session 或 SMTP 密钥复用。
 - 匿名 `/api/public/source-info` 可以返回当前配置的 `publicBaseUrl` 与正式 Token，
@@ -235,6 +263,48 @@ Relay 无法检查端到端加密内容是否属于游戏流量。Source Token�
 
 当包存储能力引入目录、配额、上传大小或覆盖策略配置时，应归入独立的包服务配置
 对象，不得塞入 Relay 配置。
+
+### Web UI 国际化与主题
+
+`server.json.webUI` 可覆盖默认 locale、启用 locale、语言切换、默认主题和主题切换。
+配置只能引用统一清单中的 locale；未知、禁用默认语言、fallback 环、词典 key 漂移
+或非法主题使服务拒绝启动。
+
+Go Server 是独立部署产品，用户门户和管理后台只读取清单的 `goServer` bundle
+（各 locale 的 `go-server.json`）。它不读取 App `app.json`，也不能把自身词条提供
+给 App 内置 Developer Workspace；工作区归 App 所有并由宿主投影 App 词条。
+
+用户和管理员页面共用 locale/theme loader。静态文本、动态状态、placeholder、
+title、alt、label 和 aria-label 全部走词典；错误优先按机器 code 映射，不向界面
+直接展示 API 原始 message。`/api/**`、`/apps/**` 和 Relay 不读取 locale，同一请求
+在不同 UI 语言下返回完全相同的 JSON。
+
+HTML 壳的 `data-i18n*` 节点和属性不得携带中英文 fallback；统一首帧遮罩必须持续到
+`go-server.json` bundle 投影完成。Playmesh、ClamAV、协议路径、URL 示例等技术值
+可原样保留，游戏名、账号、版本等动态/API 值不得登记为本地化 key。静态契约测试
+同时校验 HTML 无 fallback 且每个引用 key 在所有启用 bundle 中非空。
+
+Web 支持 system/light/dark，二维码保持白底；普通圆角不超过 8px，不使用渐变、
+光晕、装饰阴影或 backdrop blur。表单和交互控件有可见 `:focus-visible`，reduced
+motion 下禁用非必要动画。
+
+## 删除状态机
+
+版本删除不是单一数据库 DELETE：
+
+1. 事务把记录标记为 `deleting` 并写入审计。
+2. 删除 ZIP、图标和派生文件。
+3. 第二个事务删除版本；若是最后一个版本，同步释放 gameId 所有权。
+
+文件删除失败返回 `202 deletion_pending`。服务启动立即调用清理，运行时每 30 秒
+重试；缺失文件视为已清理，流程幂等。审计表不得用会随游戏行删除的外键，最终删除
+后仍保留操作记录。
+
+schema v3 的审计事件必须同时保存稳定 `actor_identifier`：用户使用十进制用户 ID，
+管理员使用 `.env` 配置的管理员用户名，后台恢复任务使用 `system`。审核、自动或
+手动上/下架、删除开始/完成及设置更新均保存角色、gameId/版本、`from`、`target`
+和时间；设置事件以 `_server` / `settings` 作为稳定资源标识。schema 采用破坏式
+边界，不提供旧数据库迁移。
 
 ## 新增服务端能力
 
@@ -254,10 +324,15 @@ Relay Manager。
 
 - Catalog、管理面和 Relay 的实际路由与文档一致。
 - 包上传、替换、失败回滚、列表和下载使用同一存储事实。
+- Catalog 只公开每个 gameId 当前最高 `approved + published` 版本且不回退。
+- 所有权抢占、相同/较低版本和并发上传返回冲突且无文件/事务残留。
+- deleting 状态可在启动和后台恢复，最后一版完成删除后释放所有权。
 - 所有写操作的鉴权、大小限制、限流和审计已启用。
 - 隧道凭证按角色隔离，端点密钥从未到达服务端。
 - 连接、临时文件和失败上传可以在超时或关闭时回收。
 - `server.json` 示例不含生产秘密，公网地址与 TLS 终止配置一致。
 - 版本日志分别记录已验证内容和仍需完成的公网、压力与故障恢复验证。
+- 两个启用语言的 Web 词典 key 集一致，嵌入副本与共享源逐字一致。
+- 不同 locale/theme 下 API JSON 逐字段一致。
 - 使用 `go.mod` 固定的已修复 Go 工具链完成 `go build`、`govulncheck` 与
   `gosec`；不得用存在已知标准库漏洞的旧工具链发布公网服务。

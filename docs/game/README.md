@@ -61,6 +61,8 @@ AI 提示词和操作审批。
 - 单屏多人控制器入口：`entries.controller`，默认 `app/controller/index.html`
 - 多人 Authority 入口：`authority.entry`
 - 实际 SDK 版本及兼容范围：以目标 App 的 SDK 注册表和开发者工作区状态为准
+- 游戏业务 locale：`playmesh.runtime.getLocale()`（只返回当前显示端 locale；
+  游戏自行提供翻译，不读取 App messages）
 
 URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。目标 App 会根据
 `main.json.sdkVersion/appSdkVersion` 选择兼容 SDK Bundle 和对应宿主执行器。

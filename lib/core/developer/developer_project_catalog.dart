@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 
 import '../../models/game_summary.dart';
 import '../../models/game_manifest.dart';
+import '../../models/game_id.dart';
 import '../../models/game_capabilities.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../../models/local_game_entry.dart';
@@ -290,6 +291,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         workspace: target,
         label: '发布项目 ${package.manifest.version}',
         path: '',
+        summaryCode: 'publish_project',
+        summaryArguments: {'version': package.manifest.version},
         forceNew: true,
         action: () => _packageTransfer.commitPackage(package, target),
       );
@@ -396,17 +399,18 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       final manifestFile = _resolveFile(staging, 'main.json');
       final decoded = jsonDecode(await manifestFile.readAsString());
       if (decoded is! Map) throw StateError('默认项目模板清单无效');
-      final manifestJson = Map<String, Object?>.from(decoded)
-        ..['id'] = id
-        ..['name'] = name
-        ..['author'] = author
-        ..['lastModifiedAt'] = draft.lastModifiedAt.millisecondsSinceEpoch
-        ..['remarks'] = description
-        ..['orientation'] = draft.orientation.manifestValue
-        ..['modes'] = [draft.mode]
-        ..['displayModes'] = [draft.displayMode]
-        ..['tags'] = draft.tags.map((tag) => tag.trim()).toSet().toList()
-        ..['players'] = {'min': draft.minPlayers, 'max': draft.maxPlayers};
+      final manifestJson =
+          projectGameManifestJson(Map<String, Object?>.from(decoded))
+            ..['id'] = id
+            ..['name'] = name
+            ..['author'] = author
+            ..['lastModifiedAt'] = draft.lastModifiedAt.millisecondsSinceEpoch
+            ..['remarks'] = description
+            ..['orientation'] = draft.orientation.manifestValue
+            ..['modes'] = [draft.mode]
+            ..['displayModes'] = [draft.displayMode]
+            ..['tags'] = draft.tags.map((tag) => tag.trim()).toSet().toList()
+            ..['players'] = {'min': draft.minPlayers, 'max': draft.maxPlayers};
       if (draft.controllerOrientation case final controllerOrientation?) {
         manifestJson['controllerOrientation'] =
             controllerOrientation.manifestValue;
@@ -488,14 +492,15 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       final manifestFile = _resolveFile(staging, 'main.json');
       final decoded = jsonDecode(await manifestFile.readAsString());
       if (decoded is! Map) throw const FormatException('来源项目 main.json 无效');
-      final manifest = Map<String, Object?>.from(decoded)
-        ..['id'] = validated.id
-        ..['name'] = validated.name
-        ..['author'] = validated.author
-        ..['lastModifiedAt'] = lastModifiedAt.millisecondsSinceEpoch;
-      GameManifest.fromJson(manifest);
+      final manifest =
+          projectGameManifestJson(Map<String, Object?>.from(decoded))
+            ..['id'] = validated.id
+            ..['name'] = validated.name
+            ..['author'] = validated.author
+            ..['lastModifiedAt'] = lastModifiedAt.millisecondsSinceEpoch;
+      final normalizedManifest = GameManifest.fromJson(manifest).toJson();
       await manifestFile.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(manifest),
+        '${const JsonEncoder.withIndent('  ').convert(normalizedManifest)}\n',
         flush: true,
       );
       await _renameDirectoryWithRetry(staging, target.path);
@@ -559,6 +564,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '创建文件夹 $normalized',
       path: normalized,
+      summaryCode: 'create_directory',
+      summaryArguments: {'path': normalized},
       action: () => _createDirectory(projectId, normalized),
     );
   }
@@ -587,6 +594,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '删除文件夹 $normalized',
       path: normalized,
+      summaryCode: 'delete_directory',
+      summaryArguments: {'path': normalized},
       action: () => _deleteDirectory(projectId, normalized),
     );
   }
@@ -626,6 +635,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '复制 $from 到 $to',
       path: _commonParent([from, to]),
+      summaryCode: 'copy_path',
+      summaryArguments: {'source': from, 'destination': to},
       action: () => _copyEntry(workspace, from, to),
     );
   }
@@ -682,6 +693,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '移动 $from 到 $to',
       path: _commonParent([from, to]),
+      summaryCode: 'move_path',
+      summaryArguments: {'source': from, 'destination': to},
       action: () async {
         final sourceFile = _resolveFile(workspace, from);
         final sourceDirectory = _resolveDirectory(workspace, from);
@@ -754,6 +767,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '解压 $source 到 $destination',
       path: destination,
+      summaryCode: 'extract_archive',
+      summaryArguments: {'source': source, 'destination': destination},
       action: () async {
         for (final item in extracted) {
           final output = _resolveFile(workspace, item.path);
@@ -807,11 +822,11 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         throw FormatException('main.json.$field 由 App 管理，不能修改');
       }
     }
-    final normalized = Map<String, Object?>.from(manifest)
+    final projected = projectGameManifestJson(manifest)
       ..['id'] = currentId
       ..['author'] = current['author']
       ..['lastModifiedAt'] = current['lastModifiedAt'];
-    GameManifest.fromJson(normalized);
+    final normalized = GameManifest.fromJson(projected).toJson();
     final encoded = utf8.encode(
       '${const JsonEncoder.withIndent('  ').convert(normalized)}\n',
     );
@@ -845,6 +860,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '保存文件 $normalized',
       path: normalized,
+      summaryCode: 'save_file',
+      summaryArguments: {'path': normalized},
       action: () => _writeFile(
         projectId,
         normalized,
@@ -892,6 +909,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '批量修改 ${paths.length} 个文件',
       path: _commonParent(paths),
+      summaryCode: 'batch_edit',
+      summaryArguments: {'count': paths.length},
       action: () => _writeFilesAtomic(
         projectId,
         files,
@@ -982,6 +1001,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '删除文件 $normalized',
       path: normalized,
+      summaryCode: 'delete_file',
+      summaryArguments: {'path': normalized},
       action: () => _deleteFile(
         projectId,
         normalized,
@@ -1069,6 +1090,8 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       workspace: workspace,
       label: '恢复本地历史 ${normalized.isEmpty ? '整个工作区' : normalized}',
       path: normalized,
+      summaryCode: normalized.isEmpty ? 'restore_workspace' : 'restore_path',
+      summaryArguments: normalized.isEmpty ? const {} : {'path': normalized},
       forceNew: true,
       action: () =>
           _localHistory.restore(workspace, operationId, normalized, version),
@@ -1142,7 +1165,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         assetPath: game.entry.gameEntryPath,
         gameEntryPath: game.entry.gameEntryPath,
         controllerEntryPath: game.entry.controllerEntryPath,
-        statusLabel: '${game.entry.statusLabel} · 开发副本',
+        statusLabel: game.entry.statusLabel,
         packageRootAssetPath: game.entry.packageRootAssetPath,
         packageRootFilePath: directory.path,
       ),
@@ -1241,9 +1264,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       minPlayers: manifest.players.min,
       maxPlayers: manifest.players.max,
       supportsMultiplayer: manifest.supportsMultiplayer,
-      displayModeLabel: displayMode == GameDisplayMode.singleScreenMultiplayer
-          ? '大屏模式'
-          : '多人多屏',
+      displayModeLabel: displayMode.manifestValue,
       displayMode: displayMode.manifestValue,
       orientation: manifest.orientation,
       controllerOrientation: manifest.controllerOrientation,
@@ -1253,7 +1274,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
         assetPath: manifest.entries.game,
         gameEntryPath: manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,
-        statusLabel: 'Game SDK ${manifest.sdkVersion} · 开发项目',
+        statusLabel: 'Game SDK ${manifest.sdkVersion}',
         packageRootAssetPath: _templateRoot,
         packageRootFilePath: directory.path,
       ),
@@ -1399,14 +1420,15 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     final normalizedId = id.trim();
     final normalizedName = name.trim();
     final normalizedAuthor = author.trim();
-    if (!RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(normalizedId)) {
+    if (!isValidPlaymeshGameId(normalizedId) ||
+        !RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(normalizedId)) {
       throw const FormatException('项目 ID 必须是小写反向域名格式');
     }
     if (normalizedName.isEmpty || normalizedName.length > 80) {
       throw const FormatException('项目名称长度必须为 1 到 80 个字符');
     }
     if (normalizedAuthor.isEmpty || normalizedAuthor.length > 80) {
-      throw const FormatException('作者名称长度必须为 1 到 80 个字符');
+      throw const FormatException('发布者名称长度必须为 1 到 80 个字符');
     }
     if (!lastModifiedAt.isUtc) {
       throw const FormatException('最后修改时间必须使用 UTC');

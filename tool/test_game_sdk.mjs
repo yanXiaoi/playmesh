@@ -6,6 +6,30 @@ const commands = [];
 const binaryFrames = [];
 const uploads = [];
 const binaryChannelBytes = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
+const localizationManifest = JSON.parse(
+  fs.readFileSync(
+    new URL("../assets/playmesh-localization/manifest.json", import.meta.url),
+    "utf8",
+  ),
+);
+const localizationMessages = new Map(
+  localizationManifest.locales.map((locale) => {
+    const appMessages = JSON.parse(
+      fs.readFileSync(
+        new URL(`../assets/playmesh-localization/${locale.bundles.app}`, import.meta.url),
+        "utf8",
+      ),
+    );
+    return [
+      locale.id,
+      Object.fromEntries(
+        Object.entries(appMessages)
+          .filter(([key]) => key.startsWith("platform.game."))
+          .map(([key, value]) => [key.slice("platform.game.".length), value]),
+      ),
+    ];
+  }),
+);
 
 function parseBinarySend(frame) {
   assert.equal(frame[1], 0x04);
@@ -123,6 +147,32 @@ class MockWebSocket {
   }
 }
 
+const gameDocumentBody = {
+  isConnected: true,
+  tabIndex: -1,
+  attributes: new Map(),
+  getAttribute(name) {
+    return this.attributes.has(name) ? this.attributes.get(name) : null;
+  },
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+    if (name === "tabindex") this.tabIndex = Number(value);
+  },
+  removeAttribute(name) {
+    this.attributes.delete(name);
+    if (name === "tabindex") this.tabIndex = -1;
+  },
+  focus() {
+    window.document.activeElement = this;
+  },
+};
+const gameFocusTarget = {
+  isConnected: true,
+  focus() {
+    window.document.activeElement = this;
+  },
+};
+
 globalThis.window = {
   setInterval,
   clearInterval,
@@ -151,6 +201,20 @@ globalThis.window = {
     return Buffer.from(value, "base64").toString("binary");
   },
   addEventListener() {},
+  navigator: {
+    languages: ["zh-CN"],
+    language: "zh-CN",
+    userActivation: { isActive: true },
+  },
+  document: {
+    activeElement: gameFocusTarget,
+    body: gameDocumentBody,
+    documentElement: { isConnected: true },
+  },
+  [Symbol.for("playmesh.platform-ui.configuration")]: {
+    locale: localizationManifest.defaultLocale,
+    messages: localizationMessages.get(localizationManifest.defaultLocale),
+  },
   playmeshApp: {
     ready: Promise.resolve({
       available: true,
@@ -209,7 +273,17 @@ globalThis.window = {
           binaryTransport: { url: "ws://127.0.0.1/binary?token=secret" },
           session: {
             id: "s-1", joinCode: "ABC123", state: "lobby",
-            authorityClientId: "p-authority", players: [], minPlayers: 2,
+            authorityClientId: "p-authority",
+            players: [{
+              id: "p-guest",
+              nickname: "Guest",
+              avatar: null,
+              role: "player",
+              connected: true,
+              source: "lan_html",
+              latencyMs: 18,
+            }],
+            minPlayers: 2,
           },
         }));
       } else if (command.command === "performance.ping") {
@@ -237,10 +311,19 @@ globalThis.window = {
           type: "command.result", requestId: command.requestId, result: null,
         });
       } else if (command.command === "session.finish") {
+        const current = window.playmesh.session.getCurrent();
         window.playmesh.__receive({
           type: "command.result",
           requestId: command.requestId,
-          result: { ...window.playmesh.session.getCurrent(), state: "stopped" },
+          result: {
+            ...current,
+            state: "stopped",
+            players: current.players.map((player) => ({
+              ...player,
+              source: "lan_html",
+              latencyMs: 21,
+            })),
+          },
         });
       }
     },
@@ -255,11 +338,34 @@ const readyCommand = commands.shift();
 assert.equal(readyCommand.command, "sdk.ready");
 const sdkBootstrap = await window.playmesh.ready;
 assert.equal(sdkBootstrap.binaryTransport, undefined);
+assert.equal(JSON.stringify(sdkBootstrap).includes("toolbar.expand"), false);
+assert.equal(window.playmesh.runtime.getLocale(), "zh-CN");
+assert.equal("messages" in window.playmesh.runtime, false);
+assert.equal(
+  Symbol.for("playmesh.platform-ui.configuration") in window,
+  false,
+  "App platform UI messages must be consumed from private bootstrap state",
+);
 assert.equal(window.playmesh.session.isAuthority(), true);
 assert.equal(window.playmesh.player.getCurrent(), null);
 assert.equal(window.playmesh.session.getCurrent().joinCode, "ABC123");
-assert.equal(window.playmesh.version, "2.2.3");
-assert.equal((await window.playmesh.session.finish()).state, "stopped");
+assert.deepEqual(
+  Object.keys(window.playmesh.session.getCurrent().players[0]).sort(),
+  ["avatar", "connected", "id", "nickname", "role"],
+);
+assert.equal(window.playmesh.version, "2.4.0");
+const unrelatedPlatformFocusTarget = { isConnected: true };
+window.document.activeElement = unrelatedPlatformFocusTarget;
+window.playmesh.__receive({ type: "platform.ui.restoreGameFocus" });
+assert.equal(
+  window.document.activeElement,
+  unrelatedPlatformFocusTarget,
+  "a host restore without an SDK share capture must not steal focus",
+);
+const finishedSession = await window.playmesh.session.finish();
+assert.equal(finishedSession.state, "stopped");
+assert.equal("source" in finishedSession.players[0], false);
+assert.equal("latencyMs" in finishedSession.players[0], false);
 assert.equal(window.playmesh.performance.getLatency() >= 0, true);
 assert.equal(
   window.playmesh.performance.getLatencyDiagnostics().authorityAvailable,
@@ -429,21 +535,42 @@ window.playmesh.__receive({
 });
 assert.equal(received.correct, true);
 
-window.playmesh.authority.onService((action, context) => ({
-  targetPlayerIds: [context.senderPlayerId],
-  message: { type: "echo", action },
-}));
+let authorityContext = null;
+window.playmesh.authority.onService((action, context) => {
+  authorityContext = context;
+  return {
+    targetPlayerIds: [context.senderPlayerId],
+    message: { type: "echo", action },
+  };
+});
 window.playmesh.__receive({
   type: "transport.message",
   message: {
     type: "authority.action", senderPlayerId: "p-guest", payload: { type: "ping" },
-    session: { players: [{ id: "p-host" }, { id: "p-guest" }] },
+    session: {
+      players: [
+        {
+          id: "p-host", nickname: "Host", avatar: null,
+          role: "authority_player", connected: true,
+          source: "lan_app", latencyMs: 4,
+        },
+        {
+          id: "p-guest", nickname: "Guest", avatar: null,
+          role: "player", connected: true,
+          source: "lan_html", latencyMs: 19,
+        },
+      ],
+    },
   },
 });
 await new Promise((resolve) => setTimeout(resolve, 0));
 const authorityResult = commands.find((command) => command.command === "authority.result");
 assert.deepEqual(authorityResult.targetPlayerIds, ["p-guest"]);
 assert.equal(authorityResult.payload.type, "echo");
+assert.deepEqual(
+  Object.keys(authorityContext.members[0]).sort(),
+  ["avatar", "connected", "id", "nickname", "role"],
+);
 
 const syncController = window.playmesh.sync.startAuthority({
   initialState: { score: 0 },

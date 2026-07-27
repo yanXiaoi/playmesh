@@ -1,17 +1,21 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 
 void main() {
   test('主 SDK 在 App 与浏览器初始化前统一完成能力确认', () async {
-    final source = await File(
-      'assets/playmesh-library/public/sdk/v1/playmesh.js',
-    ).readAsString();
+    final source = SdkFeatureRegistry.sdkFile('playmesh.js');
 
     expect(source, contains('function requestCapabilityConsent'));
-    expect(source, contains('（本平台暂不支持）'));
-    expect(source, contains('拒绝并退出'));
-    expect(source, contains('同意并进入'));
+    expect(source, contains('function capabilityDisplayText'));
+    expect(
+      source,
+      contains('["sensor.accelerometer", "capability.sensor.accelerometer"]'),
+    );
+    expect(source, contains('name: definition?.name || capability'));
+    expect(source, contains('description: definition?.description || ""'));
+    expect(source, contains('platformHtml("capability.unsupported")'));
+    expect(source, contains('platformHtml("capability.deny")'));
+    expect(source, contains('platformHtml("capability.allow")'));
     expect(source, contains('max-height:calc(100dvh - 32px)'));
     expect(source, contains('overflow-y:auto'));
     expect(source, contains('<div class="content">'));
@@ -23,13 +27,11 @@ void main() {
   });
 
   test('App SDK 只转发退出请求，不实现能力弹窗', () async {
-    final source = await File(
-      'assets/playmesh-library/public/sdk/v1/playmesh-app.js',
-    ).readAsString();
+    final source = SdkFeatureRegistry.sdkFile('playmesh-app.js');
 
     expect(source, contains('return request("app.game.exit")'));
     expect(source, contains('return request("app.capabilities.confirm")'));
-    expect(source, isNot(contains('拒绝并退出')));
-    expect(source, isNot(contains('同意并进入')));
+    expect(source, isNot(contains('capability.deny')));
+    expect(source, isNot(contains('capability.allow')));
   });
 }

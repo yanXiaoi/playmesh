@@ -7,14 +7,17 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
+import '../../core/game_sdk/game_sdk_bridge.dart';
+import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_web/local_app_sdk_server.dart';
 import '../../core/game_web/local_tunnel_gateway.dart';
+import '../../core/localization/platform_game_ui_assets.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../../core/relay/relay_tunnel.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
-import '../settings/settings_page.dart';
 import 'game_controls.dart';
 import 'windows_local_game_web_view.dart';
 
@@ -35,6 +38,7 @@ class RemoteGamePage extends StatefulWidget {
 }
 
 class _RemoteGamePageState extends State<RemoteGamePage> {
+  final GameToolDockController _toolDockController = GameToolDockController();
   WebViewController? _controller;
   AppWebViewBridge? _appBridge;
   LocalTunnelGateway? _webGateway;
@@ -43,10 +47,15 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Uri? _localEntryUri;
   Object? _error;
   int _windowsReloadKey = 0;
+  int _toolResetGeneration = 0;
   late final WebViewMessageQueue _messageQueue;
   Future<void> Function(String)? _runWindowsJavaScript;
-  bool _showPerformance = true;
+  String? _platformUiConfigurationKey;
+  Map<String, Object?>? _platformUiConfiguration;
+  bool _showPerformance = false;
   bool _debugVisible = false;
+  bool _infoVisible = false;
+  bool _allowPop = false;
   final List<Map<String, Object?>> _developerLogs = [];
   StreamSubscription<Map<String, Object?>>? _developerLogSubscription;
 
@@ -72,6 +81,25 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     developerEventHub.beginRuntime();
     _messageQueue = WebViewMessageQueue(_runJavaScript);
     unawaited(_prepare());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final localizations = PlaymeshLocalizations.maybeOf(context);
+    final localeId = localizations?.localeId;
+    final brightness = Theme.of(context).brightness;
+    final configurationKey = '$localeId:${brightness.name}';
+    if (_platformUiConfigurationKey == configurationKey) return;
+    _platformUiConfigurationKey = configurationKey;
+    _platformUiConfiguration = localizations == null
+        ? null
+        : platformGameUiConfigurationFor(
+            localizations,
+            brightness: brightness,
+          ).toJson();
+    _appBridge?.setPlatformUiConfiguration(_platformUiConfiguration);
+    unawaited(_syncPlatformUiConfiguration());
   }
 
   Future<void> _prepare() async {
@@ -135,10 +163,14 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
         nickname: widget.nickname,
-        gameName: 'Playmesh 游戏',
+        gameName: context.tr('game.remote_title'),
         acceptRuntimeGameDeclaration: true,
         coreBaseUri: coreGateway.localBaseUri,
         playerSource: usesRelay ? 'server' : 'lan_app',
+        platformUiConfiguration: _platformUiConfiguration,
+        onOpenSharePanel: _rejectShareFromRemote,
+        onShowToolDock: _showToolDockFromSdk,
+        onHideToolDock: _hideToolDockFromSdk,
         onExitRequested: () async {
           if (mounted) await Navigator.of(context).maybePop();
         },
@@ -180,6 +212,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageStarted: (_) {
+              _resetTransientUiForLoad();
               _messageQueue.pause(clearPending: true);
               unawaited(_appBridge?.resetCapabilities());
             },
@@ -187,7 +220,10 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
               unawaited(
                 _messageQueue
                     .resume()
-                    .then((_) => _syncPerformanceVisible())
+                    .then((_) async {
+                      await _syncPlatformUiConfiguration();
+                      await _syncPerformanceVisible();
+                    })
                     .catchError((Object error) {
                       debugPrint('发送远程 WebView Bridge 启动消息失败: $error');
                     }),
@@ -227,6 +263,23 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     await controller.runJavaScript(script);
   }
 
+  Future<void> _syncPlatformUiConfiguration() async {
+    final configuration = _platformUiConfiguration;
+    if (configuration == null) return;
+    _appBridge?.setPlatformUiConfiguration(configuration);
+    final script = gameSdkReceiveScript(
+      jsonEncode({
+        'type': 'platform.ui.configure',
+        'configuration': configuration,
+      }),
+    );
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      await _runWindowsJavaScript?.call(script);
+      return;
+    }
+    if (_controller != null) await _messageQueue.add(script);
+  }
+
   @override
   void dispose() {
     unawaited(_developerLogSubscription?.cancel());
@@ -243,51 +296,55 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          _buildWebView(),
-          GameToolDock(
-            backTooltip: '返回加入页面',
-            onBack: () => Navigator.of(context).pop(),
-            onReload: _reload,
-            showPerformance: _showPerformance,
-            onTogglePerformance: _togglePerformance,
-            onEnterFullscreen: () => _setFullscreen(true),
-            onExitFullscreen: () => _setFullscreen(false),
-            secondaryActions: [
-              GameToolAction(
-                icon: Icons.info_outline,
-                label: '游戏信息',
-                onPressed: _openGameInfo,
+    return GameRuntimeShortcutScope(
+      controller: _toolDockController,
+      onBack: _handleRuntimeBack,
+      onOpenTools: _openToolsFromShortcut,
+      onMoveTools: _moveToolsFromShortcut,
+      child: PopScope(
+        canPop: _allowPop,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _handleRuntimeBack();
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildWebView(),
+              GameToolDock(
+                controller: _toolDockController,
+                resetKey: Object.hash(_windowsReloadKey, _toolResetGeneration),
+                backTooltip: context.tr('game.back_join'),
+                onBack: _exitRemotePage,
+                onReload: _reload,
+                showPerformance: _showPerformance,
+                onTogglePerformance: _togglePerformance,
+                onOpenLogs: _openDebugLogs,
+                onEnterFullscreen: () => _setFullscreen(true),
+                onExitFullscreen: () => _setFullscreen(false),
+                secondaryActions: [
+                  GameToolAction(
+                    icon: Icons.info_outline,
+                    label: context.tr('game.info'),
+                    onPressed: () => unawaited(_openGameInfo()),
+                  ),
+                ],
               ),
-              GameToolAction(
-                icon: Icons.receipt_long_outlined,
-                label: '运行日志',
-                onPressed: _openDebugLogs,
-              ),
-              GameToolAction(
-                icon: Icons.tune_outlined,
-                label: '游戏设置',
-                onPressed: () =>
-                    Navigator.of(context).pushNamed(SettingsPage.routeName),
-              ),
+              if (_debugVisible)
+                Positioned.fill(
+                  child: GameRuntimeLogOverlay(
+                    logs: _developerLogs,
+                    onClear: () {
+                      developerEventHub.clearRecentLogs();
+                      setState(_developerLogs.clear);
+                    },
+                    onClose: () => unawaited(_hideDebugLogs()),
+                  ),
+                ),
             ],
           ),
-          if (_debugVisible)
-            Positioned.fill(
-              child: GameRuntimeLogOverlay(
-                logs: _developerLogs,
-                onClear: () {
-                  developerEventHub.clearRecentLogs();
-                  setState(_developerLogs.clear);
-                },
-                onClose: () => unawaited(_hideDebugLogs()),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
@@ -301,7 +358,10 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              '无法打开主机游戏页面\n$error',
+              context.tr(
+                'game.remote_open_failed',
+                arguments: {'error': error},
+              ),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white),
             ),
@@ -320,10 +380,11 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         key: ValueKey('remote-game-$_windowsReloadKey'),
         assetPath: _launchUri.path,
         entryUri: _launchUri,
-        title: 'Playmesh 对局',
+        title: context.tr('game.remote_title'),
         appBridge: appBridge,
         onRunJavaScriptReady: (runJavaScript) {
           _runWindowsJavaScript = runJavaScript;
+          unawaited(_syncPlatformUiConfiguration());
           unawaited(_syncPerformanceVisible());
         },
       );
@@ -345,20 +406,26 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   }
 
   void _reload() {
+    if (_infoVisible && mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
     developerEventHub.beginRuntime();
     _messageQueue.pause(clearPending: true);
     unawaited(_appBridge?.resetCapabilities());
+    unawaited(_hideDebugLogs(restoreFocus: false));
+    setState(() {
+      _error = null;
+      _runWindowsJavaScript = null;
+      _showPerformance = false;
+      _debugVisible = false;
+      _windowsReloadKey += 1;
+      _toolResetGeneration += 1;
+    });
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      setState(() {
-        _error = null;
-        _runWindowsJavaScript = null;
-        _windowsReloadKey += 1;
-      });
       return;
     }
     final controller = _controller;
     if (controller != null) {
-      setState(() => _error = null);
       unawaited(controller.reload());
       return;
     }
@@ -375,7 +442,16 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           .catchError((Object error) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('${enabled ? '进入' : '退出'}全屏失败：$error')),
+              SnackBar(
+                content: Text(
+                  context.tr(
+                    enabled
+                        ? 'game.fullscreen_enter_failed'
+                        : 'game.fullscreen_exit_failed',
+                    arguments: {'error': error},
+                  ),
+                ),
+              ),
             );
           }),
     );
@@ -402,17 +478,20 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     }
   }
 
-  void _openGameInfo() {
-    showModalBottomSheet<void>(
+  Future<void> _openGameInfo() async {
+    if (_infoVisible || !mounted) return;
+    _infoVisible = true;
+    await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xff20242b),
       barrierColor: const Color(0x99000000),
       builder: (context) => GameToolInfoSheet(
-        title: 'Playmesh 对局',
-        description: '通过主机分享地址加载，无需在本机安装游戏。',
+        title: context.tr('game.remote_title'),
+        description: context.tr('game.remote_description'),
         labels: const [],
       ),
     );
+    _infoVisible = false;
+    if (mounted) _toolDockController.restoreFocus();
   }
 
   void _openDebugLogs() {
@@ -434,11 +513,92 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     setState(() => _debugVisible = true);
   }
 
-  Future<void> _hideDebugLogs() async {
-    if (mounted) setState(() => _debugVisible = false);
+  Future<void> _hideDebugLogs({bool restoreFocus = true}) async {
+    if (mounted) {
+      setState(() => _debugVisible = false);
+      if (restoreFocus) _toolDockController.restoreFocus();
+    }
     final subscription = _developerLogSubscription;
     _developerLogSubscription = null;
     await subscription?.cancel();
+  }
+
+  void _resetTransientUiForLoad() {
+    if (!mounted) return;
+    if (_infoVisible && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    final hadDebugOverlay = _debugVisible;
+    setState(() {
+      _showPerformance = false;
+      _debugVisible = false;
+      _toolResetGeneration += 1;
+    });
+    if (hadDebugOverlay || _developerLogSubscription != null) {
+      unawaited(_hideDebugLogs(restoreFocus: false));
+    }
+    unawaited(_syncPerformanceVisible());
+  }
+
+  void _handleRuntimeBack() {
+    if (_toolDockController.isMoving) {
+      _toolDockController.closeTopLayer();
+      return;
+    }
+    if (_debugVisible) {
+      unawaited(_hideDebugLogs());
+      return;
+    }
+    if (_toolDockController.closeTopLayer()) return;
+    _exitRemotePage();
+  }
+
+  void _exitRemotePage() {
+    if (_allowPop || !mounted) return;
+    setState(() => _allowPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  void _openToolsFromShortcut() {
+    if (_debugVisible || _infoVisible) return;
+    _toolDockController.openTools();
+  }
+
+  void _moveToolsFromShortcut() {
+    if (_debugVisible || _infoVisible) return;
+    _toolDockController.beginMoveMode();
+  }
+
+  Future<void> _rejectShareFromRemote() {
+    throw const SdkCommandException(
+      'not_authority',
+      '只有当前 Authority 游戏可以打开分享界面',
+    );
+  }
+
+  Future<void> _showToolDockFromSdk() async {
+    if (!mounted ||
+        _debugVisible ||
+        _infoVisible ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    if (!_toolDockController.showFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<void> _hideToolDockFromSdk() async {
+    if (!mounted) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    if (!_toolDockController.hideFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    await WidgetsBinding.instance.endOfFrame;
   }
 }
 

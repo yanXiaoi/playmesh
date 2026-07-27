@@ -49,80 +49,31 @@ class DeveloperAiPromptTemplateStore {
     : _bundle = bundle ?? rootBundle,
       _injectedRoot = root;
 
-  static const descriptors = <DeveloperAiPromptTemplateDescriptor>[
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'common',
-      name: '对话 AI 公共规则（仅项目能力）',
-      category: 'common',
-      categoryName: '公共',
-      assetPath: 'assets/playmesh-library/public/developer/prompts/common.txt',
-    ),
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'agent-common',
-      name: 'Agent 公共规则（能力与测试 API）',
-      category: 'common',
-      categoryName: '公共',
-      assetPath:
-          'assets/playmesh-library/public/developer/prompts/agent-common.txt',
-    ),
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'custom-ideas',
-      name: '自定义想法',
-      category: 'common',
-      categoryName: '公共',
-      assetPath:
-          'assets/playmesh-library/public/developer/prompts/custom-ideas.txt',
-    ),
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'solo',
-      name: '单机游戏',
-      category: 'mode',
-      categoryName: '游戏模式',
-      assetPath: 'assets/playmesh-library/public/developer/prompts/solo.txt',
-    ),
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'multiplayer',
-      name: '联机游戏公共规则',
-      category: 'mode',
-      categoryName: '游戏模式',
-      assetPath:
-          'assets/playmesh-library/public/developer/prompts/multiplayer.txt',
-    ),
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'multi-screen',
-      name: '普通多人多屏',
-      category: 'display',
-      categoryName: '显示模式',
-      assetPath:
-          'assets/playmesh-library/public/developer/prompts/multi-screen.txt',
-    ),
-    DeveloperAiPromptTemplateDescriptor(
-      id: 'single-screen-multiplayer',
-      name: '单屏多人',
-      category: 'display',
-      categoryName: '显示模式',
-      assetPath:
-          'assets/playmesh-library/public/developer/prompts/single-screen-multiplayer.txt',
-    ),
-  ];
-
+  static const promptsRoot = 'assets/playmesh-library/public/developer/prompts';
+  static const manifestAssetPath = '$promptsRoot/manifest.json';
   static const _maxTemplateBytes = 512 * 1024;
+  static const _reservedTemplateIds = {'common', 'agent-common'};
 
   final AssetBundle _bundle;
   final Directory? _injectedRoot;
   Directory? _resolvedRoot;
+  Future<List<DeveloperAiPromptTemplateDescriptor>>? _descriptorsOperation;
 
   Future<List<DeveloperAiPromptTemplate>> list() async {
     final templates = <DeveloperAiPromptTemplate>[];
-    for (final descriptor in descriptors) {
+    for (final descriptor in await descriptors()) {
       templates.add(await read(descriptor.id));
     }
     return List.unmodifiable(templates);
   }
 
+  Future<List<DeveloperAiPromptTemplateDescriptor>> descriptors() {
+    return _descriptorsOperation ??= _loadDescriptors();
+  }
+
   Future<DeveloperAiPromptTemplate> read(String id) async {
-    final descriptor = _descriptor(id);
-    final defaultContent = await _bundle.loadString(descriptor.assetPath);
+    final descriptor = await _descriptor(id);
+    final defaultContent = await _readDefault(descriptor);
     final override = File(
       '${(await _root()).path}${Platform.pathSeparator}$id.txt',
     );
@@ -136,7 +87,7 @@ class DeveloperAiPromptTemplateStore {
   }
 
   Future<DeveloperAiPromptTemplate> save(String id, String content) async {
-    _descriptor(id);
+    await _descriptor(id);
     if (content.trim().isEmpty) {
       throw const FormatException('提示模板不能为空');
     }
@@ -154,7 +105,7 @@ class DeveloperAiPromptTemplateStore {
   }
 
   Future<DeveloperAiPromptTemplate> reset(String id) async {
-    _descriptor(id);
+    await _descriptor(id);
     final file = File(
       '${(await _root()).path}${Platform.pathSeparator}$id.txt',
     );
@@ -162,11 +113,94 @@ class DeveloperAiPromptTemplateStore {
     return read(id);
   }
 
-  DeveloperAiPromptTemplateDescriptor _descriptor(String id) {
-    for (final descriptor in descriptors) {
+  Future<DeveloperAiPromptTemplateDescriptor> _descriptor(String id) async {
+    for (final descriptor in await descriptors()) {
       if (descriptor.id == id) return descriptor;
     }
     throw FormatException('未知 AI 提示模板: $id');
+  }
+
+  Future<List<DeveloperAiPromptTemplateDescriptor>> _loadDescriptors() async {
+    final manifestText = await _bundle.loadString(manifestAssetPath);
+    final decoded = jsonDecode(manifestText);
+    if (decoded is! Map) {
+      throw const FormatException('AI 提示词清单根节点必须是对象');
+    }
+    final manifest = Map<String, Object?>.from(decoded);
+    final version = manifest['manifestVersion'];
+    if (version is! String ||
+        !RegExp(
+          r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$',
+        ).hasMatch(version)) {
+      throw const FormatException(
+        'AI 提示词 manifestVersion 必须使用严格 MAJOR.MINOR.PATCH',
+      );
+    }
+    final rawTemplates = manifest['templates'];
+    if (rawTemplates is! List || rawTemplates.isEmpty) {
+      throw const FormatException('AI 提示词清单 templates 必须是非空数组');
+    }
+    final ids = <String>{};
+    final files = <String>{};
+    final result = <DeveloperAiPromptTemplateDescriptor>[];
+    for (final raw in rawTemplates) {
+      if (raw is! Map) {
+        throw const FormatException('AI 提示词清单模板必须是对象');
+      }
+      final item = Map<String, Object?>.from(raw);
+      final id = _requiredManifestString(item, 'id');
+      final file = _requiredManifestString(item, 'file');
+      if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$').hasMatch(id)) {
+        throw FormatException('AI 提示词模板 id 无效: $id');
+      }
+      if (!RegExp(r'^[^/\\]+\.txt$').hasMatch(file) ||
+          file.contains('..') ||
+          file.contains('/') ||
+          file.contains(r'\')) {
+        throw FormatException('AI 提示词模板 file 必须是当前目录内的 .txt 文件: $file');
+      }
+      if (!ids.add(id)) {
+        throw FormatException('AI 提示词清单包含重复 id: $id');
+      }
+      if (!files.add(file)) {
+        throw FormatException('AI 提示词清单包含重复 file: $file');
+      }
+      result.add(
+        DeveloperAiPromptTemplateDescriptor(
+          id: id,
+          name: _requiredManifestString(item, 'name'),
+          category: _requiredManifestString(item, 'category'),
+          categoryName: _requiredManifestString(item, 'categoryName'),
+          assetPath: '$promptsRoot/$file',
+        ),
+      );
+    }
+    final missingReserved = _reservedTemplateIds.difference(ids);
+    if (missingReserved.isNotEmpty) {
+      throw FormatException('AI 提示词清单缺少保留模板: ${missingReserved.join(', ')}');
+    }
+    for (final descriptor in result) {
+      await _readDefault(descriptor);
+    }
+    return List.unmodifiable(result);
+  }
+
+  Future<String> _readDefault(
+    DeveloperAiPromptTemplateDescriptor descriptor,
+  ) async {
+    final data = await _bundle.load(descriptor.assetPath);
+    if (data.lengthInBytes == 0 || data.lengthInBytes > _maxTemplateBytes) {
+      throw FormatException('AI 提示词模板 ${descriptor.id} 必须在 1 B 至 512 KiB 之间');
+    }
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    final content = utf8.decode(bytes, allowMalformed: false);
+    if (content.trim().isEmpty) {
+      throw FormatException('AI 提示词模板 ${descriptor.id} 不能为空');
+    }
+    return content;
   }
 
   Future<Directory> _root() async {
@@ -180,4 +214,12 @@ class DeveloperAiPromptTemplateStore {
       '${Platform.pathSeparator}ai-prompts',
     );
   }
+}
+
+String _requiredManifestString(Map<String, Object?> json, String field) {
+  final value = json[field];
+  if (value is! String || value.trim().isEmpty) {
+    throw FormatException('AI 提示词清单 $field 必须是非空字符串');
+  }
+  return value.trim();
 }

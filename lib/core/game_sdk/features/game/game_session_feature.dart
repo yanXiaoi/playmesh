@@ -4,7 +4,28 @@ const gameSessionSdkSource = SdkSourceFragment(
   id: 'game.session',
   target: SdkSourceTarget.game,
   order: 30,
-  typeScript: r'''  function seedPlayerConnections(session) {
+  typeScript: r'''  function publicPlayer(player) {
+    if (!player || typeof player !== "object") return null;
+    return {
+      id: player.id,
+      nickname: player.nickname,
+      avatar: typeof player.avatar === "string" ? player.avatar : null,
+      role: player.role,
+      connected: Boolean(player.connected),
+    };
+  }
+
+  function publicSession(session) {
+    if (!session || typeof session !== "object") return null;
+    return {
+      ...session,
+      players: Array.isArray(session.players)
+        ? session.players.map(publicPlayer)
+        : [],
+    };
+  }
+
+  function seedPlayerConnections(session) {
     previouslyConnectedPlayerIds.clear();
     for (const player of session?.players || []) {
       if (player.connected) previouslyConnectedPlayerIds.add(player.id);

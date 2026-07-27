@@ -102,7 +102,6 @@ Windows ZIP 共 154 个条目；脚本确认根目录包含 `playmesh.exe`、
 
 ## 未执行项
 
-- 未执行 OpenHarmony 平台发布构建，本次用户只要求 Android 与 Windows。
 - 未执行真实公网中转服务器与两台实体设备的端到端联机验收。
 - 未执行移动系统对回环 Origin、安全上下文、权限弹窗和 WebView 生命周期的
   真机行为验收。

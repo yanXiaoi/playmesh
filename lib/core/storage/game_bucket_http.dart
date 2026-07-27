@@ -52,12 +52,25 @@ Future<bool> handleGameBucketRequest(
       }
       request.response.headers
         ..contentType = bucketContentType(file.path)
-        ..set(
+        ..set('x-content-type-options', 'nosniff');
+      if (segments[1] == GameStorageService.systemAvatarBucket) {
+        final playerId = segments[2].substring(0, segments[2].length - 4);
+        final etag = await storage.avatarEtag(playerId);
+        request.response.headers
+          ..set(HttpHeaders.cacheControlHeader, 'private, no-cache')
+          ..set(HttpHeaders.etagHeader, etag);
+        if (request.headers.value(HttpHeaders.ifNoneMatchHeader) == etag) {
+          request.response.statusCode = HttpStatus.notModified;
+          await request.response.close();
+          return true;
+        }
+      } else {
+        request.response.headers.set(
           HttpHeaders.cacheControlHeader,
           'public, max-age=31536000, immutable',
-        )
-        ..set('x-content-type-options', 'nosniff')
-        ..contentLength = await file.length();
+        );
+      }
+      request.response.contentLength = await file.length();
       await file.openRead().pipe(request.response);
     } on FormatException {
       await _text(request.response, HttpStatus.notFound, '文件不存在');

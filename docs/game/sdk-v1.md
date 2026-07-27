@@ -1,6 +1,6 @@
 # Game SDK / App 能力插件 API
 
-本文记录 Game SDK `2.2.3` 与 App Bridge SDK `2.1.1` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 明确兼容 `1.0.0-2.2.3` 请求，当前 App SDK 明确兼容 `1.0.0-2.1.1` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
+本文记录 Game SDK `2.4.0` 与 App Bridge SDK `2.2.0` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 明确兼容 `1.0.0-2.4.0` 请求，当前 App SDK 明确兼容 `1.0.0-2.2.0` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -49,12 +49,45 @@ Authority 面向游戏只公开 `/app/**`、`/bucket/**`、`/playmesh/**` 资源
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "2.2.3"
+console.log(playmesh.version); // "2.4.0"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若当前页面角色在 `capabilities.json` 中对应的能力列表非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
 
 Game SDK 会把当前页面的方向传给 App Bridge；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过 SDK 悬浮工具栏的全屏按钮再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
+
+能力确认、普通浏览器工具栏、昵称、信息与日志层都属于 Playmesh 平台 UI。它们的
+文字来自宿主 App 当前 locale 的统一 `app.json`，App WebView 会随 App 语言即时更新；
+普通浏览器由分享网关注入所有启用语言的受限平台投影，SDK 再按 `navigator`
+语言为覆盖层做精确/主语言匹配和 fallback。该配置是平台私有链路，本身不向游戏
+暴露 messages，也不改变 `playmesh.ready` 或 API JSON；
+游戏只能通过下一节独立的只读 locale 接口选择自己的翻译。平台配置不会翻译游戏
+DOM、游戏资源、标签、用户内容和日志原文。游戏不得读取、覆盖或复制平台词典，也
+不需要为这些平台 UI 编写中英文分支。
+
+## 游戏业务 locale
+
+等待 SDK 就绪后，可以同步读取当前实际显示端的 locale：
+
+```js
+await playmesh.ready;
+const locale = playmesh.runtime.getLocale(); // 例如 "zh-CN" 或 "en-US"
+```
+
+`playmesh.runtime.getLocale(): string` 是只读接口：
+
+- App WebView 返回当前显示该游戏的本机 App locale。远程加入时返回加入方 App
+  locale，不继承也不查询 Authority 主机语言；App 切换语言后再次调用会得到新值。
+- 普通浏览器依次检查 `navigator.languages`、`navigator.language`，直接返回第一
+  个合法的系统 locale；读取失败或值非法时返回 `zh`。返回值不受 Playmesh
+  平台覆盖层已启用 locale 限制，例如浏览器为 `ja-JP` 时仍返回 `ja-JP`。
+- 接口只返回 locale 字符串，不返回 App 的 `app.json`、`platform.game.*` 或任何
+  messages。
+
+Playmesh 只负责自身平台覆盖层的翻译，不自动翻译游戏。游戏开发者应在游戏包中维护
+自己的业务语言资源，并按该 locale 渲染游戏 DOM、图片、音频、标签和其他内容；用户
+生成内容与原始日志通常应保持原样。浏览器系统 locale 若不在平台覆盖层语言集合中，
+覆盖层会独立按主语言匹配并最终回退 `zh-CN`，不会改写上述 SDK 返回值。
 
 事件订阅 API 都返回取消订阅函数：
 
@@ -162,12 +195,24 @@ const offReconnect = playmesh.session.onPlayerReconnect(({ player, session, isCu
 interface Player {
   id: string;
   nickname: string;
+  avatar: string | null;
   role: "authority" | "authority_player" | "player";
   connected: boolean;
 }
 ```
 
 返回当前玩家；SDK 尚未就绪或当前是大屏公共 Authority 页面时返回 `null`。
+
+`avatar` 与 `nickname` 同级。App 玩家头像由平台自动同步，成功后为
+`/bucket/_sys-user-avatars/{playerId}.png`；无自定义头像、尚未同步或 HTML
+玩家均为 `null`。游戏不能设置头像。该字段同样出现在 Bootstrap、会话快照、
+玩家连接事件、Authority 上下文和 Sync 上下文的所有 `Player` 中。
+
+公开 `Player` 固定只包含 `id`、`nickname`、`avatar`、`role` 和
+`connected`。Core 用于连接管理的 `source`、`latencyMs` 及其他内部字段会在
+Game SDK 边界统一过滤，不会进入 Bootstrap、会话快照、玩家连接事件、
+Authority 上下文或 Sync 上下文。游戏如需观察当前页面的联机延迟，应使用
+`playmesh.performance`，不能依赖玩家内部连接元数据。
 
 `authority_player` 表示普通多屏 App 主机同时参与为 Player；Authority 资格仍只由 App 创建会话时登记的 `authorityClientId` 与 `playmesh.session.isAuthority()` 决定。`authority` 是单屏多人公共显示端的宿主身份，该页面的 `getCurrent()` 为 `null`；所有加入者均为 `player`，无论加入顺序都不会成为 Authority。
 
@@ -245,6 +290,51 @@ const off = playmesh.sync.observe((snapshot) => render(snapshot.state));
 `getSnapshot()` 返回最近快照，`observe(callback)` 注册时会立即回调已有快照。快照包含 `protocolVersion`、`stateType`、`full`、`revision`、`sequence`、`timestamp`、`sourceTick` 和 JSON `state`。当前实现始终发送完整快照；页面应以最新快照为准，不自行拼接不可信增量。
 
 底层 `playmesh.game` 与 `playmesh.authority` 仍保留给需要自定义消息路由的高级游戏，但同一个输入不应同时走两套协议。
+
+## App 级平台功能
+
+App 自己提供的分享界面、游戏工具和退出能力统一位于 `playmesh.app`，不再放在
+`playmesh.authority` 或其他业务组中。普通浏览器保留同名安全空实现，调用会 reject。
+
+### `playmesh.app.openSharePanel()`
+
+当前 Authority 游戏可以在有效用户操作中请求 App 打开既有“二维码与链接”界面：
+
+```js
+button.addEventListener("click", async () => {
+  await playmesh.app.openSharePanel();
+});
+```
+
+Promise 在界面成功显示后完成，不返回 Token、URL 或二维码内容。SDK 与 App
+都会重新检查 Authority 身份和瞬时用户激活；非 Authority、后台页面或平台 UI
+不可用时分别以 `not_authority`、`user_activation_required` 或
+`ui_unavailable` 拒绝。界面已打开时重复调用复用同一层并重新聚焦关闭按钮；
+关闭后的短暂重复请求以 `rate_limited` 拒绝。
+
+SDK 会在发出命令前同步记录当前游戏 DOM 的焦点元素。分享层关闭后，App 通过
+不属于公开 API 的宿主消息要求 SDK 恢复该元素；元素已经移除时回退到游戏文档，
+普通浏览器再回退到游戏文档。这个私有过程不会把分享 Token、链接、二维码
+或 App 本地化词典暴露给游戏。
+
+### 游戏工具和退出
+
+```js
+await playmesh.app.showToolDock();
+await playmesh.app.hideToolDock();
+await playmesh.app.exitGame();
+```
+
+`showToolDock()` 显示并展开 App 悬浮游戏工具，并把焦点移到第一个工具按钮。通过
+SDK 唤起的工具在任一实际操作完成后会自动隐藏；用户手动展开的工具在操作后只收起
+为悬浮按钮。“更多”本身只展开二级菜单，选择菜单项后才执行上述收起/隐藏规则。
+`hideToolDock()` 可由游戏主动隐藏工具，并把网页焦点还给 `showToolDock()` 调用前的
+DOM 元素；元素已经移除时回退到游戏文档。`exitGame()` 请求当前显示 App 正常结束
+游戏、执行既有退出清理并返回上一 App 页面。
+
+这些方法只控制 App 自己的界面和生命周期，不向游戏暴露 Flutter 控件、分享凭据或
+内部导航对象。App 已退到后台、运行页已经销毁或相应平台 UI 不可用时以
+`ui_unavailable` 拒绝。
 
 ## Authority
 
@@ -347,7 +437,9 @@ playmesh.lifecycle.onExit((event) => {});
 
 ### `playmesh.storage.getBucket(bucket)`
 
-Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
+Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。所有 `_sys-`
+前缀均由平台保留，游戏的数据、上传和清空 API 会统一拒绝，不能占用头像等系统
+Bucket。
 
 ```js
 const profile = playmesh.storage.getBucket("profile_v1");
@@ -414,7 +506,7 @@ const off = playmesh.performance.onLatency((value) => console.log(value));
 
 `getLatency()` 在尚无有效样本或 Authority 不在线时返回 `null`。诊断对象包含客户端发送/接收时间、Core 接收/发送时间、Authority 可用状态和原始 RTT，供开发诊断使用；游戏规则不得依赖延迟数值决定胜负。
 
-FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工具坞只调用显示开关，不再原生重复绘制；普通浏览器由 SDK 创建与 App 游戏工具区对应的可收纳功能区，提供刷新、性能开关、进入/退出全屏、游戏信息、浏览器日志指引和昵称设置，但不模拟 App 导航、退出游戏或分享能力。`setVisible(boolean)` 可供宿主集成使用，普通游戏通常不需要调用。
+FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工具坞只调用显示开关，不再原生重复绘制；普通浏览器由 SDK 创建与 App 游戏工具区对应的可收纳功能区，提供刷新、性能开关、进入/退出全屏、游戏信息、浏览器日志指引和昵称设置，但不模拟 App 导航、退出游戏或分享能力。App 内性能层跟随当前显示 App 的有效主题，普通浏览器工具层跟随浏览器系统主题。新开、刷新或重连后仅收起状态悬浮球可见，性能层、工具列表、菜单、信息和日志层默认关闭。`setVisible(boolean)` 可供宿主集成使用，普通游戏通常不需要调用。
 
 ## 浏览器行为
 
@@ -426,7 +518,7 @@ FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工�
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
 - 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。
 - 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线后，同 ID 重连可由游戏恢复准备状态和临时玩家状态。
-- SDK 在普通浏览器页面上提供隔离于游戏样式的可收纳功能区和固定配色二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境只显示 SDK 性能层，由 App 自己的共用工具区提供返回、刷新、全屏、日志和设置，不重复显示浏览器工具区。
+- SDK 在普通浏览器页面上提供隔离于游戏样式的可收纳功能区和随系统明暗模式切换的二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境只显示跟随当前显示 App 主题的 SDK 性能层，由 App 自己的共用工具区提供返回、刷新、全屏、日志和设置，不重复显示浏览器工具区。
 - 旧浏览器连接断开后，其玩家从会话成员集合移除并释放人数名额；短暂的刷新竞态由 SDK 对 `session_full` 做有限重试。
 - 刷新继续使用本局分享 token；退出游戏、会话关闭、App/Core 重启后旧 token 失效。
 - 关闭分享面板和刷新游戏不会使 token 失效。

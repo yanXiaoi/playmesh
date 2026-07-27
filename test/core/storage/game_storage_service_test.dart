@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/profile/avatar_image.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
 
 void main() {
@@ -111,6 +113,44 @@ void main() {
     expect(() => storage.getData('save\n', 'key'), throwsFormatException);
     expect(() => storage.getData('a' * 65, 'key'), throwsFormatException);
     expect(() => storage.setData('save', '../key', 1), throwsFormatException);
+  });
+
+  test('游戏 API 拒绝保留 Bucket，平台头像使用固定路径原子写入', () async {
+    final root = await Directory.systemTemp.createTemp('playmesh-avatar-');
+    addTearDown(() => root.delete(recursive: true));
+    final storage = await GameStorageService.create(
+      gameId: 'com.playmesh.avatar',
+      libraryRoot: root,
+    );
+    expect(
+      () => storage.setData('_sys-user-avatars', 'value', 1),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('平台保留前缀'),
+        ),
+      ),
+    );
+    final normalized = await AvatarImage.normalize(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0l'
+        'EQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      ),
+    );
+    final path = await storage.writeUserAvatar(
+      playerId: 'u_avatar',
+      pngBytes: normalized.pngBytes,
+      sha256: normalized.sha256,
+    );
+
+    expect(path, '/bucket/_sys-user-avatars/u_avatar.png');
+    expect(
+      await storage.dataFile('_sys-user-avatars', 'u_avatar.png').readAsBytes(),
+      normalized.pngBytes,
+    );
+    expect(await storage.avatarEtag('u_avatar'), contains(normalized.sha256));
+    await storage.close();
   });
 
   test('同一 Bucket 的高频写入和宿主落盘串行执行且不丢数据', () async {

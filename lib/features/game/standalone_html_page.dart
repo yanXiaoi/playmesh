@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
 import '../../core/developer/webview_console_capture.dart';
@@ -96,32 +97,32 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
             top: MediaQuery.paddingOf(context).top + 8,
             right: 8,
             child: Material(
-              color: Colors.black.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(12),
+              color: Colors.black.withAlpha(179),
+              borderRadius: BorderRadius.circular(8),
               clipBehavior: Clip.antiAlias,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    tooltip: '返回',
+                    tooltip: context.tr('common.back'),
                     color: Colors.white,
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.arrow_back),
                   ),
                   IconButton(
-                    tooltip: '重新加载',
+                    tooltip: context.tr('common.reload'),
                     color: Colors.white,
                     onPressed: _reload,
                     icon: const Icon(Icons.refresh),
                   ),
                   IconButton(
-                    tooltip: '进入全屏',
+                    tooltip: context.tr('game.fullscreen_enter'),
                     color: Colors.white,
                     onPressed: () => _setFullscreen(true),
                     icon: const Icon(Icons.fullscreen),
                   ),
                   IconButton(
-                    tooltip: '退出全屏',
+                    tooltip: context.tr('game.fullscreen_exit'),
                     color: Colors.white,
                     onPressed: () => _setFullscreen(false),
                     icon: const Icon(Icons.fullscreen_exit),
@@ -142,7 +143,7 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'HTML 文件打开失败\n$error',
+            context.tr('game.html_open_failed', arguments: {'error': error}),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white),
           ),
@@ -201,7 +202,16 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
       ) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${enabled ? '进入' : '退出'}全屏失败：$error')),
+          SnackBar(
+            content: Text(
+              context.tr(
+                enabled
+                    ? 'game.fullscreen_enter_failed'
+                    : 'game.fullscreen_exit_failed',
+                arguments: {'error': error},
+              ),
+            ),
+          ),
         );
       }),
     );

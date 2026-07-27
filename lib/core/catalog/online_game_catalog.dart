@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -8,10 +9,14 @@ import 'package:http/http.dart' as http;
 import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../game_package/game_library_repository.dart';
+import '../game_package/game_library_local_metadata.dart';
+import '../game_package/game_package_icon.dart';
 import '../game_package/game_package_transfer_service.dart';
 import '../network/lan_endpoint_resolver.dart';
+import '../version/semantic_version.dart';
 import 'game_catalog_models.dart';
 import 'game_catalog_preferences.dart';
+import 'game_catalog_publisher.dart';
 import 'game_catalog_server.dart';
 
 enum GameDownloadStatus { queued, downloading, completed, stopped, failed }
@@ -30,10 +35,11 @@ class GameDownloadTask {
 }
 
 class GameDownloadQueue extends ChangeNotifier {
-  GameDownloadQueue(this._transfer, this._onImported);
+  GameDownloadQueue(this._transfer, this._onImported, {required this._library});
 
   final GamePackageTransferService _transfer;
   final Future<void> Function(GameSummary game) _onImported;
+  final GameLibraryRepository _library;
   final List<GameDownloadTask> _tasks = [];
   Future<void>? _processingOperation;
 
@@ -46,10 +52,10 @@ class GameDownloadQueue extends ChangeNotifier {
               task.status == GameDownloadStatus.queued ||
               task.status == GameDownloadStatus.downloading,
         )
-        .map((task) => '${task.game.source.id}:${task.game.manifest.id}')
+        .map((task) => task.game.downloadKey)
         .toSet();
     for (final game in games) {
-      final key = '${game.source.id}:${game.manifest.id}';
+      final key = game.downloadKey;
       if (!existing.add(key)) continue;
       _tasks.add(
         GameDownloadTask(
@@ -146,14 +152,17 @@ class GameDownloadQueue extends ChangeNotifier {
     task.client = client;
     final temporary = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      'playmesh-catalog-import.playmesh.zip',
+      'playmesh-catalog-import-${task.id}.zip',
     );
     IOSink? sink;
     try {
       if (await temporary.exists()) await temporary.delete();
       final uri = task.game.source.host.replace(
         path: '/apps/download',
-        queryParameters: {'id': task.game.manifest.id},
+        queryParameters: {
+          'id': task.game.manifest.id,
+          'version': task.game.manifest.version,
+        },
       );
       final request = http.Request('GET', uri);
       if (task.game.source.token.isNotEmpty) {
@@ -188,7 +197,15 @@ class GameDownloadQueue extends ChangeNotifier {
       await sink.close();
       sink = null;
       if (task.cancelled) throw const _DownloadCancelled();
-      final imported = await _transfer.importPackage(temporary);
+      _validateReplacement(task.game);
+      final imported = await _transfer.importPackage(
+        temporary,
+        expectedGameId: task.game.manifest.id,
+        expectedVersion: task.game.manifest.version,
+        expectedPublisher: task.game.publisher.isEmpty
+            ? null
+            : task.game.publisher,
+      );
       await _onImported(imported);
       task.status = GameDownloadStatus.completed;
       task.progress = 1;
@@ -212,6 +229,29 @@ class GameDownloadQueue extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  void _validateReplacement(OnlineCatalogGame offer) {
+    GameSummary? installed;
+    for (final game in _library.cachedGames) {
+      if (game.id == offer.manifest.id) {
+        installed = game;
+        break;
+      }
+    }
+    if (installed == null) return;
+    final installedPublisher = installed.author.trim();
+    final offerPublisher = offer.publisher.trim();
+    if (installedPublisher.isEmpty ||
+        offerPublisher.isEmpty ||
+        installedPublisher != offerPublisher) {
+      throw const FormatException('已安装游戏与下载包的发布者不一致');
+    }
+    final current = SemanticVersion.parse(installed.version);
+    final target = SemanticVersion.parse(offer.manifest.version);
+    if (target.compareTo(current) <= 0) {
+      throw FormatException('升级版本必须严格高于当前版本 ${installed.version}');
+    }
+  }
 }
 
 class GameCatalogController extends ChangeNotifier {
@@ -221,15 +261,21 @@ class GameCatalogController extends ChangeNotifier {
     required Future<void> Function(GameSummary game) onImported,
     required String Function() nicknameProvider,
     GameCatalogPreferences? preferences,
+    GameCatalogPublisher? publisher,
+    DateTime Function()? now,
   }) : _preferences = preferences ?? GameCatalogPreferences(),
+       _publisher = publisher ?? GameCatalogPublisher(transfer: transfer),
+       _now = now ?? DateTime.now,
        _server = GameCatalogServer(
          library,
          transfer,
          nicknameProvider: nicknameProvider,
        ),
-       downloads = GameDownloadQueue(transfer, onImported);
+       downloads = GameDownloadQueue(transfer, onImported, library: library);
 
   final GameCatalogPreferences _preferences;
+  final GameCatalogPublisher _publisher;
+  final DateTime Function() _now;
   final GameCatalogServer _server;
   final GameDownloadQueue downloads;
   GameCatalogShareConfig _share = const GameCatalogShareConfig();
@@ -242,6 +288,8 @@ class GameCatalogController extends ChangeNotifier {
   bool get initialized => _initialized;
   GameCatalogShareConfig get share => _share;
   List<OnlineGameSource> get sources => List.unmodifiable(_sources);
+  List<OnlineGameSource> get uploadCandidates =>
+      List.unmodifiable(_sources.where((source) => source.canUpload));
   int get defaultPageSize => _defaultPageSize;
   Object? get shareError => _shareError;
   bool get sharing => _server.running;
@@ -310,15 +358,11 @@ class GameCatalogController extends ChangeNotifier {
     return resolveLanEndpoints(_share.port);
   }
 
-  Uri configurationUriFor(Uri endpoint, {String? name}) => Uri(
-    scheme: 'playmesh',
-    host: 'catalog-source',
-    queryParameters: {
-      'host': endpoint.toString(),
-      if (_share.token.isNotEmpty) 'token': _share.token,
-      'name': name ?? endpoint.host,
-    },
-  );
+  Uri configurationUriFor(Uri endpoint, {String? name}) => _share.token.isEmpty
+      ? catalogOrigin(endpoint)
+      : catalogOrigin(
+          endpoint,
+        ).replace(queryParameters: {'token': _share.token});
 
   Future<void> setDefaultPageSize(int value) async {
     if (value < 1 || value > 100) {
@@ -359,8 +403,79 @@ class GameCatalogController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setSourceShowOnHome(String id, bool showOnHome) async {
+    _sources = List.unmodifiable(
+      _sources.map(
+        (source) =>
+            source.id == id ? source.copyWith(showOnHome: showOnHome) : source,
+      ),
+    );
+    await _save();
+    notifyListeners();
+  }
+
+  Future<OnlineGameSource> verifyAndUpsertSource(
+    String rawValue, {
+    String? sourceId,
+  }) async {
+    await initialize();
+    final parsed = OnlineGameSource.fromPublicUrl(rawValue, id: sourceId);
+    OnlineGameSource? existing;
+    for (final source in _sources) {
+      if (source.host == parsed.host) {
+        existing = source;
+        break;
+      }
+    }
+    final candidate = OnlineGameSource(
+      id: existing?.id ?? parsed.id,
+      name: existing?.name ?? parsed.name,
+      host: parsed.host,
+      token: parsed.token,
+      uploadKey: existing?.uploadKey ?? '',
+      enabled: existing?.enabled ?? true,
+      showOnHome: existing?.showOnHome ?? true,
+    );
+    final probe = await _probeSource(candidate);
+    final declaration = probe.declaration;
+    if (probe.error != null || declaration == null) {
+      throw FormatException(probe.error ?? '游戏源声明无效');
+    }
+    final verified = candidate.copyWith(
+      name: existing?.name ?? declaration.displayNameFor(candidate.host),
+      declaration: declaration,
+      lastValidatedAt: DateTime.now().toUtc(),
+      clearLastError: true,
+    );
+    await upsertSource(verified);
+    return verified;
+  }
+
+  Future<OnlineGameSourceProbe> refreshSourceDeclaration(String id) async {
+    await initialize();
+    final source = _sources.firstWhere((item) => item.id == id);
+    final probe = await _probeSource(source);
+    final updated = probe.declaration == null
+        ? source.copyWith(
+            lastValidatedAt: DateTime.now().toUtc(),
+            lastError: probe.error ?? '声明无效',
+          )
+        : source.copyWith(
+            declaration: probe.declaration,
+            lastValidatedAt: DateTime.now().toUtc(),
+            clearLastError: true,
+          );
+    await upsertSource(updated);
+    return OnlineGameSourceProbe(
+      source: updated,
+      elapsed: probe.elapsed,
+      declaration: probe.declaration,
+      error: probe.error,
+    );
+  }
+
   Future<OnlineCatalogSearchResult> search({
-    int page = 1,
+    Map<String, int> pagesBySource = const {},
     String name = '',
     String tag = '',
     String description = '',
@@ -371,27 +486,242 @@ class GameCatalogController extends ChangeNotifier {
       enabled.map(
         (source) => _searchSource(
           source,
-          page: page,
+          page: pagesBySource[source.id] ?? 1,
+          validateLatestOffers: true,
           name: name,
           tag: tag,
           description: description,
         ),
       ),
     );
-    final unique = <String, OnlineCatalogGame>{};
+    final games = <OnlineCatalogGame>[];
     final errors = <String, String>{};
+    final sections = <SourceSectionResult>[];
     for (final result in results) {
+      if ((result.error ?? result.protocolError) case final error?) {
+        errors[result.source.id] = error;
+      }
+      games.addAll(result.games);
+      sections.add(_sectionFrom(result));
+    }
+    return OnlineCatalogSearchResult(
+      games: List.unmodifiable(games),
+      errors: Map.unmodifiable(errors),
+      sections: List.unmodifiable(sections),
+    );
+  }
+
+  Future<OnlineCatalogSearchResult> searchAll({
+    String name = '',
+    String tag = '',
+    String description = '',
+  }) async {
+    await initialize();
+    final results = await Future.wait(
+      _sources
+          .where((source) => source.enabled)
+          .map(
+            (source) => _searchAllSource(
+              source,
+              name: name,
+              tag: tag,
+              description: description,
+            ),
+          ),
+    );
+    final games = <OnlineCatalogGame>[];
+    final errors = <String, String>{};
+    final sections = <SourceSectionResult>[];
+    for (final result in results) {
+      games.addAll(result.offers);
+      sections.add(result);
       if (result.error case final error?) {
         errors[result.source.id] = error;
       }
-      for (final game in result.games) {
-        unique.putIfAbsent(game.manifest.id, () => game);
-      }
     }
     return OnlineCatalogSearchResult(
-      games: List.unmodifiable(unique.values),
+      games: List.unmodifiable(games),
       errors: Map.unmodifiable(errors),
+      sections: List.unmodifiable(sections),
     );
+  }
+
+  Future<HomeCatalogResult> loadHome({
+    Map<String, int> pagesBySource = const {},
+  }) async {
+    await initialize();
+    final visible = _sources
+        .where((source) => source.enabled && source.showOnHome)
+        .toList();
+    final sections = await Future.wait(
+      visible.map(
+        (source) => _searchSource(
+          source,
+          page: pagesBySource[source.id] ?? 1,
+          validateLatestOffers: false,
+          name: '',
+          tag: '',
+          description: '',
+        ),
+      ),
+    );
+    return HomeCatalogResult(List.unmodifiable(sections.map(_sectionFrom)));
+  }
+
+  Future<SourceSectionResult> loadHomeSource(
+    String sourceId, {
+    int page = 1,
+    String? cursor,
+  }) async {
+    await initialize();
+    final source = _sources.firstWhere(
+      (item) => item.id == sourceId && item.enabled && item.showOnHome,
+    );
+    final result = await _searchSource(
+      source,
+      page: page,
+      cursor: cursor,
+      validateLatestOffers: false,
+      name: '',
+      tag: '',
+      description: '',
+    );
+    return SourceSectionResult(
+      source: source,
+      offers: result.games,
+      total: result.total,
+      page: result.page,
+      nextCursor: result.nextCursor,
+      error: result.error,
+    );
+  }
+
+  Future<SourceSectionResult> searchSource(
+    String sourceId, {
+    int page = 1,
+    String? cursor,
+    String name = '',
+    String tag = '',
+    String description = '',
+  }) async {
+    await initialize();
+    final source = _sources.firstWhere(
+      (item) => item.id == sourceId && item.enabled,
+    );
+    return _sectionFrom(
+      await _searchSource(
+        source,
+        page: page,
+        cursor: cursor,
+        validateLatestOffers: true,
+        name: name,
+        tag: tag,
+        description: description,
+      ),
+    );
+  }
+
+  Future<List<AggregatedGameResult>> searchAggregated({
+    String name = '',
+    String tag = '',
+    String description = '',
+    Map<String, GameLibraryUsageStats> usage = const {},
+  }) async {
+    final result = await search(name: name, tag: tag, description: description);
+    return aggregateCatalogOffers(
+      result.games,
+      usage: usage,
+      sourceOrder: _sources.map((source) => source.id).toList(),
+    );
+  }
+
+  Future<GameUpdateCheckResult> checkUpdates(
+    Iterable<GameSummary> installedGames,
+  ) async {
+    final result = await searchAll();
+    final sourceErrors = [
+      for (final source in _sources)
+        if (source.enabled)
+          if (result.errors[source.id] case final message?)
+            GameUpdateSourceError(
+              sourceId: source.id,
+              localSourceName: source.name,
+              message: message,
+            ),
+    ];
+    return GameUpdateCheckResult(
+      candidates: findGameUpdates(
+        installedGames: installedGames,
+        offers: result.games,
+        sourceOrder: _sources.map((source) => source.id).toList(),
+      ),
+      sourceErrors: List.unmodifiable(sourceErrors),
+      checkedAt: _now().toUtc(),
+    );
+  }
+
+  Future<GameCatalogPublishBatchResult> publishGamePackage({
+    required GameSummary game,
+    required Iterable<String> sourceIds,
+    GameCatalogPublishEventCallback? onEvent,
+  }) async {
+    await initialize();
+    return _publisher.publish(
+      game: game,
+      sourceIds: sourceIds,
+      configuredSources: _sources,
+      onEvent: onEvent,
+    );
+  }
+
+  Future<GameCatalogPublishBatchResult> retryFailedGamePackagePublish({
+    required GameSummary game,
+    required GameCatalogPublishBatchResult previous,
+    GameCatalogPublishEventCallback? onEvent,
+  }) async {
+    await initialize();
+    return _publisher.retryFailures(
+      game: game,
+      previous: previous,
+      configuredSources: _sources,
+      onEvent: onEvent,
+    );
+  }
+
+  Future<List<int>?> loadOfferIcon(OnlineCatalogGame offer) async {
+    final uri = offer.icon;
+    if (uri == null || !isSameCatalogOrigin(offer.source.host, uri)) {
+      return null;
+    }
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', uri);
+      if (offer.source.token.isNotEmpty) {
+        request.headers[HttpHeaders.authorizationHeader] =
+            'Bearer ${offer.source.token}';
+      }
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != HttpStatus.ok ||
+          (response.contentLength ?? 0) > maxGamePackageIconBytes) {
+        return null;
+      }
+      final bytes = BytesBuilder(copy: false);
+      var length = 0;
+      await for (final chunk in response.stream) {
+        length += chunk.length;
+        if (length > maxGamePackageIconBytes) return null;
+        bytes.add(chunk);
+      }
+      final result = bytes.takeBytes();
+      if (!isSafeGamePackageIconBytes(result)) return null;
+      return List.unmodifiable(result);
+    } on Object {
+      return null;
+    } finally {
+      client.close();
+    }
   }
 
   Future<List<OnlineGameSourceProbe>> probeEnabledSources() async {
@@ -404,6 +734,8 @@ class GameCatalogController extends ChangeNotifier {
   Future<_SourceSearchResult> _searchSource(
     OnlineGameSource source, {
     required int page,
+    String? cursor,
+    bool validateLatestOffers = true,
     required String name,
     required String tag,
     required String description,
@@ -415,6 +747,7 @@ class GameCatalogController extends ChangeNotifier {
         queryParameters: {
           'size': _defaultPageSize.toString(),
           'page': page.toString(),
+          if (cursor?.trim().isNotEmpty ?? false) 'cursor': cursor!.trim(),
           if (name.trim().isNotEmpty) 's_name': name.trim(),
           if (tag.trim().isNotEmpty) 's_tag': tag.trim(),
           if (description.trim().isNotEmpty) 's_desc': description.trim(),
@@ -438,23 +771,183 @@ class GameCatalogController extends ChangeNotifier {
       final games = <OnlineCatalogGame>[];
       for (final raw in decoded['data']! as List) {
         if (raw is! Map) throw const FormatException('游戏条目必须是对象');
+        final json = Map<String, Object?>.from(raw);
+        final iconRaw = json.remove('icon');
+        final catalogAuthor = json['author'] is String
+            ? json['author']! as String
+            : '';
+        Uri? icon;
+        if (iconRaw is String) {
+          final candidate = Uri.tryParse(iconRaw);
+          if (candidate != null &&
+              candidate.isAbsolute &&
+              isSameCatalogOrigin(source.host, candidate)) {
+            icon = candidate;
+          }
+        }
         games.add(
           OnlineCatalogGame(
-            manifest: GameManifest.fromJson(Map<String, Object?>.from(raw)),
+            manifest: GameManifest.fromJson(json),
             source: source,
+            icon: icon,
+            catalogAuthor: catalogAuthor,
           ),
         );
       }
-      return _SourceSearchResult(source: source, games: games);
+      final validation = validateLatestOffers
+          ? _filterSourceLatestOffers(source, games)
+          : _LatestOfferPageValidation(
+              games: List<OnlineCatalogGame>.unmodifiable(games),
+            );
+      final total = decoded['total'];
+      return _SourceSearchResult(
+        source: source,
+        games: validation.games,
+        total: total is int && total >= 0 ? total : games.length,
+        page: page,
+        returnedCount: games.length,
+        nextCursor:
+            decoded['nextCursor'] is String &&
+                (decoded['nextCursor']! as String).trim().isNotEmpty
+            ? (decoded['nextCursor']! as String).trim()
+            : null,
+        protocolError: validation.protocolError,
+      );
     } on Object catch (error) {
       return _SourceSearchResult(
         source: source,
         games: const [],
+        total: 0,
+        page: page,
+        returnedCount: 0,
         error: error.toString(),
       );
     } finally {
       client.close();
     }
+  }
+
+  Future<SourceSectionResult> _searchAllSource(
+    OnlineGameSource source, {
+    required String name,
+    required String tag,
+    required String description,
+  }) async {
+    final offers = <OnlineCatalogGame>[];
+    final offerIndexesByGameId = <String, int>{};
+    final seenCursors = <String>{};
+    final protocolErrors = <String>[];
+    var page = 1;
+    var total = 0;
+    String? requestCursor;
+    while (true) {
+      final result = await _searchSource(
+        source,
+        page: page,
+        cursor: requestCursor,
+        validateLatestOffers: true,
+        name: name,
+        tag: tag,
+        description: description,
+      );
+      if (result.error case final error?) {
+        return SourceSectionResult(
+          source: source,
+          offers: List.unmodifiable(offers),
+          total: total,
+          page: page,
+          nextCursor: requestCursor,
+          error: _combineSourceErrors(protocolErrors, error),
+        );
+      }
+      if (result.protocolError case final error?) {
+        protocolErrors.add(error);
+      }
+      total = result.total;
+      final nextCursor = result.nextCursor;
+      var added = 0;
+      for (final offer in result.games) {
+        final id = offer.manifest.id;
+        final existingIndex = offerIndexesByGameId[id];
+        if (existingIndex != null) {
+          final existing = offers[existingIndex];
+          if (SemanticVersion.parse(
+                offer.manifest.version,
+              ).compareTo(SemanticVersion.parse(existing.manifest.version)) >
+              0) {
+            offers[existingIndex] = offer;
+          }
+          protocolErrors.add('游戏源在不同分页重复返回 gameId：$id');
+          continue;
+        }
+        offerIndexesByGameId[id] = offers.length;
+        offers.add(offer);
+        added += 1;
+      }
+      final cursorMode = requestCursor != null || nextCursor != null;
+      final complete = cursorMode
+          ? nextCursor == null
+          : offers.length >= total ||
+                result.returnedCount == 0 ||
+                result.returnedCount < _defaultPageSize;
+      if (complete) {
+        return SourceSectionResult(
+          source: source,
+          offers: List.unmodifiable(offers),
+          total: total,
+          page: page,
+          nextCursor: nextCursor,
+          error: _combineSourceErrors(protocolErrors),
+        );
+      }
+      if (added == 0 && nextCursor == null) {
+        return SourceSectionResult(
+          source: source,
+          offers: List.unmodifiable(offers),
+          total: total,
+          page: page,
+          nextCursor: nextCursor,
+          error: _combineSourceErrors(
+            protocolErrors,
+            '游戏源分页没有新的 latest offer，已停止继续读取',
+          ),
+        );
+      }
+      if (nextCursor != null && !seenCursors.add(nextCursor)) {
+        return SourceSectionResult(
+          source: source,
+          offers: List.unmodifiable(offers),
+          total: total,
+          page: page,
+          nextCursor: nextCursor,
+          error: _combineSourceErrors(protocolErrors, '游戏源重复返回 cursor，无法继续读取'),
+        );
+      }
+      requestCursor = nextCursor;
+      page += 1;
+      if (page > 2048) {
+        return SourceSectionResult(
+          source: source,
+          offers: List.unmodifiable(offers),
+          total: total,
+          page: page - 1,
+          nextCursor: nextCursor,
+          error: _combineSourceErrors(protocolErrors, '游戏源分页超过安全上限'),
+        );
+      }
+    }
+  }
+
+  SourceSectionResult _sectionFrom(_SourceSearchResult result) {
+    return SourceSectionResult(
+      source: result.source,
+      offers: result.games,
+      total: result.total,
+      page: result.page,
+      nextCursor: result.nextCursor,
+      error: result.error ?? result.protocolError,
+      exhausted: result.returnedCount == 0 && result.nextCursor == null,
+    );
   }
 
   Future<OnlineGameSourceProbe> _probeSource(OnlineGameSource source) async {
@@ -515,12 +1008,70 @@ class _SourceSearchResult {
   const _SourceSearchResult({
     required this.source,
     required this.games,
+    required this.total,
+    required this.page,
+    required this.returnedCount,
+    this.nextCursor,
     this.error,
+    this.protocolError,
   });
 
   final OnlineGameSource source;
   final List<OnlineCatalogGame> games;
+  final int total;
+  final int page;
+  final int returnedCount;
+  final String? nextCursor;
   final String? error;
+  final String? protocolError;
+}
+
+class _LatestOfferPageValidation {
+  const _LatestOfferPageValidation({required this.games, this.protocolError});
+
+  final List<OnlineCatalogGame> games;
+  final String? protocolError;
+}
+
+_LatestOfferPageValidation _filterSourceLatestOffers(
+  OnlineGameSource source,
+  List<OnlineCatalogGame> offers,
+) {
+  final result = <OnlineCatalogGame>[];
+  final indexesByGameId = <String, int>{};
+  final duplicateGameIds = <String>{};
+  for (final offer in offers) {
+    if (offer.source.id != source.id) {
+      throw const FormatException('offer 的 sourceId 与请求源不一致');
+    }
+    final version = SemanticVersion.parse(offer.manifest.version);
+    final id = offer.manifest.id;
+    final existingIndex = indexesByGameId[id];
+    if (existingIndex == null) {
+      indexesByGameId[id] = result.length;
+      result.add(offer);
+      continue;
+    }
+    duplicateGameIds.add(id);
+    final existing = result[existingIndex];
+    if (version.compareTo(SemanticVersion.parse(existing.manifest.version)) >
+        0) {
+      result[existingIndex] = offer;
+    }
+  }
+  return _LatestOfferPageValidation(
+    games: List.unmodifiable(result),
+    protocolError: duplicateGameIds.isEmpty
+        ? null
+        : '游戏源为同一 gameId 返回了多个版本：'
+              '${duplicateGameIds.join(', ')}；仅保留最高语义版本',
+  );
+}
+
+String? _combineSourceErrors(List<String> errors, [String? trailing]) {
+  final values = <String>[...errors, ?trailing];
+  if (values.isEmpty) return null;
+  return values.toSet().join(' | ');
 }
 
 class _DownloadCancelled implements Exception {

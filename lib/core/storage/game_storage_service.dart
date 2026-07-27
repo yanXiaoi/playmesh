@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../library/playmesh_library_root.dart';
+import '../profile/avatar_image.dart';
+import '../../models/game_id.dart';
 
 class GameStorageService {
   GameStorageService._({required this.gameId, required Directory libraryRoot})
@@ -26,14 +29,18 @@ class GameStorageService {
   static const _dirtyFlushThreshold = 20;
   static const _maxValueBytes = 256 * 1024;
   static const maxUploadBytes = 256 * 1024 * 1024;
+  static const systemAvatarBucket = '_sys-user-avatars';
   static const _replaceAttempts = 8;
-  static final _gameIdPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$');
   static final _bucketPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');
+  static final _systemBucketPattern = RegExp(
+    r'^_sys-[A-Za-z0-9][A-Za-z0-9_-]{0,58}$',
+  );
   static final _keyPattern = RegExp(r'^[A-Za-z0-9._-]{1,128}$');
   static final _dataFilePattern = RegExp(
     r'^[0-9]{13,}(?:\.[A-Za-z0-9]{1,16})?$',
   );
   static final _extensionPattern = RegExp(r'^[A-Za-z0-9]{1,16}$');
+  static final _playerIdPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$');
   static final Map<String, Future<void>> _pathOperations = {};
   static int _temporarySequence = 0;
   static int _lastUploadTimestamp = 0;
@@ -49,7 +56,7 @@ class GameStorageService {
     required String gameId,
     Directory? libraryRoot,
   }) async {
-    if (!_gameIdPattern.hasMatch(gameId)) {
+    if (!isValidPlaymeshGameId(gameId)) {
       throw const FormatException('无效的 gameId');
     }
     final root = libraryRoot ?? await PlaymeshLibraryRoot.resolve();
@@ -57,12 +64,12 @@ class GameStorageService {
   }
 
   Future<Object?> getData(String bucket, String key) async {
-    _validateBucketAndKey(bucket, key);
+    _validatePublicBucketAndKey(bucket, key);
     return (await _load(bucket)).values[key];
   }
 
   Future<void> setData(String bucket, String key, Object? value) async {
-    _validateBucketAndKey(bucket, key);
+    _validatePublicBucketAndKey(bucket, key);
     final encoded = jsonEncode(value);
     if (utf8.encode(encoded).length > _maxValueBytes) {
       throw const FormatException('单个游戏数据值超过 256 KiB');
@@ -73,7 +80,7 @@ class GameStorageService {
   }
 
   Future<void> removeData(String bucket, String key) async {
-    _validateBucketAndKey(bucket, key);
+    _validatePublicBucketAndKey(bucket, key);
     final state = await _load(bucket);
     if (state.values.containsKey(key)) {
       state.values.remove(key);
@@ -82,7 +89,7 @@ class GameStorageService {
   }
 
   Future<void> clearData(String bucket) async {
-    _validateBucket(bucket);
+    _validatePublicBucket(bucket);
     final state = await _load(bucket);
     state.values.clear();
     _markDirty(bucket, state);
@@ -95,7 +102,7 @@ class GameStorageService {
     required Stream<List<int>> data,
     int? contentLength,
   }) async {
-    _validateBucket(bucket);
+    _validatePublicBucket(bucket);
     if (contentLength != null && contentLength > maxUploadBytes) {
       throw const FormatException('上传文件不能超过 256 MiB');
     }
@@ -147,9 +154,68 @@ class GameStorageService {
     return '/bucket/$bucket/$fileName';
   }
 
-  /// 解析公开数据区文件。JSON 数据目录不会经过此入口。
+  /// 将会话头像写入平台私有 Bucket。游戏脚本无法通过数据或上传 API
+  /// 创建、覆盖或枚举该路径。
+  Future<String> writeUserAvatar({
+    required String playerId,
+    required Uint8List pngBytes,
+    required String sha256,
+  }) async {
+    _validatePlayerId(playerId);
+    final avatar = await AvatarImage.validate(pngBytes);
+    if (avatar.sha256 != sha256) {
+      throw const FormatException('系统头像摘要不匹配');
+    }
+    final target = _userAvatarFile(playerId);
+    await _withPathLock(target.path, () async {
+      await target.parent.create(recursive: true);
+      final sequence = _temporarySequence++;
+      final temporary = File(
+        '${target.path}.${DateTime.now().microsecondsSinceEpoch}.$sequence.tmp',
+      );
+      try {
+        await temporary.writeAsBytes(avatar.pngBytes, flush: true);
+        await _replaceFileWithRetry(temporary, target);
+      } finally {
+        if (await temporary.exists()) {
+          try {
+            await temporary.delete();
+          } on FileSystemException {
+            // 唯一临时文件不会影响下一次头像提交。
+          }
+        }
+      }
+    });
+    return '/bucket/$systemAvatarBucket/$playerId.png';
+  }
+
+  Future<void> clearSystemAvatars() async {
+    final directory = Directory(
+      '${_binaryDirectory.path}${Platform.pathSeparator}$systemAvatarBucket',
+    );
+    if (await directory.exists()) await directory.delete(recursive: true);
+  }
+
+  Future<String> avatarEtag(String playerId) async {
+    _validatePlayerId(playerId);
+    final avatar = await AvatarImage.validate(
+      await _userAvatarFile(playerId).readAsBytes(),
+    );
+    return '"sha256-${avatar.sha256}"';
+  }
+
+  /// 解析同源数据区文件。普通 Bucket 公开；系统头像 Bucket 只允许精确文件名。
+  /// JSON 数据目录不会经过此入口。
   File dataFile(String bucket, String fileName) {
-    _validateBucket(bucket);
+    if (bucket == systemAvatarBucket) {
+      if (!fileName.endsWith('.png')) {
+        throw const FormatException('系统头像文件名无效');
+      }
+      final playerId = fileName.substring(0, fileName.length - 4);
+      _validatePlayerId(playerId);
+      return _userAvatarFile(playerId);
+    }
+    _validatePublicBucket(bucket);
     if (!_dataFilePattern.hasMatch(fileName)) {
       throw const FormatException('Bucket 文件名无效');
     }
@@ -160,7 +226,7 @@ class GameStorageService {
   }
 
   Future<void> _flushBucket(String bucket) async {
-    _validateBucket(bucket);
+    _validatePublicBucket(bucket);
     final state = await _load(bucket);
     state.timer?.cancel();
     state.timer = null;
@@ -223,7 +289,7 @@ class GameStorageService {
   }
 
   Future<_BucketState> _load(String bucket) async {
-    _validateBucket(bucket);
+    _validatePublicBucket(bucket);
     final cached = _buckets[bucket];
     if (cached != null) return cached;
     final file = File(
@@ -313,16 +379,39 @@ class GameStorageService {
     }
   }
 
-  static void _validateBucketAndKey(String bucket, String key) {
-    _validateBucket(bucket);
+  File _userAvatarFile(String playerId) {
+    _validateSystemBucket(systemAvatarBucket);
+    return File(
+      '${_binaryDirectory.path}${Platform.pathSeparator}$systemAvatarBucket'
+      '${Platform.pathSeparator}$playerId.png',
+    );
+  }
+
+  static void _validatePublicBucketAndKey(String bucket, String key) {
+    _validatePublicBucket(bucket);
     if (!_keyPattern.hasMatch(key)) throw const FormatException('无效的游戏数据 key');
   }
 
-  static void _validateBucket(String value) {
+  static void _validatePublicBucket(String value) {
+    if (value.startsWith('_sys-')) {
+      throw const FormatException('Bucket 名称使用了平台保留前缀 _sys-');
+    }
     if (!_bucketPattern.hasMatch(value)) {
       throw const FormatException(
         'Bucket 名称必须以字母或数字开头，只能包含字母、数字、下划线和连字符，且不超过 64 个字符',
       );
+    }
+  }
+
+  static void _validatePlayerId(String value) {
+    if (!_playerIdPattern.hasMatch(value)) {
+      throw const FormatException('无效的会话玩家 ID');
+    }
+  }
+
+  static void _validateSystemBucket(String value) {
+    if (!_systemBucketPattern.hasMatch(value)) {
+      throw const FormatException('无效的平台系统 Bucket');
     }
   }
 

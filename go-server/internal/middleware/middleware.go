@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,12 +14,10 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-server/internal/config"
-	"go-server/internal/store"
 )
 
 const (
 	sourceAuthenticatedKey = "playmesh.source_authenticated"
-	catalogStatusKey       = "playmesh.catalog_status"
 )
 
 func RequestID() gin.HandlerFunc {
@@ -81,8 +80,7 @@ func CORS() gin.HandlerFunc {
 	}
 }
 
-// CatalogToken authenticates both App tokens and records which package status
-// the request may read. Whitelist entries are exact method/path pairs.
+// CatalogToken 保留 Relay 既有的双 Token 鉴权行为。
 func CatalogToken(auth config.Auth) gin.HandlerFunc {
 	publishedToken := strings.TrimSpace(auth.PublishedToken)
 	if publishedToken == "" {
@@ -95,16 +93,13 @@ func CatalogToken(auth config.Auth) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		if _, ok := whitelist[c.Request.Method+" "+c.Request.URL.Path]; ok {
-			c.Set(catalogStatusKey, store.StatusApproved)
 			c.Next()
 			return
 		}
 		provided, ok := bearerToken(c.GetHeader("Authorization"))
 		switch {
 		case ok && SecureEqual(provided, publishedToken):
-			c.Set(catalogStatusKey, store.StatusApproved)
 		case ok && SecureEqual(provided, reviewToken):
-			c.Set(catalogStatusKey, store.StatusPending)
 		default:
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error":   "unauthorized",
@@ -117,18 +112,34 @@ func CatalogToken(auth config.Auth) gin.HandlerFunc {
 	}
 }
 
-// SourceToken keeps the older middleware entry point while using dual-token
-// semantics.
 func SourceToken(auth config.Auth) gin.HandlerFunc {
 	return CatalogToken(auth)
 }
 
-func CatalogStatus(c *gin.Context) string {
-	value := c.GetString(catalogStatusKey)
-	if value == store.StatusPending {
-		return store.StatusPending
+func CatalogReadToken(auth config.Auth) gin.HandlerFunc {
+	publishedToken := strings.TrimSpace(auth.PublishedToken)
+	if publishedToken == "" {
+		publishedToken = strings.TrimSpace(auth.Token)
 	}
-	return store.StatusApproved
+	whitelist := make(map[string]struct{}, len(auth.Whitelist))
+	for _, entry := range auth.Whitelist {
+		whitelist[strings.ToUpper(strings.TrimSpace(entry.Method))+" "+entry.Path] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		if _, ok := whitelist[c.Request.Method+" "+c.Request.URL.Path]; ok {
+			c.Next()
+			return
+		}
+		provided, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok || !SecureEqual(provided, publishedToken) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"code": "unauthorized", "message": "需要有效的 Catalog 读取 Token",
+			})
+			return
+		}
+		c.Set(sourceAuthenticatedKey, true)
+		c.Next()
+	}
 }
 
 func BearerToken(c *gin.Context) (string, bool) {
@@ -231,11 +242,19 @@ func NewIntervalLimiter(interval time.Duration) *IntervalLimiter {
 }
 
 func (l *IntervalLimiter) Allow(key string) bool {
+	allowed, _ := l.AllowWithRetryAfter(key)
+	return allowed
+}
+
+func (l *IntervalLimiter) AllowWithRetryAfter(key string) (bool, time.Duration) {
 	now := time.Now()
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	if previous, ok := l.lastSeen[key]; ok && now.Sub(previous) < l.interval {
-		return false
+	if previous, ok := l.lastSeen[key]; ok {
+		remaining := l.interval - now.Sub(previous)
+		if remaining > 0 {
+			return false, remaining
+		}
 	}
 	l.lastSeen[key] = now
 	if len(l.lastSeen) > 10000 {
@@ -246,13 +265,22 @@ func (l *IntervalLimiter) Allow(key string) bool {
 			}
 		}
 	}
-	return true
+	return true, 0
 }
 
 func RateLimit(limiter *IntervalLimiter, scope string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !limiter.Allow(scope + ":" + c.ClientIP()) {
-			c.Header("Retry-After", "1")
+		allowed, retryAfter := limiter.AllowWithRetryAfter(
+			scope + ":" + c.ClientIP(),
+		)
+		if !allowed {
+			retryAfterSeconds := int64(
+				(retryAfter + time.Second - 1) / time.Second,
+			)
+			if retryAfterSeconds < 1 {
+				retryAfterSeconds = 1
+			}
+			c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error":   "rate_limited",
 				"message": "请求过于频繁，请稍后重试",

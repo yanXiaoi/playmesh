@@ -46,6 +46,97 @@ void main() {
     expect(page.revision, 0);
   });
 
+  test('页面默认查询返回同一 revision 的全部结果且不截断一百项', () {
+    final games = List<GameSummary>.generate(125, _indexedGame);
+    final repository = GameLibraryRepository(
+      () async => const [],
+      initialGames: games,
+    );
+
+    final result = repository.query();
+
+    expect(result.total, 125);
+    expect(result.games, hasLength(125));
+    expect(result.offset, 0);
+    expect(result.revision, 0);
+  });
+
+  test('统一索引支持发布者和跨字段多关键词 AND', () {
+    final repository = GameLibraryRepository(
+      () async => const [],
+      initialGames: const [
+        GameSummary(
+          id: 'com.example.party',
+          name: '星海派对',
+          version: '2.0.0',
+          author: 'Example Studio',
+          description: '多人竞速',
+          minPlayers: 1,
+          maxPlayers: 4,
+          supportsMultiplayer: true,
+          displayModeLabel: '多屏模式',
+          displayMode: 'multi_screen',
+          orientation: GameOrientation.landscape,
+          tags: ['arcade'],
+          entry: LocalGameEntry(
+            assetPath: 'app/index.html',
+            statusLabel: 'SDK',
+          ),
+        ),
+      ],
+    );
+
+    expect(
+      repository.query(search: 'Example 竞速 2.0.0').games.single.id,
+      'com.example.party',
+    );
+    expect(repository.query(search: 'Example missing').games, isEmpty);
+  });
+
+  test('损坏摘要进入预构建索引且只折叠拉丁字符大小写', () {
+    const recoverable = GameSummary(
+      id: 'com.example.repair',
+      name: '待修复',
+      version: '0.0.0',
+      description: '',
+      minPlayers: 1,
+      maxPlayers: 1,
+      supportsMultiplayer: false,
+      displayModeLabel: '',
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      manifestError: 'ÉCOLE ΩFault 解析失败',
+      entry: LocalGameEntry(
+        assetPath: 'app/index.html',
+        statusLabel: 'manifest_repair_required',
+      ),
+    );
+    final repository = GameLibraryRepository(
+      () async => const [],
+      initialGames: const [recoverable],
+    );
+
+    expect(repository.query(search: 'école 解析').games, const [recoverable]);
+    expect(repository.query(search: 'Ωfault').games, const [recoverable]);
+    expect(repository.query(search: 'ωfault').games, isEmpty);
+  });
+
+  test('排序优先 launchCount，再按最近打开和语义版本', () {
+    final hot = _oldGame.withUsage(
+      lastOpenedAt: DateTime.utc(2026, 7, 20),
+      launchCount: 5,
+    );
+    final recent = _newGame.withUsage(
+      lastOpenedAt: DateTime.utc(2026, 7, 25),
+      launchCount: 2,
+    );
+    final repository = GameLibraryRepository(
+      () async => const [],
+      initialGames: [recent, hot],
+    );
+    expect(repository.cachedGames.first.id, 'old');
+  });
+
   test('开发工作区项目直接进入统一游戏库缓存', () {
     final repository = GameLibraryRepository(() async => const []);
 
@@ -71,7 +162,7 @@ void main() {
       'third',
     ]);
 
-    repository.markOpened('third', DateTime.utc(2026, 7, 25));
+    repository.markLaunched('third', DateTime.utc(2026, 7, 25));
     expect(repository.cachedGames.map((game) => game.id), [
       'third',
       'new',
@@ -113,6 +204,24 @@ const _newGame = GameSummary(
   orientation: GameOrientation.landscape,
   tags: ['party'],
   entry: LocalGameEntry(assetPath: 'new/app/index.html', statusLabel: 'SDK'),
+);
+
+GameSummary _indexedGame(int index) => GameSummary(
+  id: 'com.example.game$index',
+  name: 'Game $index',
+  version: '1.0.0',
+  author: 'Publisher',
+  description: 'Indexed game',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: 'multi_screen',
+  displayMode: 'multi_screen',
+  orientation: GameOrientation.landscape,
+  entry: LocalGameEntry(
+    assetPath: 'game-$index/app/index.html',
+    statusLabel: 'ready',
+  ),
 );
 
 const _thirdGame = GameSummary(

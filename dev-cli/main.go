@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const cliVersion = "1.3.1"
+const cliVersion = "1.4.0"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {

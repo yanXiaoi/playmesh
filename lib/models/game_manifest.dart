@@ -1,5 +1,7 @@
 import 'game_summary.dart';
+import 'game_id.dart';
 import '../core/game_sdk/sdk_feature_registry.dart';
+import '../core/version/semantic_version.dart';
 
 enum GameMode {
   solo('solo'),
@@ -57,18 +59,21 @@ class GameManifest {
     required this.modes,
     required this.displayModes,
     required this.players,
-    required this.permissions,
     required this.tags,
-    required this.icon,
     required this.entries,
     this.authority,
   });
 
   factory GameManifest.fromJson(Map<String, Object?> json) {
     final id = _requiredString(json, 'id');
+    if (!isValidPlaymeshGameId(id)) {
+      throw const FormatException(
+        'id 必须为 1 到 64 个 ASCII 字母、数字、点、下划线或连字符，且以字母或数字开头',
+      );
+    }
     final name = _requiredString(json, 'name');
     final author = (_optionalString(json, 'author')?.trim() ?? '').isEmpty
-        ? '佚名'
+        ? ''
         : _optionalString(json, 'author')!.trim();
     if (author.length > 80) {
       throw const FormatException('author 不能超过 80 个字符');
@@ -172,14 +177,6 @@ class GameManifest {
       throw const FormatException('多人上限大于 1 时 modes 必须包含 multiplayer');
     }
 
-    final iconValue = json['icon'];
-    final icon = iconValue == null
-        ? null
-        : validateGamePackagePath(_asString(iconValue, 'icon'), field: 'icon');
-    if (icon != null && !icon.startsWith('app/')) {
-      throw const FormatException('icon 必须位于 app/ 公开资源目录内');
-    }
-    final permissions = _optionalStringList(json, 'permissions');
     final tags = _optionalStringList(json, 'tags');
 
     return GameManifest(
@@ -196,9 +193,7 @@ class GameManifest {
       modes: Set.unmodifiable(modes),
       displayModes: Set.unmodifiable(displayModes),
       players: GamePlayerLimits(min: minPlayers, max: maxPlayers),
-      permissions: List.unmodifiable(permissions),
       tags: List.unmodifiable(tags),
-      icon: icon,
       entries: entries,
       authority: authority,
     );
@@ -217,9 +212,7 @@ class GameManifest {
   final Set<GameMode> modes;
   final Set<GameDisplayMode> displayModes;
   final GamePlayerLimits players;
-  final List<String> permissions;
   final List<String> tags;
-  final String? icon;
   final GameEntriesManifest entries;
   final GameAuthorityManifest? authority;
 
@@ -239,7 +232,6 @@ class GameManifest {
       'displayModes': displayModes.map((mode) => mode.manifestValue).toList(),
       'players': {'min': players.min, 'max': players.max},
       'entries': {'game': entries.game, 'controller': entries.controller},
-      'permissions': permissions,
       'tags': tags,
     };
     if (lastModifiedAt case final lastModifiedAt?) {
@@ -251,10 +243,58 @@ class GameManifest {
     if (authority case final authority?) {
       json['authority'] = {'entry': authority.entry};
     }
-    if (icon case final icon?) json['icon'] = icon;
     return json;
   }
 }
+
+/// Returns the writable projection of a manifest without assigning semantics
+/// to unknown JSON members. Readers may accept arbitrary extra members, while
+/// every App-owned write path emits only fields from the current contract.
+Map<String, Object?> projectGameManifestJson(Map<String, Object?> source) {
+  final projected = _projectJsonObject(source, const [
+    'id',
+    'name',
+    'author',
+    'lastModifiedAt',
+    'remarks',
+    'version',
+    'sdkVersion',
+    'appSdkVersion',
+    'orientation',
+    'controllerOrientation',
+    'modes',
+    'displayModes',
+    'players',
+    'entries',
+    'tags',
+    'authority',
+  ]);
+  _projectNestedJsonObject(projected, 'players', const ['min', 'max']);
+  _projectNestedJsonObject(projected, 'entries', const ['game', 'controller']);
+  _projectNestedJsonObject(projected, 'authority', const ['entry']);
+  return projected;
+}
+
+void _projectNestedJsonObject(
+  Map<String, Object?> parent,
+  String field,
+  List<String> fields,
+) {
+  final value = parent[field];
+  if (value is! Map) return;
+  parent[field] = _projectJsonObject(
+    value.map((key, value) => MapEntry(key.toString(), value)),
+    fields,
+  );
+}
+
+Map<String, Object?> _projectJsonObject(
+  Map<String, Object?> source,
+  List<String> fields,
+) => {
+  for (final field in fields)
+    if (source.containsKey(field)) field: source[field],
+};
 
 String validateGamePackagePath(String value, {required String field}) {
   if (value.isEmpty ||
@@ -318,9 +358,7 @@ String? _optionalString(Map<String, Object?> json, String field) {
 
 String _requiredVersion(Map<String, Object?> json, String field) {
   final value = _requiredString(json, field);
-  if (!RegExp(r'^\d+\.\d+\.\d+$').hasMatch(value)) {
-    throw FormatException('$field 必须使用 MAJOR.MINOR.PATCH');
-  }
+  SemanticVersion.parse(value);
   return value;
 }
 

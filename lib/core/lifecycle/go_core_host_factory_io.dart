@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'go_core_host_contract.dart';
 
 GoCoreHost createBundledGoCoreHost({required String address}) {
-  if (Platform.isAndroid || Platform.operatingSystem == 'ohos') {
+  if (Platform.isAndroid) {
     return _MobileGoCoreHost(address);
   }
   if (Platform.isWindows) {

@@ -45,10 +45,6 @@
 
 该 APK 仅供内部安装验证，不是生产签名包。
 
-统一全目标命令在 Android 完成后因当前 HarmonyOS 固定工具链不支持部分较新的 Dart/Flutter
-依赖语法而停止。该失败不影响已经验证并归档的 Android 产物；本次需求只要求 Android 和 Windows，
-因此随后使用 Windows 单目标命令继续构建。
-
 ## Windows
 
 - 构建命令：`tool/build_release.ps1 -Target windows`

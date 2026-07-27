@@ -5,6 +5,7 @@ import '../storage/game_storage_service.dart';
 part 'features/app/app_capability_feature.dart';
 part 'features/app/app_core_feature.dart';
 part 'features/app/app_device_feature.dart';
+part 'features/app/app_ui_feature.dart';
 part 'features/game/game_binary_feature.dart';
 part 'features/game/game_core_feature.dart';
 part 'features/game/game_performance_feature.dart';
@@ -129,6 +130,16 @@ class SdkCommandDeferred extends SdkCommandExecution {
   const SdkCommandDeferred();
 }
 
+class SdkCommandException implements Exception {
+  const SdkCommandException(this.code, this.message);
+
+  final String code;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 abstract interface class _GameSdkCommandFeature {
   SdkSourceFragment get source;
 
@@ -190,7 +201,10 @@ class AppSdkCommandContext {
     required this.sendCapabilityEvent,
     required this.disposeCapability,
     required this.setFullscreen,
+    required this.openSharePanel,
+    required this.setToolDockVisible,
     required this.requestExit,
+    required this.syncAvatar,
   });
 
   final Future<Map<String, Object?>> Function(
@@ -204,7 +218,10 @@ class AppSdkCommandContext {
   final Future<Object?> Function(Map<String, Object?> payload)
   disposeCapability;
   final Future<Object?> Function(Map<String, Object?> payload) setFullscreen;
+  final Future<Object?> Function() openSharePanel;
+  final Future<Object?> Function(bool visible) setToolDockVisible;
   final Object? Function() requestExit;
+  final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
 }
 
 /// 唯一 SDK 注册位置。新增功能时在对应 feature 文件实现并在这里注册一次。
@@ -221,6 +238,7 @@ final class SdkFeatureRegistry {
   static final List<_AppSdkCommandFeature> _appCommandFeatures = [
     _AppCoreFeature(),
     _AppCapabilityFeature(),
+    _AppUiFeature(),
     _AppDeviceFeature(),
   ];
 
@@ -250,6 +268,7 @@ final class SdkFeatureRegistry {
     gameStorageLifecycleSdkSource,
     appCoreSdkSource,
     appCapabilitySdkSource,
+    appUiSdkSource,
     appDeviceSdkSource,
   ];
 
@@ -574,16 +593,36 @@ _SdkRuntimeBundle _assembleRuntimeBundle(
     versionName: 'PLAYMESH_APP_SDK_VERSION',
     versionPlaceholder: '__PLAYMESH_APP_SDK_VERSION__',
   );
-  final gameDeclaration = game.declaration.replaceAll(
-    '__PLAYMESH_APP_SDK_VERSION__',
+  const appVersionPlaceholder = '__PLAYMESH_APP_SDK_VERSION__';
+  final gameTypeScript = game.typeScript.replaceAll(
+    appVersionPlaceholder,
     app.version,
   );
+  final gameJavaScript = game.javaScript.replaceAll(
+    appVersionPlaceholder,
+    app.version,
+  );
+  final gameDeclaration = game.declaration.replaceAll(
+    appVersionPlaceholder,
+    app.version,
+  );
+  for (final entry in {
+    'playmesh.ts': gameTypeScript,
+    'playmesh.js': gameJavaScript,
+    'playmesh.d.ts': gameDeclaration,
+  }.entries) {
+    if (entry.value.contains(appVersionPlaceholder)) {
+      throw StateError(
+        '${entry.key} still contains the App SDK version placeholder',
+      );
+    }
+  }
   return _SdkRuntimeBundle(
     gameVersion: game.version,
     appVersion: app.version,
     files: Map.unmodifiable({
-      'playmesh.ts': game.typeScript,
-      'playmesh.js': game.javaScript,
+      'playmesh.ts': gameTypeScript,
+      'playmesh.js': gameJavaScript,
       'playmesh.d.ts': gameDeclaration,
       'playmesh-app.ts': app.typeScript,
       'playmesh-app.js': app.javaScript,

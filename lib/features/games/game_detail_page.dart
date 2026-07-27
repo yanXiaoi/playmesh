@@ -7,7 +7,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
 
 import '../../models/game_summary.dart';
-import '../../core/platform/app_platform.dart';
+import '../../core/game_package/game_package_icon.dart';
+import '../../core/game_package/game_package_share_files.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../../core/storage/game_storage_service.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
@@ -17,15 +19,24 @@ typedef GamePackageExport =
     Future<void> Function(GameSummary game, String destinationPath);
 
 String gamePackageExportFileName(GameSummary game) {
-  var safeName = game.name
-      .trim()
-      .replaceAll(RegExp(r'[<>:"/\\|?*\u0000-\u001F]'), '_')
-      .replaceAll(RegExp(r'[. ]+$'), '');
-  if (safeName.isEmpty) safeName = 'game';
-  if (safeName.runes.length > 50) {
-    safeName = String.fromCharCodes(safeName.runes.take(50));
+  return gamePackageShareFileName(game);
+}
+
+Future<GamePackageShareFiles>? _mobileShareFiles;
+
+Future<GamePackageShareFiles> _mobileGamePackageShareFiles() {
+  return _mobileShareFiles ??= getTemporaryDirectory().then(
+    (directory) => GamePackageShareFiles(temporaryRoot: directory),
+  );
+}
+
+Future<void> cleanupStaleGamePackageExport() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await (await _mobileGamePackageShareFiles()).cleanup();
+  } on Object {
+    // Startup cleanup is best effort. The next export repeats it before writing.
   }
-  return '$safeName-v${game.version}.zip';
 }
 
 class GameDetailPage extends StatelessWidget {
@@ -44,8 +55,12 @@ class GameDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final description =
+        game.description.trim().isNotEmpty || game.manifestError == null
+        ? game.description
+        : context.tr('game.repair_description');
     return Scaffold(
-      appBar: AppBar(title: const Text('游戏详情')),
+      appBar: AppBar(title: Text(context.tr('game.details'))),
       body: PlaymeshBackground(
         child: SafeArea(
           child: Center(
@@ -64,12 +79,12 @@ class GameDetailPage extends StatelessWidget {
                             _GameHeader(game: game),
                             const SizedBox(height: 24),
                             Text(
-                              '游戏简介',
+                              context.tr('game.description'),
                               style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                             const SizedBox(height: 8),
-                            Text(game.description),
+                            Text(description),
                             const SizedBox(height: 18),
                             _ManifestFacts(game: game),
                             const SizedBox(height: 12),
@@ -79,7 +94,9 @@ class GameDetailPage extends StatelessWidget {
                                 child: TextButton.icon(
                                   onPressed: () => _exportGame(context),
                                   icon: const Icon(Icons.download_outlined),
-                                  label: const Text('导出游戏包'),
+                                  label: Text(
+                                    context.tr('game.export_package'),
+                                  ),
                                 ),
                               ),
                             Align(
@@ -87,7 +104,7 @@ class GameDetailPage extends StatelessWidget {
                               child: TextButton.icon(
                                 onPressed: () => _clearGameData(context),
                                 icon: const Icon(Icons.delete_outline),
-                                label: const Text('清除游戏数据'),
+                                label: Text(context.tr('game.clear_data')),
                               ),
                             ),
                             const Divider(height: 32),
@@ -101,7 +118,7 @@ class GameDetailPage extends StatelessWidget {
                                 ),
                                 onPressed: () => _deleteGame(context),
                                 icon: const Icon(Icons.delete_forever_outlined),
-                                label: const Text('删除游戏'),
+                                label: Text(context.tr('game.delete')),
                               ),
                             ),
                           ],
@@ -128,7 +145,11 @@ class GameDetailPage extends StatelessWidget {
                 ? Icons.play_arrow
                 : Icons.build_outlined,
           ),
-          label: Text(game.manifestError == null ? '开始游戏' : '请先修复 main.json'),
+          label: Text(
+            game.manifestError == null
+                ? context.tr('game.start')
+                : context.tr('game.fix_manifest'),
+          ),
         ),
       ),
     );
@@ -138,22 +159,21 @@ class GameDetailPage extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('永久删除游戏'),
+        title: Text(context.tr('game.delete_forever')),
         content: Text(
-          '将永久删除“${game.name}”的游戏文件、存档、缓存和本地历史。'
-          '该操作不可恢复。',
+          context.tr('game.delete_confirm', arguments: {'name': game.name}),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(context.tr('common.cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('永久删除'),
+            child: Text(context.tr('game.delete_forever')),
           ),
         ],
       ),
@@ -164,65 +184,104 @@ class GameDetailPage extends StatelessWidget {
       if (context.mounted) Navigator.of(context).pop(game.id);
     } on Object catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除失败: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr('game.delete_failed', arguments: {'error': error}),
+            ),
+          ),
+        );
       }
     }
   }
 
   Future<void> _exportGame(BuildContext context) async {
     final suggestedName = gamePackageExportFileName(game);
-    if (Platform.isAndroid || isHarmonyOS) {
+    if (Platform.isAndroid) {
+      final exportSubject = context.tr(
+        'game.export_subject',
+        arguments: {'name': game.name},
+      );
+      final exportText = context.tr(
+        'game.export_text',
+        arguments: {'name': game.name, 'version': game.version},
+      );
+      File? destination;
+      GamePackageShareFiles? shareFiles;
       try {
-        final temporaryDirectory = await getTemporaryDirectory();
-        final destination = File(
-          '${temporaryDirectory.path}${Platform.pathSeparator}'
-          'playmesh-share-export.playmesh.zip',
-        );
-        if (await destination.exists()) await destination.delete();
+        shareFiles = await _mobileGamePackageShareFiles();
+        destination = await shareFiles.create(game);
         await onExport!(game, destination.path);
-        // The OHOS share_plus fork currently exposes this compatibility API.
-        // ignore: deprecated_member_use
-        await Share.shareXFiles(
-          [XFile(destination.path, mimeType: 'application/zip')],
-          subject: '导出 ${game.name}',
-          text: 'Playmesh 游戏包：${game.name} ${game.version}',
-          fileNameOverrides: [suggestedName],
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(destination.path, mimeType: 'application/zip')],
+            subject: exportSubject,
+            text: exportText,
+            fileNameOverrides: [suggestedName],
+          ),
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('游戏包已生成，请在系统面板中选择保存或分享位置')),
+            SnackBar(content: Text(context.tr('game.export_share_ready'))),
           );
         }
       } on Object catch (error) {
         if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('导出失败：$error')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                context.tr('game.export_failed', arguments: {'error': error}),
+              ),
+            ),
+          );
+        }
+      } finally {
+        try {
+          if (destination != null && shareFiles != null) {
+            // Android share sheets can return before the receiver opens the
+            // URI. Release the lease and let the next share/app startup remove
+            // the stale file instead of deleting it underneath the receiver.
+            await shareFiles.complete(destination, deleteNow: false);
+          }
+        } on Object {
+          // The next startup/share cleanup retries without masking share errors.
         }
       }
       return;
     }
     final location = await getSaveLocation(
       suggestedName: suggestedName,
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'Playmesh 游戏包', extensions: ['zip']),
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: context.tr('library.package_type'),
+          extensions: const ['zip'],
+        ),
       ],
     );
     if (location == null || !context.mounted) return;
     try {
       await onExport!(game, location.path);
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('游戏包已导出到 ${location.path}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr(
+                'game.exported_to',
+                arguments: {'path': location.path},
+              ),
+            ),
+          ),
+        );
       }
     } on Object catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导出失败：$error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr('game.export_failed', arguments: {'error': error}),
+            ),
+          ),
+        );
       }
     }
   }
@@ -231,16 +290,16 @@ class GameDetailPage extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('清除游戏数据'),
-        content: const Text('这会删除该游戏通过 Playmesh SDK 保存的全部数据，且无法恢复。'),
+        title: Text(context.tr('game.clear_data')),
+        content: Text(context.tr('game.clear_data_confirm')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(context.tr('common.cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('清除'),
+            child: Text(context.tr('common.clear')),
           ),
         ],
       ),
@@ -249,15 +308,19 @@ class GameDetailPage extends StatelessWidget {
     try {
       await GameStorageService.clearGameData(gameId: game.id);
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('游戏数据已清除')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('game.data_cleared'))),
+        );
       }
     } on Object catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('清除失败: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr('game.clear_failed', arguments: {'error': error}),
+            ),
+          ),
+        );
       }
     }
   }
@@ -273,11 +336,7 @@ class _GameHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const GradientIcon(
-          icon: Icons.sports_esports_outlined,
-          size: 64,
-          iconSize: 32,
-        ),
+        _GameDetailIcon(game: game),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -290,10 +349,15 @@ class _GameHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text('版本 ${game.version}'),
+              Text(
+                context.tr(
+                  'game.version_value',
+                  arguments: {'version': game.version},
+                ),
+              ),
               const SizedBox(height: 2),
               Tooltip(
-                message: '点击复制游戏 ID',
+                message: context.tr('game.copy_id'),
                 child: TextButton.icon(
                   key: const ValueKey('copy-game-id'),
                   style: TextButton.styleFrom(
@@ -307,14 +371,21 @@ class _GameHeader extends StatelessWidget {
                       await Clipboard.setData(ClipboardData(text: game.id));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('游戏 ID 已复制')),
+                          SnackBar(content: Text(context.tr('game.id_copied'))),
                         );
                       }
                     } on Object catch (error) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('复制失败：$error')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              context.tr(
+                                'common.copy_failed',
+                                arguments: {'error': error},
+                              ),
+                            ),
+                          ),
+                        );
                       }
                     }
                   },
@@ -341,27 +412,78 @@ class _ManifestFacts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    String optionalTimestamp(DateTime? value) => value == null
+        ? context.tr('common.none')
+        : _formatLocalTimestamp(context, value);
+    final playerRange = game.minPlayers == game.maxPlayers
+        ? context.tr(
+            'library.player_count',
+            arguments: {'count': game.minPlayers},
+          )
+        : context.tr(
+            'library.player_range',
+            arguments: {'min': game.minPlayers, 'max': game.maxPlayers},
+          );
+    final displayMode = game.displayMode == 'single_screen_multiplayer'
+        ? context.tr('game.display_single_screen')
+        : context.tr('game.display_multi_screen');
+    String orientationLabel(GameOrientation value) =>
+        value == GameOrientation.landscape
+        ? context.tr('library.landscape')
+        : context.tr('library.portrait');
     final facts = <(IconData, String, String)>[
-      (Icons.person_outline, '作者', game.author.isEmpty ? '佚名' : game.author),
+      (
+        Icons.person_outline,
+        context.tr('common.publisher'),
+        game.author.isEmpty
+            ? context.tr('common.publisher_unknown')
+            : game.author,
+      ),
       (
         Icons.schedule_outlined,
-        '最后上传',
-        _formatOptionalTimestamp(game.lastModifiedAt),
+        context.tr('game.last_uploaded'),
+        optionalTimestamp(game.lastModifiedAt),
       ),
       (
         Icons.history_outlined,
-        '最近打开',
-        _formatOptionalTimestamp(game.lastOpenedAt),
+        context.tr('game.last_opened'),
+        optionalTimestamp(game.lastOpenedAt),
+      ),
+      (
+        Icons.bar_chart_rounded,
+        context.tr('game.launch_count'),
+        context.tr(
+          'game.launch_count_value',
+          arguments: {'count': game.launchCount},
+        ),
       ),
       if (game.manifestError != null)
-        (Icons.warning_amber_rounded, '清单状态', '待修复'),
-      (Icons.sell_outlined, '版本', game.version),
-      (Icons.people_outline, '游玩人数', game.playerRangeLabel),
-      (Icons.devices_outlined, '显示模式', game.displayModeLabel),
-      (Icons.screen_rotation_outlined, '主画面', game.orientation.label),
-      if (game.controllerOrientation case final orientation?)
-        (Icons.smartphone_outlined, '控制器', orientation.label),
-      (Icons.hub_outlined, '游戏模式', game.modeLabel),
+        (
+          Icons.warning_amber_rounded,
+          context.tr('game.manifest_status'),
+          context.tr('game.needs_repair'),
+        ),
+      (Icons.sell_outlined, context.tr('common.version'), game.version),
+      (Icons.people_outline, context.tr('game.players'), playerRange),
+      (Icons.devices_outlined, context.tr('game.display_mode'), displayMode),
+      (
+        Icons.screen_rotation_outlined,
+        context.tr('game.main_screen'),
+        orientationLabel(game.orientation),
+      ),
+      if (game.controllerOrientation case final controllerOrientation?)
+        (
+          Icons.smartphone_outlined,
+          context.tr('game.controller'),
+          orientationLabel(controllerOrientation),
+        ),
+      (
+        Icons.hub_outlined,
+        context.tr('game.game_mode'),
+        game.supportsMultiplayer
+            ? context.tr('library.multiplayer')
+            : context.tr('library.solo'),
+      ),
       if (game.appSdkVersion.isNotEmpty)
         (
           Icons.integration_instructions_outlined,
@@ -384,7 +506,9 @@ class _ManifestFacts extends StatelessWidget {
                   icon: fact.$1,
                   label: fact.$2,
                   value: fact.$3,
-                  shrinkToFit: fact.$2 == '最后上传' || fact.$2 == '最近打开',
+                  shrinkToFit:
+                      fact.$1 == Icons.schedule_outlined ||
+                      fact.$1 == Icons.history_outlined,
                 ),
               ),
           ],
@@ -393,17 +517,40 @@ class _ManifestFacts extends StatelessWidget {
     );
   }
 
-  String _formatLocalTimestamp(DateTime value) {
+  String _formatLocalTimestamp(BuildContext context, DateTime value) {
     final local = value.toLocal();
-    String twoDigits(int part) => part.toString().padLeft(2, '0');
-    return '${local.year.toString().padLeft(4, '0')}-'
-        '${twoDigits(local.month)}-${twoDigits(local.day)} '
-        '${twoDigits(local.hour)}:${twoDigits(local.minute)}:'
-        '${twoDigits(local.second)}';
+    final material = MaterialLocalizations.of(context);
+    return '${material.formatMediumDate(local)} '
+        '${material.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
   }
+}
 
-  String _formatOptionalTimestamp(DateTime? value) =>
-      value == null ? '无' : _formatLocalTimestamp(value);
+class _GameDetailIcon extends StatelessWidget {
+  const _GameDetailIcon({required this.game});
+
+  final GameSummary game;
+
+  @override
+  Widget build(BuildContext context) {
+    const fallback = GradientIcon(
+      icon: Icons.sports_esports_outlined,
+      size: 64,
+      iconSize: 32,
+    );
+    final path = game.localIconPath;
+    if (path == null || path.trim().isEmpty) return fallback;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image(
+        image: GamePackageIconImageProvider(File(path)),
+        width: 64,
+        height: 64,
+        fit: BoxFit.cover,
+        excludeFromSemantics: true,
+        errorBuilder: (_, _, _) => fallback,
+      ),
+    );
+  }
 }
 
 class _ManifestFact extends StatelessWidget {
@@ -424,9 +571,9 @@ class _ManifestFact extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest.withValues(alpha: 0.56),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.7)),
+        color: colors.surfaceContainerHighest.withAlpha(143),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.outlineVariant.withAlpha(179)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),

@@ -5,6 +5,8 @@
   "homepage": "",
   "supportsGameRelay": true,
   "showPublicSourceQRCode": true,
+  "allowUserRegistration": true,
+  "requireEmailVerification": false,
   "auth": {
     "whitelist": [
       {
@@ -49,5 +51,12 @@
     "maxTunnels": 1000,
     "maxConnectionsPerTunnel": 64,
     "maxConnectionsPerIP": 32
+  },
+  "webUI": {
+    "defaultLocale": "zh-CN",
+    "enabledLocales": ["zh-CN", "en-US"],
+    "allowLocaleSwitch": true,
+    "defaultThemeMode": "system",
+    "allowThemeSwitch": true
   }
 }

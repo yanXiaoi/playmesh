@@ -2,13 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 
 import '../../models/game_manifest.dart';
 import '../../models/game_capabilities.dart';
 import '../../models/game_summary.dart';
 import '../library/playmesh_library_root.dart';
 import 'file_game_library_scanner.dart';
+import 'game_package_icon.dart';
 
 class ValidatedGamePackage {
   const ValidatedGamePackage({required this.manifest, required this.files});
@@ -46,15 +47,30 @@ class GamePackageTransferService {
     File source, {
     String? author,
     DateTime? lastModifiedAt,
+    String? expectedGameId,
+    String? expectedVersion,
+    String? expectedPublisher,
   }) async {
     final package = await readPackage(
       source,
       author: author,
       lastModifiedAt: lastModifiedAt,
     );
+    if (expectedGameId != null && package.manifest.id != expectedGameId) {
+      throw const FormatException('下载包 gameId 与 Catalog offer 不一致');
+    }
+    if (expectedVersion != null &&
+        package.manifest.version != expectedVersion) {
+      throw const FormatException('下载包版本与 Catalog offer 不一致');
+    }
+    if (expectedPublisher != null &&
+        package.manifest.author.trim() != expectedPublisher.trim()) {
+      throw const FormatException('下载包发布者与 Catalog offer 不一致');
+    }
     final root = await _root();
     final packages = Directory('${root.path}${Platform.pathSeparator}packages');
     await packages.create(recursive: true);
+    await _recoverInterruptedImports(packages);
     final target = Directory(
       '${packages.path}${Platform.pathSeparator}${package.manifest.id}',
     );
@@ -109,7 +125,7 @@ class GamePackageTransferService {
     if (author != null || lastModifiedAt != null) {
       final normalizedAuthor = author?.trim() ?? '';
       if (normalizedAuthor.isEmpty || lastModifiedAt == null) {
-        throw const FormatException('发布项目必须同时提供作者和最后修改时间');
+        throw const FormatException('发布项目必须同时提供发布者和最后修改时间');
       }
       manifestJson
         ..['author'] = normalizedAuthor
@@ -126,6 +142,12 @@ class GamePackageTransferService {
       }
     }
     _validateRequiredFiles(manifest, files.keys.toSet());
+    if (files[gamePackageIconName] case final iconEntry?) {
+      final content = List<int>.from(iconEntry.content as List<int>);
+      if (!isSafeGamePackageIconBytes(content, totalLength: iconEntry.size)) {
+        files.remove(gamePackageIconName);
+      }
+    }
     final normalizedFiles = <String, List<int>>{
       for (final item in files.entries)
         item.key: item.key == 'main.json'
@@ -166,7 +188,7 @@ class GamePackageTransferService {
       }
       final replacing = await target.exists();
       if (replacing) {
-        await _replacePublishedFiles(
+        await _replacePackageDirectory(
           staging: staging,
           target: target,
           backup: backup,
@@ -180,61 +202,121 @@ class GamePackageTransferService {
     }
   }
 
-  Future<void> _replacePublishedFiles({
+  /// Restores the last complete package if a previous process stopped between
+  /// the two same-volume directory renames used by [commitPackage].
+  Future<void> recoverInterruptedImports() async {
+    final root = await _root();
+    final packages = Directory('${root.path}${Platform.pathSeparator}packages');
+    if (!await packages.exists()) return;
+    await _recoverInterruptedImports(packages);
+  }
+
+  Future<void> _replacePackageDirectory({
     required Directory staging,
     required Directory target,
     required Directory backup,
   }) async {
-    await backup.create(recursive: true);
-    const names = ['main.json', 'capabilities.json', 'app'];
+    await _copyPreservedEntries(target, staging);
+    await target.rename(backup.path);
     try {
-      for (final name in names) {
-        await _moveIfPresent(target, backup, name);
-      }
-      for (final name in names) {
-        await _moveIfPresent(staging, target, name);
-      }
-      await staging.delete(recursive: true);
-      await backup.delete(recursive: true);
+      await staging.rename(target.path);
     } on Object {
-      // 发布文件作为一个事务回滚；data、cache 和其他运行目录始终留在原目标中。
-      for (final name in names) {
-        await _deleteIfPresent(target, name);
+      if (!await target.exists() && await backup.exists()) {
+        await backup.rename(target.path);
       }
-      for (final name in names) {
-        await _moveIfPresent(backup, target, name);
-      }
-      if (await staging.exists()) await staging.delete(recursive: true);
-      if (await backup.exists()) await backup.delete(recursive: true);
       rethrow;
     }
-  }
-
-  Future<void> _moveIfPresent(
-    Directory sourceRoot,
-    Directory destinationRoot,
-    String name,
-  ) async {
-    final sourceFile = File('${sourceRoot.path}${Platform.pathSeparator}$name');
-    final sourceDirectory = Directory(sourceFile.path);
-    final destination = '${destinationRoot.path}${Platform.pathSeparator}$name';
-    if (await sourceFile.exists()) {
-      await destinationRoot.create(recursive: true);
-      await sourceFile.rename(destination);
-    } else if (await sourceDirectory.exists()) {
-      await destinationRoot.create(recursive: true);
-      await sourceDirectory.rename(destination);
+    try {
+      await backup.delete(recursive: true);
+    } on FileSystemException {
+      // A complete new target is already visible. Startup recovery removes the
+      // stale backup without risking rollback of the committed package.
     }
   }
 
-  Future<void> _deleteIfPresent(Directory root, String name) async {
-    final file = File('${root.path}${Platform.pathSeparator}$name');
-    if (await file.exists()) {
-      await file.delete();
+  Future<void> _copyPreservedEntries(
+    Directory target,
+    Directory staging,
+  ) async {
+    const publishedNames = {
+      'main.json',
+      'capabilities.json',
+      gamePackageIconName,
+      'app',
+    };
+    await for (final entity in target.list(followLinks: false)) {
+      final name = entity.path.substring(target.path.length + 1);
+      if (publishedNames.contains(name)) continue;
+      await _copyEntity(
+        entity,
+        '${staging.path}${Platform.pathSeparator}$name',
+      );
+    }
+  }
+
+  Future<void> _copyEntity(FileSystemEntity source, String destination) async {
+    if (source is File) {
+      await File(destination).parent.create(recursive: true);
+      await source.copy(destination);
       return;
     }
-    final directory = Directory(file.path);
-    if (await directory.exists()) await directory.delete(recursive: true);
+    if (source is Link) {
+      await Link(destination).parent.create(recursive: true);
+      await Link(destination).create(await source.target());
+      return;
+    }
+    if (source is! Directory) return;
+    final destinationDirectory = Directory(destination);
+    await destinationDirectory.create(recursive: true);
+    await for (final child in source.list(followLinks: false)) {
+      final name = child.path.substring(source.path.length + 1);
+      await _copyEntity(
+        child,
+        '${destinationDirectory.path}${Platform.pathSeparator}$name',
+      );
+    }
+  }
+
+  Future<void> _recoverInterruptedImports(Directory packages) async {
+    final backups = <Directory>[];
+    final staging = <Directory>[];
+    await for (final entity in packages.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final name = entity.path.substring(packages.path.length + 1);
+      if (name.startsWith('.playmesh-backup-')) {
+        backups.add(entity);
+      } else if (name.startsWith('.playmesh-import-')) {
+        staging.add(entity);
+      }
+    }
+    backups.sort((left, right) => right.path.compareTo(left.path));
+    for (final backup in backups) {
+      try {
+        final manifestFile = File(
+          '${backup.path}${Platform.pathSeparator}main.json',
+        );
+        final decoded = jsonDecode(await manifestFile.readAsString());
+        if (decoded is! Map) continue;
+        final manifest = GameManifest.fromJson(
+          Map<String, Object?>.from(decoded),
+        );
+        final target = Directory(
+          '${packages.path}${Platform.pathSeparator}${manifest.id}',
+        );
+        if (await target.exists()) {
+          await backup.delete(recursive: true);
+        } else {
+          await backup.rename(target.path);
+        }
+      } on Object {
+        // Leave an unrecognized backup untouched for manual recovery.
+      }
+    }
+    for (final directory in staging) {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    }
   }
 
   Future<File> exportPackage(
@@ -267,36 +349,76 @@ class GamePackageTransferService {
     if (!await manifest.exists() || (validate && !await app.exists())) {
       throw const FormatException('游戏包根目录必须包含 main.json 和 app/');
     }
-    final archive = Archive()
-      ..addFile(
-        ArchiveFile(
-          'main.json',
-          await manifest.length(),
-          await manifest.readAsBytes(),
-        ),
-      );
-    var expandedBytes = await manifest.length();
+    final manifestSize = await manifest.length();
+    if (manifestSize > maxSingleFileBytes) {
+      throw const FormatException('main.json 超过单文件限制');
+    }
+    List<int>? normalizedManifestBytes;
+    var archiveManifestSize = manifestSize;
+    try {
+      final decoded = jsonDecode(await manifest.readAsString());
+      if (decoded is! Map) {
+        if (validate) {
+          throw const FormatException('main.json 根节点必须是对象');
+        }
+      } else {
+        final input = decoded.map<String, Object?>(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        final normalized = validate
+            ? GameManifest.fromJson(input).toJson()
+            : projectGameManifestJson(input);
+        normalizedManifestBytes = utf8.encode(
+          '${const JsonEncoder.withIndent('  ').convert(normalized)}\n',
+        );
+        archiveManifestSize = normalizedManifestBytes.length;
+      }
+    } on FormatException {
+      if (validate) rethrow;
+    }
+    if (archiveManifestSize > maxSingleFileBytes) {
+      throw const FormatException('main.json 超过单文件限制');
+    }
+    final files = <(File, String)>[];
+    var expandedBytes = archiveManifestSize;
     var fileCount = 1;
     final capabilities = File(
       '${package.path}${Platform.pathSeparator}capabilities.json',
     );
     if (await capabilities.exists()) {
+      final capabilitySize = await capabilities.length();
+      if (capabilitySize > maxSingleFileBytes) {
+        throw const FormatException('capabilities.json 超过单文件限制');
+      }
       final bytes = await capabilities.readAsBytes();
       if (validate) {
         GameCapabilities.fromJson(
           Map<String, Object?>.from(jsonDecode(utf8.decode(bytes)) as Map),
         );
       }
-      archive.addFile(ArchiveFile('capabilities.json', bytes.length, bytes));
+      files.add((capabilities, 'capabilities.json'));
       expandedBytes += bytes.length;
       fileCount += 1;
+    }
+    final icon = File(
+      '${package.path}${Platform.pathSeparator}$gamePackageIconName',
+    );
+    if (await isSafeGamePackageIcon(icon)) {
+      files.add((icon, gamePackageIconName));
+      expandedBytes += await icon.length();
+      fileCount += 1;
+    }
+    if (expandedBytes > maxExpandedBytes || fileCount > maxFileCount) {
+      throw const FormatException('游戏包超过导出限制');
     }
     if (await app.exists()) {
       await for (final entity in app.list(
         recursive: true,
         followLinks: false,
       )) {
-        if (entity is Link) throw const FormatException('游戏包不允许符号链接');
+        if (entity is Link) {
+          throw const FormatException('游戏包不允许符号链接');
+        }
         if (entity is! File) continue;
         final size = await entity.length();
         if (size > maxSingleFileBytes) {
@@ -311,15 +433,38 @@ class GamePackageTransferService {
             .substring(package.path.length + 1)
             .replaceAll('\\', '/');
         _validatePackagePath(relative);
-        archive.addFile(
-          ArchiveFile(relative, size, await entity.readAsBytes()),
-        );
+        files.add((entity, relative));
       }
     }
-    final encoded = ZipEncoder().encode(archive);
-    if (encoded == null) throw StateError('游戏包压缩失败');
     await destination.parent.create(recursive: true);
-    await destination.writeAsBytes(encoded, flush: true);
+    final encoder = ZipFileEncoder();
+    var opened = false;
+    try {
+      encoder.create(destination.path);
+      opened = true;
+      if (normalizedManifestBytes case final normalized?) {
+        encoder.addArchiveFile(
+          ArchiveFile('main.json', normalized.length, normalized),
+        );
+      } else {
+        await encoder.addFile(manifest, 'main.json');
+      }
+      for (final item in files) {
+        await encoder.addFile(item.$1, item.$2);
+      }
+      await encoder.close();
+      opened = false;
+    } on Object {
+      if (opened) {
+        try {
+          await encoder.close();
+        } on Object {
+          // Preserve the original export error.
+        }
+      }
+      if (await destination.exists()) await destination.delete();
+      rethrow;
+    }
     return destination;
   }
 
@@ -368,9 +513,10 @@ class GamePackageTransferService {
   void _validatePackagePath(String path) {
     if (path != 'main.json' &&
         path != 'capabilities.json' &&
+        path != gamePackageIconName &&
         !path.startsWith('app/')) {
       throw FormatException(
-        '游戏包只允许包含根 main.json、capabilities.json 和 app/：$path',
+        '游戏包只允许包含根 main.json、icon.png、capabilities.json 和 app/：$path',
       );
     }
     final lower = path.toLowerCase();

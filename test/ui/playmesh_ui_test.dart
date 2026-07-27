@@ -18,7 +18,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 80));
-    expect(find.byType(Opacity), findsWidgets);
+    expect(find.byType(FadeTransition), findsWidgets);
     await tester.pumpAndSettle();
 
     navigatorKey.currentState!.pop();
@@ -27,7 +27,7 @@ void main() {
 
     expect(find.text('首页'), findsOneWidget);
     expect(find.byType(FractionalTranslation), findsWidgets);
-    expect(find.byType(Opacity), findsNothing);
+    expect(find.byType(FadeTransition), findsNothing);
     await tester.pumpAndSettle();
   });
 }

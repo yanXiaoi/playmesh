@@ -2,13 +2,12 @@ import 'local_game_entry.dart';
 import 'game_capabilities.dart';
 
 enum GameOrientation {
-  landscape('landscape', '横屏'),
-  portrait('portrait', '竖屏');
+  landscape('landscape'),
+  portrait('portrait');
 
-  const GameOrientation(this.manifestValue, this.label);
+  const GameOrientation(this.manifestValue);
 
   final String manifestValue;
-  final String label;
 
   static GameOrientation fromManifestValue(String value) {
     return GameOrientation.values.firstWhere(
@@ -23,9 +22,11 @@ class GameSummary {
     required this.id,
     required this.name,
     required this.version,
-    this.author = '佚名',
+    this.author = '',
     this.lastModifiedAt,
     this.lastOpenedAt,
+    this.launchCount = 0,
+    this.localIconPath,
     this.manifestError,
     this.sdkVersion = '',
     this.appSdkVersion = '',
@@ -48,6 +49,8 @@ class GameSummary {
   final String author;
   final DateTime? lastModifiedAt;
   final DateTime? lastOpenedAt;
+  final int launchCount;
+  final String? localIconPath;
   final String? manifestError;
   final String sdkVersion;
   final String appSdkVersion;
@@ -63,39 +66,35 @@ class GameSummary {
   final List<String> tags;
   final GameCapabilities capabilities;
 
-  String get playerRangeLabel {
-    if (minPlayers == maxPlayers) {
-      return '$minPlayers 人';
-    }
-
-    return '$minPlayers-$maxPlayers 人';
-  }
-
-  String get modeLabel => supportsMultiplayer ? '支持联机' : '单机';
-
   GameOrientation orientationForRole({required bool controller}) =>
       controller ? controllerOrientation ?? orientation : orientation;
 
-  GameSummary withLastOpenedAt(DateTime value) => GameSummary(
-    id: id,
-    name: name,
-    version: version,
-    author: author,
-    lastModifiedAt: lastModifiedAt,
-    lastOpenedAt: value,
-    manifestError: manifestError,
-    sdkVersion: sdkVersion,
-    appSdkVersion: appSdkVersion,
-    description: description,
-    minPlayers: minPlayers,
-    maxPlayers: maxPlayers,
-    supportsMultiplayer: supportsMultiplayer,
-    displayModeLabel: displayModeLabel,
-    displayMode: displayMode,
-    orientation: orientation,
-    controllerOrientation: controllerOrientation,
-    entry: entry,
-    tags: tags,
-    capabilities: capabilities,
-  );
+  GameSummary withUsage({DateTime? lastOpenedAt, int? launchCount}) =>
+      GameSummary(
+        id: id,
+        name: name,
+        version: version,
+        author: author,
+        lastModifiedAt: lastModifiedAt,
+        lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
+        launchCount: launchCount ?? this.launchCount,
+        localIconPath: localIconPath,
+        manifestError: manifestError,
+        sdkVersion: sdkVersion,
+        appSdkVersion: appSdkVersion,
+        description: description,
+        minPlayers: minPlayers,
+        maxPlayers: maxPlayers,
+        supportsMultiplayer: supportsMultiplayer,
+        displayModeLabel: displayModeLabel,
+        displayMode: displayMode,
+        orientation: orientation,
+        controllerOrientation: controllerOrientation,
+        entry: entry,
+        tags: tags,
+        capabilities: capabilities,
+      );
+
+  GameSummary withLastOpenedAt(DateTime value) =>
+      withUsage(lastOpenedAt: value);
 }

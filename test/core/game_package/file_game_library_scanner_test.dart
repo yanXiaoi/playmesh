@@ -37,6 +37,7 @@ void main() {
 
     expect(games, hasLength(1));
     expect(games.single.id, 'com.example.game');
+    expect(games.single.displayModeLabel, 'multi_screen');
     expect(games.single.entry.packageRootFilePath, package.path);
   });
 
@@ -73,6 +74,9 @@ void main() {
 
     expect(games.single.id, 'com.example.actual');
     expect(games.single.manifestError, contains('不一致'));
+    expect(games.single.description, isEmpty);
+    expect(games.single.displayModeLabel, 'multi_screen');
+    expect(games.single.entry.statusLabel, 'manifest_repair_required');
   });
 
   test('扫描并返回自定义页面入口', () async {
@@ -172,7 +176,10 @@ void main() {
     await unidentifiable.create(recursive: true);
     await File(
       '${broken.path}${Platform.pathSeparator}main.json',
-    ).writeAsString('{"id":"com.example.broken","name":42}');
+    ).writeAsString(
+      '{"id":"com.example.broken","name":42,'
+      '"remarks":"API repair note / 原样"}',
+    );
     await File(
       '${unidentifiable.path}${Platform.pathSeparator}main.json',
     ).writeAsString('{"name":"No id"}');
@@ -182,8 +189,9 @@ void main() {
     expect(games, hasLength(1));
     expect(games.single.id, 'com.example.broken');
     expect(games.single.name, 'com.example.broken');
-    expect(games.single.author, '佚名');
+    expect(games.single.author, isEmpty);
     expect(games.single.lastModifiedAt, isNull);
     expect(games.single.manifestError, isNotNull);
+    expect(games.single.description, 'API repair note / 原样');
   });
 }

@@ -1,10 +1,17 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image/png"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,13 +21,15 @@ import (
 )
 
 const maxMessageBytes = 64 * 1024
+const maxAvatarBytes = 512 * 1024
 
 type Handler struct {
-	store  *Store
-	logger *slog.Logger
-	mutex  sync.Mutex
-	rooms  map[string]map[string]*peer
-	binary *binaryHub
+	store         *Store
+	logger        *slog.Logger
+	mutex         sync.Mutex
+	rooms         map[string]map[string]*peer
+	avatarPending map[string]map[string]string
+	binary        *binaryHub
 }
 
 type peer struct {
@@ -44,6 +53,17 @@ type serverMessage struct {
 	Session        *Snapshot       `json:"session,omitempty"`
 }
 
+type avatarWritePayload struct {
+	PlayerID string `json:"playerId"`
+	Digest   string `json:"digest"`
+	PNG      string `json:"png"`
+}
+
+type avatarCommittedPayload struct {
+	PlayerID string `json:"playerId"`
+	Digest   string `json:"digest"`
+}
+
 type sessionResponse struct {
 	Session         Snapshot    `json:"session"`
 	Credential      Credentials `json:"credential"`
@@ -54,7 +74,8 @@ type sessionResponse struct {
 func NewHandler(store *Store, logger *slog.Logger) *Handler {
 	return &Handler{
 		store: store, logger: logger, rooms: make(map[string]map[string]*peer),
-		binary: newBinaryHub(logger),
+		avatarPending: make(map[string]map[string]string),
+		binary:        newBinaryHub(logger),
 	}
 }
 
@@ -73,6 +94,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.finish(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/finish"))
 	case strings.HasSuffix(path, "/players/me") && request.Method == http.MethodPatch:
 		h.updateNickname(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/players/me"))
+	case strings.HasSuffix(path, "/avatar") && request.Method == http.MethodPut:
+		h.uploadAvatar(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/avatar"))
 	case strings.HasSuffix(path, "/share") && request.Method == http.MethodPost:
 		h.openShare(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/share"))
 	case strings.HasSuffix(path, "/share") && request.Method == http.MethodDelete:
@@ -125,9 +148,14 @@ func (h *Handler) join(writer http.ResponseWriter, request *http.Request) {
 	if !decodeBody(writer, request, &body) {
 		return
 	}
+	access, err := joinAccessForRequest(request, body.Source)
+	if err != nil {
+		writeStoreError(writer, err)
+		return
+	}
 	snapshot, credential, err := h.store.Join(JoinInput{
 		JoinCode: body.JoinCode, Nickname: body.Nickname,
-		ShareToken: body.ShareToken, PlayerID: body.PlayerID, Source: body.Source,
+		ShareToken: body.ShareToken, PlayerID: body.PlayerID, Access: access,
 	})
 	if err != nil {
 		writeStoreError(writer, err)
@@ -186,6 +214,9 @@ func (h *Handler) finish(writer http.ResponseWriter, request *http.Request, sess
 	}
 	writeJSON(writer, http.StatusOK, snapshot)
 	h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &snapshot})
+	h.mutex.Lock()
+	delete(h.avatarPending, snapshot.ID)
+	h.mutex.Unlock()
 }
 
 func (h *Handler) updateNickname(writer http.ResponseWriter, request *http.Request, sessionID string) {
@@ -202,6 +233,75 @@ func (h *Handler) updateNickname(writer http.ResponseWriter, request *http.Reque
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"session": snapshot, "player": player})
 	h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &snapshot})
+}
+
+func (h *Handler) uploadAvatar(writer http.ResponseWriter, request *http.Request, sessionID string) {
+	record, player, err := h.store.Authenticate(sessionID, bearerToken(request))
+	if err != nil {
+		writeStoreError(writer, err)
+		return
+	}
+	if !player.access.canUploadAvatar() {
+		writeError(writer, http.StatusForbidden, "avatar_source_forbidden", "只有 App 玩家可以同步头像")
+		return
+	}
+	if request.Header.Get("Content-Type") != "image/png" {
+		writeError(writer, http.StatusBadRequest, "invalid_avatar", "头像必须使用 image/png")
+		return
+	}
+	request.Body = http.MaxBytesReader(writer, request.Body, maxAvatarBytes+1)
+	data, err := io.ReadAll(request.Body)
+	if err != nil || len(data) == 0 || len(data) > maxAvatarBytes {
+		writeError(writer, http.StatusRequestEntityTooLarge, "avatar_too_large", "头像不能超过 512 KiB")
+		return
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(data))
+	if err != nil || config.Width != 256 || config.Height != 256 {
+		writeError(writer, http.StatusBadRequest, "invalid_avatar", "头像必须是 256 x 256 PNG")
+		return
+	}
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	if request.Header.Get("X-Playmesh-Avatar-Sha256") != digest {
+		writeError(writer, http.StatusBadRequest, "avatar_digest_mismatch", "头像摘要不匹配")
+		return
+	}
+	if player.Avatar != nil && player.AvatarDigest == digest {
+		snapshot := record.snapshot()
+		writeJSON(writer, http.StatusOK, map[string]any{"session": snapshot, "player": player})
+		return
+	}
+	if !record.authorityConnected() {
+		writeError(writer, http.StatusConflict, "authority_unavailable", "权威主机当前不可用")
+		return
+	}
+	h.mutex.Lock()
+	if h.avatarPending[sessionID] == nil {
+		h.avatarPending[sessionID] = make(map[string]string)
+	}
+	if h.avatarPending[sessionID][player.ID] == digest {
+		h.mutex.Unlock()
+		writeJSON(writer, http.StatusAccepted, map[string]any{
+			"player":  player,
+			"pending": true,
+		})
+		return
+	}
+	h.avatarPending[sessionID][player.ID] = digest
+	h.mutex.Unlock()
+	payload, _ := json.Marshal(avatarWritePayload{
+		PlayerID: player.ID,
+		Digest:   digest,
+		PNG:      base64.StdEncoding.EncodeToString(data),
+	})
+	h.send(sessionID, record.snapshot().AuthorityClientID, serverMessage{
+		Type:    "platform.avatar.write",
+		Payload: payload,
+	})
+	writeJSON(writer, http.StatusAccepted, map[string]any{
+		"player":  player,
+		"pending": true,
+	})
 }
 
 func (h *Handler) snapshot(writer http.ResponseWriter, request *http.Request, sessionID string) {
@@ -349,6 +449,47 @@ func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 			for _, target := range message.TargetPlayerIDs {
 				h.send(snapshot.ID, target, outgoing)
 			}
+		case "platform.avatar.committed":
+			if client.player.ID != snapshot.AuthorityClientID {
+				_ = client.conn.Close(websocket.StatusPolicyViolation, "只有 Authority 可以确认头像写入")
+				return
+			}
+			var committed avatarCommittedPayload
+			if json.Unmarshal(message.Payload, &committed) != nil {
+				_ = client.conn.Close(websocket.StatusUnsupportedData, "头像写入确认格式无效")
+				return
+			}
+			h.mutex.Lock()
+			pending := h.avatarPending[snapshot.ID][committed.PlayerID]
+			if pending == committed.Digest {
+				delete(h.avatarPending[snapshot.ID], committed.PlayerID)
+			}
+			h.mutex.Unlock()
+			if pending == "" || pending != committed.Digest {
+				_ = client.conn.Close(websocket.StatusPolicyViolation, "头像写入确认与待处理请求不匹配")
+				return
+			}
+			updated, _, err := h.store.CommitAvatar(record, committed.PlayerID, committed.Digest)
+			if err != nil {
+				_ = client.conn.Close(websocket.StatusPolicyViolation, "头像写入玩家身份无效")
+				return
+			}
+			h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &updated})
+		case "platform.avatar.failed":
+			if client.player.ID != snapshot.AuthorityClientID {
+				_ = client.conn.Close(websocket.StatusPolicyViolation, "只有 Authority 可以拒绝头像写入")
+				return
+			}
+			var failed avatarCommittedPayload
+			if json.Unmarshal(message.Payload, &failed) != nil {
+				_ = client.conn.Close(websocket.StatusUnsupportedData, "头像写入失败格式无效")
+				return
+			}
+			h.mutex.Lock()
+			if h.avatarPending[snapshot.ID][failed.PlayerID] == failed.Digest {
+				delete(h.avatarPending[snapshot.ID], failed.PlayerID)
+			}
+			h.mutex.Unlock()
 		default:
 			_ = client.conn.Close(websocket.StatusUnsupportedData, "未知消息类型")
 			return
@@ -437,6 +578,45 @@ func decodeBody(writer http.ResponseWriter, request *http.Request, target any) b
 
 func bearerToken(request *http.Request) string {
 	return strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
+}
+
+func joinAccessForRequest(request *http.Request, claimedSource string) (playerAccess, error) {
+	source, err := normalizeClaimedPlayerSource(claimedSource)
+	if err != nil {
+		return playerAccessLANHTML, err
+	}
+	// Relay is a distinct, non-avatar identity even when its final hop reaches
+	// Authority Core through a loopback bridge with tunnel-like Host metadata.
+	if source == "server" {
+		return playerAccessServer, nil
+	}
+	if isTrustedLANAppRequest(request) {
+		return playerAccessLANApp, nil
+	}
+	return playerAccessLANHTML, nil
+}
+
+func isTrustedLANAppRequest(request *http.Request) bool {
+	remoteHost, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err != nil || !net.ParseIP(remoteHost).IsLoopback() {
+		return false
+	}
+	if request.Header.Get("Origin") == "" {
+		return true
+	}
+
+	// A remote App reaches Core through the App-owned Upgrade tunnel. The
+	// tunnel preserves the inner browser Host while opening a new loopback
+	// connection to Core, so the inner Host port differs from Core's local
+	// listener port. A normal browser connects to Core directly and cannot set
+	// Host, while the loopback and port mismatch are both derived server-side.
+	localAddress, ok := request.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok {
+		return false
+	}
+	_, requestPort, requestErr := net.SplitHostPort(request.Host)
+	_, localPort, localErr := net.SplitHostPort(localAddress.String())
+	return requestErr == nil && localErr == nil && requestPort != localPort
 }
 
 func writeStoreError(writer http.ResponseWriter, err error) {

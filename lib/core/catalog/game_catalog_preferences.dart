@@ -17,17 +17,30 @@ class GameCatalogPreferencesValue {
 }
 
 class GameCatalogPreferences {
-  GameCatalogPreferences({Directory? libraryRoot})
-    : _injectedRoot = libraryRoot;
+  GameCatalogPreferences({Directory? libraryRoot, DateTime Function()? now})
+    : _injectedRoot = libraryRoot,
+      _now = now ?? DateTime.now;
 
   final Directory? _injectedRoot;
+  final DateTime Function() _now;
   Directory? _resolvedRoot;
 
   Future<GameCatalogPreferencesValue> load() async {
     final file = await _file();
     if (!await file.exists()) return const GameCatalogPreferencesValue();
-    final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map) throw const FormatException('游戏源设置根节点必须是对象');
+    Object? decoded;
+    try {
+      decoded = jsonDecode(await file.readAsString());
+    } on Object {
+      await _isolateUnsupported(file);
+      await save(const GameCatalogPreferencesValue());
+      return const GameCatalogPreferencesValue();
+    }
+    if (decoded is! Map || decoded['formatVersion'] != 2) {
+      await _isolateUnsupported(file);
+      await save(const GameCatalogPreferencesValue());
+      return const GameCatalogPreferencesValue();
+    }
     final json = Map<String, Object?>.from(decoded);
     final shareRaw = json['share'];
     final sizeRaw = json['defaultPageSize'];
@@ -36,9 +49,15 @@ class GameCatalogPreferences {
     if (sourcesRaw is List) {
       for (final item in sourcesRaw) {
         if (item is Map) {
-          sources.add(
-            OnlineGameSource.fromJson(Map<String, Object?>.from(item)),
-          );
+          try {
+            sources.add(
+              OnlineGameSource.fromJson(Map<String, Object?>.from(item)),
+            );
+          } on Object {
+            await _isolateUnsupported(file);
+            await save(const GameCatalogPreferencesValue());
+            return const GameCatalogPreferencesValue();
+          }
         }
       }
     }
@@ -59,7 +78,7 @@ class GameCatalogPreferences {
     final temporary = File('${file.path}.tmp');
     await temporary.writeAsString(
       const JsonEncoder.withIndent('  ').convert({
-        'formatVersion': 1,
+        'formatVersion': 2,
         'share': value.share.toJson(),
         'defaultPageSize': value.defaultPageSize,
         'sources': value.sources.map((source) => source.toJson()).toList(),
@@ -77,5 +96,16 @@ class GameCatalogPreferences {
       '${root.path}${Platform.pathSeparator}catalog'
       '${Platform.pathSeparator}settings.json',
     );
+  }
+
+  Future<void> _isolateUnsupported(File file) async {
+    final stamp = _now().toUtc().millisecondsSinceEpoch;
+    var backup = File('${file.path}.$stamp.unsupported');
+    var suffix = 0;
+    while (await backup.exists()) {
+      suffix += 1;
+      backup = File('${file.path}.$stamp.$suffix.unsupported');
+    }
+    await file.rename(backup.path);
   }
 }

@@ -92,7 +92,7 @@ await vibration.dispose();
 ## 游戏侧约定
 
 - 创建前先等待 `playmesh.ready`。
-- 不直接调用传感器插件、MethodChannel、ArkTS/Kotlin/Swift 或浏览器私有接口。
+- 不直接调用传感器插件、MethodChannel、Kotlin/Swift 或浏览器私有接口。
 - 不把“已声明”当成“当前设备可用”。
 - 不复制平台能力确认 UI。
 - 每个实例都必须释放；页面退出时平台会兜底，但游戏仍应主动停止业务订阅。
@@ -107,6 +107,14 @@ Agent 可使用：
 ```text
 GET  /dev/api/capability-tests
 POST /dev/api/capability-tests
+POST /dev/api/capability-tests/instances
+POST /dev/api/capability-tests/instances/{instanceId}/invoke
+DELETE /dev/api/capability-tests/instances/{instanceId}
 ```
+
+列表、自检、实例选项、方法参数和持续回调都来自插件的 `CapabilityDescriptor`。
+工作区不会按能力 code 写专用测试界面：`optionsSchema` 定义创建参数表单，
+`methods[].argumentsSchema` 定义每次方法调用表单，`events[]` 决定是否显示持续
+测试与实时 SSE 回显。参数通过表单填写，JSON 只用于结果和事件回显。
 
 能力自检用于确认当前 App/设备适配器状态，不替代游戏业务测试或真机体验验收。

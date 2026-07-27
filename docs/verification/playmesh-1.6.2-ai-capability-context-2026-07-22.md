@@ -25,4 +25,4 @@
 | `dart analyze test/core/developer/developer_web_gateway_test.dart` | 通过；No issues found |
 | `git diff --check` | 通过；仅有仓库现有的 LF/CRLF 转换提示，无空白错误 |
 
-Flutter 测试与定向分析按要求在沙盒外执行。无参数的全仓 `flutter analyze --no-pub` 会扫描现有 `build/harmony-release/` 复制目录，并因该构建副本未声明 Windows WebView 依赖报告 11 条问题；本次修改所在的 `lib/core/developer` 与对应测试文件单独分析均为零问题。
+Flutter 测试与定向分析按要求在沙盒外执行；本次修改所在的 `lib/core/developer` 与对应测试文件单独分析均为零问题。

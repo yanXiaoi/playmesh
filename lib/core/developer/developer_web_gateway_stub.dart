@@ -15,6 +15,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperRunController? runController,
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
+  DeveloperProjectPublisher? projectPublisher,
+  DeveloperWorkspaceLocalizationBridge? localizationBridge,
   String Function()? currentAuthor,
   DeveloperViewAvailabilityProvider? viewAvailability,
   DateTime Function()? clock,

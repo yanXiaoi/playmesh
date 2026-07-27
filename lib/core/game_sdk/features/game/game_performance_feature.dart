@@ -76,21 +76,30 @@ const gamePerformanceSdkSource = SdkSourceFragment(
     if (!global.document.body) {
       await new Promise((resolve) => global.document.addEventListener("DOMContentLoaded", resolve, { once: true }));
     }
+    if (typeof global.document.createElement !== "function") return null;
     const host = global.document.createElement("div");
     host.id = "playmesh-performance";
+    host.setAttribute?.("data-theme", platformUiTheme);
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>
-      :host{all:initial;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0}
-      .panel{position:fixed;right:12px;top:12px;z-index:2147483646;display:flex;gap:10px;padding:7px 9px;border:1px solid #ffffff30;border-radius:7px;background:#111827d9;color:#f9fafb;box-shadow:0 3px 12px #0004;font-size:12px;font-weight:700;line-height:1}
+      :host{all:initial;--pm-performance-border:#ffffff30;--pm-performance-surface:#111827e8;--pm-performance-text:#f9fafb;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;color-scheme:dark}
+      :host([data-theme="light"]){--pm-performance-border:#8795a6;--pm-performance-surface:#fffffff2;--pm-performance-text:#17202b;color-scheme:light}
+      .panel{position:fixed;right:12px;top:12px;z-index:2147483646;display:flex;gap:10px;padding:7px 9px;border:1px solid var(--pm-performance-border);border-radius:7px;background:var(--pm-performance-surface);color:var(--pm-performance-text);box-shadow:0 3px 12px #0004;font-size:12px;font-weight:700;line-height:1}
       .panel[hidden],.latency[hidden]{display:none}
     </style><div class="panel"><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
     global.document.body.appendChild(host);
     performanceUi = {
+      host,
       panel: root.querySelector(".panel"),
       fps: root.querySelector(".fps"),
       latency: root.querySelector(".latency"),
     };
+    refreshPerformancePlatformUi(performanceUi);
     return performanceUi;
+  }
+
+  function refreshPerformancePlatformUi(ui) {
+    ui?.host?.setAttribute?.("data-theme", platformUiTheme);
   }
 
   async function renderPerformanceUi() {

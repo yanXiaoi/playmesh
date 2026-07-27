@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../core/platform/app_platform.dart';
+import '../../core/localization/playmesh_localization.dart';
+import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
 import 'remote_game_page.dart';
 
@@ -97,13 +98,15 @@ class JoinGamePage extends StatefulWidget {
   const JoinGamePage({
     super.key,
     this.initialUserId = 'u_local',
-    this.initialNickname = '本机玩家',
+    this.initialNickname = playmeshDefaultLocalNickname,
+    this.autoScan = false,
   });
 
   static const routeName = '/join-game';
 
   final String initialUserId;
   final String initialNickname;
+  final bool autoScan;
 
   @override
   State<JoinGamePage> createState() => _JoinGamePageState();
@@ -114,12 +117,21 @@ class _JoinGamePageState extends State<JoinGamePage> {
   final _invitationController = TextEditingController();
   bool _joining = false;
 
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autoScan) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scannerSupported) _scanInvitation();
+      });
+    }
+  }
+
   bool get _scannerSupported =>
       kIsWeb ||
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS ||
-      defaultTargetPlatform == TargetPlatform.macOS ||
-      isHarmonyOS;
+      defaultTargetPlatform == TargetPlatform.macOS;
 
   @override
   void dispose() {
@@ -130,7 +142,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('加入对局')),
+      appBar: AppBar(title: Text(context.tr('join.title'))),
       body: PlaymeshBackground(
         child: SafeArea(
           child: Form(
@@ -160,7 +172,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        '加入主机对局',
+                                        context.tr('join.host_title'),
                                         style: Theme.of(context)
                                             .textTheme
                                             .titleLarge
@@ -169,7 +181,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
                                             ),
                                       ),
                                       const SizedBox(height: 3),
-                                      const Text('扫描二维码，或粘贴完整的对局邀请链接'),
+                                      Text(context.tr('join.subtitle')),
                                     ],
                                   ),
                                 ),
@@ -180,20 +192,20 @@ class _JoinGamePageState extends State<JoinGamePage> {
                               FilledButton.tonalIcon(
                                 onPressed: _joining ? null : _scanInvitation,
                                 icon: const Icon(Icons.qr_code_scanner),
-                                label: const Text('扫码加入'),
+                                label: Text(context.tr('join.scan')),
                               ),
-                              const Padding(
+                              Padding(
                                 padding: EdgeInsets.symmetric(vertical: 18),
                                 child: Row(
                                   children: [
-                                    Expanded(child: Divider()),
+                                    const Expanded(child: Divider()),
                                     Padding(
-                                      padding: EdgeInsets.symmetric(
+                                      padding: const EdgeInsets.symmetric(
                                         horizontal: 12,
                                       ),
-                                      child: Text('手动输入'),
+                                      child: Text(context.tr('join.manual')),
                                     ),
-                                    Expanded(child: Divider()),
+                                    const Expanded(child: Divider()),
                                   ],
                                 ),
                               ),
@@ -201,11 +213,11 @@ class _JoinGamePageState extends State<JoinGamePage> {
                               const SizedBox(height: 22),
                             TextFormField(
                               controller: _invitationController,
-                              decoration: const InputDecoration(
-                                labelText: '对局邀请链接',
-                                hintText: '粘贴局域网或服务器邀请链接',
-                                helperText: '无需拆分主机地址、加入码或邀请凭证',
-                                prefixIcon: Icon(Icons.link_rounded),
+                              decoration: InputDecoration(
+                                labelText: context.tr('join.invite_link'),
+                                hintText: context.tr('join.invite_hint'),
+                                helperText: context.tr('join.invite_helper'),
+                                prefixIcon: const Icon(Icons.link_rounded),
                               ),
                               keyboardType: TextInputType.url,
                               textInputAction: TextInputAction.go,
@@ -220,7 +232,11 @@ class _JoinGamePageState extends State<JoinGamePage> {
                             FilledButton.icon(
                               onPressed: _joining ? null : _joinFromInput,
                               icon: const Icon(Icons.login),
-                              label: Text(_joining ? '正在加入…' : '加入对局'),
+                              label: Text(
+                                _joining
+                                    ? context.tr('join.joining')
+                                    : context.tr('join.submit'),
+                              ),
                             ),
                           ],
                         ),
@@ -249,8 +265,8 @@ class _JoinGamePageState extends State<JoinGamePage> {
     try {
       GameInvitation.parse(value ?? '');
       return null;
-    } on FormatException catch (error) {
-      return error.message.toString();
+    } on FormatException {
+      return context.tr('join.invalid_invite');
     }
   }
 
@@ -289,7 +305,7 @@ class _InvitationScannerPageState extends State<_InvitationScannerPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('扫描对局二维码'),
+        title: Text(context.tr('join.scan_title')),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
@@ -321,16 +337,16 @@ class _InvitationScannerPageState extends State<_InvitationScannerPage> {
               height: 250,
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.white, width: 3),
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
           ),
-          const Positioned(
+          Positioned(
             left: 24,
             right: 24,
             bottom: 42,
             child: Text(
-              '将邀请二维码放入取景框内',
+              context.tr('join.scan_hint'),
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white, fontSize: 16),
             ),

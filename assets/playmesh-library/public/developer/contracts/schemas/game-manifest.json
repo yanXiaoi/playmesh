@@ -6,14 +6,14 @@
   "additionalProperties": true,
   "required": ["id", "name", "version", "sdkVersion", "orientation", "modes", "displayModes", "players"],
   "properties": {
-    "id": { "type": "string", "minLength": 1 },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
     "name": { "type": "string", "minLength": 1 },
-    "author": { "type": "string", "minLength": 1, "maxLength": 80, "readOnly": true, "default": "佚名", "description": "Platform-managed upload metadata. Legacy packages may omit it and are displayed as 佚名." },
-    "lastModifiedAt": { "type": "integer", "minimum": 0, "readOnly": true, "description": "Optional Unix epoch milliseconds; missing values render as 无 in the current device timezone." },
+    "author": { "type": "string", "maxLength": 80, "readOnly": true, "description": "Platform-managed upload metadata; a missing value remains an empty dynamic publisher value for the App shell to present." },
+    "lastModifiedAt": { "type": "integer", "minimum": 0, "readOnly": true, "description": "Optional Unix epoch milliseconds; presentation of a missing value belongs to the localized App shell." },
     "remarks": { "type": "string" },
-    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
-    "sdkVersion": { "type": "string", "pattern": "^[12]\\.\\d+\\.\\d+$" },
-    "appSdkVersion": { "type": "string", "pattern": "^[12]\\.\\d+\\.\\d+$" },
+    "version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
+    "sdkVersion": { "type": "string", "pattern": "^[12]\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
+    "appSdkVersion": { "type": "string", "pattern": "^[12]\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
     "orientation": { "enum": ["landscape", "portrait"] },
     "controllerOrientation": { "enum": ["landscape", "portrait"] },
     "modes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["solo", "multiplayer"] } },
@@ -45,9 +45,7 @@
       "required": ["entry"],
       "properties": { "entry": { "$ref": "#/$defs/javascriptEntry" } }
     },
-    "icon": { "type": "string", "pattern": "^app/" },
-    "tags": { "type": "array", "items": { "type": "string" } },
-    "permissions": { "type": "array", "items": { "type": "string" } }
+    "tags": { "type": "array", "items": { "type": "string" } }
   },
   "allOf": [
     {

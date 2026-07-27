@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:http/http.dart' as http;
+
 import 'sdk_feature_registry.dart';
 
 import '../capabilities/capability_registry.dart';
@@ -8,7 +10,9 @@ import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../capabilities/support/motion_sensor_source.dart';
 import '../platform/app_device_service.dart';
+import '../profile/user_profile_store.dart';
 import '../../models/game_summary.dart';
+import '../../models/user_profile.dart';
 
 class AppWebViewBridge {
   AppWebViewBridge({
@@ -19,11 +23,18 @@ class AppWebViewBridge {
     this.acceptRuntimeGameDeclaration = false,
     this.coreBaseUri,
     this.playerSource = 'lan_app',
+    Map<String, Object?>? platformUiConfiguration,
     this.deviceService = const AppDeviceService(),
     MotionSensorSource? motionSource,
     CapabilityRegistry? capabilityRegistry,
+    this.onOpenSharePanel,
+    this.onShowToolDock,
+    this.onHideToolDock,
     this.onExitRequested,
-  }) : capabilityRegistry =
+  }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
+         platformUiConfiguration,
+       ),
+       capabilityRegistry =
            capabilityRegistry ??
            createDefaultCapabilityRegistry(
              motionSource: motionSource,
@@ -43,8 +54,12 @@ class AppWebViewBridge {
   final Uri? coreBaseUri;
   final String playerSource;
   final AppDeviceService deviceService;
+  final Future<void> Function()? onOpenSharePanel;
+  final Future<void> Function()? onShowToolDock;
+  final Future<void> Function()? onHideToolDock;
   final Future<void> Function()? onExitRequested;
   final CapabilityRegistry capabilityRegistry;
+  Map<String, Object?>? _platformUiConfiguration;
   late CapabilityRuntime _capabilityRuntime;
   late String _runtimeGameName = gameName;
   late List<String> _runtimeDeclaredCapabilities = List.unmodifiable(
@@ -78,7 +93,10 @@ class AppWebViewBridge {
           sendCapabilityEvent: (message) => send(jsonEncode(message)),
           disposeCapability: _disposeCapability,
           setFullscreen: _fullscreen,
+          openSharePanel: _openSharePanel,
+          setToolDockVisible: _setToolDockVisible,
           requestExit: _requestExit,
+          syncAvatar: _syncAvatar,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -99,6 +117,7 @@ class AppWebViewBridge {
         jsonEncode({
           'type': 'app.command.error',
           'requestId': requestId,
+          if (error is SdkCommandException) 'code': error.code,
           'error': error.toString(),
         }),
       );
@@ -144,6 +163,7 @@ class AppWebViewBridge {
       }
     }
     return {
+      '_playmeshPlatformUi': _platformUiConfiguration,
       'available': true,
       'sdkVersion': sdkVersion,
       'identity': {
@@ -168,6 +188,10 @@ class AppWebViewBridge {
         'declaredCapabilities': _runtimeDeclaredCapabilities,
       },
     };
+  }
+
+  void setPlatformUiConfiguration(Map<String, Object?>? configuration) {
+    _platformUiConfiguration = _normalizePlatformUiConfiguration(configuration);
   }
 
   Object? _confirmCapabilities() {
@@ -198,10 +222,62 @@ class AppWebViewBridge {
     return null;
   }
 
+  Future<Object?> _openSharePanel() async {
+    final callback = onOpenSharePanel;
+    if (callback == null) {
+      throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
+    }
+    await callback();
+    return null;
+  }
+
+  Future<Object?> _setToolDockVisible(bool visible) async {
+    final callback = visible ? onShowToolDock : onHideToolDock;
+    if (callback == null) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    await callback();
+    return null;
+  }
+
   Object? _requestExit() {
     final callback = onExitRequested;
     if (callback != null) {
       Timer.run(() => unawaited(callback()));
+    }
+    return null;
+  }
+
+  Future<Object?> _syncAvatar(Map<String, Object?> payload) async {
+    final baseUri = coreBaseUri;
+    if (baseUri == null || playerSource != 'lan_app') return null;
+    final sessionId = payload['sessionId'];
+    final credentialToken = payload['credentialToken'];
+    if (sessionId is! String ||
+        sessionId.isEmpty ||
+        credentialToken is! String ||
+        credentialToken.isEmpty) {
+      throw const FormatException('头像同步会话凭据无效');
+    }
+    final profile = await const UserProfileStore().load(
+      UserProfile(userId: userId, nickname: nickname),
+    );
+    final bytes = profile.avatarBytes;
+    final digest = profile.avatarSha256;
+    if (profile.userId != userId || bytes == null || digest == null) {
+      return null;
+    }
+    final response = await http.put(
+      baseUri.resolve('v1/sessions/$sessionId/avatar'),
+      headers: {
+        'Authorization': 'Bearer $credentialToken',
+        'Content-Type': 'image/png',
+        'X-Playmesh-Avatar-Sha256': digest,
+      },
+      body: bytes,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('头像同步失败（HTTP ${response.statusCode}）');
     }
     return null;
   }
@@ -214,6 +290,53 @@ class AppWebViewBridge {
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
   }
+}
+
+Map<String, Object?>? _normalizePlatformUiConfiguration(
+  Map<String, Object?>? configuration,
+) {
+  if (configuration == null) return null;
+  final locale = configuration['locale'];
+  final theme = configuration['theme'];
+  final rawMessages = configuration['messages'];
+  if (locale is! String ||
+      !RegExp(r'^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$').hasMatch(locale) ||
+      theme is! String ||
+      !const {'system', 'light', 'dark'}.contains(theme) ||
+      rawMessages is! Map) {
+    throw ArgumentError.value(
+      configuration,
+      'configuration',
+      'Invalid platform UI configuration',
+    );
+  }
+  final messages = <String, String>{};
+  for (final entry in rawMessages.entries) {
+    final key = entry.key;
+    final value = entry.value;
+    if (key is! String ||
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$').hasMatch(key) ||
+        value is! String) {
+      throw ArgumentError.value(
+        configuration,
+        'configuration',
+        'Invalid platform UI messages',
+      );
+    }
+    messages[key] = value;
+  }
+  if (messages.isEmpty) {
+    throw ArgumentError.value(
+      configuration,
+      'configuration',
+      'Platform UI messages must not be empty',
+    );
+  }
+  return Map.unmodifiable({
+    'locale': locale,
+    'messages': Map.unmodifiable(messages),
+    'theme': theme,
+  });
 }
 
 bool _sameCapabilities(List<String> left, List<String> right) {

@@ -31,12 +31,15 @@ const (
 )
 
 type Player struct {
-	ID        string `json:"id"`
-	Nickname  string `json:"nickname"`
-	Role      string `json:"role"`
-	Source    string `json:"source"`
-	Connected bool   `json:"connected"`
-	LatencyMS *int   `json:"latencyMs"`
+	ID           string  `json:"id"`
+	Nickname     string  `json:"nickname"`
+	Avatar       *string `json:"avatar"`
+	Role         string  `json:"role"`
+	Source       string  `json:"source"`
+	Connected    bool    `json:"connected"`
+	LatencyMS    *int    `json:"latencyMs"`
+	AvatarDigest string  `json:"-"`
+	access       playerAccess
 }
 
 type Snapshot struct {
@@ -63,7 +66,31 @@ type CreateInput struct {
 }
 
 type JoinInput struct {
-	JoinCode, Nickname, ShareToken, PlayerID, Source string
+	JoinCode, Nickname, ShareToken, PlayerID string
+	Access                                   playerAccess
+}
+
+type playerAccess uint8
+
+const (
+	playerAccessLANHTML playerAccess = iota
+	playerAccessLANApp
+	playerAccessServer
+)
+
+func (access playerAccess) source() string {
+	switch access {
+	case playerAccessLANApp:
+		return "lan_app"
+	case playerAccessServer:
+		return "server"
+	default:
+		return "lan_html"
+	}
+}
+
+func (access playerAccess) canUploadAvatar() bool {
+	return access == playerAccessLANApp
 }
 
 type ShareGrant struct {
@@ -112,6 +139,7 @@ func (s *Store) Create(input CreateInput) (Snapshot, Credentials, error) {
 		authority.Role = "authority_player"
 	}
 	authority.Source = "lan_app"
+	authority.access = playerAccessLANApp
 	id, err := randomID("s_", 16)
 	if err != nil {
 		return Snapshot{}, Credentials{}, err
@@ -145,11 +173,8 @@ func (s *Store) Join(input JoinInput) (Snapshot, Credentials, error) {
 	if err != nil {
 		return Snapshot{}, Credentials{}, err
 	}
-	source, err := normalizePlayerSource(input.Source)
-	if err != nil {
-		return Snapshot{}, Credentials{}, err
-	}
-	player.Source = source
+	player.Source = input.Access.source()
+	player.access = input.Access
 	record.mutex.Lock()
 	defer record.mutex.Unlock()
 	if input.ShareToken != "" && sha256.Sum256([]byte(input.ShareToken)) != record.shareTokenHash {
@@ -161,6 +186,13 @@ func (s *Store) Join(input JoinInput) (Snapshot, Credentials, error) {
 	}
 	if replacing && existing.Connected {
 		return Snapshot{}, Credentials{}, ErrPlayerConnected
+	}
+	if replacing {
+		if existing.access != player.access {
+			return Snapshot{}, Credentials{}, ErrUnauthorized
+		}
+		player.Avatar = existing.Avatar
+		player.AvatarDigest = existing.AvatarDigest
 	}
 	record.players[player.ID], record.tokens[tokenHash] = player, player.ID
 	return record.snapshotLocked(), Credentials{
@@ -264,6 +296,14 @@ func (s *Store) Finish(sessionID, token string) (Snapshot, error) {
 		return Snapshot{}, ErrNotAuthority
 	}
 	record.state = StateStopped
+	record.authority.Avatar, record.authority.AvatarDigest = nil, ""
+	if _, participates := record.players[record.authority.ID]; participates {
+		record.players[record.authority.ID] = record.authority
+	}
+	for playerID, current := range record.players {
+		current.Avatar, current.AvatarDigest = nil, ""
+		record.players[playerID] = current
+	}
 	record.pruneDisconnectedLocked()
 	return record.snapshotLocked(), nil
 }
@@ -302,6 +342,29 @@ func (s *Store) UpdateNickname(sessionID, token, nickname string) (Snapshot, Pla
 		record.players[player.ID] = current
 		player = current
 	}
+	return record.snapshotLocked(), player, nil
+}
+
+func (s *Store) CommitAvatar(record *record, playerID, digest string) (Snapshot, Player, error) {
+	record.mutex.Lock()
+	defer record.mutex.Unlock()
+	avatar := "/bucket/_sys-user-avatars/" + playerID + ".png"
+	if playerID == record.authority.ID {
+		if !record.authority.access.canUploadAvatar() {
+			return Snapshot{}, Player{}, ErrUnauthorized
+		}
+		record.authority.Avatar, record.authority.AvatarDigest = &avatar, digest
+		if _, participates := record.players[playerID]; participates {
+			record.players[playerID] = record.authority
+		}
+		return record.snapshotLocked(), record.authority, nil
+	}
+	player, exists := record.players[playerID]
+	if !exists || !player.access.canUploadAvatar() {
+		return Snapshot{}, Player{}, ErrUnauthorized
+	}
+	player.Avatar, player.AvatarDigest = &avatar, digest
+	record.players[playerID] = player
 	return record.snapshotLocked(), player, nil
 }
 
@@ -455,7 +518,7 @@ func (r *record) pruneDisconnectedLocked() {
 	}
 }
 
-func normalizePlayerSource(value string) (string, error) {
+func normalizeClaimedPlayerSource(value string) (string, error) {
 	switch strings.TrimSpace(value) {
 	case "", "lan_html":
 		return "lan_html", nil

@@ -104,7 +104,7 @@ void main() {
             'assets/playmesh-library/public/developer/templates/default-game/package',
         entryAssetPath:
             'assets/playmesh-library/public/developer/templates/default-game/package/app/index.html',
-        gameSdkVersion: '2.2.3',
+        gameSdkVersion: '99.0.0',
       ),
       throwsUnsupportedError,
     );

@@ -123,6 +123,24 @@ const player = playmesh.player.getCurrent();
 
 大屏公共显示端的 `player` 为 `null`。页面必须允许该值为空，不能把 Authority 自动加入玩家集合。
 
+## 游戏业务国际化
+
+Playmesh 的 App 词典只翻译平台自己的覆盖层，不会提供给游戏。游戏在
+`await playmesh.ready` 后调用同步只读 `playmesh.runtime.getLocale()`，取得当前
+实际显示端的 locale，并使用游戏包内自己的语言资源渲染业务界面：
+
+```js
+await playmesh.ready;
+const locale = playmesh.runtime.getLocale();
+renderGameMessages(locale);
+```
+
+App WebView 返回本机 App locale；远程加入设备不会继承 Authority 主机语言。普通
+浏览器直接读取 `navigator.languages`、`navigator.language` 中第一个合法系统
+locale，失败回退 `zh`；该返回值不受 Playmesh 覆盖层支持语言限制。SDK 不向
+游戏公开 `app.json` 或 messages，Playmesh 也不会自动翻译游戏 DOM、资源、标签、
+用户内容或日志。
+
 ## 多人动作与 Authority
 
 玩家页面只提交业务动作：
@@ -203,7 +221,7 @@ Canvas/WebGL 游戏应在实际绘制或提交完成后调用。非逐帧渲染�
 
 ## 平台能力插件
 
-需要平台能力时，在 `main.json` 同级创建可选 `capabilities.json`。`required` 声明主画面能力；单屏多人使用 `controllerRequired` 独立声明控制器能力，其他模式禁止该字段。不要把能力写入 `main.json.permissions`，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都从平台注册表为两个角色分别生成选项。`GET /dev/api/capabilities` 返回每个插件的 code、`apiVersion`、方法、事件和平台状态。工作区“能力测试”显示并测试全平台注册表，不按当前项目声明过滤；项目声明只控制当前页面角色可创建哪些插件实例。
+需要平台能力时，在 `main.json` 同级创建可选 `capabilities.json`。`required` 声明主画面能力；单屏多人使用 `controllerRequired` 独立声明控制器能力，其他模式禁止该字段。`main.json` 没有 `permissions` 字段，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都从平台注册表为两个角色分别生成选项。`GET /dev/api/capabilities` 返回每个插件的 code、`apiVersion`、方法、事件和平台状态。工作区“能力测试”显示并测试全平台注册表，不按当前项目声明过滤；项目声明只控制当前页面角色可创建哪些插件实例。
 
 ```json
 {

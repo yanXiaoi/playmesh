@@ -56,6 +56,7 @@ part 'operations/files/file_tree_operation.dart';
 part 'operations/files/local_history_operation.dart';
 part 'operations/packages/package_import_operation.dart';
 part 'operations/packages/project_package_operation.dart';
+part 'operations/publishing/project_publish_operation.dart';
 part 'operations/projects/data_operation.dart';
 part 'operations/projects/manifest_operation.dart';
 part 'operations/projects/project_copy_operation.dart';
@@ -68,12 +69,14 @@ part 'operations/runtime/logs_operation.dart';
 part 'operations/runtime/project_run_operation.dart';
 part 'operations/runtime/webview_javascript_operation.dart';
 part 'operations/system/documentation_operation.dart';
+part 'operations/system/localization_operation.dart';
 part 'operations/system/qr_operation.dart';
 part 'operations/system/sdk_bundle_operation.dart';
 part 'operations/system/status_operation.dart';
 
 final _developerOperationRegistry = _DeveloperOperationRegistry(const [
   _DocumentationOperation(),
+  _LocalizationOperation(),
   _StatusOperation(),
   _SdkBundleOperation(),
   _ActiveRunOperation(),
@@ -82,6 +85,7 @@ final _developerOperationRegistry = _DeveloperOperationRegistry(const [
   _ProjectCopyOperation(),
   _PackageImportOperation(),
   _ProjectPackageOperation(),
+  _ProjectPublishOperation(),
   _CapabilityRegistryOperation(),
   _CapabilityTestsOperation(),
   _ProjectCapabilitiesOperation(),
@@ -122,6 +126,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperRunController? runController,
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
+  DeveloperProjectPublisher? projectPublisher,
+  DeveloperWorkspaceLocalizationBridge? localizationBridge,
   String Function()? currentAuthor,
   DeveloperViewAvailabilityProvider? viewAvailability,
   DateTime Function()? clock,
@@ -140,6 +146,8 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
       runController: runController ?? DeveloperRunController(),
       capabilityTests: capabilityTests ?? DeveloperCapabilityTestService(),
       packageTransfer: packageTransfer ?? GamePackageTransferService(),
+      projectPublisher: projectPublisher,
+      localizationBridge: localizationBridge,
       currentAuthor: currentAuthor,
       viewAvailability:
           viewAvailability ??
@@ -164,6 +172,8 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     required this.runController,
     required this.capabilityTests,
     required this.packageTransfer,
+    required this.projectPublisher,
+    required this.localizationBridge,
     required this.currentAuthor,
     required this.viewAvailability,
     required this.clock,
@@ -188,6 +198,8 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   final DeveloperRunController runController;
   final DeveloperCapabilityTestService capabilityTests;
   final GamePackageTransferService packageTransfer;
+  final DeveloperProjectPublisher? projectPublisher;
+  final DeveloperWorkspaceLocalizationBridge? localizationBridge;
   final String Function()? currentAuthor;
   final DeveloperViewAvailabilityProvider viewAvailability;
   final DateTime Function() clock;
@@ -202,7 +214,10 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   void listen() {
     server.listen((request) {
       final requestId = 'dev-${_randomHex(8)}';
-      request.response.headers.set('X-Request-ID', requestId);
+      request.response.headers
+        ..set('X-Request-ID', requestId)
+        ..set('Referrer-Policy', 'no-referrer')
+        ..set('X-Content-Type-Options', 'nosniff');
       unawaited(
         _developerRequestPipeline.run(
           this,
@@ -227,8 +242,12 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
           ..sameSite = SameSite.strict
           ..path = '/',
       );
-      final workspace = await rootBundle.loadString(
+      final workspaceTemplate = await rootBundle.loadString(
         'assets/playmesh-library/public/developer/workspace.html',
+      );
+      final workspace = workspaceTemplate.replaceFirst(
+        '__PLAYMESH_APP_UI_BOOTSTRAP__',
+        _workspaceUiBootstrapJson(),
       );
       await _html(request.response, workspace);
       return;
@@ -252,17 +271,29 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   String _requireCurrentAuthor() {
     final author = currentAuthor?.call().trim() ?? '';
     if (author.isEmpty) {
-      throw StateError('当前 App 昵称不可用，无法写入项目作者');
+      throw StateError('当前 App 昵称不可用，无法写入项目发布者');
     }
     return author;
   }
 
+  String _workspaceUiBootstrapJson() {
+    final snapshot = localizationBridge?.current();
+    if (snapshot == null) return 'null';
+    return jsonEncode({
+          'themeMode': snapshot.themeMode,
+          'effectiveTheme': snapshot.effectiveTheme,
+          'allowThemeSwitch': snapshot.allowThemeSwitch,
+        })
+        .replaceAll('<', r'\u003c')
+        .replaceAll('>', r'\u003e')
+        .replaceAll('&', r'\u0026')
+        .replaceAll('\u2028', r'\u2028')
+        .replaceAll('\u2029', r'\u2029');
+  }
+
   Future<T> _serializePackageFile<T>(Future<T> Function() action) {
     final operation = _packageFileTail.then((_) => action());
-    _packageFileTail = operation.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
+    _packageFileTail = operation.then<void>((_) {}, onError: (_, _) {});
     return operation;
   }
 

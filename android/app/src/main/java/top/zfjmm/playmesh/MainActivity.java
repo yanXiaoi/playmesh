@@ -97,7 +97,11 @@ public class MainActivity extends FlutterActivity {
                 result.success(consumeIncomingFile(getIntent()));
                 setIntent(new Intent());
             } catch (Exception error) {
-                result.error("open_file_error", error.getMessage(), null);
+                result.error(
+                        incomingFileErrorCode(error),
+                        error.toString(),
+                        null
+                );
             }
         });
 
@@ -110,9 +114,25 @@ public class MainActivity extends FlutterActivity {
                 switch (call.method) {
                     case "start":
                         Integer port = call.argument("port");
+                        String localeId = call.argument("localeId");
+                        Map<?, ?> rawMessages = call.argument("messages");
                         DeveloperForegroundService.start(
                                 appContext,
-                                port == null ? 0 : port
+                                port == null ? 0 : port,
+                                requiredNotificationLocaleId(localeId),
+                                notificationMessages(rawMessages)
+                        );
+                        result.success(null);
+                        break;
+                    case "updateNotification":
+                        Integer notificationPort = call.argument("port");
+                        String notificationLocaleId = call.argument("localeId");
+                        Map<?, ?> updatedMessages = call.argument("messages");
+                        DeveloperForegroundService.updateNotification(
+                                appContext,
+                                notificationPort == null ? 0 : notificationPort,
+                                requiredNotificationLocaleId(notificationLocaleId),
+                                notificationMessages(updatedMessages)
                         );
                         result.success(null);
                         break;
@@ -135,6 +155,32 @@ public class MainActivity extends FlutterActivity {
                 );
             }
         });
+    }
+
+    private static String requiredNotificationLocaleId(@Nullable String localeId) {
+        if (localeId == null || localeId.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "developer_notification_locale_unavailable"
+            );
+        }
+        return localeId;
+    }
+
+    private static Map<String, String> notificationMessages(
+            @Nullable Map<?, ?> rawMessages
+    ) {
+        if (rawMessages == null) {
+            throw new IllegalArgumentException(
+                    "developer_notification_messages_unavailable"
+            );
+        }
+        Map<String, String> messages = new HashMap<>();
+        for (Map.Entry<?, ?> entry : rawMessages.entrySet()) {
+            if (entry.getKey() instanceof String && entry.getValue() instanceof String) {
+                messages.put((String) entry.getKey(), (String) entry.getValue());
+            }
+        }
+        return messages;
     }
 
     @Override
@@ -168,9 +214,19 @@ public class MainActivity extends FlutterActivity {
             if (file != null) openFileChannel.invokeMethod("fileOpened", file);
         } catch (Exception error) {
             Map<String, Object> details = new HashMap<>();
-            details.put("message", error.getMessage());
+            details.put("code", incomingFileErrorCode(error));
+            details.put("diagnostic", error.toString());
             openFileChannel.invokeMethod("fileOpenFailed", details);
         }
+    }
+
+    private static String incomingFileErrorCode(Exception error) {
+        String message = error.getMessage();
+        if ("incoming_file_cache_unavailable".equals(message)
+                || "incoming_file_unreadable".equals(message)) {
+            return message;
+        }
+        return "incoming_file_native_error";
     }
 
     private Map<String, Object> consumeIncomingFile(Intent intent) throws Exception {
@@ -200,7 +256,7 @@ public class MainActivity extends FlutterActivity {
 
         File directory = new File(getCacheDir(), "incoming-files");
         if (!directory.exists() && !directory.mkdirs()) {
-            throw new IllegalStateException("无法创建外部文件缓存目录");
+            throw new IllegalStateException("incoming_file_cache_unavailable");
         }
         File destination = new File(
                 directory,
@@ -210,7 +266,9 @@ public class MainActivity extends FlutterActivity {
                 ? new FileInputStream(new File(uri.getPath()))
                 : getContentResolver().openInputStream(uri);
              FileOutputStream output = new FileOutputStream(destination)) {
-            if (input == null) throw new IllegalStateException("无法读取分享文件");
+            if (input == null) {
+                throw new IllegalStateException("incoming_file_unreadable");
+            }
             byte[] buffer = new byte[64 * 1024];
             int count;
             while ((count = input.read(buffer)) >= 0) {

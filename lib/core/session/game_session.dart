@@ -6,6 +6,7 @@ class GameSessionPlayer {
     required this.nickname,
     required this.connected,
     required this.role,
+    this.avatar,
     this.source = 'lan_html',
     this.latencyMs,
   });
@@ -16,6 +17,7 @@ class GameSessionPlayer {
       nickname: json['nickname']! as String,
       connected: json['connected']! as bool,
       role: json['role']! as String,
+      avatar: json['avatar'] as String?,
       source: json['source'] as String? ?? 'lan_html',
       latencyMs: json['latencyMs'] as int?,
     );
@@ -25,6 +27,7 @@ class GameSessionPlayer {
   final String nickname;
   final bool connected;
   final String role;
+  final String? avatar;
   final String source;
   final int? latencyMs;
 
@@ -33,6 +36,7 @@ class GameSessionPlayer {
     'nickname': nickname,
     'connected': connected,
     'role': role,
+    'avatar': avatar,
     'source': source,
     'latencyMs': latencyMs,
   };

@@ -111,6 +111,24 @@ Future<void> _servePublicAsset(HttpRequest request, String route) async {
   if (relativePath.isEmpty || relativePath.split('/').contains('..')) {
     throw const FormatException('平台资源路径无效');
   }
+  if (relativePath.startsWith('localization/')) {
+    final localizationPath = relativePath.substring('localization/'.length);
+    if (localizationPath.isEmpty ||
+        localizationPath.split('/').contains('..')) {
+      throw const FormatException('本地化资源路径无效');
+    }
+    final data = await rootBundle.load(
+      'assets/playmesh-localization/$localizationPath',
+    );
+    request.response.headers.contentType = ContentType.parse(
+      _publicContentType(localizationPath),
+    );
+    request.response.add(
+      data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+    );
+    await request.response.close();
+    return;
+  }
   final liveSdk = SdkFeatureRegistry.sdkFileForPublicPath(relativePath);
   if (liveSdk != null) {
     request.response.headers.contentType = ContentType.parse(

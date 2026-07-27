@@ -10,6 +10,7 @@ import '../../models/local_game_entry.dart';
 import '../library/playmesh_library_root.dart';
 import 'game_library_local_metadata.dart';
 import 'game_library_repository.dart';
+import 'game_package_icon.dart';
 
 class FileGameLibraryScanner {
   FileGameLibraryScanner({
@@ -29,7 +30,7 @@ class FileGameLibraryScanner {
       '${libraryRoot.path}${Platform.pathSeparator}packages',
     );
     await packages.create(recursive: true);
-    final lastOpenedAt = await _metadataStore.readLastOpenedAt();
+    final usage = await _metadataStore.readUsageStats();
     final games = <GameSummary>[];
     await for (final entity in packages.list()) {
       if (entity is! Directory ||
@@ -44,11 +45,12 @@ class FileGameLibraryScanner {
       );
       if (!await manifestFile.exists()) continue;
       try {
-        games.add(await loadPackage(entity, lastOpenedAt: lastOpenedAt));
+        games.add(await loadPackage(entity, usage: usage));
       } on Object catch (error, stackTrace) {
         debugPrint('跳过无法识别 ID 的游戏包 ${entity.path}: $error\n$stackTrace');
       }
     }
+    await _metadataStore.retainGameIds(games.map((game) => game.id));
     games.sort(compareGameLibraryOrder);
     return List.unmodifiable(games);
   }
@@ -56,6 +58,7 @@ class FileGameLibraryScanner {
   Future<GameSummary> loadPackage(
     Directory package, {
     Map<String, DateTime>? lastOpenedAt,
+    Map<String, GameLibraryUsageStats>? usage,
   }) async {
     final manifestFile = File(
       '${package.path}${Platform.pathSeparator}main.json',
@@ -70,20 +73,24 @@ class FileGameLibraryScanner {
     if (rawId is! String || rawId.trim().isEmpty) {
       throw const FormatException('main.json 缺少有效 id');
     }
-    final opened =
-        (lastOpenedAt ?? await _metadataStore.readLastOpenedAt())[rawId.trim()];
+    final id = rawId.trim();
+    final stats =
+        usage?[id] ??
+        (lastOpenedAt == null
+            ? (await _metadataStore.readUsageStats())[id]
+            : GameLibraryUsageStats(lastOpenedAt: lastOpenedAt[id]));
     try {
-      return await _loadValidPackage(package, json, opened);
+      return await _loadValidPackage(package, json, stats);
     } on Object catch (error) {
       debugPrint('游戏包 ${package.path} 清单待修复: $error');
-      return _loadRecoverablePackage(package, json, error, opened);
+      return await _loadRecoverablePackage(package, json, error, stats);
     }
   }
 
   Future<GameSummary> _loadValidPackage(
     Directory package,
     Map<String, Object?> json,
-    DateTime? lastOpenedAt,
+    GameLibraryUsageStats? usage,
   ) async {
     final manifest = GameManifest.fromJson(json);
     final capabilities = await _readCapabilities(package);
@@ -117,22 +124,26 @@ class FileGameLibraryScanner {
       throw FormatException('游戏包缺少 ${authority.entry}');
     }
     final displayMode = manifest.displayModes.first;
+    final icon = File(
+      '${package.path}${Platform.pathSeparator}$gamePackageIconName',
+    );
+    final iconPath = await isSafeGamePackageIcon(icon) ? icon.path : null;
     return GameSummary(
       id: manifest.id,
       name: manifest.name,
       version: manifest.version,
       author: manifest.author,
       lastModifiedAt: manifest.lastModifiedAt,
-      lastOpenedAt: lastOpenedAt,
+      lastOpenedAt: usage?.lastOpenedAt,
+      launchCount: usage?.launchCount ?? 0,
+      localIconPath: iconPath,
       sdkVersion: manifest.sdkVersion,
       appSdkVersion: manifest.appSdkVersion,
       description: manifest.remarks,
       minPlayers: manifest.players.min,
       maxPlayers: manifest.players.max,
       supportsMultiplayer: manifest.supportsMultiplayer,
-      displayModeLabel: displayMode == GameDisplayMode.singleScreenMultiplayer
-          ? '大屏模式'
-          : '多人多屏',
+      displayModeLabel: displayMode.manifestValue,
       displayMode: displayMode.manifestValue,
       orientation: manifest.orientation,
       controllerOrientation: manifest.controllerOrientation,
@@ -148,12 +159,12 @@ class FileGameLibraryScanner {
     );
   }
 
-  GameSummary _loadRecoverablePackage(
+  Future<GameSummary> _loadRecoverablePackage(
     Directory package,
     Map<String, Object?> json,
     Object error,
-    DateTime? lastOpenedAt,
-  ) {
+    GameLibraryUsageStats? usage,
+  ) async {
     final id = (json['id'] as String).trim();
     final displayMode =
         _firstString(json['displayModes']) ??
@@ -180,34 +191,37 @@ class FileGameLibraryScanner {
       entryMap['controller'],
       fallback: 'app/controller/index.html',
     );
-    final author = _nonEmptyString(json['author']) ?? '佚名';
+    final author = _nonEmptyString(json['author']) ?? '';
+    final icon = File(
+      '${package.path}${Platform.pathSeparator}$gamePackageIconName',
+    );
+    final iconPath = await isSafeGamePackageIcon(icon) ? icon.path : null;
     return GameSummary(
       id: id,
       name: _nonEmptyString(json['name']) ?? id,
       version: _nonEmptyString(json['version']) ?? '0.0.0',
       author: author,
       lastModifiedAt: _safeTimestamp(json['lastModifiedAt']),
-      lastOpenedAt: lastOpenedAt,
+      lastOpenedAt: usage?.lastOpenedAt,
+      launchCount: usage?.launchCount ?? 0,
+      localIconPath: iconPath,
       manifestError: error.toString(),
       sdkVersion: _nonEmptyString(json['sdkVersion']) ?? '',
       appSdkVersion: _nonEmptyString(json['appSdkVersion']) ?? '',
-      description:
-          _nonEmptyString(json['remarks']) ?? 'main.json 存在错误，请在开发者工作区修复。',
+      description: _nonEmptyString(json['remarks']) ?? '',
       minPlayers: minPlayers,
       maxPlayers: maxPlayers,
       supportsMultiplayer: _stringListContains(json['modes'], 'multiplayer'),
-      displayModeLabel:
-          displayMode == GameDisplayMode.singleScreenMultiplayer.manifestValue
-          ? '大屏模式'
-          : '多人多屏',
+      displayModeLabel: displayMode,
       displayMode: displayMode,
       orientation: orientation,
       controllerOrientation: controllerOrientation,
+      tags: _stringList(json['tags']),
       entry: LocalGameEntry(
         assetPath: gameEntry,
         gameEntryPath: gameEntry,
         controllerEntryPath: controllerEntry,
-        statusLabel: '清单待修复',
+        statusLabel: 'manifest_repair_required',
         packageRootFilePath: package.path,
       ),
     );
@@ -244,6 +258,14 @@ String? _firstString(Object? value) {
 
 bool _stringListContains(Object? value, String expected) =>
     value is List && value.contains(expected);
+
+List<String> _stringList(Object? value) => value is List
+    ? value
+          .whereType<String>()
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList()
+    : const [];
 
 int? _positiveInt(Object? value) => value is int && value > 0 ? value : null;
 

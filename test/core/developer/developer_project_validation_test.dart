@@ -23,7 +23,6 @@ void main() {
   "displayModes": ["single_screen_multiplayer"],
   "players": {"min": 2, "max": 4},
   "authority": {"entry": "app/static/js/service/index.js"},
-  "permissions": [],
   "tags": []
 }''');
     await _write(workspace, 'app/index.html', '''<!doctype html>
@@ -57,6 +56,20 @@ void main() {
     expect(missingResource.path, 'app/index.html');
     expect(missingResource.line, 3);
     expect(missingResource.column, isNotNull);
+    expect(missingResource.messageArguments, {
+      'reference': '/app/static/image/missing.png',
+    });
+    expect(missingResource.hintArguments, {
+      'resolvedPath': 'app/static/image/missing.png',
+    });
+    expect(
+      missingResource.toJson(),
+      containsPair('message', missingResource.message),
+    );
+    expect(
+      missingResource.toJson(),
+      containsPair('messageArguments', missingResource.messageArguments),
+    );
   });
 
   test('合法项目通过校验', () async {
@@ -139,6 +152,8 @@ void main() {
       (item) => item.code == 'controller_entry_missing',
     );
     expect(diagnostic.path, 'app/remote/pad.html');
+    expect(diagnostic.messageArguments, {'path': 'app/remote/pad.html'});
+    expect(diagnostic.hintArguments, {'path': 'app/remote/pad.html'});
     expect(
       report.diagnostics.map((item) => item.code),
       isNot(contains('app_entry_missing')),

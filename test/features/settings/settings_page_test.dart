@@ -7,18 +7,28 @@ import 'package:playmesh/core/developer/developer_channel.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
 import 'package:playmesh/features/settings/settings_page.dart';
+import 'package:playmesh/ui/playmesh_ui.dart';
+
+import '../../support/localized_test_app.dart';
 
 void main() {
+  setUpAll(initializeLocalizedTestApp);
+
   testWidgets('shows online Core version and request ID', (tester) async {
     final provider = _QueueStatusProvider([
       GoCoreStatusResult.online(_onlineStatus('req-settings-online')),
     ]);
 
     await tester.pumpWidget(
-      MaterialApp(home: SettingsPage(statusProvider: provider)),
+      localizedTestApp(home: SettingsPage(statusProvider: provider)),
     );
     await _pumpAsync(tester);
 
+    expect(find.text('Playmesh 3.0.0'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Playmesh 3.0.0')).dy,
+      lessThan(tester.getTopLeft(find.text('Core 0.1.0')).dy),
+    );
     expect(find.text('在线'), findsOneWidget);
     expect(find.text('Core 0.1.0'), findsOneWidget);
     expect(find.text('req-settings-online'), findsOneWidget);
@@ -34,7 +44,7 @@ void main() {
     ]);
 
     await tester.pumpWidget(
-      MaterialApp(home: SettingsPage(statusProvider: provider)),
+      localizedTestApp(home: SettingsPage(statusProvider: provider)),
     );
     await _pumpAsync(tester);
 
@@ -58,7 +68,7 @@ void main() {
     ]);
 
     await tester.pumpWidget(
-      MaterialApp(home: SettingsPage(statusProvider: provider)),
+      localizedTestApp(home: SettingsPage(statusProvider: provider)),
     );
     await _pumpAsync(tester);
 
@@ -76,7 +86,7 @@ void main() {
     final developerProvider = _FakeDeveloperProvider();
 
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: SettingsPage(
           statusProvider: statusProvider,
           developerProvider: developerProvider,
@@ -125,7 +135,7 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: SettingsPage(
           statusProvider: statusProvider,
           developerProvider: developerProvider,
@@ -162,7 +172,7 @@ void main() {
       ]);
       final developerProvider = _DelayedDeveloperProvider();
       await tester.pumpWidget(
-        MaterialApp(
+        localizedTestApp(
           home: SettingsPage(
             statusProvider: statusProvider,
             developerProvider: developerProvider,
@@ -179,7 +189,41 @@ void main() {
 
       developerProvider.completeEnable();
       await _pumpAsync(tester);
-      expect(find.textContaining('已开启，token 尾号'), findsOneWidget);
+      expect(find.textContaining('已开启，Token 尾号'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'developer workspace selection keeps readable dark-theme colors',
+    (tester) async {
+      final statusProvider = _QueueStatusProvider([
+        GoCoreStatusResult.online(_onlineStatus('req-settings-dark-selection')),
+      ]);
+      final developerProvider = _FakeDeveloperProvider();
+
+      await tester.pumpWidget(
+        localizedTestApp(
+          home: Theme(
+            data: PlaymeshTheme.dark(),
+            child: SettingsPage(
+              statusProvider: statusProvider,
+              developerProvider: developerProvider,
+            ),
+          ),
+        ),
+      );
+      await _pumpAsync(tester);
+      await tester.tap(find.byType(Switch));
+      await _pumpAsync(tester);
+
+      final selectedTile = tester.widget<ListTile>(
+        find.byWidgetPredicate(
+          (widget) => widget is ListTile && widget.selected,
+        ),
+      );
+      final colors = PlaymeshTheme.dark().colorScheme;
+      expect(selectedTile.selectedTileColor, colors.secondaryContainer);
+      expect(selectedTile.selectedColor, colors.onSecondaryContainer);
     },
   );
 }

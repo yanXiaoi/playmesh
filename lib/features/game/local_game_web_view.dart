@@ -12,7 +12,10 @@ import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_package/game_asset_gateway.dart';
+import '../../core/localization/platform_game_ui_assets.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../../core/platform/app_platform.dart';
+import '../../models/user_profile.dart';
 
 class LocalGameWebView extends StatefulWidget {
   const LocalGameWebView({
@@ -25,8 +28,11 @@ class LocalGameWebView extends StatefulWidget {
     this.appSdkVersion,
     this.bridge,
     this.localUserId = 'u_local',
-    this.localNickname = '本机玩家',
+    this.localNickname = playmeshDefaultLocalNickname,
     this.declaredCapabilities = const [],
+    this.onOpenSharePanel,
+    this.onShowToolDock,
+    this.onHideToolDock,
     this.onExitRequested,
     this.onJavaScriptExecutorChanged,
   });
@@ -41,6 +47,9 @@ class LocalGameWebView extends StatefulWidget {
   final String localUserId;
   final String localNickname;
   final List<String> declaredCapabilities;
+  final Future<void> Function()? onOpenSharePanel;
+  final Future<void> Function()? onShowToolDock;
+  final Future<void> Function()? onHideToolDock;
   final Future<void> Function()? onExitRequested;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
@@ -57,6 +66,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   Uri? _entryUri;
   late final AppWebViewBridge _appBridge;
   late final WebViewMessageQueue _messageQueue;
+  String? _platformUiConfigurationKey;
+  Map<String, Object?>? _platformUiConfiguration;
+  Future<void> Function(String)? _runWindowsJavaScript;
 
   bool get _canUsePlatformWebView {
     return supportsPlatformWebView;
@@ -70,6 +82,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       nickname: widget.localNickname,
       gameName: widget.title,
       declaredCapabilities: widget.declaredCapabilities,
+      onOpenSharePanel: widget.onOpenSharePanel,
+      onShowToolDock: widget.onShowToolDock,
+      onHideToolDock: widget.onHideToolDock,
       onExitRequested: widget.onExitRequested,
     );
     _messageQueue = WebViewMessageQueue(_runJavaScript);
@@ -81,6 +96,25 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       return;
     }
     unawaited(_initialize());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final localizations = PlaymeshLocalizations.maybeOf(context);
+    final localeId = localizations?.localeId;
+    final brightness = Theme.of(context).brightness;
+    final configurationKey = '$localeId:${brightness.name}';
+    if (_platformUiConfigurationKey == configurationKey) return;
+    _platformUiConfigurationKey = configurationKey;
+    _platformUiConfiguration = localizations == null
+        ? null
+        : platformGameUiConfigurationFor(
+            localizations,
+            brightness: brightness,
+          ).toJson();
+    _appBridge.setPlatformUiConfiguration(_platformUiConfiguration);
+    unawaited(_sendPlatformUiConfiguration());
   }
 
   Future<void> _initialize() async {
@@ -181,6 +215,22 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     }
   }
 
+  Future<void> _sendPlatformUiConfiguration() async {
+    final configuration = _platformUiConfiguration;
+    if (configuration == null) return;
+    final script = gameSdkReceiveScript(
+      jsonEncode({
+        'type': 'platform.ui.configure',
+        'configuration': configuration,
+      }),
+    );
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      await _runWindowsJavaScript?.call(script);
+      return;
+    }
+    await _messageQueue.add(script);
+  }
+
   Future<void> _runJavaScript(String script) async {
     final controller = _controller;
     if (controller == null) throw StateError('游戏 WebView 尚未创建');
@@ -196,6 +246,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   @override
   void dispose() {
     widget.onJavaScriptExecutorChanged?.call(null);
+    _runWindowsJavaScript = null;
     unawaited(_appBridge.close());
     unawaited(_bridgeSubscription?.cancel());
     unawaited(_assetGateway?.close());
@@ -221,6 +272,10 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   title: widget.title,
                   bridge: widget.bridge,
                   appBridge: _appBridge,
+                  onRunJavaScriptReady: (executor) {
+                    _runWindowsJavaScript = executor;
+                    unawaited(_sendPlatformUiConfiguration());
+                  },
                   onEvaluateJavaScriptReady: (executor) {
                     widget.onJavaScriptExecutorChanged?.call(executor);
                   },

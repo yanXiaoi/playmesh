@@ -18,6 +18,7 @@ import (
 func TestCreateUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *testing.T) {
 	packageBytes := createTestProjectPackage(t, map[string]string{
 		"main.json":         `{"id":"com.example.created","name":"Created","version":"1.0.0"}`,
+		rootIconName:        string(validRootIcon(t)),
 		"capabilities.json": `{"required":["sensor.accelerometer"]}`,
 		"app/index.html":    "<!doctype html><title>Created</title>",
 	})
@@ -102,7 +103,13 @@ func TestCreateUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *testing.T)
 		request.ControllerRequiredCapabilities[0] != "sensor.accelerometer" {
 		t.Fatalf("controller capabilities were not forwarded: %#v", request.ControllerRequiredCapabilities)
 	}
-	for _, path := range []string{"main.json", "capabilities.json", "app/index.html", "playmesh/sdk/playmesh.js"} {
+	for _, path := range []string{
+		"main.json",
+		rootIconName,
+		"capabilities.json",
+		"app/index.html",
+		"playmesh/sdk/playmesh.js",
+	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("created project was not downloaded (%s): %v", path, err)
 		}

@@ -105,6 +105,58 @@ void main() {
       ).readAsString(),
       contains('New'),
     );
+    final packageEntries = await installed.parent
+        .list()
+        .map((entity) => entity.path)
+        .toList();
+    expect(
+      packageEntries.any(
+        (path) =>
+            path.contains('.playmesh-import-') ||
+            path.contains('.playmesh-backup-'),
+      ),
+      isFalse,
+    );
+  });
+
+  test('启动恢复目录交换中断时的上一份完整游戏包', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-update-recovery-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    final service = GamePackageTransferService(libraryRoot: root);
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.recovery'),
+      'app/index.html': '<!doctype html><title>Stable</title>',
+    });
+    final game = await service.importPackage(source);
+    final target = Directory(game.entry.packageRootFilePath!);
+    final packages = target.parent;
+    final backup = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-backup-test',
+    );
+    final staging = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-import-test',
+    );
+    await target.rename(backup.path);
+    await staging.create();
+    await File(
+      '${staging.path}${Platform.pathSeparator}partial.tmp',
+    ).writeAsString('partial');
+
+    await service.recoverInterruptedImports();
+
+    expect(await target.exists(), isTrue);
+    expect(await backup.exists(), isFalse);
+    expect(await staging.exists(), isFalse);
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Stable'),
+    );
   });
 
   test('非单屏多人游戏拒绝声明控制器能力', () async {
@@ -139,6 +191,71 @@ void main() {
       GamePackageTransferService(libraryRoot: root).importPackage(source),
       throwsFormatException,
     );
+  });
+
+  test('根 icon.png 被导入导出且清单未知字段被统一投影丢弃', () async {
+    final root = await Directory.systemTemp.createTemp('playmesh-icon-v2-');
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}icon.zip');
+    final archive = Archive();
+    final manifestBytes = utf8.encode(
+      jsonEncode({
+        ...(jsonDecode(_manifest('com.example.icon')) as Map),
+        'icon': 'app/legacy.png',
+        'permissions': ['keyboard'],
+        'redundant': true,
+      }),
+    );
+    archive
+      ..addFile(ArchiveFile('main.json', manifestBytes.length, manifestBytes))
+      ..addFile(ArchiveFile('app/index.html', 1, [0]))
+      ..addFile(ArchiveFile('icon.png', _pngBytes.length, _pngBytes));
+    await source.writeAsBytes(ZipEncoder().encode(archive)!);
+
+    final service = GamePackageTransferService(libraryRoot: root);
+    final game = await service.importPackage(source);
+    expect(game.localIconPath, endsWith('icon.png'));
+    final installedManifest =
+        jsonDecode(
+              await File(
+                '${game.entry.packageRootFilePath}${Platform.pathSeparator}main.json',
+              ).readAsString(),
+            )
+            as Map;
+    expect(installedManifest.containsKey('icon'), isFalse);
+    expect(installedManifest.containsKey('permissions'), isFalse);
+    expect(installedManifest.containsKey('redundant'), isFalse);
+    installedManifest
+      ..['icon'] = 'app/legacy.png'
+      ..['permissions'] = ['keyboard']
+      ..['redundant'] = true;
+    await File(
+      '${game.entry.packageRootFilePath}${Platform.pathSeparator}main.json',
+    ).writeAsString(jsonEncode(installedManifest));
+
+    final exported = File('${root.path}${Platform.pathSeparator}export.zip');
+    await service.exportPackage(game, exported);
+    final exportedArchive = ZipDecoder().decodeBytes(
+      await exported.readAsBytes(),
+    );
+    final names = exportedArchive
+        .where((entry) => entry.isFile)
+        .map((entry) => entry.name)
+        .toSet();
+    expect(names, contains('icon.png'));
+    final exportedManifest =
+        jsonDecode(
+              utf8.decode(
+                exportedArchive
+                        .singleWhere((entry) => entry.name == 'main.json')
+                        .content
+                    as List<int>,
+              ),
+            )
+            as Map;
+    expect(exportedManifest.containsKey('icon'), isFalse);
+    expect(exportedManifest.containsKey('permissions'), isFalse);
+    expect(exportedManifest.containsKey('redundant'), isFalse);
   });
 
   test('宽松项目拉取保留损坏能力文件且不要求 app 目录', () async {
@@ -200,6 +317,69 @@ void main() {
         .toSet();
     expect(entries, {'main.json', 'capabilities.json'});
   });
+
+  test(
+    'downloaded package tampering cannot change id version or publisher',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'playmesh-tampered-download-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final service = GamePackageTransferService(libraryRoot: root);
+      final cases = [
+        (
+          id: 'com.attacker.replacement',
+          version: '2.0.0',
+          author: 'Trusted Publisher',
+        ),
+        (
+          id: 'com.example.expected',
+          version: '9.9.9',
+          author: 'Trusted Publisher',
+        ),
+        (
+          id: 'com.example.expected',
+          version: '2.0.0',
+          author: 'Attacker Publisher',
+        ),
+      ];
+
+      for (var index = 0; index < cases.length; index += 1) {
+        final value = cases[index];
+        final source = File(
+          '${root.path}${Platform.pathSeparator}tampered-$index.zip',
+        );
+        await _writeZip(source, {
+          'main.json': _manifest(
+            value.id,
+            version: value.version,
+            author: value.author,
+          ),
+          'app/index.html': '<!doctype html>',
+        });
+
+        await expectLater(
+          service.importPackage(
+            source,
+            expectedGameId: 'com.example.expected',
+            expectedVersion: '2.0.0',
+            expectedPublisher: 'Trusted Publisher',
+          ),
+          throwsFormatException,
+        );
+      }
+
+      final packages = Directory(
+        '${root.path}${Platform.pathSeparator}packages',
+      );
+      expect(
+        await packages.exists()
+            ? await packages.list().toList()
+            : const <FileSystemEntity>[],
+        isEmpty,
+      );
+    },
+  );
 }
 
 Future<void> _writeZip(File output, Map<String, String> files) async {
@@ -211,10 +391,14 @@ Future<void> _writeZip(File output, Map<String, String> files) async {
   await output.writeAsBytes(ZipEncoder().encode(archive)!);
 }
 
-String _manifest(String id, {String version = '1.0.0'}) => jsonEncode({
+String _manifest(
+  String id, {
+  String version = '1.0.0',
+  String author = 'Test Author',
+}) => jsonEncode({
   'id': id,
   'name': 'Transfer Game',
-  'author': 'Test Author',
+  'author': author,
   'lastModifiedAt': 1784851200000,
   'version': version,
   'sdkVersion': '1.0.0',
@@ -223,3 +407,8 @@ String _manifest(String id, {String version = '1.0.0'}) => jsonEncode({
   'displayModes': ['multi_screen'],
   'players': {'min': 1, 'max': 1},
 });
+
+final _pngBytes = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+  'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);

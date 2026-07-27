@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -13,15 +14,18 @@ import '../../core/developer/developer_event_hub.dart';
 import '../../core/developer/developer_run_controller.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/game_runtime_bridge.dart';
+import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/standalone_game_runtime_bridge.dart';
 import '../../core/game_web/game_web_gateway.dart';
+import '../../core/localization/playmesh_localization.dart';
+import '../../core/profile/user_profile_store.dart';
 import '../../core/relay/relay_tunnel.dart';
 import '../../core/services/go_core_runtime.dart';
 import '../../core/session/go_core_session_client.dart';
 import '../../core/session/game_session.dart';
 import '../../core/storage/game_storage_service.dart';
 import '../../models/game_summary.dart';
-import '../settings/settings_page.dart';
+import '../../models/user_profile.dart';
 import 'game_controls.dart';
 import 'game_launcher.dart';
 import 'game_orientation_controller.dart';
@@ -57,14 +61,14 @@ class GamePage extends StatefulWidget {
     super.key,
     required this.game,
     this.localUserId = 'u_local',
-    this.localNickname = '本机玩家',
+    this.localNickname = playmeshDefaultLocalNickname,
     this.previewBuilder,
     this.orientationController,
     this.goCoreRuntime,
     this.joinRequest,
     this.developerProjectId,
     this.catalogController,
-    this.initialPerformanceVisible = true,
+    this.initialPerformanceVisible = false,
     this.onPerformanceVisibilityChanged,
   });
 
@@ -92,7 +96,13 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
+  static const _sdkShareReopenCooldown = Duration(milliseconds: 800);
+
   int _runtimeGeneration = 0;
+  int _configurationGeneration = 0;
+  final GameToolDockController _toolDockController = GameToolDockController();
+  final GlobalKey<_ShareOverlayState> _shareOverlayKey =
+      GlobalKey<_ShareOverlayState>();
   late final GameOrientationController _orientationController;
   Future<void> _orientationOperation = Future<void>.value();
   Object? _fullscreenError;
@@ -101,12 +111,16 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   GoCoreSessionClient? _sessionClient;
   GameRuntimeBridge? _bridge;
   StandaloneGameRuntimeBridge? _soloBridge;
-  late bool _showPerformance;
+  bool _showPerformance = false;
   GameWebGateway? _webGateway;
   List<Uri> _shareLinks = const [];
   Uri? _selectedShareLink;
   bool _shareVisible = false;
   bool _shareLoading = false;
+  int _shareGeneration = 0;
+  Future<void>? _shareOpenOperation;
+  FocusNode? _focusBeforeShare;
+  DateTime? _shareClosedAt;
   Object? _shareError;
   bool _disposing = false;
   bool _allowPop = false;
@@ -114,6 +128,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   bool _shareGrantActive = false;
   GameStorageService? _soloShareStorage;
   bool _debugVisible = false;
+  bool _infoVisible = false;
   final List<Map<String, Object?>> _developerLogs = [];
   StreamSubscription<Map<String, Object?>>? _developerLogSubscription;
   StreamSubscription<Map<String, Object?>>? _roomSubscription;
@@ -142,27 +157,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _showPerformance = widget.initialPerformanceVisible;
     _orientationController =
         widget.orientationController ?? SystemGameOrientationController();
     _applyOrientation(_runtimeOrientation);
-    final developerProjectId = widget.developerProjectId;
-    final runtime = widget.goCoreRuntime;
-    if (developerProjectId != null && runtime != null) {
-      _unregisterDeveloperRestart = runtime.registerDeveloperGameRestartHandler(
-        developerProjectId,
-        _restartGame,
-      );
-      _unregisterDeveloperStop = runtime.registerDeveloperGameStopHandler(
-        developerProjectId,
-        _exitGame,
-      );
-      _unregisterDeveloperJavaScript = runtime
-          .registerDeveloperGameJavaScriptExecutor(
-            developerProjectId,
-            _executeDeveloperJavaScript,
-          );
-    }
+    _registerDeveloperHandlers();
     _initializeSession();
   }
 
@@ -178,17 +176,132 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     if (oldOrientation != _runtimeOrientation) {
       _applyOrientation(_runtimeOrientation);
     }
+    final developerBindingChanged =
+        oldWidget.developerProjectId != widget.developerProjectId ||
+        !identical(oldWidget.goCoreRuntime, widget.goCoreRuntime);
+    final runtimeChanged =
+        developerBindingChanged || _runtimeIdentityChanged(oldWidget);
+    if (developerBindingChanged) {
+      final oldProjectId = oldWidget.developerProjectId;
+      if (oldProjectId != null) {
+        oldWidget.goCoreRuntime?.reportDeveloperGameStopped(
+          oldProjectId,
+          expectedRunId: _developerRunId,
+        );
+      }
+      _unregisterDeveloperHandlers();
+      _registerDeveloperHandlers();
+    }
+    if (runtimeChanged) {
+      final generation = ++_configurationGeneration;
+      unawaited(_resetForWidgetUpdate(generation));
+    }
   }
 
-  @override
-  void dispose() {
-    _disposing = true;
+  bool _runtimeIdentityChanged(GamePage oldWidget) {
+    final oldGame = oldWidget.game;
+    final game = widget.game;
+    final oldEntry = oldGame.entry;
+    final entry = game.entry;
+    final oldJoin = oldWidget.joinRequest;
+    final join = widget.joinRequest;
+    return oldGame.id != game.id ||
+        oldGame.name != game.name ||
+        oldGame.version != game.version ||
+        oldGame.sdkVersion != game.sdkVersion ||
+        oldGame.appSdkVersion != game.appSdkVersion ||
+        oldGame.description != game.description ||
+        oldGame.minPlayers != game.minPlayers ||
+        oldGame.maxPlayers != game.maxPlayers ||
+        oldGame.supportsMultiplayer != game.supportsMultiplayer ||
+        oldGame.displayMode != game.displayMode ||
+        oldGame.orientation != game.orientation ||
+        oldGame.controllerOrientation != game.controllerOrientation ||
+        oldEntry.assetPath != entry.assetPath ||
+        oldEntry.gameEntryPath != entry.gameEntryPath ||
+        oldEntry.controllerEntryPath != entry.controllerEntryPath ||
+        oldEntry.packageRootAssetPath != entry.packageRootAssetPath ||
+        oldEntry.packageRootFilePath != entry.packageRootFilePath ||
+        !setEquals(oldGame.capabilities.required, game.capabilities.required) ||
+        !setEquals(
+          oldGame.capabilities.controllerRequired,
+          game.capabilities.controllerRequired,
+        ) ||
+        oldWidget.localUserId != widget.localUserId ||
+        oldWidget.localNickname != widget.localNickname ||
+        (oldWidget.previewBuilder == null) != (widget.previewBuilder == null) ||
+        oldJoin?.coreEndpoint != join?.coreEndpoint ||
+        oldJoin?.joinCode != join?.joinCode ||
+        oldJoin?.nickname != join?.nickname;
+  }
+
+  bool _isCurrentConfiguration(int generation) =>
+      mounted && !_disposing && generation == _configurationGeneration;
+
+  void _registerDeveloperHandlers() {
+    final developerProjectId = widget.developerProjectId;
+    final runtime = widget.goCoreRuntime;
+    if (developerProjectId == null || runtime == null) return;
+    _unregisterDeveloperRestart = runtime.registerDeveloperGameRestartHandler(
+      developerProjectId,
+      _restartGame,
+    );
+    _unregisterDeveloperStop = runtime.registerDeveloperGameStopHandler(
+      developerProjectId,
+      _exitGame,
+    );
+    _unregisterDeveloperJavaScript = runtime
+        .registerDeveloperGameJavaScriptExecutor(
+          developerProjectId,
+          _executeDeveloperJavaScript,
+        );
+  }
+
+  void _unregisterDeveloperHandlers() {
     _unregisterDeveloperRestart?.call();
     _unregisterDeveloperRestart = null;
     _unregisterDeveloperStop?.call();
     _unregisterDeveloperStop = null;
     _unregisterDeveloperJavaScript?.call();
     _unregisterDeveloperJavaScript = null;
+  }
+
+  Future<void> _resetForWidgetUpdate(int generation) async {
+    if (_infoVisible && mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    _infoVisible = false;
+    _developerJavaScriptExecutor = null;
+    _shareOpenOperation = null;
+    _focusBeforeShare = null;
+    _shareClosedAt = null;
+    await _hideDebugLogs(restoreFocus: false);
+    await _closeSession();
+    if (!_isCurrentConfiguration(generation)) return;
+    setState(() {
+      _runtimeGeneration += 1;
+      _sessionReady = false;
+      _sessionError = null;
+      _showPerformance = false;
+      _shareVisible = false;
+      _shareLoading = false;
+      _shareError = null;
+      _debugVisible = false;
+      _fullscreenError = null;
+      _relaySources = const [];
+      _relaySourcesLoading = false;
+      _relayConnecting = false;
+      _relayError = null;
+    });
+    widget.onPerformanceVisibilityChanged?.call(false);
+    await _initializeSession();
+  }
+
+  @override
+  void dispose() {
+    _disposing = true;
+    _configurationGeneration += 1;
+    _unregisterDeveloperHandlers();
     _developerJavaScriptExecutor = null;
     unawaited(_developerLogSubscription?.cancel());
     _developerLogSubscription = null;
@@ -222,102 +335,101 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: _allowPop,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_returnToPrevious());
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          key: GamePage.gameSurfaceKey,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(child: _buildGameRuntime()),
-            GameToolDock(
-              backTooltip: '返回上一页',
-              showPerformance: _showPerformance,
-              onTogglePerformance: _togglePerformance,
-              onReload: () =>
-                  unawaited(_restartGame().catchError((Object _) {})),
-              onBack: () => unawaited(_returnToPrevious()),
-              onShare: () => unawaited(_openShare()),
-              onEnterFullscreen: () =>
-                  _applyOrientation(_runtimeOrientation, userInitiated: true),
-              onExitFullscreen: () => unawaited(_exitFullscreen()),
-              secondaryActions: [
-                GameToolAction(
-                  icon: Icons.info_outline,
-                  label: '游戏信息',
-                  onPressed: _openGameInfo,
-                ),
-                GameToolAction(
-                  icon: Icons.receipt_long_outlined,
-                  label: '运行日志',
-                  onPressed: _openDebugLogs,
-                ),
-                GameToolAction(
-                  icon: Icons.tune_outlined,
-                  label: '游戏设置',
-                  onPressed: () =>
-                      Navigator.of(context).pushNamed(SettingsPage.routeName),
-                ),
-              ],
-            ),
-            if (_fullscreenError != null && !_shareVisible && !_debugVisible)
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: MediaQuery.paddingOf(context).bottom + 12,
-                child: _FullscreenNotice(
-                  error: _fullscreenError!,
-                  onRetry: () => _applyOrientation(
-                    _runtimeOrientation,
-                    userInitiated: true,
+    return GameRuntimeShortcutScope(
+      controller: _toolDockController,
+      onBack: _handleRuntimeBack,
+      onOpenTools: _openToolsFromShortcut,
+      onMoveTools: _moveToolsFromShortcut,
+      child: PopScope(
+        canPop: _allowPop,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _handleRuntimeBack();
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            key: GamePage.gameSurfaceKey,
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(child: _buildGameRuntime()),
+              GameToolDock(
+                controller: _toolDockController,
+                resetKey: _runtimeGeneration,
+                backTooltip: context.tr('game.back_previous'),
+                showPerformance: _showPerformance,
+                onTogglePerformance: _togglePerformance,
+                onReload: () =>
+                    unawaited(_restartGame().catchError((Object _) {})),
+                onBack: () => unawaited(_returnToPrevious()),
+                onShare: () => unawaited(_openShare()),
+                onOpenLogs: _openDebugLogs,
+                onEnterFullscreen: () =>
+                    _applyOrientation(_runtimeOrientation, userInitiated: true),
+                onExitFullscreen: () => unawaited(_exitFullscreen()),
+                secondaryActions: [
+                  GameToolAction(
+                    icon: Icons.info_outline,
+                    label: context.tr('game.info'),
+                    onPressed: () => unawaited(_openGameInfo()),
                   ),
-                  onDismiss: () => setState(() => _fullscreenError = null),
-                ),
+                ],
               ),
-            if (_shareVisible)
-              Positioned.fill(
-                child: _ShareOverlay(
-                  joinCode: _bridge?.connection.snapshot.joinCode,
-                  corePort: widget.goCoreRuntime?.endpoint.port,
-                  links: _shareLinks,
-                  selectedLink: _selectedShareLink,
-                  loading: _shareLoading,
-                  error: _shareError,
-                  players:
-                      _bridge?.connection.snapshot.players ??
-                      const <GameSessionPlayer>[],
-                  relaySources: _relaySources,
-                  relaySourcesLoading: _relaySourcesLoading,
-                  relayConnecting: _relayConnecting,
-                  relaySource: _relaySource,
-                  relaySession: _relaySession,
-                  relayStatus: _relayStatus,
-                  relayError: _relayError,
-                  onClose: _hideShare,
-                  onSelectLink: (link) {
-                    setState(() => _selectedShareLink = link);
-                  },
-                  onLoadRelaySources: _loadRelaySources,
-                  onConnectRelay: _connectRelay,
-                  onDisconnectRelay: _disconnectRelay,
+              if (_fullscreenError != null && !_shareVisible && !_debugVisible)
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: MediaQuery.paddingOf(context).bottom + 12,
+                  child: _FullscreenNotice(
+                    error: _fullscreenError!,
+                    onRetry: () => _applyOrientation(
+                      _runtimeOrientation,
+                      userInitiated: true,
+                    ),
+                    onDismiss: () => setState(() => _fullscreenError = null),
+                  ),
                 ),
-              ),
-            if (_debugVisible)
-              Positioned.fill(
-                child: GameRuntimeLogOverlay(
-                  logs: _developerLogs,
-                  onClear: () {
-                    developerEventHub.clearRecentLogs();
-                    setState(_developerLogs.clear);
-                  },
-                  onClose: () => unawaited(_hideDebugLogs()),
+              if (_shareVisible)
+                Positioned.fill(
+                  child: _ShareOverlay(
+                    key: _shareOverlayKey,
+                    joinCode: _bridge?.connection.snapshot.joinCode,
+                    corePort: widget.goCoreRuntime?.endpoint.port,
+                    links: _shareLinks,
+                    selectedLink: _selectedShareLink,
+                    loading: _shareLoading,
+                    error: _shareError,
+                    players:
+                        _bridge?.connection.snapshot.players ??
+                        const <GameSessionPlayer>[],
+                    relaySources: _relaySources,
+                    relaySourcesLoading: _relaySourcesLoading,
+                    relayConnecting: _relayConnecting,
+                    relaySource: _relaySource,
+                    relaySession: _relaySession,
+                    relayStatus: _relayStatus,
+                    relayError: _relayError,
+                    onClose: _hideShare,
+                    onSelectLink: (link) {
+                      setState(() => _selectedShareLink = link);
+                    },
+                    onLoadRelaySources: _loadRelaySources,
+                    onConnectRelay: _connectRelay,
+                    onDisconnectRelay: _disconnectRelay,
+                  ),
                 ),
-              ),
-          ],
+              if (_debugVisible)
+                Positioned.fill(
+                  child: GameRuntimeLogOverlay(
+                    logs: _developerLogs,
+                    onClear: () {
+                      developerEventHub.clearRecentLogs();
+                      setState(_developerLogs.clear);
+                    },
+                    onClose: () => unawaited(_hideDebugLogs()),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -346,6 +458,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             localUserId: widget.localUserId,
             localNickname: widget.localNickname,
             controllerRole: _controllerRole,
+            onOpenSharePanel: _openShareFromAppSdk,
+            onShowToolDock: _showToolDockFromSdk,
+            onHideToolDock: _hideToolDockFromSdk,
             onExitRequested: _returnToPrevious,
             onJavaScriptExecutorChanged: (executor) {
               _developerJavaScriptExecutor = executor;
@@ -389,9 +504,35 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeSession() async {
+    final configurationGeneration = _configurationGeneration;
+    final game = widget.game;
+    final runtime = widget.goCoreRuntime;
+    final joinRequest = widget.joinRequest;
+    final localUserId = widget.localUserId;
+    final localNickname = widget.localNickname;
+    final developerProjectId = widget.developerProjectId;
+    if (_sessionReady || _sessionError != null) {
+      if (_infoVisible && mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      await _hideDebugLogs(restoreFocus: false);
+      if (!_isCurrentConfiguration(configurationGeneration)) return;
+      _focusBeforeShare = null;
+      _shareClosedAt = null;
+      setState(() {
+        _runtimeGeneration += 1;
+        _showPerformance = false;
+        _shareVisible = false;
+        _debugVisible = false;
+        _fullscreenError = null;
+      });
+      _webViewBridge?.setPerformanceVisible(false);
+      widget.onPerformanceVisibilityChanged?.call(false);
+    }
+    if (!_isCurrentConfiguration(configurationGeneration)) return;
     _clearLogsForNewRun();
     if (widget.previewBuilder != null) {
-      if (mounted) {
+      if (_isCurrentConfiguration(configurationGeneration)) {
         setState(() {
           _sessionReady = true;
           _sessionError = null;
@@ -399,12 +540,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       }
       return;
     }
-    if (!widget.game.supportsMultiplayer ||
-        (widget.goCoreRuntime == null && widget.joinRequest == null)) {
-      await _initializeStandaloneSession();
+    if (!game.supportsMultiplayer || (runtime == null && joinRequest == null)) {
+      await _initializeStandaloneSession(
+        configurationGeneration: configurationGeneration,
+        game: game,
+        localUserId: localUserId,
+        localNickname: localNickname,
+        developerProjectId: developerProjectId,
+        runtime: runtime,
+      );
       return;
     }
-    if (mounted) {
+    if (_isCurrentConfiguration(configurationGeneration)) {
       setState(() {
         _sessionReady = false;
         _sessionError = null;
@@ -412,35 +559,49 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     }
     try {
       await _closeSession();
-      final joinRequest = widget.joinRequest;
+      if (!_isCurrentConfiguration(configurationGeneration)) return;
       late final GoCoreSessionClient client;
       late final GameSessionConnection connection;
       if (joinRequest == null) {
-        await widget.goCoreRuntime!.start();
-        client = GoCoreSessionClient(baseUri: widget.goCoreRuntime!.endpoint);
+        await runtime!.start();
+        if (!_isCurrentConfiguration(configurationGeneration)) return;
+        client = GoCoreSessionClient(baseUri: runtime.endpoint);
         connection = await client.create(
-          gameId: widget.game.id,
-          displayMode: widget.game.displayMode,
-          minPlayers: widget.game.minPlayers,
-          maxPlayers: widget.game.maxPlayers,
-          nickname: widget.localNickname,
+          gameId: game.id,
+          displayMode: game.displayMode,
+          minPlayers: game.minPlayers,
+          maxPlayers: game.maxPlayers,
+          nickname: localNickname,
         );
       } else {
         client = GoCoreSessionClient(baseUri: joinRequest.coreEndpoint);
         connection = await client.join(
           joinCode: joinRequest.joinCode,
           nickname: joinRequest.nickname,
-          playerId: widget.localUserId,
+          playerId: localUserId,
         );
       }
-      final storage = await GameStorageService.create(gameId: widget.game.id);
-      if (!mounted) {
+      final storage = await GameStorageService.create(gameId: game.id);
+      if (!_isCurrentConfiguration(configurationGeneration)) {
         await connection.close();
         await storage.close();
         client.close();
         return;
       }
-      final bridge = GameRuntimeBridge(connection, storage: storage);
+      if (connection.isAuthority) {
+        // A process crash can leave fixed-name platform avatar files behind.
+        // A newly created Authority session owns a fresh avatar namespace and
+        // must clear it before any local or joining player synchronizes.
+        await storage.clearSystemAvatars();
+        if (!_isCurrentConfiguration(configurationGeneration)) {
+          await connection.close();
+          await storage.close();
+          client.close();
+          return;
+        }
+      }
+      late final GameRuntimeBridge bridge;
+      bridge = GameRuntimeBridge(connection, storage: storage);
       setState(() {
         _sessionClient = client;
         _bridge = bridge;
@@ -448,20 +609,37 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       });
       await _roomSubscription?.cancel();
       _roomSubscription = connection.messages.listen((message) {
-        if (message['session'] is! Map || !mounted || _disposing) return;
+        if (!_isCurrentConfiguration(configurationGeneration) ||
+            !identical(_bridge, bridge)) {
+          return;
+        }
+        if (message['type'] == 'transport.status' &&
+            message['state'] == 'reconnected') {
+          _resetTransientUiForReconnect();
+          return;
+        }
+        if (message['session'] is! Map) return;
         setState(() {});
       });
+      unawaited(
+        _syncLocalAvatar(
+          connection,
+          userId: localUserId,
+          nickname: localNickname,
+        ),
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && identical(_bridge, bridge)) {
+        if (_isCurrentConfiguration(configurationGeneration) &&
+            identical(_bridge, bridge)) {
           bridge.setPerformanceVisible(_showPerformance);
         }
       });
-      final developerProjectId = widget.developerProjectId;
-      if (developerProjectId != null && !_disposing && mounted) {
+      if (developerProjectId != null &&
+          _isCurrentConfiguration(configurationGeneration)) {
         if (connection.isAuthority) {
           await _ensureShare(showOverlay: false);
         } else {
-          widget.goCoreRuntime?.reportDeveloperGameRunning(
+          runtime?.reportDeveloperGameRunning(
             projectId: developerProjectId,
             expectedRunId: _developerRunId,
             joinCode: connection.snapshot.joinCode,
@@ -469,15 +647,15 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         }
       }
     } on Object catch (error) {
-      final developerProjectId = widget.developerProjectId;
-      if (developerProjectId != null && !_disposing && mounted) {
-        widget.goCoreRuntime?.reportDeveloperGameError(
+      if (!_isCurrentConfiguration(configurationGeneration)) return;
+      if (developerProjectId != null) {
+        runtime?.reportDeveloperGameError(
           developerProjectId,
           error,
           expectedRunId: _developerRunId,
         );
       }
-      if (mounted) {
+      if (_isCurrentConfiguration(configurationGeneration)) {
         setState(() {
           _sessionError = error;
           _sessionReady = true;
@@ -486,8 +664,15 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _initializeStandaloneSession() async {
-    if (mounted) {
+  Future<void> _initializeStandaloneSession({
+    required int configurationGeneration,
+    required GameSummary game,
+    required String localUserId,
+    required String localNickname,
+    required String? developerProjectId,
+    required GoCoreRuntime? runtime,
+  }) async {
+    if (_isCurrentConfiguration(configurationGeneration)) {
       setState(() {
         _sessionReady = false;
         _sessionError = null;
@@ -495,41 +680,43 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     }
     try {
       await _closeSession();
-      if (!mounted) {
+      if (!_isCurrentConfiguration(configurationGeneration)) {
         return;
       }
-      final bridge = StandaloneGameRuntimeBridge(
-        gameId: widget.game.id,
-        userId: widget.localUserId,
-        nickname: widget.localNickname,
+      late final StandaloneGameRuntimeBridge bridge;
+      bridge = StandaloneGameRuntimeBridge(
+        gameId: game.id,
+        userId: localUserId,
+        nickname: localNickname,
       );
       setState(() {
         _soloBridge = bridge;
         _sessionReady = true;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && identical(_soloBridge, bridge)) {
+        if (_isCurrentConfiguration(configurationGeneration) &&
+            identical(_soloBridge, bridge)) {
           bridge.setPerformanceVisible(_showPerformance);
         }
       });
-      final developerProjectId = widget.developerProjectId;
-      if (developerProjectId != null && !_disposing && mounted) {
-        widget.goCoreRuntime?.reportDeveloperGameRunning(
+      if (developerProjectId != null &&
+          _isCurrentConfiguration(configurationGeneration)) {
+        runtime?.reportDeveloperGameRunning(
           projectId: developerProjectId,
           expectedRunId: _developerRunId,
         );
         await _ensureShare(showOverlay: false);
       }
     } on Object catch (error) {
-      final developerProjectId = widget.developerProjectId;
-      if (developerProjectId != null && !_disposing && mounted) {
-        widget.goCoreRuntime?.reportDeveloperGameError(
+      if (!_isCurrentConfiguration(configurationGeneration)) return;
+      if (developerProjectId != null) {
+        runtime?.reportDeveloperGameError(
           developerProjectId,
           error,
           expectedRunId: _developerRunId,
         );
       }
-      if (mounted) {
+      if (_isCurrentConfiguration(configurationGeneration)) {
         setState(() {
           _sessionError = error;
           _sessionReady = true;
@@ -559,21 +746,161 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _sessionClient = null;
   }
 
-  Future<void> _openShare() => _ensureShare(showOverlay: true);
+  Future<void> _syncLocalAvatar(
+    GameSessionConnection connection, {
+    required String userId,
+    required String nickname,
+  }) async {
+    try {
+      final profile = await const UserProfileStore().load(
+        UserProfile(userId: userId, nickname: nickname),
+      );
+      if (profile.userId != userId ||
+          profile.avatarBytes == null ||
+          profile.avatarSha256 == null) {
+        return;
+      }
+      await connection.syncAvatar(profile.avatarBytes!, profile.avatarSha256!);
+    } on Object {
+      // 头像失败不影响创建、加入或恢复会话。
+    }
+  }
 
-  Future<void> _ensureShare({required bool showOverlay}) async {
-    final multiplayer = widget.game.supportsMultiplayer;
+  Future<void> _openShare({bool throwOnError = false}) {
+    if (_shareVisible) {
+      _shareOverlayKey.currentState?.requestCloseFocus();
+      final activeOperation = _shareOpenOperation;
+      if (activeOperation == null) return Future<void>.value();
+      return throwOnError
+          ? activeOperation
+          : activeOperation.catchError((Object _) {});
+    }
+    _focusBeforeShare = FocusManager.instance.primaryFocus;
+    final activeOperation = _shareOpenOperation;
+    if (activeOperation != null) {
+      if (mounted) {
+        setState(() => _shareVisible = true);
+      }
+      return throwOnError
+          ? activeOperation
+          : activeOperation.catchError((Object _) {});
+    }
+    late final Future<void> operation;
+    operation = _ensureShare(showOverlay: true, throwOnError: true)
+        .whenComplete(() {
+          if (identical(_shareOpenOperation, operation)) {
+            _shareOpenOperation = null;
+          }
+        });
+    _shareOpenOperation = operation;
+    return throwOnError ? operation : operation.catchError((Object _) {});
+  }
+
+  Future<void> _openShareFromAppSdk() async {
+    final isCurrentAuthority =
+        _bridge?.connection.isAuthority == true || _soloBridge != null;
+    if (!mounted ||
+        _disposing ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
+    }
+    if (!isCurrentAuthority) {
+      throw const SdkCommandException(
+        'not_authority',
+        '只有当前 Authority 游戏可以打开分享界面',
+      );
+    }
+    final executor = _developerJavaScriptExecutor;
+    if (executor == null) {
+      throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
+    }
+    final active = await executor(
+      'Boolean(globalThis.navigator?.userActivation?.isActive)',
+    );
+    if (active != true && active.toString() != 'true') {
+      throw const SdkCommandException(
+        'user_activation_required',
+        '打开分享界面需要当前用户操作',
+      );
+    }
+    final shareClosedAt = _shareClosedAt;
+    if (!_shareVisible &&
+        shareClosedAt != null &&
+        DateTime.now().difference(shareClosedAt) < _sdkShareReopenCooldown) {
+      throw const SdkCommandException('rate_limited', '分享界面刚刚关闭，请稍后再试');
+    }
+    try {
+      await _openShare(throwOnError: true);
+    } on SdkCommandException {
+      rethrow;
+    } on Object {
+      throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
+    }
+  }
+
+  Future<void> _showToolDockFromSdk() async {
+    if (!mounted ||
+        _disposing ||
+        _shareVisible ||
+        _debugVisible ||
+        _infoVisible ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    if (!_toolDockController.showFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<void> _hideToolDockFromSdk() async {
+    if (!mounted || _disposing) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    if (!_toolDockController.hideFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    }
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<void> _ensureShare({
+    required bool showOverlay,
+    bool throwOnError = false,
+  }) async {
+    final configurationGeneration = _configurationGeneration;
+    final shareGeneration = _shareGeneration;
+    final game = widget.game;
+    final multiplayer = game.supportsMultiplayer;
     final bridge = _bridge;
+    final soloBridge = _soloBridge;
     final runtime = widget.goCoreRuntime;
-    final gameRootAsset = widget.game.entry.packageRootAssetPath;
-    final gameRootFile = widget.game.entry.packageRootFilePath;
+    final gameRootAsset = game.entry.packageRootAssetPath;
+    final gameRootFile = game.entry.packageRootFilePath;
     final hasGameRoot = gameRootAsset != null || gameRootFile != null;
     final canShareMultiplayer =
         bridge != null && bridge.connection.isAuthority && runtime != null;
+    bool isCurrentOperation() =>
+        _isCurrentConfiguration(configurationGeneration) &&
+        shareGeneration == _shareGeneration &&
+        identical(_bridge, bridge) &&
+        identical(_soloBridge, soloBridge);
+    void failIfRequested() {
+      if (throwOnError) {
+        throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
+      }
+    }
+
+    if (!isCurrentOperation()) {
+      failIfRequested();
+      return;
+    }
     if (!hasGameRoot || (multiplayer && !canShareMultiplayer)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('当前页面不能开启浏览器分享。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.tr('game.share_unavailable'))),
+      );
+      if (throwOnError) {
+        throw const SdkCommandException('ui_unavailable', '当前页面不能开启浏览器分享');
+      }
       return;
     }
     if (_webGateway != null || _shareLoading) {
@@ -589,70 +916,99 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     });
     GameStorageService? soloStorage;
     GameWebGateway? gateway;
+    var localGrantActive = false;
+    Future<void> cleanupLocalResources() async {
+      await gateway?.close();
+      gateway = null;
+      await soloStorage?.close();
+      soloStorage = null;
+      if (localGrantActive) {
+        localGrantActive = false;
+        try {
+          await bridge?.connection.closeShare();
+        } on Object catch (closeError) {
+          debugPrint('回收浏览器分享授权失败: $closeError');
+        }
+      }
+      if (shareGeneration == _shareGeneration) {
+        _shareGrantActive = false;
+      }
+    }
+
     try {
       late final String shareToken;
       late final GameStorageService storage;
       if (multiplayer) {
         final grant = await bridge!.connection.openShare();
+        localGrantActive = true;
+        if (!isCurrentOperation()) {
+          await cleanupLocalResources();
+          failIfRequested();
+          return;
+        }
         _shareGrantActive = true;
         shareToken = grant.token;
         storage = bridge.storage;
       } else {
-        final localStorage = await _soloBridge?.ensureStorage();
+        final localStorage = await soloBridge?.ensureStorage();
+        if (!isCurrentOperation()) {
+          failIfRequested();
+          return;
+        }
         soloStorage = localStorage == null
-            ? await GameStorageService.create(gameId: widget.game.id)
+            ? await GameStorageService.create(gameId: game.id)
             : null;
+        if (!isCurrentOperation()) {
+          await cleanupLocalResources();
+          failIfRequested();
+          return;
+        }
         shareToken = _newStandaloneShareToken();
         storage = localStorage ?? soloStorage!;
       }
-      gateway = await startGameWebGateway(
+      final startedGateway = await startGameWebGateway(
         gameRootAssetPath: gameRootAsset ?? '',
         gameRootFilePath: gameRootFile,
         multiplayer: multiplayer,
         displayMode: multiplayer
             ? bridge!.connection.snapshot.displayMode
             : 'multi_screen',
-        orientation: widget.game.orientation,
-        controllerOrientation: widget.game.controllerOrientation,
-        gameEntryPath: widget.game.entry.gameEntryPath,
-        controllerEntryPath: widget.game.entry.controllerEntryPath,
-        gameName: widget.game.name,
-        gameSdkVersion: widget.game.sdkVersion.isEmpty
-            ? null
-            : widget.game.sdkVersion,
-        appSdkVersion: widget.game.appSdkVersion.isEmpty
-            ? null
-            : widget.game.appSdkVersion,
-        requiredCapabilities: widget.game.capabilities.required.toList(),
-        controllerRequiredCapabilities: widget
-            .game
-            .capabilities
-            .controllerRequired
+        orientation: game.orientation,
+        controllerOrientation: game.controllerOrientation,
+        gameEntryPath: game.entry.gameEntryPath,
+        controllerEntryPath: game.entry.controllerEntryPath,
+        gameName: game.name,
+        gameSdkVersion: game.sdkVersion.isEmpty ? null : game.sdkVersion,
+        appSdkVersion: game.appSdkVersion.isEmpty ? null : game.appSdkVersion,
+        requiredCapabilities: game.capabilities.required.toList(),
+        controllerRequiredCapabilities: game.capabilities.controllerRequired
             .toList(),
         coreEndpoint: multiplayer ? runtime!.endpoint : null,
         joinCode: multiplayer ? bridge!.connection.snapshot.joinCode : null,
         shareToken: shareToken,
         storage: storage,
       );
-      final links = await gateway.shareLinks();
-      if (!mounted) {
-        await gateway.close();
-        await soloStorage?.close();
-        if (_shareGrantActive) {
-          _shareGrantActive = false;
-          await bridge?.connection.closeShare();
-        }
+      gateway = startedGateway;
+      if (!isCurrentOperation()) {
+        await cleanupLocalResources();
+        failIfRequested();
+        return;
+      }
+      final links = await startedGateway.shareLinks();
+      if (!isCurrentOperation()) {
+        await cleanupLocalResources();
+        failIfRequested();
         return;
       }
       setState(() {
-        _webGateway = gateway;
+        _webGateway = startedGateway;
         _soloShareStorage = soloStorage;
         _shareLinks = links;
         _selectedShareLink = links.isEmpty ? null : links.first;
         _shareLoading = false;
       });
       final developerProjectId = widget.developerProjectId;
-      if (developerProjectId != null && !_disposing && mounted) {
+      if (developerProjectId != null && isCurrentOperation()) {
         runtime?.reportDeveloperGameRunning(
           projectId: developerProjectId,
           expectedRunId: _developerRunId,
@@ -661,37 +1017,44 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         );
       }
     } on Object catch (error) {
-      await gateway?.close();
-      await soloStorage?.close();
-      if (_shareGrantActive) {
-        _shareGrantActive = false;
-        try {
-          await bridge?.connection.closeShare();
-        } on Object catch (closeError) {
-          debugPrint('回收浏览器分享授权失败: $closeError');
-        }
-      }
+      await cleanupLocalResources();
+      final isCurrent = isCurrentOperation();
       final developerProjectId = widget.developerProjectId;
-      if (developerProjectId != null && !_disposing && mounted) {
+      if (developerProjectId != null && isCurrent) {
         runtime?.reportDeveloperGameError(
           developerProjectId,
           error,
           expectedRunId: _developerRunId,
         );
       }
-      if (mounted) {
+      if (isCurrent) {
         setState(() {
           _shareError = error;
           _shareLoading = false;
         });
       }
+      if (throwOnError) rethrow;
     }
   }
 
   Future<void> _hideShare() async {
-    if (mounted) {
-      setState(() => _shareVisible = false);
-    }
+    if (!mounted || !_shareVisible) return;
+    final focusBeforeShare = _focusBeforeShare;
+    final bridge = _webViewBridge;
+    _focusBeforeShare = null;
+    _shareClosedAt = DateTime.now();
+    setState(() => _shareVisible = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (focusBeforeShare != null &&
+          focusBeforeShare.canRequestFocus &&
+          focusBeforeShare.context != null) {
+        focusBeforeShare.requestFocus();
+      } else {
+        _toolDockController.restoreFocus();
+      }
+      bridge?.restoreGameContentFocus();
+    });
   }
 
   Future<void> _loadRelaySources() async {
@@ -701,7 +1064,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _relaySources = const [];
-          _relayError = '当前运行环境未启用在线游戏源';
+          _relayError = context.tr('game.relay_catalog_unavailable');
         });
       }
       return;
@@ -736,18 +1099,21 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final declaration = probe.declaration;
     final relayDeclaration = declaration?.relay;
     if (!probe.supportsGameRelay || relayDeclaration == null) {
-      setState(() => _relayError = '该游戏源未声明公共联机中转能力');
+      setState(() => _relayError = context.tr('game.relay_not_declared'));
       return;
     }
     if (relayDeclaration.transport != 'playmesh-tcp-upgrade') {
-      setState(() => _relayError = '当前 App 不支持该游戏源的中转协议');
+      setState(
+        () => _relayError = context.tr('game.relay_transport_unsupported'),
+      );
       return;
     }
     if (relayDeclaration.protocolVersion != relayProtocolVersion) {
       setState(
-        () => _relayError =
-            '当前 App 不支持该游戏源的中转协议版本：'
-            '${relayDeclaration.protocolVersion}',
+        () => _relayError = context.tr(
+          'game.relay_version_unsupported',
+          arguments: {'version': relayDeclaration.protocolVersion},
+        ),
       );
       return;
     }
@@ -762,11 +1128,12 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     RelayHostSession? session;
     try {
       await _ensureShare(showOverlay: false);
+      if (!mounted || _disposing) return;
       final gateway = _webGateway;
       final runtime = widget.goCoreRuntime;
       final entry = _selectedShareLink ?? _shareLinks.firstOrNull;
       if (gateway == null || runtime == null || entry == null) {
-        throw StateError('当前游戏尚未建立可供中转使用的本地分享链路');
+        throw StateError(context.tr('game.relay_local_share_missing'));
       }
       session = await startRelayHostSession(
         serverBaseUri: relayDeclaration.publicBaseUrl,
@@ -838,22 +1205,48 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
-  void _openGameInfo() {
-    showModalBottomSheet<void>(
+  Future<void> _openGameInfo() async {
+    if (_infoVisible || !mounted) return;
+    _infoVisible = true;
+    final playerRange = widget.game.minPlayers == widget.game.maxPlayers
+        ? context.tr(
+            'library.player_count',
+            arguments: {'count': widget.game.minPlayers},
+          )
+        : context.tr(
+            'library.player_range',
+            arguments: {
+              'min': widget.game.minPlayers,
+              'max': widget.game.maxPlayers,
+            },
+          );
+    final description =
+        widget.game.description.trim().isNotEmpty ||
+            widget.game.manifestError == null
+        ? widget.game.description
+        : context.tr('game.repair_description');
+    await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xff20242b),
       barrierColor: const Color(0x99000000),
       builder: (context) => GameToolInfoSheet(
         title: widget.game.name,
-        description: widget.game.description,
+        description: description,
         labels: [
-          widget.game.entry.statusLabel,
-          widget.game.displayModeLabel,
-          widget.game.playerRangeLabel,
-          widget.game.modeLabel,
+          widget.game.manifestError == null && widget.game.sdkVersion.isNotEmpty
+              ? 'Game SDK ${widget.game.sdkVersion}'
+              : context.tr('game.needs_repair'),
+          widget.game.displayMode == 'single_screen_multiplayer'
+              ? context.tr('game.display_single_screen')
+              : context.tr('game.display_multi_screen'),
+          playerRange,
+          widget.game.supportsMultiplayer
+              ? context.tr('library.multiplayer')
+              : context.tr('library.solo'),
         ],
       ),
     );
+    _infoVisible = false;
+    if (mounted) _toolDockController.restoreFocus();
   }
 
   void _openDebugLogs() {
@@ -875,9 +1268,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     setState(() => _debugVisible = true);
   }
 
-  Future<void> _hideDebugLogs() async {
+  Future<void> _hideDebugLogs({bool restoreFocus = true}) async {
     if (mounted && !_disposing) {
       setState(() => _debugVisible = false);
+      if (restoreFocus) _toolDockController.restoreFocus();
     }
     final subscription = _developerLogSubscription;
     _developerLogSubscription = null;
@@ -885,6 +1279,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   Future<void> _stopShare() async {
+    _shareGeneration += 1;
+    _shareOpenOperation = null;
+    final shareBridge = _bridge;
     await _disconnectRelay();
     final gateway = _webGateway;
     _webGateway = null;
@@ -892,6 +1289,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _soloShareStorage = null;
     final hadGrant = _shareGrantActive;
     _shareGrantActive = false;
+    _focusBeforeShare = null;
+    _shareClosedAt = null;
     if (!_disposing && mounted) {
       setState(() {
         _shareVisible = false;
@@ -905,7 +1304,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     await soloStorage?.close();
     if (hadGrant) {
       try {
-        await _bridge?.connection.closeShare();
+        await shareBridge?.connection.closeShare();
       } on Object catch (error) {
         debugPrint('关闭浏览器分享失败: $error');
       }
@@ -913,25 +1312,34 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   Future<void> _restartGame() async {
+    if (_infoVisible && mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
     final bridge = _bridge;
     final soloBridge = _soloBridge;
     await _webViewBridge?.notifyLifecycle('exit');
     await bridge?.persistStorage();
     await soloBridge?.persistStorage();
     await _soloShareStorage?.flushAll();
+    await _stopShare();
+    await _hideDebugLogs(restoreFocus: false);
     if (!mounted) {
       return;
     }
     _clearLogsForNewRun();
     setState(() {
       _runtimeGeneration += 1;
+      _showPerformance = false;
+      _debugVisible = false;
+      _fullscreenError = null;
     });
+    widget.onPerformanceVisibilityChanged?.call(false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _webViewBridge?.setPerformanceVisible(_showPerformance);
     });
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('游戏内容已刷新。')));
+    ).showSnackBar(SnackBar(content: Text(context.tr('game.reloaded'))));
   }
 
   Future<Object?> _executeDeveloperJavaScript(String source) {
@@ -960,6 +1368,56 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     widget.onPerformanceVisibilityChanged?.call(_showPerformance);
   }
 
+  void _handleRuntimeBack() {
+    if (_toolDockController.isMoving) {
+      _toolDockController.closeTopLayer();
+      return;
+    }
+    if (_debugVisible) {
+      unawaited(_hideDebugLogs());
+      return;
+    }
+    if (_shareVisible) {
+      unawaited(_hideShare());
+      return;
+    }
+    if (_toolDockController.closeTopLayer()) return;
+    if (_fullscreenError != null) {
+      setState(() => _fullscreenError = null);
+      return;
+    }
+    unawaited(_returnToPrevious());
+  }
+
+  void _openToolsFromShortcut() {
+    if (_shareVisible || _debugVisible || _infoVisible) return;
+    _toolDockController.openTools();
+  }
+
+  void _moveToolsFromShortcut() {
+    if (_shareVisible || _debugVisible || _infoVisible) return;
+    _toolDockController.beginMoveMode();
+  }
+
+  void _resetTransientUiForReconnect() {
+    if (!mounted || _disposing) return;
+    if (_infoVisible && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    unawaited(_hideDebugLogs(restoreFocus: false));
+    _focusBeforeShare = null;
+    _shareClosedAt = null;
+    setState(() {
+      _runtimeGeneration += 1;
+      _showPerformance = false;
+      _shareVisible = false;
+      _debugVisible = false;
+      _fullscreenError = null;
+    });
+    _webViewBridge?.setPerformanceVisible(false);
+    widget.onPerformanceVisibilityChanged?.call(false);
+  }
+
   Future<void> _exitFullscreen() async {
     try {
       await _orientationController.exitFullscreen();
@@ -968,9 +1426,16 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       }
     } on Object catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('退出全屏失败：$error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'game.fullscreen_exit_failed',
+              arguments: {'error': error},
+            ),
+          ),
+        ),
+      );
     }
   }
 
@@ -986,9 +1451,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     } on Object catch (error) {
       _exitOperation = null;
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('退出前保存游戏数据失败：$error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr('game.exit_save_failed', arguments: {'error': error}),
+            ),
+          ),
+        );
       }
       return;
     }
@@ -1009,6 +1478,7 @@ enum _SharePanelTab { lan, server, room }
 
 class _ShareOverlay extends StatefulWidget {
   const _ShareOverlay({
+    super.key,
     required this.joinCode,
     required this.corePort,
     required this.links,
@@ -1057,12 +1527,26 @@ class _ShareOverlay extends StatefulWidget {
 class _ShareOverlayState extends State<_ShareOverlay> {
   static const _relayPageSize = 5;
 
+  final FocusNode _closeFocusNode = FocusNode(debugLabel: 'game-share-close');
   _SharePanelTab _tab = _SharePanelTab.lan;
   String _search = '';
   int _page = 1;
 
+  void requestCloseFocus() {
+    if (_closeFocusNode.canRequestFocus) {
+      _closeFocusNode.requestFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    _closeFocusNode.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return ColoredBox(
       color: const Color(0xc7000000),
       child: SafeArea(
@@ -1078,10 +1562,10 @@ class _ShareOverlayState extends State<_ShareOverlay> {
                     maxHeight: max(120.0, viewport.maxHeight - 20),
                   ),
                   child: Theme(
-                    data: ThemeData.light(useMaterial3: true),
+                    data: Theme.of(context),
                     child: Material(
-                      color: const Color(0xfff7f8f6),
-                      borderRadius: BorderRadius.circular(24),
+                      color: colorScheme.surface,
+                      borderRadius: BorderRadius.circular(8),
                       clipBehavior: Clip.antiAlias,
                       child: SizedBox(
                         width: panelWidth,
@@ -1101,18 +1585,28 @@ class _ShareOverlayState extends State<_ShareOverlay> {
                                     Expanded(
                                       child: Text(
                                         widget.joinCode == null
-                                            ? '分享游戏'
-                                            : '加入对局 · ${widget.joinCode}',
-                                        style: const TextStyle(
-                                          color: Color(0xff17191d),
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w800,
-                                        ),
+                                            ? context.tr('game.share_title')
+                                            : context.tr(
+                                                'game.join_code_title',
+                                                arguments: {
+                                                  'code': widget.joinCode,
+                                                },
+                                              ),
+                                        style:
+                                            const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w800,
+                                            ).copyWith(
+                                              color: colorScheme.onSurface,
+                                            ),
                                       ),
                                     ),
                                     IconButton(
-                                      tooltip: '关闭分享',
-                                      color: const Color(0xff17191d),
+                                      key: const Key('game-share-close'),
+                                      focusNode: _closeFocusNode,
+                                      autofocus: true,
+                                      tooltip: context.tr('game.share_close'),
+                                      color: colorScheme.onSurface,
                                       onPressed: () =>
                                           unawaited(widget.onClose()),
                                       icon: const Icon(Icons.close),
@@ -1156,14 +1650,29 @@ class _ShareOverlayState extends State<_ShareOverlay> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
         children: [
-          _tabButton(_SharePanelTab.lan, Icons.lan_outlined, '局域网'),
+          _tabButton(
+            _SharePanelTab.lan,
+            Icons.lan_outlined,
+            context.tr('game.share_lan'),
+          ),
           const SizedBox(width: 8),
-          _tabButton(_SharePanelTab.server, Icons.public_outlined, '服务器'),
+          _tabButton(
+            _SharePanelTab.server,
+            Icons.public_outlined,
+            context.tr('game.share_server'),
+          ),
           const SizedBox(width: 8),
           _tabButton(
             _SharePanelTab.room,
             Icons.groups_outlined,
-            '房间状态 (${widget.players.where((player) => player.connected).length})',
+            context.tr(
+              'game.room_status_count',
+              arguments: {
+                'count': widget.players
+                    .where((player) => player.connected)
+                    .length,
+              },
+            ),
           ),
         ],
       ),
@@ -1172,12 +1681,15 @@ class _ShareOverlayState extends State<_ShareOverlay> {
 
   Widget _tabButton(_SharePanelTab value, IconData icon, String label) {
     final selected = _tab == value;
+    final colorScheme = Theme.of(context).colorScheme;
     return Expanded(
       child: Material(
-        color: selected ? const Color(0xffdcebe5) : const Color(0x08000000),
-        borderRadius: BorderRadius.circular(13),
+        color: selected
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(13),
+          borderRadius: BorderRadius.circular(8),
           onTap: () {
             setState(() => _tab = value);
             if (value == _SharePanelTab.server && widget.relaySource == null) {
@@ -1219,9 +1731,9 @@ class _ShareOverlayState extends State<_ShareOverlay> {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
-          '无法开启分享\n${widget.error}',
+          context.tr('game.share_failed', arguments: {'error': widget.error}),
           textAlign: TextAlign.center,
-          style: const TextStyle(color: Color(0xff17191d)),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
         ),
       );
     }
@@ -1270,12 +1782,9 @@ class _ShareOverlayState extends State<_ShareOverlay> {
     final query = _search.trim().toLowerCase();
     final filtered = widget.relaySources
         .where((probe) {
-          final declaration = probe.declaration!;
           final haystack = [
             probe.source.name,
             probe.source.host.toString(),
-            declaration.displayNameFor(probe.source.host),
-            declaration.author ?? '',
           ].join('\n').toLowerCase();
           return query.isEmpty || haystack.contains(query);
         })
@@ -1296,11 +1805,11 @@ class _ShareOverlayState extends State<_ShareOverlay> {
             children: [
               Expanded(
                 child: TextField(
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     isDense: true,
-                    prefixIcon: Icon(Icons.search),
-                    hintText: '搜索中转游戏源',
-                    border: OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.search),
+                    hintText: context.tr('game.relay_search'),
+                    border: const OutlineInputBorder(),
                   ),
                   onChanged: (value) => setState(() {
                     _search = value;
@@ -1310,7 +1819,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
               ),
               const SizedBox(width: 8),
               IconButton.filledTonal(
-                tooltip: '重新检测延迟',
+                tooltip: context.tr('game.relay_refresh_latency'),
                 onPressed: widget.relaySourcesLoading
                     ? null
                     : () => unawaited(widget.onLoadRelaySources()),
@@ -1328,15 +1837,18 @@ class _ShareOverlayState extends State<_ShareOverlay> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 36),
               child: Text(
-                '无法获取中转服务器\n${widget.relayError}',
+                context.tr(
+                  'game.relay_load_failed',
+                  arguments: {'error': widget.relayError},
+                ),
                 textAlign: TextAlign.center,
               ),
             )
           else if (visible.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 48),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 48),
               child: Text(
-                '已开启的在线游戏源中没有可用的联机中转服务器',
+                context.tr('game.relay_empty'),
                 textAlign: TextAlign.center,
               ),
             )
@@ -1347,7 +1859,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  tooltip: '上一页',
+                  tooltip: context.tr('common.previous_page'),
                   onPressed: page <= 1
                       ? null
                       : () => setState(() => _page = page - 1),
@@ -1355,7 +1867,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
                 ),
                 Text('$page / $pageCount'),
                 IconButton(
-                  tooltip: '下一页',
+                  tooltip: context.tr('common.next_page'),
                   onPressed: page >= pageCount
                       ? null
                       : () => setState(() => _page = page + 1),
@@ -1374,16 +1886,15 @@ class _ShareOverlayState extends State<_ShareOverlay> {
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
-      color: const Color(0x08000000),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: ListTile(
         title: Text(
-          declaration.displayNameFor(probe.source.host),
+          probe.source.name,
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (declaration.author != null) Text('作者：${declaration.author}'),
             Text('${probe.source.host} · ${probe.elapsed.inMilliseconds} ms'),
             if (homepage != null)
               TextButton.icon(
@@ -1395,7 +1906,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
                   launchUrl(homepage, mode: LaunchMode.externalApplication),
                 ),
                 icon: const Icon(Icons.open_in_new, size: 15),
-                label: const Text('游戏源主页'),
+                label: Text(context.tr('game.source_homepage')),
               ),
           ],
         ),
@@ -1403,7 +1914,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
           onPressed: widget.relayConnecting
               ? null
               : () => unawaited(widget.onConnectRelay(probe)),
-          child: const Text('连接'),
+          child: Text(context.tr('game.connect')),
         ),
       ),
     );
@@ -1420,14 +1931,34 @@ class _ShareOverlayState extends State<_ShareOverlay> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          declaration.displayNameFor(source.source.host),
+          source.source.name,
           style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
-        Text('游戏源：${source.source.host}'),
-        Text('中转地址：${declaration.relay!.publicBaseUrl}'),
-        Text('探测延迟：${source.elapsed.inMilliseconds} ms'),
-        Text('连接状态：${_relayStatusLabel(widget.relayStatus)}'),
+        Text(
+          context.tr(
+            'game.source_address',
+            arguments: {'address': source.source.host},
+          ),
+        ),
+        Text(
+          context.tr(
+            'game.relay_address',
+            arguments: {'address': declaration.relay!.publicBaseUrl},
+          ),
+        ),
+        Text(
+          context.tr(
+            'game.relay_latency',
+            arguments: {'latency': source.elapsed.inMilliseconds},
+          ),
+        ),
+        Text(
+          context.tr(
+            'game.connection_status',
+            arguments: {'status': _relayStatusLabel(widget.relayStatus)},
+          ),
+        ),
         if (widget.relayError != null) ...[
           const SizedBox(height: 8),
           Text(
@@ -1445,7 +1976,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
           OutlinedButton.icon(
             onPressed: () => _copyLink(context, invitation),
             icon: const Icon(Icons.copy),
-            label: const Text('复制服务器加入链接'),
+            label: Text(context.tr('game.server_join_link_copy')),
           ),
         ],
         const SizedBox(height: 8),
@@ -1454,7 +1985,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
               ? null
               : () => unawaited(widget.onDisconnectRelay()),
           icon: const Icon(Icons.link_off),
-          label: const Text('断开服务器'),
+          label: Text(context.tr('game.server_disconnect')),
         ),
       ],
     );
@@ -1485,21 +2016,30 @@ class _ShareOverlayState extends State<_ShareOverlay> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '已连接 $connected / 已加入 ${widget.players.length}',
+            context.tr(
+              'game.room_player_summary',
+              arguments: {
+                'connected': connected,
+                'joined': widget.players.length,
+              },
+            ),
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 10),
           if (widget.players.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 48),
-              child: Text('暂无已加入玩家', textAlign: TextAlign.center),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 48),
+              child: Text(
+                context.tr('game.room_empty'),
+                textAlign: TextAlign.center,
+              ),
             )
           else
             for (final player in widget.players)
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 elevation: 0,
-                color: const Color(0x08000000),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: ListTile(
                   leading: CircleAvatar(
                     child: Icon(
@@ -1516,7 +2056,11 @@ class _ShareOverlayState extends State<_ShareOverlay> {
                     '${_playerSourceLabel(player.source)} · '
                     '${player.latencyMs == null ? '-- ms' : '${player.latencyMs} ms'}',
                   ),
-                  trailing: Text(player.connected ? '在线' : '已断开'),
+                  trailing: Text(
+                    player.connected
+                        ? context.tr('game.player_online')
+                        : context.tr('game.player_disconnected'),
+                  ),
                 ),
               ),
         ],
@@ -1536,8 +2080,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 18)],
+        borderRadius: BorderRadius.circular(8),
       ),
       child: QrImageView(data: value, size: size),
     );
@@ -1550,24 +2093,28 @@ class _ShareOverlayState extends State<_ShareOverlay> {
   Uri? _lanInvitation(Uri? link) => _invitationLink(link);
 
   String _relayStatusLabel(RelayConnectionStatus status) => switch (status) {
-    RelayConnectionStatus.connecting => '连接中',
-    RelayConnectionStatus.connected => '已连接',
-    RelayConnectionStatus.retrying => '重试中',
-    RelayConnectionStatus.disconnected => '已断开',
+    RelayConnectionStatus.connecting => context.tr(
+      'game.connection_connecting',
+    ),
+    RelayConnectionStatus.connected => context.tr('game.connection_connected'),
+    RelayConnectionStatus.retrying => context.tr('game.connection_retrying'),
+    RelayConnectionStatus.disconnected => context.tr(
+      'game.connection_disconnected',
+    ),
   };
 
   String _playerSourceLabel(String source) => switch (source) {
-    'server' => '服务器',
-    'lan_app' => '局域网 App',
-    'lan_html' => '局域网 HTML',
+    'server' => context.tr('game.player_source_server'),
+    'lan_app' => context.tr('game.player_source_lan_app'),
+    'lan_html' => context.tr('game.player_source_lan_html'),
     _ => source,
   };
 
   void _copyLink(BuildContext context, Uri link) {
     unawaited(Clipboard.setData(ClipboardData(text: link.toString())));
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('加入链接已复制')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.tr('game.join_link_copied'))),
+    );
   }
 }
 
@@ -1588,7 +2135,7 @@ class _ShareAddressList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '可用网络地址',
+          context.tr('game.available_addresses'),
           style: Theme.of(
             context,
           ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
@@ -1599,9 +2146,9 @@ class _ShareAddressList extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: Material(
               color: link == selectedLink
-                  ? const Color(0xffdcebe5)
-                  : const Color(0x0a000000),
-              borderRadius: BorderRadius.circular(15),
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
               child: ListTile(
                 key: ValueKey('share-link-${link.host}'),
                 contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
@@ -1616,14 +2163,16 @@ class _ShareAddressList extends StatelessWidget {
                   style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
                 ),
                 trailing: IconButton(
-                  tooltip: '复制游戏分享链接',
+                  tooltip: context.tr('game.share_link_copy'),
                   onPressed: () {
                     unawaited(
                       Clipboard.setData(ClipboardData(text: link.toString())),
                     );
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('游戏分享链接已复制')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(context.tr('game.share_link_copied')),
+                      ),
+                    );
                   },
                   icon: const Icon(Icons.copy),
                 ),
@@ -1632,7 +2181,7 @@ class _ShareAddressList extends StatelessWidget {
             ),
           ),
         Text(
-          '扫码可在 Playmesh 中直接加入，也可复制链接在浏览器打开。链接在退出游戏前持续有效。',
+          context.tr('game.share_address_description'),
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
@@ -1653,9 +2202,10 @@ class _FullscreenNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Material(
-      color: const Color(0xee111827),
-      borderRadius: BorderRadius.circular(16),
+      color: colorScheme.inverseSurface,
+      borderRadius: BorderRadius.circular(8),
       elevation: 8,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
@@ -1665,16 +2215,25 @@ class _FullscreenNotice extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                '未能进入全屏，游戏仍可正常游玩。\n$error',
+                context.tr(
+                  'game.fullscreen_notice',
+                  arguments: {'error': error},
+                ),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, height: 1.35),
+                style: TextStyle(
+                  color: colorScheme.onInverseSurface,
+                  height: 1.35,
+                ),
               ),
             ),
-            TextButton(onPressed: onRetry, child: const Text('重试')),
+            TextButton(
+              onPressed: onRetry,
+              child: Text(context.tr('common.retry')),
+            ),
             IconButton(
-              tooltip: '关闭提示',
-              color: Colors.white70,
+              tooltip: context.tr('game.notice_close'),
+              color: colorScheme.onInverseSurface,
               onPressed: onDismiss,
               icon: const Icon(Icons.close),
             ),
@@ -1693,26 +2252,31 @@ class _GameStartFailure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return ColoredBox(
-      color: const Color(0xff241516),
+      color: colorScheme.errorContainer,
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Colors.white, size: 42),
+              Icon(
+                Icons.error_outline,
+                color: colorScheme.onErrorContainer,
+                size: 42,
+              ),
               const SizedBox(height: 12),
               Text(
                 error.toString(),
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: colorScheme.onErrorContainer),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () => unawaited(onRetry()),
                 icon: const Icon(Icons.refresh),
-                label: const Text('重试'),
+                label: Text(context.tr('common.retry')),
               ),
             ],
           ),

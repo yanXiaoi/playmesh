@@ -113,7 +113,7 @@ http://<authority-host>:<port>/<declared-app-entry>?channelId=<channelId>&token=
 1. 并发获取每个源的 `/apps/info`。
 2. 筛选 `supportsGameRelay == true`。
 3. 异步测量本次请求延迟。
-4. 分页显示并支持按名称、Host、作者搜索。
+4. 分页显示并支持按名称、Host、建造者搜索。
 5. 每个源右侧提供“连接”按钮。
 
 连接后切换为当前服务器详情，显示服务器声明、最新延迟、连接状态、App
@@ -179,9 +179,9 @@ GET /apps/info
 
 ```json
 {
-  "catalogApiVersion": "1.4.0",
+  "catalogApiVersion": "2.0.0",
   "name": "Playmesh 公共游戏源",
-  "author": "服务器作者",
+  "author": "服务器建造者",
   "homepage": "https://example.com",
   "supportsGameRelay": true,
   "relay": {
@@ -195,7 +195,8 @@ GET /apps/info
 }
 ```
 
-`name`、`author`、`homepage` 可选。名称缺失时客户端显示格式化后的
+`name`、`author`、`homepage` 可选；`author` 在游戏源界面显示为“建造者”，不要
+与游戏 Manifest 的“发布者”标签混用。名称缺失时客户端显示格式化后的
 `host:port`，HTTP 80 和 HTTPS 443 省略端口。`publicBaseUrl` 是 Go Server
 明确配置并返回的公共中转 Origin，只能包含 HTTP/HTTPS 协议、主机和可选端口；
 App 的 Host Upgrade、Client Upgrade 和最终二维码都必须使用它，不能从游戏源
@@ -204,7 +205,9 @@ Host 或当前请求头推导。外层是否使用 TLS 直接由 `publicBaseUrl`
 配置，App 用它作为主机动态连接池上限，不在客户端硬编码服务器容量。可选字段
 不存在时直接省略。
 
-现有 `/apps/list` 和 `/apps/download` 保持原响应契约。
+Catalog `2.0.0` 的 `/apps/list` 对每个 `gameId` 只返回当前 latest offer；
+`/apps/download` 必须携带 `gameId + version`，图标使用同源独立 URL。Relay 只读取
+`/apps/info` 中的中转声明，不改变这些 Catalog 规则。
 
 ### 4.1 App 自带游戏源
 
@@ -212,13 +215,13 @@ App 自带的游戏库分享服务器不支持公共中转，声明固定为：
 
 ```json
 {
-  "catalogApiVersion": "1.4.0",
+  "catalogApiVersion": "2.0.0",
   "name": "{用户昵称}的游戏库",
   "supportsGameRelay": false
 }
 ```
 
-不返回作者、主页或 `relay`，用户不能修改这些固定字段。
+不返回建造者、主页或 `relay`，用户不能修改这些固定字段。
 
 ## 5. Authority 暴露面
 

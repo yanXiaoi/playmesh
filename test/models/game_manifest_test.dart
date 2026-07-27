@@ -17,7 +17,6 @@ void main() {
     'displayModes': ['single_screen_multiplayer'],
     'players': {'min': 2, 'max': 5},
     'authority': {'entry': 'app/static/js/service/index.js'},
-    'permissions': ['keyboard'],
   };
 
   test('解析完整的多人游戏清单', () {
@@ -34,6 +33,19 @@ void main() {
     expect(manifest.controllerOrientation, GameOrientation.portrait);
   });
 
+  test('未知字段静默忽略且已知字段投影写回', () {
+    final json = validManifest()
+      ..['permissions'] = ['keyboard']
+      ..['icon'] = 'app/legacy.png'
+      ..['redundant'] = {'nested': true};
+
+    final encoded = GameManifest.fromJson(json).toJson();
+
+    expect(encoded, isNot(contains('permissions')));
+    expect(encoded, isNot(contains('icon')));
+    expect(encoded, isNot(contains('redundant')));
+  });
+
   test('单屏多人必须声明控制器方向', () {
     final json = validManifest()..remove('controllerOrientation');
 
@@ -46,12 +58,21 @@ void main() {
     expect(() => GameManifest.fromJson(json), throwsFormatException);
   });
 
-  test('旧清单缺少作者和最后上传时间时使用兼容默认值', () {
+  test('旧清单缺少发布者时保留空动态值并兼容缺省时间', () {
     final missingAuthor = validManifest()..remove('author');
     final missingTimestamp = validManifest()..remove('lastModifiedAt');
 
-    expect(GameManifest.fromJson(missingAuthor).author, '佚名');
+    expect(GameManifest.fromJson(missingAuthor).author, isEmpty);
     expect(GameManifest.fromJson(missingTimestamp).lastModifiedAt, isNull);
+  });
+
+  test('拒绝可能逃逸安装目录或超过跨端上限的游戏 ID', () {
+    final traversal = validManifest()..['id'] = '../outside';
+    final overlong = validManifest()
+      ..['id'] = 'a${List<String>.filled(64, 'b').join()}';
+
+    expect(() => GameManifest.fromJson(traversal), throwsFormatException);
+    expect(() => GameManifest.fromJson(overlong), throwsFormatException);
   });
 
   test('解析自定义游戏和控制器入口', () {

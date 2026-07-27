@@ -16,7 +16,11 @@ interface Window { playmeshApp: PlaymeshAppApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "2.1.1";
+  const PLAYMESH_APP_SDK_VERSION = "2.2.0";
+  const PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY =
+    typeof Symbol === "function" && typeof Symbol.for === "function"
+      ? Symbol.for("playmesh.platform-ui.configuration")
+      : "__PLAYMESH_PLATFORM_UI_CONFIGURATION__";
 
   let sequence = 0;
   let bootstrap = null;
@@ -94,7 +98,9 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     pending.delete(message.requestId);
     global.clearTimeout(operation.timer);
     if (message.type === "app.command.error") {
-      operation.reject(new Error(message.error || "Playmesh App Bridge 调用失败"));
+      const error = new Error(message.error || "Playmesh App Bridge 调用失败");
+      if (typeof message.code === "string") error.code = message.code;
+      operation.reject(error);
     } else {
       operation.resolve(clone(message.result));
     }

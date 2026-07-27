@@ -19,6 +19,10 @@ interface PlaymeshPlayer {
   id: string;
   /** 当前展示昵称，长度为 1～32 个字符。 */
   nickname: string;
+  /** App 玩家同步成功后的同源头像路径；未同步及 HTML 玩家为 `null`。 */
+  avatar: string | null;
+  /** 当前玩家在会话中的参与角色；Authority 资格仍以 `session.isAuthority()` 为准。 */
+  role: "authority" | "authority_player" | "player";
   /** 玩家是否拥有在线连接；离线玩家可以保留在成员列表中等待重连。 */
   connected: boolean;
 }
@@ -40,6 +44,16 @@ interface PlaymeshSessionSnapshot {
   /** 允许加入的最大玩家数。 */
   maxPlayers?: number;
   [key: string]: unknown;
+}
+
+/** 玩家连接状态发生变化时的稳定事件载荷。 */
+interface PlaymeshPlayerConnectionEvent {
+  /** 发生连接变化的玩家。 */
+  player: PlaymeshPlayer;
+  /** 应用本次变化后的会话快照。 */
+  session: PlaymeshSessionSnapshot;
+  /** 该玩家是否就是当前页面参与的玩家。 */
+  isCurrentPlayer: boolean;
 }
 
 /** `await playmesh.ready` 的初始化结果。 */
@@ -265,6 +279,14 @@ interface PlaymeshAppApi {
   readonly ready: Promise<unknown>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
   isAvailable(): boolean;
+  /** 打开 App 的“二维码与链接”界面；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.openSharePanel */
+  openSharePanel(): Promise<void>;
+  /** 显示并聚焦 App 游戏工具栏。 @playmesh-completion playmesh.app.showToolDock */
+  showToolDock(): Promise<void>;
+  /** 隐藏 App 游戏工具栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideToolDock */
+  hideToolDock(): Promise<void>;
+  /** 请求 App 结束当前游戏并返回上一页。 @playmesh-completion playmesh.app.exitGame */
+  exitGame(): Promise<void>;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
     getCurrent(): PlaymeshAppIdentity | null;
@@ -297,16 +319,21 @@ interface PlaymeshApi {
   readonly ready: Promise<PlaymeshBootstrap>;
   /** 当前设备的 App Bridge 能力；普通浏览器中 `isAvailable()` 为 false。 */
   readonly app: PlaymeshAppApi;
+  /** 当前游戏页面的只读运行环境信息；不包含平台 UI 词典。 */
+  readonly runtime: {
+    /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.runtime.getLocale */
+    getLocale(): string;
+  };
   /** 对局状态、Authority 身份和玩家成员事件。 */
   readonly session: {
     /** 订阅会话快照；注册后若已就绪会立即回调。 @returns 取消订阅函数。 @playmesh-completion playmesh.session.onStateChange */
     onStateChange(callback: (session: PlaymeshSessionSnapshot | null) => void): PlaymeshUnsubscribe;
     /** 玩家第一次加入时回调。重连不会重复触发本事件。 @playmesh-completion playmesh.session.onPlayerJoin */
-    onPlayerJoin(callback: (player: PlaymeshPlayer) => void): PlaymeshUnsubscribe;
+    onPlayerJoin(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
     /** 玩家连接断开时回调；成员可能仍留在会话中。 @playmesh-completion playmesh.session.onPlayerLeave */
-    onPlayerLeave(callback: (player: PlaymeshPlayer) => void): PlaymeshUnsubscribe;
+    onPlayerLeave(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
     /** 离线玩家使用相同 ID 恢复连接时回调。 @playmesh-completion playmesh.session.onPlayerReconnect */
-    onPlayerReconnect(callback: (player: PlaymeshPlayer) => void): PlaymeshUnsubscribe;
+    onPlayerReconnect(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
     /** 当前页面是否是固定 Authority Client。不要根据 `players[0]` 推断。 @playmesh-completion playmesh.session.isAuthority */
     isAuthority(): boolean;
     /** 返回最近会话快照；单机分享页或尚未就绪时返回 `null`。 @playmesh-completion playmesh.session.getCurrent */
@@ -408,7 +435,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "2.2.3";
+  const PLAYMESH_SDK_VERSION = "2.4.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -457,7 +484,7 @@ interface Window { playmesh: PlaymeshApi; }
   let latencyDiagnostics = null;
   let latencyTimer = null;
   let latencyProbeSequence = 0;
-  let performanceVisible = true;
+  let performanceVisible = false;
   let performanceUi = null;
   let syncAuthorityRuntime = null;
   let currentSyncSnapshot = null;

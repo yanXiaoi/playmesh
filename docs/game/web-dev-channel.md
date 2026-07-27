@@ -8,6 +8,12 @@ App 端不维护独立文件编辑器。开启开发者模式后，设置页可�
 
 工作区页面、样式、脚本、CodeMirror 和默认项目骨架统一位于 `playmesh-library/public/developer/`。Dart 网关只负责鉴权、静态资源装载和 API/SSE，不内嵌页面模板或项目骨架。
 
+工作区是 App 界面的一部分，语言跟随 App。全部静态和动态显示文案都由 App 当前
+locale 的 `app.json` 提供，Developer Gateway/内置 WebView 只传递已经解析 fallback
+的 `locale + messages`；App 切换语言后，已打开工作区即时更新。工作区不会另外保存
+语言偏好，也不维护独立的中英文词典。API 路径、机器错误 code、游戏源码和日志原文
+保持不翻译。
+
 用户必须先在 App 设置中主动开启开发者模式。开发者网页通道只在开发者模式有效，关闭后立即失效。
 
 开发者 Gateway 使用独立监听端口，不修改 Go Core 的动态端口。按当前产品决策，Gateway 绑定 `0.0.0.0`；设置页默认端口为 `16666`，用户可以修改，并只展示当前设备解析到的局域网 IPv4 链接。端口被占用或无权限时必须显示明确错误，不得重启 Core 或中断当前游戏会话。设置页展示的开发者地址、文档地址和游戏分享地址都必须支持长按或拖选复制。
@@ -36,7 +42,7 @@ http://192.168.1.10:16666/dev/7f4c.../workspace?token=...
 
 ### Android 后台与锁屏
 
-Android 开启开发者模式时必须启动 `specialUse` Foreground Service，并由该服务持有当前 App 的同一个 FlutterEngine。服务期间使用 CPU WakeLock 与高性能 Wi-Fi Lock，使 Developer Gateway 在切换到其他 App、Activity 被系统回收或设备锁屏后仍能处理局域网请求。系统必须持续披露前台服务：取得通知权限时显示常驻通知；Android 13 及以上若用户拒绝通知权限，系统仍会在 Foreground Service 任务管理入口披露。关闭开发者模式时同步停止服务并释放两个锁。
+Android 开启开发者模式时必须启动 `specialUse` Foreground Service，并由该服务持有当前 App 的同一个 FlutterEngine。服务期间使用 CPU WakeLock 与高性能 Wi-Fi Lock，使 Developer Gateway 在切换到其他 App、Activity 被系统回收或设备锁屏后仍能处理局域网请求。系统必须持续披露前台服务：取得通知权限时显示常驻通知；Android 13 及以上若用户拒绝通知权限，系统仍会在 Foreground Service 任务管理入口披露。通知渠道名、渠道说明、标题和正文只从当前 App `app.json` 的 `platform.android.developer_service.*` 投影取得，原生层不维护 `strings.xml` 副本或可见中英文 fallback；端口保持独立整数参数，只替换正文中的 `{port}`。App 固定语言或跟随系统语言发生变化时，运行中的服务立即用同一端口刷新通知。关闭开发者模式时同步停止服务并释放两个锁。
 
 后台可用接口包括状态、项目与文件读写、Diff、本地历史、校验、文档、日志、事件、包操作和停止当前运行。需要真实 Activity/View 的操作必须在统一操作定义中声明 `requiresForegroundView=true`；当前包括启动项目、重启项目、执行 WebView JavaScript 和运行平台能力自检。App 位于后台、设备锁定、屏幕关闭、Activity 不存在或窗口失焦时，这些操作返回 HTTP `409`：
 
@@ -68,7 +74,7 @@ Android 开启开发者模式时必须启动 `specialUse` Foreground Service，�
 
 - 顶部只保留项目、运行、保存、AI 开发和“更多”五个入口。移动端项目选择具有 `120px` 最小宽度，四个操作按钮保留固定可点击宽度；一行不足时允许响应式换行，由项目选择独占第一行，四个操作按钮均分第二行，禁止继续压缩任一入口。空间足够时仍保持单行，尽量把纵向视口留给项目树和代码。对话控制台、WebView JS 操作台、新建文件、重启、停止、校验、文件 Diff、删除文件和数据清理统一收纳到“更多”下拉菜单。
 - 项目入口与“更多”都使用 IDEA 风格的锚点下拉菜单，按触发按钮的实时视口位置展开，不使用整页选择弹窗或固定坐标。项目菜单聚合新建项目、复制当前项目、项目设置和删除项目，列表可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，项目菜单保持展开，选定或新建项目后才能编辑。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
-- 复制项目以当前项目为来源，新项目名称和 ID 均可修改；源码、清单和公开资源进入副本，项目根目录的 `data/`、`cache/`、`.playmesh/` 不复制。普通项目设置不允许修改稳定 `id`、`author` 和 `lastModifiedAt`；复制操作通过创建新项目提供变更 ID 的正式入口。删除项目会删除源码、运行数据、缓存和本地历史，必须在项目未运行时二次确认。
+- 复制项目以当前项目为来源，新项目名称和 ID 均可修改；源码、清单和公开资源进入副本，项目根目录的 `data/`、`cache/`、`.playmesh/` 不复制。`author` 发布者元数据使用当前 App 用户昵称；普通项目设置不允许修改稳定 `id`、`author` 和 `lastModifiedAt`。复制操作通过创建新项目提供变更 ID 的正式入口。删除项目会删除源码、运行数据、缓存和本地历史，必须在项目未运行时二次确认。
 - IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑和可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
 - 能力选项必须由 `GET /dev/api/capabilities` 返回的统一插件注册表动态生成，展示中文名、用途、`apiVersion`、方法、事件以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
 - “更多 → 能力测试”始终展示全平台注册表，不按当前项目的 `capabilities.json` 过滤。`GET /dev/api/capability-tests` 读取插件自检清单；`POST` 省略 `codes` 或传空数组时测试全部插件，也可指定 code，并用 `timeoutMs`（250～10000）控制单项等待时间。工作区持续调用并回显插件版本、状态、耗时和实际结果，直到用户手动关闭测试窗口。
@@ -132,7 +138,7 @@ AI 应优先使用高层开发者 API，例如“创建项目”“修改文件�
 
 清单和能力声明使用专用高层接口：`GET/PUT /dev/api/projects/{projectId}/manifest` 读取或修改 `main.json`（请求中的 `id` 必须与当前项目一致），`GET/PUT /dev/api/projects/{projectId}/capabilities` 读取或修改可选能力声明，`GET /dev/api/capabilities` 读取统一能力注册表，`GET/POST /dev/api/capability-tests` 读取或执行平台注册表驱动的能力自检。普通文件写接口继续禁止修改 `main.json`，从而保证稳定 ID 和完整清单校验。
 
-项目级管理使用 `POST /dev/api/projects/{projectId}/copy` 和 `DELETE /dev/api/projects/{projectId}`。复制请求必须提供新的唯一 ID 与名称，作者取当前 App 用户昵称，并排除源项目的运行数据、缓存和本地历史；删除接口拒绝删除正在启动或运行的项目。两项操作都由 Developer Project Catalog 执行，网页不得直接操作目录。
+项目级管理使用 `POST /dev/api/projects/{projectId}/copy` 和 `DELETE /dev/api/projects/{projectId}`。复制请求必须提供新的唯一 ID 与名称，发布者取当前 App 用户昵称，并排除源项目的运行数据、缓存和本地历史；删除接口拒绝删除正在启动或运行的项目。两项操作都由 Developer Project Catalog 执行，网页不得直接操作目录。
 
 项目运行生命周期使用四个正式接口：`GET /dev/api/projects/{projectId}/run` 读取当前状态，`POST /run` 开始，`POST /run/restart` 刷新当前运行内容，`POST /run/stop` 停止并关闭当前游戏会话。首次启动会先移除旧游戏路由再创建新的游戏 WebView；刷新只重建当前 WebView 内容并保留现有会话。没有对应运行实例时，刷新和停止返回结构化错误。AI 在非流式调用中应优先轮询 `GET /dev/api/projects/{projectId}/run` 获取状态，并使用 `GET /dev/api/logs?limit=50` 读取诊断日志；SSE 仍用于浏览器工作区的实时体验。
 
@@ -201,7 +207,6 @@ main.json 内容
 支持的 displayModes
 当前页面角色
 可用 SDK API
-允许的 permissions
 当前 capabilities.json.required；对话为已勾选能力完整声明，Agent 为全量注册表与测试 API
 当前运行角色与项目校验报告
 最近一次结构化错误
@@ -237,7 +242,7 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.2.3` 与 App Bridge SDK `2.1.1` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL，但响应内容由按游戏清单版本选择的 Dart 兼容发行即时组装；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `2.4.0` 与 App Bridge SDK `2.2.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL，但响应内容由按游戏清单版本选择的 Dart 兼容发行即时组装；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
 
 > **AI 上下文最小披露原则：提示词只暴露游戏代码可调用的公开 SDK、当前项目声明与完成任务所必需的约束。回环代理、内部路由、中转鉴权、密钥协商和加密通道等平台实现不得进入游戏 AI 上下文。**
 

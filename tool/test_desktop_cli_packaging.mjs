@@ -7,6 +7,7 @@ const macProject = fs.readFileSync("macos/Runner.xcodeproj/project.pbxproj", "ut
 const macScript = fs.readFileSync("tool/build_dev_cli_macos.sh", "utf8");
 const release = fs.readFileSync("tool/build_release.ps1", "utf8");
 const windowsRelease = fs.readFileSync("tool/build_windows_release_ninja.ps1", "utf8");
+const coreRelease = fs.readFileSync("tool/build_go_core.ps1", "utf8");
 
 for (const [name, content] of [["Windows", windows], ["Linux", linux]]) {
   assert.match(content, /PLAYMESH_CLI_SOURCE_DIR/);
@@ -23,7 +24,15 @@ assert.match(macProject, /build_dev_cli_macos\.sh/);
 assert.match(macScript, /GOOS=darwin/);
 assert.match(macScript, /xcrun lipo -create/);
 assert.match(release, /'playmesh-cli\.exe'/);
+assert.match(release, /\[ValidateSet\('all', 'android', 'windows'\)\]/);
+assert.match(coreRelease, /\[ValidateSet\("android", "windows", "all"\)\]/);
+assert.match(release, /-SkipSdkGeneration/);
 assert.match(windowsRelease, /pubspec\.yaml version must use MAJOR\.MINOR\.PATCH\+BUILD/);
+assert.match(windowsRelease, /\[switch\]\$SkipSdkGeneration/);
+assert.match(
+  windowsRelease,
+  /if \(-not \$SkipSdkGeneration\) \{\s*& \(Join-Path \$PSScriptRoot 'generate_sdk\.ps1'\)\s*\}/,
+);
 assert.match(windowsRelease, /-DPLAYMESH_FLUTTER_VERSION=\$version/);
 assert.match(windowsRelease, /build\\flutter_assets/);
 assert.match(windowsRelease, /Refusing to clean Flutter assets outside build/);

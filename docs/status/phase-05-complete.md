@@ -38,7 +38,7 @@
 | Playmesh 包扫描、导入与导出 | `lib/core/game_package/` |
 | 开发项目、校验、文件操作和历史 | `lib/core/developer/developer_project_catalog.dart`、`developer_project_validation.dart`、`developer_file_operations.dart` |
 | Developer API、运行/重启/停止、日志和数据清理 | `lib/core/developer/developer_web_gateway_io.dart`、`developer_run_controller.dart` |
-| 开发者工作区 UI | `assets/playmesh-library/public/developer/workspace.html`、`workspace.js`、`workspace-v1.css` |
+| 开发者工作区 UI | `assets/playmesh-library/public/developer/workspace.html`、`workspace.js`、`workspace.css` |
 | OpenAPI、Schema、SDK Manifest | `assets/playmesh-library/public/developer/contracts/` |
 | AI 对话与 Agent 提示词 | `assets/playmesh-library/public/developer/prompts/`、`lib/core/developer/developer_ai_prompt_templates.dart` |
 | Logo 与平台图标 | `assets/branding/playmesh-logo.png`、各平台 Runner/Web 图标、`tool/generate_app_icons.py` |

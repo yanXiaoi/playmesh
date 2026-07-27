@@ -28,7 +28,11 @@
 
 ## 当前基线
 
-- 最新详细日志：`docs/version/2.2.0.md`
-- 下一版本临时日志：`docs/version/NEXT.md`（开发中，不代表正式版本）
+- 当前工作树：App `3.0.0+22`、Game SDK `2.4.0`、App Bridge SDK `2.2.0`、
+  Go Core `0.5.0`、Core 协议 `1.3.0`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、
+  Developer API `2.3.0`、Developer CLI `1.4.0`
+- 上一份历史详细日志：`docs/version/2.2.0.md`
+- 当前开发临时日志：`docs/version/NEXT.md`（开发中，不代表已经发行或完成构建）
+- 当前本地实现说明：`docs/implementation/playmesh-3.0.0-local-implementation.md`
 - 历史阶段终点：`docs/status/phase-06-complete.md`
 - 当前 App 简略日志：`lib/core/release/playmesh_release_notes.dart`

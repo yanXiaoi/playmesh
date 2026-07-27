@@ -26,7 +26,7 @@ class IncomingFile {
     final path = map['path'];
     final name = map['name'];
     if (path is! String || path.isEmpty || name is! String || name.isEmpty) {
-      throw const FormatException('Android 外部文件信息不完整');
+      throw const FormatException('incoming_file_payload_incomplete');
     }
     return IncomingFile(
       path: path,
@@ -52,8 +52,19 @@ class IncomingFileService {
             await onFile(_decode(call.arguments));
           case 'fileOpenFailed':
             final arguments = call.arguments;
-            final message = arguments is Map ? arguments['message'] : arguments;
-            onError(StateError(message?.toString() ?? '无法接收外部文件'));
+            final code = arguments is Map
+                ? arguments['code']?.toString()
+                : null;
+            final diagnostic = arguments is Map
+                ? arguments['diagnostic']?.toString()
+                : arguments?.toString();
+            onError(
+              StateError(
+                diagnostic == null || diagnostic.isEmpty
+                    ? (code ?? 'incoming_file_receive_failed')
+                    : '${code ?? 'incoming_file_receive_failed'}: $diagnostic',
+              ),
+            );
         }
       } on Object catch (error) {
         onError(error);
@@ -74,7 +85,9 @@ class IncomingFileService {
   }
 
   IncomingFile _decode(Object? value) {
-    if (value is! Map) throw const FormatException('无法解析 Android 外部文件');
+    if (value is! Map) {
+      throw const FormatException('incoming_file_payload_invalid');
+    }
     return IncomingFile.fromMap(value);
   }
 }

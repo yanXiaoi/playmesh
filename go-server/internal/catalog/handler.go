@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,12 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-server/internal/config"
-	"go-server/internal/middleware"
+	"go-server/internal/gameid"
 	"go-server/internal/packages"
 	"go-server/internal/store"
+	"go-server/internal/version"
 )
-
-const pendingTag = "待审核"
 
 type Handler struct {
 	config            config.Config
@@ -57,6 +57,12 @@ func (h *Handler) Info(c *gin.Context) {
 	response := gin.H{
 		"catalogApiVersion": config.CatalogAPIVersion,
 		"supportsGameRelay": settings.SupportsGameRelay && h.config.SupportsGameRelay,
+		"userUpload": gin.H{
+			"supported":       true,
+			"protocolVersion": config.UserUploadProtocolVersion,
+			"path":            "/api/user/uploads",
+			"maxUploadBytes":  h.config.Storage.MaxUploadBytes,
+		},
 	}
 	if name := strings.TrimSpace(settings.Name); name != "" {
 		response["name"] = name
@@ -95,11 +101,10 @@ func (h *Handler) List(c *gin.Context) {
 			return
 		}
 	}
-	status := middleware.CatalogStatus(c)
 	games, total, err := h.store.ListCatalogGames(
 		c.Request.Context(),
 		store.CatalogQuery{
-			Status: status, Name: c.Query("s_name"), Tag: c.Query("s_tag"),
+			Name: c.Query("s_name"), Tag: c.Query("s_tag"),
 			Description: c.Query("s_desc"),
 		},
 		page,
@@ -115,8 +120,10 @@ func (h *Handler) List(c *gin.Context) {
 		if err := json.Unmarshal([]byte(game.ManifestJSON), &manifest); err != nil {
 			continue
 		}
-		if status == store.StatusPending {
-			addPendingTag(manifest)
+		if game.IconPath != "" {
+			manifest["icon"] = h.currentPublicBaseURL() + "/apps/icon?id=" +
+				url.QueryEscape(game.PackageID) +
+				"&version=" + url.QueryEscape(game.Version)
 		}
 		data = append(data, manifest)
 	}
@@ -127,19 +134,25 @@ func (h *Handler) List(c *gin.Context) {
 }
 
 func (h *Handler) Download(c *gin.Context) {
-	status := middleware.CatalogStatus(c)
-	packageID := strings.TrimSpace(c.Query("id"))
-	if len(packageID) > 128 {
+	packageID := c.Query("id")
+	versionValue := strings.TrimSpace(c.Query("version"))
+	if !gameid.Valid(packageID) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 		return
 	}
+	if _, err := version.Parse(versionValue); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "invalid_version", "message": "下载必须指定合法的 MAJOR.MINOR.PATCH",
+		})
+		return
+	}
 	game, err := h.store.GetCatalogGame(
-		c.Request.Context(), packageID, status,
+		c.Request.Context(), packageID, versionValue,
 	)
 	if err != nil || game.StoredPath == "" {
 		c.Header("X-Playmesh-Catalog-Version", config.CatalogAPIVersion)
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "game_not_found", "message": "当前 Token 下没有可下载的游戏",
+			"code": "version_not_available", "message": "指定版本不是当前公开最新版本",
 		})
 		return
 	}
@@ -158,14 +171,34 @@ func (h *Handler) Download(c *gin.Context) {
 	)
 }
 
-func addPendingTag(manifest map[string]any) {
-	tags, _ := manifest["tags"].([]any)
-	for _, tag := range tags {
-		if value, ok := tag.(string); ok && value == pendingTag {
-			return
-		}
+func (h *Handler) Icon(c *gin.Context) {
+	packageID := c.Query("id")
+	versionValue := strings.TrimSpace(c.Query("version"))
+	if !gameid.Valid(packageID) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request"})
+		return
 	}
-	manifest["tags"] = append(tags, pendingTag)
+	if _, err := version.Parse(versionValue); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_version"})
+		return
+	}
+	game, err := h.store.GetCatalogGame(
+		c.Request.Context(), packageID, versionValue,
+	)
+	if err != nil || game.IconPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"code": "version_not_available"})
+		return
+	}
+	resolved, err := packages.ResolveStoredIcon(
+		h.config.Storage.GamesDirectory, game.IconPath,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "icon_not_available"})
+		return
+	}
+	c.Header("X-Playmesh-Catalog-Version", config.CatalogAPIVersion)
+	c.Header("Content-Type", "image/png")
+	c.File(resolved)
 }
 
 func safeFilename(value string) string {

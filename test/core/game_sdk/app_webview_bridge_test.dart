@@ -209,6 +209,52 @@ void main() {
     await exitRequested.future.timeout(const Duration(seconds: 1));
   });
 
+  test('App 级平台 UI 命令统一转发分享与游戏工具回调', () async {
+    var shareCount = 0;
+    final toolDockVisibility = <bool>[];
+    final bridge = AppWebViewBridge(
+      userId: 'u-app-ui',
+      nickname: '玩家',
+      onOpenSharePanel: () async => shareCount += 1,
+      onShowToolDock: () async => toolDockVisibility.add(true),
+      onHideToolDock: () async => toolDockVisibility.add(false),
+    );
+    addTearDown(bridge.close);
+
+    final share = await _command(
+      bridge,
+      'app.ui.openSharePanel',
+      'share',
+      payload: {'userActivation': true},
+    );
+    final show = await _command(bridge, 'app.ui.toolDock.show', 'tool-show');
+    final hide = await _command(bridge, 'app.ui.toolDock.hide', 'tool-hide');
+
+    expect(share['type'], 'app.command.result');
+    expect(show['type'], 'app.command.result');
+    expect(hide['type'], 'app.command.result');
+    expect(shareCount, 1);
+    expect(toolDockVisibility, [true, false]);
+  });
+
+  test('App 分享命令在缺少用户激活标识时返回稳定错误 code', () async {
+    final bridge = AppWebViewBridge(
+      userId: 'u-app-ui',
+      nickname: '玩家',
+      onOpenSharePanel: () async {},
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.ui.openSharePanel',
+      'share-denied',
+    );
+
+    expect(response['type'], 'app.command.error');
+    expect(response['code'], 'user_activation_required');
+  });
+
   test('全屏命令把控制器方向传给原生设备服务', () async {
     final deviceService = _FakeDeviceService();
     final bridge = AppWebViewBridge(

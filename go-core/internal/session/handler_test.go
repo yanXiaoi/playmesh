@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -235,6 +236,149 @@ func TestNicknameRouteUpdatesCurrentPlayer(t *testing.T) {
 	}
 	if payload.Player.ID != guest.Credential.Player.ID || payload.Player.Nickname != "新昵称" {
 		t.Fatalf("updated player = %#v", payload.Player)
+	}
+}
+
+func TestBrowserCannotClaimLANAppSourceOrUploadAvatar(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "avatar-source", "displayMode": "single_screen_multiplayer",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+
+	data, _ := json.Marshal(map[string]any{
+		"joinCode": host.Session.JoinCode,
+		"nickname": "浏览器玩家",
+		"playerId": "u_claimed_app",
+		"source":   "lan_app",
+	})
+	joinRequest, _ := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/sessions/join",
+		bytes.NewReader(data),
+	)
+	joinRequest.Header.Set("Content-Type", "application/json")
+	joinRequest.Header.Set("Origin", "http://127.0.0.1:4567")
+	joinResponse, err := http.DefaultClient.Do(joinRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer joinResponse.Body.Close()
+	if joinResponse.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(joinResponse.Body)
+		t.Fatalf("join status = %d, body = %s", joinResponse.StatusCode, body)
+	}
+	var joined sessionResponse
+	if err := json.NewDecoder(joinResponse.Body).Decode(&joined); err != nil {
+		t.Fatal(err)
+	}
+	if joined.Credential.Player.Source != "lan_html" {
+		t.Fatalf("browser source = %q, want lan_html", joined.Credential.Player.Source)
+	}
+
+	avatarRequest, _ := http.NewRequest(
+		http.MethodPut,
+		server.URL+"/v1/sessions/"+host.Session.ID+"/avatar",
+		bytes.NewReader([]byte("not-an-avatar")),
+	)
+	avatarRequest.Header.Set("Authorization", "Bearer "+joined.Credential.Token)
+	avatarRequest.Header.Set("Content-Type", "image/png")
+	avatarRequest.Header.Set("X-Playmesh-Avatar-Sha256", "forged")
+	avatarResponse, err := http.DefaultClient.Do(avatarRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer avatarResponse.Body.Close()
+	if avatarResponse.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(avatarResponse.Body)
+		t.Fatalf("avatar status = %d, body = %s", avatarResponse.StatusCode, body)
+	}
+	var avatarError struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(avatarResponse.Body).Decode(&avatarError); err != nil {
+		t.Fatal(err)
+	}
+	if avatarError.Error.Code != "avatar_source_forbidden" {
+		t.Fatalf("avatar error code = %q", avatarError.Error.Code)
+	}
+}
+
+func TestJoinAccessUsesServerDerivedIngress(t *testing.T) {
+	tests := []struct {
+		name          string
+		remoteAddress string
+		localAddress  string
+		host          string
+		origin        string
+		claim         string
+		want          playerAccess
+	}{
+		{
+			name:          "native app",
+			remoteAddress: "127.0.0.1:51001", localAddress: "127.0.0.1:39001",
+			host: "127.0.0.1:39001", claim: "lan_html", want: playerAccessLANApp,
+		},
+		{
+			name:          "controlled app tunnel",
+			remoteAddress: "127.0.0.1:51002", localAddress: "127.0.0.1:39001",
+			host: "127.0.0.1:42001", origin: "http://127.0.0.1:43001",
+			claim: "lan_html", want: playerAccessLANApp,
+		},
+		{
+			name:          "loopback browser direct",
+			remoteAddress: "127.0.0.1:51003", localAddress: "127.0.0.1:39001",
+			host: "127.0.0.1:39001", origin: "http://127.0.0.1:43001",
+			claim: "lan_app", want: playerAccessLANHTML,
+		},
+		{
+			name:          "remote browser without origin cannot claim app",
+			remoteAddress: "192.0.2.50:51004", localAddress: "192.0.2.10:39001",
+			host: "192.0.2.10:39001", claim: "lan_app", want: playerAccessLANHTML,
+		},
+		{
+			name:          "relay source remains non-avatar server identity",
+			remoteAddress: "192.0.2.50:51005", localAddress: "192.0.2.10:39001",
+			host: "192.0.2.10:39001", claim: "server", want: playerAccessServer,
+		},
+		{
+			name:          "relay loopback bridge is not upgraded to app",
+			remoteAddress: "127.0.0.1:51006", localAddress: "127.0.0.1:39001",
+			host: "127.0.0.1:42001", origin: "http://127.0.0.1:43001",
+			claim: "server", want: playerAccessServer,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/sessions/join", nil)
+			request.RemoteAddr = test.remoteAddress
+			request.Host = test.host
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			localAddress, err := net.ResolveTCPAddr("tcp", test.localAddress)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request = request.WithContext(
+				context.WithValue(
+					request.Context(),
+					http.LocalAddrContextKey,
+					localAddress,
+				),
+			)
+			access, err := joinAccessForRequest(request, test.claim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if access != test.want {
+				t.Fatalf("access = %v, want %v", access, test.want)
+			}
+		})
 	}
 }
 

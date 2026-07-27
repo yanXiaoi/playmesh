@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../../models/game_manifest.dart';
 import '../../models/game_capabilities.dart';
+import '../game_package/game_package_icon.dart';
 
 enum DeveloperDiagnosticSeverity {
   error,
@@ -21,6 +22,8 @@ class DeveloperProjectDiagnostic {
     this.line,
     this.column,
     this.hint,
+    this.messageArguments = const {},
+    this.hintArguments = const {},
   });
 
   final String code;
@@ -30,6 +33,8 @@ class DeveloperProjectDiagnostic {
   final int? line;
   final int? column;
   final String? hint;
+  final Map<String, Object?> messageArguments;
+  final Map<String, Object?> hintArguments;
 
   Map<String, Object?> toJson() => {
     'code': code,
@@ -39,6 +44,8 @@ class DeveloperProjectDiagnostic {
     if (line != null) 'line': line,
     if (column != null) 'column': column,
     if (hint != null) 'hint': hint,
+    if (messageArguments.isNotEmpty) 'messageArguments': messageArguments,
+    if (hintArguments.isNotEmpty) 'hintArguments': hintArguments,
   };
 }
 
@@ -227,14 +234,14 @@ class DeveloperProjectValidator {
           message: 'authority.entry 指向的文件不存在',
         );
       }
-      final iconPath = manifest.icon;
-      if (iconPath != null && !files.containsKey(iconPath)) {
+      final rootIcon = files['icon.png'];
+      if (rootIcon != null && !isSafeGamePackageIconSync(rootIcon)) {
         diagnostics.add(
-          _warning(
-            'icon_missing',
-            iconPath,
-            'icon 指向的文件不存在，将使用默认图标',
-            hint: '上传图标文件或在新建项目时使用平台默认图标。',
+          _error(
+            'root_icon_invalid',
+            'icon.png',
+            '包根目录 icon.png 不是安全的 PNG 图片',
+            hint: '请删除该文件，或替换为不超过 2 MiB 的有效 PNG。',
           ),
         );
       }
@@ -268,6 +275,7 @@ class DeveloperProjectValidator {
             path,
             '文本资源不是有效的 UTF-8',
             hint: '请将文件转换为 UTF-8 后重新上传。',
+            messageArguments: {'path': path},
           ),
         );
         continue;
@@ -288,6 +296,7 @@ class DeveloperProjectValidator {
               code: 'resource_path_escape',
               severity: DeveloperDiagnosticSeverity.error,
               message: '资源引用越过 app/ 公开目录：$reference',
+              messageArguments: {'reference': reference},
               path: path,
               line: position.$1,
               column: position.$2,
@@ -300,10 +309,12 @@ class DeveloperProjectValidator {
               code: 'resource_missing',
               severity: DeveloperDiagnosticSeverity.error,
               message: '引用的本地资源不存在：$reference',
+              messageArguments: {'reference': reference},
               path: path,
               line: position.$1,
               column: position.$2,
               hint: '补充 ${resolved.path}，或修正当前引用路径。',
+              hintArguments: {'resolvedPath': resolved.path},
             ),
           );
         }
@@ -353,6 +364,7 @@ class DeveloperProjectValidator {
           code: 'manifest_json_invalid',
           severity: DeveloperDiagnosticSeverity.error,
           message: 'main.json JSON 语法无效：${error.message}',
+          messageArguments: {'error': error.message},
           path: 'main.json',
           line: position.$1,
           column: position.$2,
@@ -378,6 +390,7 @@ class DeveloperProjectValidator {
             'main.json',
             'main.json id 必须与项目目录 ID 一致',
             hint: '当前项目 ID 为 $projectId。',
+            hintArguments: {'projectId': projectId},
           ),
         );
       }
@@ -389,6 +402,7 @@ class DeveloperProjectValidator {
           'main.json',
           error.message,
           hint: '按游戏包 main.json 字段规则修正清单。',
+          messageArguments: {'error': error.message},
         ),
       );
       return null;
@@ -423,6 +437,7 @@ class DeveloperProjectValidator {
           'capabilities.json',
           '设备能力声明无效：$error',
           hint: '删除该可选文件，或按当前 capabilities.json Schema 修正。',
+          messageArguments: {'error': error.toString()},
         ),
       );
     }
@@ -436,7 +451,16 @@ class DeveloperProjectValidator {
     required String message,
   }) {
     if (files.containsKey(path)) return;
-    diagnostics.add(_error(code, path, message, hint: '创建或恢复该入口文件后重新校验。'));
+    diagnostics.add(
+      _error(
+        code,
+        path,
+        message,
+        hint: '创建或恢复该入口文件后重新校验。',
+        messageArguments: {'path': path},
+        hintArguments: {'path': path},
+      ),
+    );
   }
 
   DeveloperProjectDiagnostic _error(
@@ -444,25 +468,16 @@ class DeveloperProjectValidator {
     String path,
     String message, {
     String? hint,
+    Map<String, Object?> messageArguments = const {},
+    Map<String, Object?> hintArguments = const {},
   }) => DeveloperProjectDiagnostic(
     code: code,
     severity: DeveloperDiagnosticSeverity.error,
     message: message,
     path: path,
     hint: hint,
-  );
-
-  DeveloperProjectDiagnostic _warning(
-    String code,
-    String path,
-    String message, {
-    String? hint,
-  }) => DeveloperProjectDiagnostic(
-    code: code,
-    severity: DeveloperDiagnosticSeverity.warning,
-    message: message,
-    path: path,
-    hint: hint,
+    messageArguments: messageArguments,
+    hintArguments: hintArguments,
   );
 }
 

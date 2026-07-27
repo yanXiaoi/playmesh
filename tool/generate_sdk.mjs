@@ -269,29 +269,37 @@ function generate({
   declarationName,
   versionName,
   placeholder,
+  replacements = {},
 }) {
+  let resolvedSource = source;
+  for (const [from, to] of Object.entries(replacements)) {
+    if (!resolvedSource.includes(from)) {
+      throw new Error(`${sourceName} 缺少待替换的版本占位符 ${from}`);
+    }
+    resolvedSource = resolvedSource.replaceAll(from, to);
+  }
   const sourcePath = path.join(sourceDirectory, sourceName);
   const declarationPattern = new RegExp(
     "const " + declarationName + " = String\\.raw`([\\s\\S]*?)`;\\n+",
   );
-  const declarationMatch = source.match(declarationPattern);
+  const declarationMatch = resolvedSource.match(declarationPattern);
   if (!declarationMatch) {
     throw new Error(`${sourceName} 缺少 ${declarationName} 声明模板`);
   }
   const versionPattern = new RegExp(
     `const ${versionName} = ["'](\\d+\\.\\d+\\.\\d+)["'];`,
   );
-  const versionMatch = source.match(versionPattern);
+  const versionMatch = resolvedSource.match(versionPattern);
   if (!versionMatch) {
     throw new Error(`${sourceName} 缺少合法的 ${versionName}`);
   }
   const version = versionMatch[1];
-  const javascript = source.replace(declarationPattern, "");
+  const javascript = resolvedSource.replace(declarationPattern, "");
   const declaration = declarationMatch[1]
     .replaceAll(placeholder, version)
     .trimStart();
   fs.mkdirSync(sourceDirectory, { recursive: true });
-  fs.writeFileSync(sourcePath, source, "utf8");
+  fs.writeFileSync(sourcePath, resolvedSource, "utf8");
   fs.mkdirSync(outputDirectory, { recursive: true });
   fs.writeFileSync(path.join(outputDirectory, `${outputName}.js`), javascript, "utf8");
   fs.writeFileSync(path.join(outputDirectory, `${outputName}.d.ts`), declaration, "utf8");
@@ -300,14 +308,6 @@ function generate({
 
 const dartSdkSources = loadDartSdkSources();
 assertCommandParity(dartSdkSources);
-const gameSdkVersion = generate({
-  source: dartSdkSources.game,
-  sourceName: "playmesh.ts",
-  outputName: "playmesh",
-  declarationName: "PLAYMESH_DECLARATION",
-  versionName: "PLAYMESH_SDK_VERSION",
-  placeholder: "__PLAYMESH_SDK_VERSION__",
-});
 const appSdkVersion = generate({
   source: dartSdkSources.app,
   sourceName: "playmesh-app.ts",
@@ -316,15 +316,31 @@ const appSdkVersion = generate({
   versionName: "PLAYMESH_APP_SDK_VERSION",
   placeholder: "__PLAYMESH_APP_SDK_VERSION__",
 });
-
-// playmesh.d.ts 同时声明 playmesh.app，必须嵌入同一次生成的 App SDK 版本。
-const gameDeclarationPath = path.join(outputDirectory, "playmesh.d.ts");
-fs.writeFileSync(
-  gameDeclarationPath,
-  fs.readFileSync(gameDeclarationPath, "utf8")
-    .replaceAll("__PLAYMESH_APP_SDK_VERSION__", appSdkVersion),
-  "utf8",
-);
+const gameSdkVersion = generate({
+  source: dartSdkSources.game,
+  sourceName: "playmesh.ts",
+  outputName: "playmesh",
+  declarationName: "PLAYMESH_DECLARATION",
+  versionName: "PLAYMESH_SDK_VERSION",
+  placeholder: "__PLAYMESH_SDK_VERSION__",
+  replacements: {
+    __PLAYMESH_APP_SDK_VERSION__: appSdkVersion,
+  },
+});
+for (const name of ["playmesh.ts", "playmesh.js", "playmesh.d.ts"]) {
+  if (
+    fs
+      .readFileSync(
+        name.endsWith(".ts") && !name.endsWith(".d.ts")
+          ? path.join(sourceDirectory, name)
+          : path.join(outputDirectory, name),
+        "utf8",
+      )
+      .includes("__PLAYMESH_APP_SDK_VERSION__")
+  ) {
+    throw new Error(`${name} 仍包含未替换的 App SDK 版本占位符`);
+  }
+}
 for (const name of ["playmesh.d.ts", "playmesh-app.d.ts"]) {
   if (fs.readFileSync(path.join(outputDirectory, name), "utf8").includes("__PLAYMESH")) {
     throw new Error(`${name} 仍包含未替换的版本占位符`);

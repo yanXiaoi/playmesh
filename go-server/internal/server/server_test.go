@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,15 +11,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"go-server/internal/config"
+	"go-server/internal/store"
 )
 
 func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
-	cfg := testConfig()
+	cfg := testConfig(t)
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +37,18 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("未鉴权状态 = %d", response.StatusCode)
+	}
+	reviewRequest, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/apps/info", nil)
+	reviewRequest.Header.Set(
+		"Authorization", "Bearer test-review-token-at-least-32-bytes",
+	)
+	reviewResponse, err := http.DefaultClient.Do(reviewRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reviewResponse.Body.Close()
+	if reviewResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("待审核 Token 读取 Catalog 状态 = %d", reviewResponse.StatusCode)
 	}
 
 	request, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/apps/info", nil)
@@ -53,13 +68,17 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	if declaration["supportsGameRelay"] != true {
 		t.Fatalf("声明 = %#v", declaration)
 	}
-	if declaration["catalogApiVersion"] != "1.4.0" ||
-		response.Header.Get("X-Playmesh-Catalog-Version") != "1.4.0" {
+	if declaration["catalogApiVersion"] != "2.0.0" ||
+		response.Header.Get("X-Playmesh-Catalog-Version") != "2.0.0" {
 		t.Fatalf(
 			"Catalog 版本 = body:%#v header:%q",
 			declaration["catalogApiVersion"],
 			response.Header.Get("X-Playmesh-Catalog-Version"),
 		)
+	}
+	upload, ok := declaration["userUpload"].(map[string]any)
+	if !ok || upload["supported"] != true || upload["protocolVersion"] != "1.0.0" {
+		t.Fatalf("用户上传声明 = %#v", declaration["userUpload"])
 	}
 	relay, ok := declaration["relay"].(map[string]any)
 	if !ok || relay["transport"] != "playmesh-tcp-upgrade" {
@@ -76,8 +95,62 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	}
 }
 
+type countingReadCloser struct {
+	reads int
+}
+
+func (r *countingReadCloser) Read(buffer []byte) (int, error) {
+	r.reads++
+	return 0, io.EOF
+}
+
+func (r *countingReadCloser) Close() error { return nil }
+
+func TestUploadRateLimitRunsBeforeReadingRequestBody(t *testing.T) {
+	cfg := testConfig(t)
+	app, err := New(cfg, DiscardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	first := httptest.NewRequest(http.MethodPost, "/api/user/uploads", nil)
+	first.RemoteAddr = "192.0.2.10:1234"
+	firstResult := httptest.NewRecorder()
+	app.Engine.ServeHTTP(firstResult, first)
+	if firstResult.Code != http.StatusUnauthorized {
+		t.Fatalf("首次上传状态 = %d", firstResult.Code)
+	}
+
+	body := &countingReadCloser{}
+	second := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/games/uploads",
+		body,
+	)
+	second.RemoteAddr = "192.0.2.10:5678"
+	secondResult := httptest.NewRecorder()
+	app.Engine.ServeHTTP(secondResult, second)
+	if secondResult.Code != http.StatusTooManyRequests {
+		t.Fatalf("限流上传状态 = %d", secondResult.Code)
+	}
+	if body.reads != 0 {
+		t.Fatalf("限流响应读取了请求体 %d 次", body.reads)
+	}
+	retryAfter, err := time.ParseDuration(
+		secondResult.Header().Get("Retry-After") + "s",
+	)
+	if err != nil || retryAfter <= time.Second || retryAfter > 30*time.Second {
+		t.Fatalf(
+			"上传限流 Retry-After = %q, err = %v",
+			secondResult.Header().Get("Retry-After"),
+			err,
+		)
+	}
+}
+
 func TestCatalogListKeepsPagingContract(t *testing.T) {
-	cfg := testConfig()
+	cfg := testConfig(t)
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -104,8 +177,75 @@ func TestCatalogListKeepsPagingContract(t *testing.T) {
 	}
 }
 
+func TestCatalogDownloadRequiresVersion(t *testing.T) {
+	cfg := testConfig(t)
+	app, err := New(cfg, DiscardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodGet, "/apps/download?id=com.example.game", nil,
+	)
+	request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
+	app.Engine.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest ||
+		!strings.Contains(recorder.Body.String(), "invalid_version") {
+		t.Fatalf("缺少版本响应 = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRegistrationDisabledBeforeCaptchaValidation(t *testing.T) {
+	cfg := testConfig(t)
+	app, err := New(cfg, DiscardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	settings, err := app.store.GetSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.AllowUserRegistration = false
+	if err := app.store.UpdateSettings(
+		context.Background(), settings, store.AdminReviewActor(cfg.AdminUsername),
+	); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/user/auth/register",
+		strings.NewReader(`{"email":"user@example.com","password":"Password1!","confirmPassword":"Password1!"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	app.Engine.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden ||
+		!strings.Contains(recorder.Body.String(), "registration_disabled") {
+		t.Fatalf("关闭注册响应 = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestUserDataRoutesRequireSession(t *testing.T) {
+	cfg := testConfig(t)
+	app, err := New(cfg, DiscardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	recorder := httptest.NewRecorder()
+	app.Engine.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/api/user/me", nil),
+	)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("匿名资料读取状态 = %d", recorder.Code)
+	}
+}
+
 func TestRelayPairsOpaqueBidirectionalStreams(t *testing.T) {
-	cfg := testConfig()
+	cfg := testConfig(t)
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +270,7 @@ func TestRelayPairsOpaqueBidirectionalStreams(t *testing.T) {
 }
 
 func TestRelayClientWhitelistStillRequiresCapability(t *testing.T) {
-	cfg := testConfig()
+	cfg := testConfig(t)
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -143,13 +283,13 @@ func TestRelayClientWhitelistStillRequiresCapability(t *testing.T) {
 		nil,
 	)
 	app.Engine.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusNotFound {
+	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("状态 = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestRelayRoutesAreAbsentWhenDeclarationDisablesRelay(t *testing.T) {
-	cfg := testConfig()
+	cfg := testConfig(t)
 	cfg.SupportsGameRelay = false
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
@@ -286,8 +426,13 @@ func (c *bufferedConn) Read(buffer []byte) (int, error) {
 	return c.reader.Read(buffer)
 }
 
-func testConfig() config.Config {
+func testConfig(t *testing.T) config.Config {
+	t.Helper()
 	cfg := config.Default()
+	root := t.TempDir()
+	cfg.Storage.DatabasePath = filepath.Join(root, "playmesh-server.db")
+	cfg.Storage.GamesDirectory = filepath.Join(root, "games")
+	cfg.Storage.QuarantineDirectory = filepath.Join(root, "quarantine")
 	cfg.Auth.Token = "test-source-secret-at-least-32-bytes"
 	cfg.Relay.PublicBaseURL = "https://relay.example.com"
 	cfg.Relay.PendingConnectionTimeoutSeconds = 1

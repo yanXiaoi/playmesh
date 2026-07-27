@@ -5,8 +5,8 @@
   "lastModifiedAt": 0,
   "remarks": "Playmesh multiplayer game",
   "version": "0.1.0",
-  "sdkVersion": "2.2.3",
-  "appSdkVersion": "2.1.1",
+  "sdkVersion": "2.4.0",
+  "appSdkVersion": "2.2.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": [
@@ -28,6 +28,5 @@
   },
   "tags": [
     "multiplayer"
-  ],
-  "permissions": []
+  ]
 }

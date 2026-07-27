@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -134,6 +135,29 @@ class GoCoreSessionClient {
     }
   }
 
+  Future<void> uploadAvatar({
+    required String sessionId,
+    required String token,
+    required Uint8List pngBytes,
+    required String sha256,
+  }) async {
+    final response = await _httpClient.put(
+      baseUri.resolve('v1/sessions/$sessionId/avatar'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'image/png',
+        'X-Playmesh-Avatar-Sha256': sha256,
+      },
+      body: pngBytes,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw GameSessionException.fromPayload(
+        response.statusCode,
+        _decodeResponse(response),
+      );
+    }
+  }
+
   Future<GameSessionConnection> _connect(GameSessionBootstrap bootstrap) async {
     final httpUri = baseUri.resolve(bootstrap.webSocketPath);
     final endpoint = httpUri.replace(
@@ -253,6 +277,40 @@ class GameSessionConnection {
 
   Future<void> closeShare() {
     return _client.closeShare(snapshot.id, bootstrap.credential.token);
+  }
+
+  Future<void> syncAvatar(Uint8List pngBytes, String sha256) {
+    return _client.uploadAvatar(
+      sessionId: snapshot.id,
+      token: bootstrap.credential.token,
+      pngBytes: pngBytes,
+      sha256: sha256,
+    );
+  }
+
+  void confirmAvatarWritten({
+    required String playerId,
+    required String sha256,
+  }) {
+    if (!isAuthority) {
+      throw const GameSessionException(
+        statusCode: 403,
+        code: 'not_authority',
+        message: '当前玩家不是本局 Authority。',
+      );
+    }
+    _send(
+      type: 'platform.avatar.committed',
+      payload: {'playerId': playerId, 'digest': sha256},
+    );
+  }
+
+  void rejectAvatarWrite({required String playerId, required String sha256}) {
+    if (!isAuthority) return;
+    _send(
+      type: 'platform.avatar.failed',
+      payload: {'playerId': playerId, 'digest': sha256},
+    );
   }
 
   void _send({

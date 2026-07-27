@@ -5,7 +5,11 @@ import 'package:playmesh/features/games/game_detail_page.dart';
 import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
+import '../../support/localized_test_app.dart';
+
 void main() {
+  setUpAll(initializeLocalizedTestApp);
+
   final game = GameSummary(
     id: 'com.example.party',
     name: '欢乐派对',
@@ -69,7 +73,7 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: GameDetailPage(game: game, onDelete: (_) async {}),
       ),
     );
@@ -85,8 +89,15 @@ void main() {
     expect(find.text('2.1.0'), findsOneWidget);
     expect(find.text('游戏 ID 已复制'), findsOneWidget);
     expect(find.text('最近打开'), findsOneWidget);
-    final uploadedAt = _formatExpectedTimestamp(game.lastModifiedAt!);
-    final openedAt = _formatExpectedTimestamp(game.lastOpenedAt!);
+    final detailContext = tester.element(find.byType(GameDetailPage));
+    final uploadedAt = _formatExpectedTimestamp(
+      detailContext,
+      game.lastModifiedAt!,
+    );
+    final openedAt = _formatExpectedTimestamp(
+      detailContext,
+      game.lastOpenedAt!,
+    );
     expect(find.text(uploadedAt), findsOneWidget);
     expect(find.text(openedAt), findsOneWidget);
     expect(
@@ -98,7 +109,66 @@ void main() {
     );
   });
 
-  testWidgets('缺省上传元数据显示为佚名和无', (tester) async {
+  testWidgets('损坏清单使用 App 文案且保留非空动态简介', (tester) async {
+    const repairGame = GameSummary(
+      id: 'com.example.repair',
+      name: 'Dynamic game name',
+      version: '0.0.0',
+      manifestError: 'raw parser error',
+      description: '',
+      minPlayers: 1,
+      maxPlayers: 1,
+      supportsMultiplayer: false,
+      displayModeLabel: 'multi_screen',
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      entry: LocalGameEntry(
+        assetPath: 'app/index.html',
+        statusLabel: 'manifest_repair_required',
+      ),
+    );
+
+    Future<void> pump(GameSummary value) => tester.pumpWidget(
+      localizedTestApp(
+        locale: const Locale('en', 'US'),
+        home: GameDetailPage(game: value, onDelete: (_) async {}),
+      ),
+    );
+
+    await pump(repairGame);
+    expect(
+      find.text(
+        'This package has an invalid main.json. '
+        'Open Developer Workspace to repair it.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('raw parser error'), findsNothing);
+
+    const rawDescription = 'API description / 原样';
+    await pump(
+      const GameSummary(
+        id: 'com.example.repair-with-description',
+        name: 'Dynamic game name',
+        version: '0.0.0',
+        manifestError: 'raw parser error',
+        description: rawDescription,
+        minPlayers: 1,
+        maxPlayers: 1,
+        supportsMultiplayer: false,
+        displayModeLabel: 'multi_screen',
+        displayMode: 'multi_screen',
+        orientation: GameOrientation.landscape,
+        entry: LocalGameEntry(
+          assetPath: 'app/index.html',
+          statusLabel: 'manifest_repair_required',
+        ),
+      ),
+    );
+    expect(find.text(rawDescription), findsOneWidget);
+  });
+
+  testWidgets('缺省上传元数据显示本地化未知发布者和无', (tester) async {
     const legacy = GameSummary(
       id: 'com.example.legacy',
       name: '旧游戏',
@@ -113,21 +183,19 @@ void main() {
       entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: '待修复'),
     );
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: GameDetailPage(game: legacy, onDelete: (_) async {}),
       ),
     );
 
-    expect(find.text('佚名'), findsOneWidget);
+    expect(find.text('未知发布者'), findsOneWidget);
     expect(find.text('无'), findsNWidgets(2));
   });
 }
 
-String _formatExpectedTimestamp(DateTime value) {
+String _formatExpectedTimestamp(BuildContext context, DateTime value) {
   final local = value.toLocal();
-  String twoDigits(int part) => part.toString().padLeft(2, '0');
-  return '${local.year.toString().padLeft(4, '0')}-'
-      '${twoDigits(local.month)}-${twoDigits(local.day)} '
-      '${twoDigits(local.hour)}:${twoDigits(local.minute)}:'
-      '${twoDigits(local.second)}';
+  final material = MaterialLocalizations.of(context);
+  return '${material.formatMediumDate(local)} '
+      '${material.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
 }

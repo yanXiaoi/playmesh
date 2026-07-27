@@ -28,6 +28,9 @@ class GoCoreRuntime
     DeveloperRunController? developerRunController,
     this.developerCapabilityTests,
     this.developerAuthorProvider,
+    this.developerProjectPublisher,
+    this.developerWorkspaceLocalizationBridge,
+    this._developerBackgroundNotificationLocalizationProvider,
     DeveloperBackgroundHost? developerBackgroundHost,
   }) : assert(client != null || clientFactory != null),
        _client = client,
@@ -46,6 +49,10 @@ class GoCoreRuntime
     DeveloperRunController? developerRunController,
     DeveloperCapabilityTestService? developerCapabilityTests,
     String Function()? developerAuthorProvider,
+    DeveloperProjectPublisher? developerProjectPublisher,
+    DeveloperWorkspaceLocalizationBridge? developerWorkspaceLocalizationBridge,
+    DeveloperBackgroundNotificationLocalizationProvider?
+    developerBackgroundNotificationLocalizationProvider,
     DeveloperBackgroundHost? developerBackgroundHost,
   }) {
     final host = createBundledGoCoreHost(address: address);
@@ -60,6 +67,11 @@ class GoCoreRuntime
       developerRunController: developerRunController,
       developerCapabilityTests: developerCapabilityTests,
       developerAuthorProvider: developerAuthorProvider,
+      developerProjectPublisher: developerProjectPublisher,
+      developerWorkspaceLocalizationBridge:
+          developerWorkspaceLocalizationBridge,
+      developerBackgroundNotificationLocalizationProvider:
+          developerBackgroundNotificationLocalizationProvider,
       developerBackgroundHost: developerBackgroundHost,
     );
   }
@@ -72,7 +84,11 @@ class GoCoreRuntime
   final DeveloperRunController developerRunController;
   final DeveloperCapabilityTestService? developerCapabilityTests;
   final String Function()? developerAuthorProvider;
+  final DeveloperProjectPublisher? developerProjectPublisher;
+  DeveloperWorkspaceLocalizationBridge? developerWorkspaceLocalizationBridge;
   final DeveloperPreferences _developerPreferences;
+  DeveloperBackgroundNotificationLocalizationProvider?
+  _developerBackgroundNotificationLocalizationProvider;
   final DeveloperBackgroundHost _developerBackgroundHost;
   GoCoreStatusService? _statusService;
   DeveloperWebGateway? _developerGateway;
@@ -85,6 +101,18 @@ class GoCoreRuntime
 
   Future<void> start() {
     return _startOperation ??= _startHost();
+  }
+
+  void setDeveloperWorkspaceLocalizationBridge(
+    DeveloperWorkspaceLocalizationBridge bridge,
+  ) {
+    developerWorkspaceLocalizationBridge = bridge;
+  }
+
+  void setDeveloperBackgroundNotificationLocalizationProvider(
+    DeveloperBackgroundNotificationLocalizationProvider provider,
+  ) {
+    _developerBackgroundNotificationLocalizationProvider = provider;
   }
 
   @override
@@ -109,10 +137,16 @@ class GoCoreRuntime
       runController: developerRunController,
       capabilityTests: developerCapabilityTests,
       currentAuthor: developerAuthorProvider,
+      projectPublisher: developerProjectPublisher,
+      localizationBridge: developerWorkspaceLocalizationBridge,
       viewAvailability: _developerBackgroundHost.viewAvailability,
     );
     try {
-      await _developerBackgroundHost.start(port: gateway.session.port!);
+      await _developerBackgroundHost.start(
+        port: gateway.session.port!,
+        localization: _developerBackgroundNotificationLocalizationProvider
+            ?.call(),
+      );
       _developerGateway = gateway;
       _developerSession = gateway.session;
       _developerLinks = await gateway.workspaceLinks();
@@ -154,6 +188,19 @@ class GoCoreRuntime
     } finally {
       await _developerBackgroundHost.stop();
     }
+  }
+
+  Future<void> refreshDeveloperBackgroundNotification() async {
+    final session = _developerSession;
+    final port = session?.port;
+    if (session?.enabled != true || port == null) return;
+    final localization = _developerBackgroundNotificationLocalizationProvider
+        ?.call();
+    if (localization == null) return;
+    await _developerBackgroundHost.updateNotification(
+      port: port,
+      localization: localization,
+    );
   }
 
   void reportDeveloperGameRunning({

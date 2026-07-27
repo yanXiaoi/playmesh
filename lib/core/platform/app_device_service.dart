@@ -9,35 +9,26 @@ import '../../models/game_summary.dart';
 class AppDeviceService {
   const AppDeviceService();
 
-  static const _harmonyChannel = MethodChannel('playmesh/harmony_capabilities');
-
   String get platform => kIsWeb ? 'web' : defaultTargetPlatform.name;
 
   bool get hapticsAvailable =>
       !kIsWeb &&
-      (isHarmonyOS ||
-          defaultTargetPlatform == TargetPlatform.android ||
+      (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
   Future<void> setFullscreen(
     bool enabled, {
     GameOrientation? orientation,
   }) async {
-    if (isHarmonyOS) {
-      await _harmonyChannel.invokeMethod<void>('setFullscreen', {
-        'enabled': enabled,
-      });
+    final desktop =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux);
+    if (desktop) {
+      await windowManager.setFullScreen(enabled);
     } else {
-      final desktop =
-          !kIsWeb &&
-          (defaultTargetPlatform == TargetPlatform.windows ||
-              defaultTargetPlatform == TargetPlatform.macOS ||
-              defaultTargetPlatform == TargetPlatform.linux);
-      if (desktop) {
-        await windowManager.setFullScreen(enabled);
-      } else {
-        FullScreen.setFullScreen(enabled);
-      }
+      FullScreen.setFullScreen(enabled);
     }
     if (!isMobileAppPlatform) return;
     if (!enabled) {
@@ -59,21 +50,22 @@ class AppDeviceService {
   }
 
   Future<void> haptic(String style) async {
-    if (isHarmonyOS) {
-      await _harmonyChannel.invokeMethod<void>('haptic', {'style': style});
-      return;
-    }
     switch (style) {
       case 'selection':
         await HapticFeedback.selectionClick();
+        return;
       case 'light':
         await HapticFeedback.lightImpact();
+        return;
       case 'medium':
         await HapticFeedback.mediumImpact();
+        return;
       case 'heavy':
         await HapticFeedback.heavyImpact();
+        return;
       case 'vibrate':
         await HapticFeedback.vibrate();
+        return;
       default:
         throw FormatException('不支持的触觉反馈类型：$style');
     }

@@ -2,18 +2,25 @@ package webui
 
 import (
 	"embed"
+	"encoding/json"
 	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"go-server/internal/config"
+	"go-server/internal/localization"
 )
 
 //go:embed assets/*
 var assets embed.FS
 
-type Handler struct{}
+type Handler struct {
+	webUI   config.WebUI
+	catalog localization.Catalog
+}
 
 var userAssets = map[string]struct{}{
 	"style.css": {},
@@ -25,8 +32,60 @@ var adminAssets = map[string]struct{}{
 	"style.css": {},
 }
 
-func New() *Handler {
-	return &Handler{}
+func New(webUI config.WebUI) *Handler {
+	catalog, err := localization.Load()
+	if err != nil {
+		panic(err)
+	}
+	return &Handler{webUI: webUI, catalog: catalog}
+}
+
+func (h *Handler) LocalizationManifest(c *gin.Context) {
+	type localeOption struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	enabled := make(map[string]struct{}, len(h.webUI.EnabledLocales))
+	for _, locale := range h.webUI.EnabledLocales {
+		enabled[locale] = struct{}{}
+	}
+	locales := make([]localeOption, 0, len(enabled))
+	for _, locale := range h.catalog.Manifest.Locales {
+		if _, ok := enabled[locale.ID]; ok {
+			locales = append(locales, localeOption{ID: locale.ID, Label: locale.Label})
+		}
+	}
+	c.Header("Cache-Control", "public, max-age=300")
+	c.JSON(http.StatusOK, gin.H{
+		"defaultLocale":     h.webUI.DefaultLocale,
+		"allowLocaleSwitch": h.webUI.AllowLocaleSwitch,
+		"defaultThemeMode":  h.webUI.DefaultThemeMode,
+		"allowThemeSwitch":  h.webUI.AllowThemeSwitch,
+		"locales":           locales,
+	})
+}
+
+func (h *Handler) LocalizationBundle(c *gin.Context) {
+	locale := c.Param("locale")
+	allowed := false
+	for _, candidate := range h.webUI.EnabledLocales {
+		if candidate == locale {
+			allowed = true
+			break
+		}
+	}
+	content, ok := h.catalog.Bundle(locale)
+	if !allowed || !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	var messages map[string]string
+	if err := json.Unmarshal(content, &messages); err != nil {
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+	c.Header("Cache-Control", "public, max-age=300")
+	c.JSON(http.StatusOK, messages)
 }
 
 func (h *Handler) User(c *gin.Context) {

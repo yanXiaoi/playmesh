@@ -15,6 +15,10 @@ abstract interface class GameSdkBridge {
 
   void setPerformanceVisible(bool visible);
 
+  /// Requests that the private SDK runtime restore the game DOM focus captured
+  /// immediately before an App-owned overlay was opened.
+  void restoreGameContentFocus();
+
   /// 返回当前游戏唯一的存储实例，供 SDK Bridge 与同源资源网关共享。
   Future<GameStorageService> ensureStorage();
 

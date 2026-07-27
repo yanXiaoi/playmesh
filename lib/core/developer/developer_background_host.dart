@@ -5,6 +5,44 @@ import 'package:flutter/services.dart';
 typedef DeveloperViewAvailabilityProvider =
     Future<DeveloperViewAvailability> Function();
 
+const developerBackgroundNotificationMessageKeys = <String>{
+  'platform.android.developer_service.channel_name',
+  'platform.android.developer_service.channel_description',
+  'platform.android.developer_service.title',
+  'platform.android.developer_service.listening',
+  'platform.android.developer_service.running',
+};
+
+typedef DeveloperBackgroundNotificationLocalizationProvider =
+    DeveloperBackgroundNotificationLocalization? Function();
+
+class DeveloperBackgroundNotificationLocalization {
+  DeveloperBackgroundNotificationLocalization.fromAppMessages({
+    required this.localeId,
+    required Map<String, String> messages,
+  }) : messages = Map.unmodifiable({
+         for (final key in developerBackgroundNotificationMessageKeys)
+           key: _requiredMessage(messages, key),
+       });
+
+  final String localeId;
+  final Map<String, String> messages;
+
+  Map<String, Object?> toChannelArguments({required int port}) => {
+    'port': port,
+    'localeId': localeId,
+    'messages': messages,
+  };
+
+  static String _requiredMessage(Map<String, String> messages, String key) {
+    final value = messages[key];
+    if (value == null || value.isEmpty) {
+      throw StateError('Missing Android developer notification message: $key');
+    }
+    return value;
+  }
+}
+
 /// 需要真实 Android Activity/View 的开发操作当前是否可以执行。
 class DeveloperViewAvailability {
   const DeveloperViewAvailability({
@@ -58,7 +96,15 @@ class DeveloperViewAvailability {
 }
 
 abstract interface class DeveloperBackgroundHost {
-  Future<void> start({required int port});
+  Future<void> start({
+    required int port,
+    DeveloperBackgroundNotificationLocalization? localization,
+  });
+
+  Future<void> updateNotification({
+    required int port,
+    required DeveloperBackgroundNotificationLocalization localization,
+  });
 
   Future<void> stop();
 
@@ -76,9 +122,32 @@ class PlatformDeveloperBackgroundHost implements DeveloperBackgroundHost {
   bool get _isAndroid => Platform.isAndroid;
 
   @override
-  Future<void> start({required int port}) async {
+  Future<void> start({
+    required int port,
+    DeveloperBackgroundNotificationLocalization? localization,
+  }) async {
     if (!_isAndroid) return;
-    await _channel.invokeMethod<void>('start', {'port': port});
+    if (localization == null) {
+      throw StateError(
+        'android_developer_notification_localization_unavailable',
+      );
+    }
+    await _channel.invokeMethod<void>(
+      'start',
+      localization.toChannelArguments(port: port),
+    );
+  }
+
+  @override
+  Future<void> updateNotification({
+    required int port,
+    required DeveloperBackgroundNotificationLocalization localization,
+  }) async {
+    if (!_isAndroid) return;
+    await _channel.invokeMethod<void>(
+      'updateNotification',
+      localization.toChannelArguments(port: port),
+    );
   }
 
   @override

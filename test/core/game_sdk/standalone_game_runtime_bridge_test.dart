@@ -62,6 +62,7 @@ void main() {
     expect(messages.first['requestId'], 'ready-1');
     expect(messages.first['session'], isNull);
     expect((messages.first['player']! as Map)['id'], 'u_test');
+    expect((messages.first['player']! as Map)['role'], 'authority_player');
     expect(messages.last['type'], 'command.result');
     expect(messages.last['requestId'], 'get-1');
     expect(messages.last['result'], 3);

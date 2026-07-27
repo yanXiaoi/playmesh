@@ -1,31 +1,55 @@
 <!doctype html>
-<html lang="zh-CN">
+<html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Playmesh 管理后台</title>
+  <title data-i18n="admin.site_title"></title>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      root.dataset.uiBooting = "true";
+      let mode = "system";
+      try { mode = localStorage.getItem("playmesh.theme") || "system"; } catch (_) {}
+      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+      const theme = mode === "light" || mode === "dark" ? mode : (dark ? "dark" : "light");
+      root.dataset.theme = theme;
+      root.style.colorScheme = theme;
+      try {
+        const saved = localStorage.getItem("playmesh.locale");
+        const locale = saved || (Array.isArray(navigator.languages) ? navigator.languages[0] : "") || navigator.language;
+        if (locale) root.lang = locale;
+      } catch (_) {}
+      window.__playmeshRevealUI = () => {
+        clearTimeout(window.__playmeshRevealTimer);
+        root.removeAttribute("data-ui-booting");
+      };
+      window.__playmeshRevealTimer = setTimeout(window.__playmeshRevealUI, 4000);
+    })();
+  </script>
   <link rel="stylesheet" href="{{ADMIN_ASSET_BASE}}/style.css">
   <script defer src="{{ADMIN_ASSET_BASE}}/admin.js"></script>
 </head>
 <body>
   <section id="login-view" class="login-wrap">
     <article class="panel login-card">
-      <div class="brand"><span class="brand-mark">P</span> Playmesh 管理后台</div>
-      <h1>管理员登录</h1>
+      <div class="brand"><span class="brand-mark">P</span> <span data-i18n="admin.site_title"></span></div>
+      <h1 data-i18n="admin.login.title"></h1>
       <form id="login-form" class="stack">
-        <label>管理员账号<input name="username" required autocomplete="username"></label>
-        <label>管理员密码<input name="password" type="password" required autocomplete="current-password"></label>
+        <label data-i18n-label="admin.login.username"><input name="username" required autocomplete="username"></label>
+        <label data-i18n-label="admin.login.password"><input name="password" type="password" required autocomplete="current-password"></label>
         <div>
-          <div id="captcha-prompt" class="muted">正在生成图形验证码…</div>
-          <img id="captcha-prompt-image" class="captcha-prompt-image hidden" alt="请按此顺序点选">
+          <div id="captcha-prompt" class="muted" data-i18n="admin.captcha.loading"></div>
+          <img id="captcha-prompt-image" class="captcha-prompt-image hidden" alt="" data-i18n-alt="admin.captcha.prompt_alt">
           <div id="captcha-canvas" class="captcha-canvas">
-            <img id="captcha-image" alt="图形验证码">
+            <img id="captcha-image" alt="" tabindex="0" data-i18n-alt="admin.captcha.image_alt"
+                 role="application"
+                 aria-label="" data-i18n-aria="admin.captcha.keyboard_help">
             <div id="captcha-markers" class="captcha-markers"></div>
           </div>
-          <input id="captcha-answer" placeholder="请输入图片中的计算结果" autocomplete="off">
-          <button id="refresh-captcha" type="button" class="secondary">换一张图形验证码</button>
+          <input id="captcha-answer" placeholder="" autocomplete="off" data-i18n-placeholder="admin.captcha.answer">
+          <button id="refresh-captcha" type="button" class="secondary" data-i18n="admin.captcha.refresh"></button>
         </div>
-        <button type="submit">登录管理后台</button>
+        <button type="submit" data-i18n="admin.login.submit"></button>
         <div id="login-notice" class="notice"></div>
       </form>
     </article>
@@ -36,108 +60,111 @@
       <aside class="panel sidebar">
         <div class="brand"><span class="brand-mark">P</span> Playmesh</div>
         <div class="nav">
-          <button class="active" data-section="overview">运行概览</button>
-          <button data-section="games">游戏包审核</button>
-          <button data-section="settings">游戏源设置</button>
-          <button data-section="config">运行配置</button>
-          <a id="public-page-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer">查看公开页面</a>
-          <button id="logout" class="danger">退出登录</button>
+          <button class="active" data-section="overview" data-i18n="admin.nav.overview"></button>
+          <button data-section="games" data-i18n="admin.nav.games"></button>
+          <button data-section="settings" data-i18n="admin.nav.settings"></button>
+          <button data-section="config" data-i18n="admin.nav.config"></button>
+          <a id="public-page-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" data-i18n="admin.nav.public"></a>
+          <select id="admin-locale" class="hidden" aria-label="" data-i18n-aria="settings.language"></select>
+          <button id="admin-theme" type="button" class="secondary" data-i18n="theme.switch"></button>
+          <button id="logout" class="danger" data-i18n="nav.logout"></button>
         </div>
       </aside>
       <section>
         <div id="overview-section" class="admin-section">
-          <div class="section-head"><div><div class="eyebrow">Live relay</div><h2>透明通道负载</h2></div><span id="stats-time" class="muted"></span></div>
+          <div class="section-head"><div><div class="eyebrow" data-i18n="admin.overview.eyebrow"></div><h2 data-i18n="admin.overview.title"></h2></div><span id="stats-time" class="muted"></span></div>
           <div id="stats" class="stats"></div>
           <div class="panel">
-            <h2>运行边界</h2>
-            <p class="muted">这里显示的是 Relay 可观察的连接和字节负载。端到端密钥与明文游戏内容不会进入 Go Server。</p>
+            <h2 data-i18n="admin.overview.boundary_title"></h2>
+            <p class="muted" data-i18n="admin.overview.boundary_description"></p>
           </div>
         </div>
         <div id="games-section" class="admin-section hidden">
-          <div class="section-head"><div><div class="eyebrow">Package review</div><h2>游戏包审核</h2></div></div>
+          <div class="section-head"><div><div class="eyebrow" data-i18n="admin.games.eyebrow"></div><h2 data-i18n="admin.games.title"></h2></div></div>
           <div class="admin-filters">
             <select id="admin-status">
-              <option value="">全部状态</option><option value="pending">待审核</option>
-              <option value="approved">已通过</option><option value="rejected">已拒绝</option>
+              <option value="" data-i18n="admin.games.all_statuses"></option><option value="pending" data-i18n="games.pending"></option>
+              <option value="approved" data-i18n="games.approved"></option><option value="rejected" data-i18n="games.rejected"></option>
+              <option value="deleting" data-i18n="games.deleting"></option>
             </select>
-            <input id="admin-search" placeholder="搜索 ID、名称、作者、邮箱或版本">
-            <button id="admin-refresh">刷新</button>
+            <input id="admin-search" placeholder="" data-i18n-placeholder="admin.games.search">
+            <button id="admin-refresh" data-i18n="common.refresh"></button>
           </div>
           <div class="table-wrap">
-            <table><thead><tr><th>游戏</th><th>作者 / 邮箱</th><th>状态</th><th>扫描</th><th>上传时间</th><th>操作</th></tr></thead>
+            <table><thead><tr><th data-i18n="admin.games.game"></th><th data-i18n="admin.games.publisher_account"></th><th data-i18n="games.status"></th><th data-i18n="admin.games.scan"></th><th data-i18n="admin.games.uploaded_at"></th><th data-i18n="common.actions"></th></tr></thead>
             <tbody id="game-rows"></tbody></table>
           </div>
-          <div class="pager"><button id="admin-previous" class="secondary">上一页</button><span id="admin-page" class="muted"></span><button id="admin-next" class="secondary">下一页</button></div>
+          <div class="pager"><button id="admin-previous" class="secondary" data-i18n="common.previous"></button><span id="admin-page" class="muted"></span><button id="admin-next" class="secondary" data-i18n="common.next"></button></div>
         </div>
         <div id="settings-section" class="admin-section hidden">
-          <div class="section-head"><div><div class="eyebrow">Catalog declaration</div><h2>游戏源声明</h2></div></div>
+          <div class="section-head"><div><div class="eyebrow" data-i18n="admin.settings.eyebrow"></div><h2 data-i18n="admin.settings.title"></h2></div></div>
           <form id="settings-form" class="panel stack">
-            <label>游戏源名称<input name="name"></label>
-            <label>作者<input name="author"></label>
-            <label>主页<input name="homepage" type="url" placeholder="https://example.com"></label>
-            <label class="choice-field"><input name="supportsGameRelay" type="checkbox"><span>对外声明支持公共联机中转</span></label>
-            <button type="submit">保存 /apps/info 设置</button>
+            <label data-i18n-label="admin.settings.name"><input name="name"></label>
+            <label data-i18n-label="admin.settings.builder"><input name="author"></label>
+            <label data-i18n-label="admin.settings.homepage"><input name="homepage" type="url" placeholder="https://example.com"></label>
+            <label class="choice-field"><input name="supportsGameRelay" type="checkbox"><span data-i18n="admin.settings.supports_relay"></span></label>
+            <button type="submit" data-i18n="admin.settings.save"></button>
             <div id="settings-notice" class="notice"></div>
           </form>
         </div>
         <div id="config-section" class="admin-section hidden">
           <div class="section-head">
-            <div><div class="eyebrow">Managed server.json</div><h2>运行配置</h2></div>
+            <div><div class="eyebrow" data-i18n="admin.config.eyebrow"></div><h2 data-i18n="admin.config.title"></h2></div>
           </div>
           <form id="config-form" class="panel stack">
-            <p class="muted">此表单由后台读取并原子更新 server.json。监听器、数据库路径、
-              限流和 Relay 等运行级参数在安全重启后生效；内容规则与 ClamAV 设置立即
-              热更新，publicBaseUrl 会同步更新 `/apps/info`，密钥仍只来自 .env。</p>
-            <h3>端口与后台</h3>
+            <p class="muted" data-i18n="admin.config.description"></p>
+            <h3 data-i18n="admin.config.network"></h3>
             <div class="filters">
-              <label class="wide">App 外部监听<input name="externalListen" required></label>
-              <label class="wide">管理监听<input name="adminListen" required></label>
-              <label class="wide">publicBaseUrl（对外地址）<input name="relayBaseURL" type="url" placeholder="https://relay.example.com"></label>
-              <label class="choice-field wide"><input name="showPublicSourceQRCode" type="checkbox"><span>在用户界面显示快速添加游戏源二维码</span></label>
-              <label>验证码模式<select name="captchaMode"><option value="math">数字计算</option><option value="text">文字点选</option></select></label>
-              <label>会话分钟<input name="sessionTTL" type="number" min="1"></label>
-              <label>登录限流 ms<input name="loginInterval" type="number" min="100"></label>
-              <label>验证码限流 ms<input name="captchaInterval" type="number" min="100"></label>
+              <label class="wide" data-i18n-label="admin.config.external_listen"><input name="externalListen" required></label>
+              <label class="wide" data-i18n-label="admin.config.admin_listen"><input name="adminListen" required></label>
+              <label class="wide" data-i18n-label="admin.config.public_base_url"><input name="relayBaseURL" type="url" placeholder="https://relay.example.com"></label>
+              <label class="choice-field wide"><input name="showPublicSourceQRCode" type="checkbox"><span data-i18n="admin.config.show_qr"></span></label>
+              <label class="choice-field wide"><input name="allowUserRegistration" type="checkbox"><span data-i18n="admin.config.allow_registration"></span></label>
+              <label class="choice-field wide"><input name="requireEmailVerification" type="checkbox"><span data-i18n="admin.config.require_verification"></span></label>
+              <label data-i18n-label="admin.config.captcha_mode"><select name="captchaMode"><option value="math" data-i18n="admin.config.captcha_math"></option><option value="text" data-i18n="admin.config.captcha_text"></option></select></label>
+              <label data-i18n-label="admin.config.session_minutes"><input name="sessionTTL" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.login_rate_ms"><input name="loginInterval" type="number" min="100"></label>
+              <label data-i18n-label="admin.config.captcha_rate_ms"><input name="captchaInterval" type="number" min="100"></label>
             </div>
-            <h3>SQLite 与游戏包</h3>
+            <h3 data-i18n="admin.config.storage"></h3>
             <div class="filters">
-              <label class="wide">数据库路径<input name="databasePath" required></label>
-              <label class="wide">游戏包目录<input name="gamesDirectory" required></label>
-              <label class="wide">隔离目录<input name="quarantineDirectory" required></label>
-              <label>上传上限 MiB<input name="maxUploadMiB" type="number" min="1"></label>
-              <label>展开上限 MiB<input name="maxExpandedMiB" type="number" min="1"></label>
-              <label>单文件上限 MiB<input name="maxFileMiB" type="number" min="1"></label>
-              <label>文件数量<input name="maxFiles" type="number" min="1"></label>
-              <label>最大压缩比<input name="maxRatio" type="number" min="1"></label>
-              <label>并发扫描数<input name="maxConcurrentScans" type="number" min="1" max="64"></label>
-              <label>公开上传间隔秒<input name="uploadInterval" type="number" min="1"></label>
+              <label class="wide" data-i18n-label="admin.config.database_path"><input name="databasePath" required></label>
+              <label class="wide" data-i18n-label="admin.config.games_directory"><input name="gamesDirectory" required></label>
+              <label class="wide" data-i18n-label="admin.config.quarantine_directory"><input name="quarantineDirectory" required></label>
+              <label data-i18n-label="admin.config.max_upload"><input name="maxUploadMiB" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_expanded"><input name="maxExpandedMiB" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_file"><input name="maxFileMiB" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_files"><input name="maxFiles" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_ratio"><input name="maxRatio" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_scans"><input name="maxConcurrentScans" type="number" min="1" max="64"></label>
+              <label data-i18n-label="admin.config.upload_interval"><input name="uploadInterval" type="number" min="1"></label>
             </div>
             <h3>ClamAV</h3>
-            <p class="muted">未安装时请使用
-              <a href="https://docs.clamav.net/manual/Installing.html" target="_blank" rel="noopener noreferrer">ClamAV 官方跨平台安装文档</a>。
-              安装完成后在下方填写 <code>clamscan</code> 或其绝对路径。</p>
+            <p class="muted"><span data-i18n="admin.config.clamav_prefix"></span>
+              <a href="https://docs.clamav.net/manual/Installing.html" target="_blank" rel="noopener noreferrer" data-i18n="admin.config.clamav_link"></a>
+              <span data-i18n="admin.config.clamav_suffix"></span></p>
             <div class="filters">
-              <label class="wide">clamscan 路径<input name="clamScanPath"></label>
-              <label>扫描超时秒<input name="scanTimeout" type="number" min="1"></label>
-              <label class="choice-field"><input name="scanRequired" type="checkbox"><span>扫描失败时拒绝上传</span></label>
+              <label class="wide" data-i18n-label="admin.config.clamscan_path"><input name="clamScanPath"></label>
+              <label data-i18n-label="admin.config.scan_timeout"><input name="scanTimeout" type="number" min="1"></label>
+              <label class="choice-field"><input name="scanRequired" type="checkbox"><span data-i18n="admin.config.scan_required"></span></label>
             </div>
-            <label>活动内容扫描规则（JSON 数组）
+            <label data-i18n-label="admin.config.content_rules">
               <textarea name="contentRules" rows="16" spellcheck="false"></textarea>
             </label>
-            <h3>Relay</h3>
+            <h3 data-i18n="admin.config.relay"></h3>
             <div class="filters">
-              <label>隧道 TTL 秒<input name="tunnelTTL" type="number" min="1"></label>
-              <label>配对超时秒<input name="pendingTimeout" type="number" min="1"></label>
-              <label>空闲超时秒<input name="idleTimeout" type="number" min="1"></label>
-              <label>最大隧道<input name="maxTunnels" type="number" min="1"></label>
-              <label>单隧道连接<input name="maxPerTunnel" type="number" min="1"></label>
-              <label>单 IP 连接<input name="maxPerIP" type="number" min="1"></label>
-              <label class="choice-field"><input name="supportsRelay" type="checkbox"><span>注册 Relay 路由</span></label>
+              <label data-i18n-label="admin.config.tunnel_ttl"><input name="tunnelTTL" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.pending_timeout"><input name="pendingTimeout" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.idle_timeout"><input name="idleTimeout" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_tunnels"><input name="maxTunnels" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_per_tunnel"><input name="maxPerTunnel" type="number" min="1"></label>
+              <label data-i18n-label="admin.config.max_per_ip"><input name="maxPerIP" type="number" min="1"></label>
+              <label class="choice-field"><input name="supportsRelay" type="checkbox"><span data-i18n="admin.config.supports_relay"></span></label>
             </div>
-            <label>App Token 鉴权白名单（JSON 数组）
+            <label data-i18n-label="admin.config.whitelist">
               <textarea name="whitelist" rows="7" spellcheck="false"></textarea>
             </label>
-            <button type="submit">保存运行配置</button>
+            <button type="submit" data-i18n="admin.config.save"></button>
             <div id="config-notice" class="notice"></div>
           </form>
         </div>
@@ -146,7 +173,7 @@
   </main>
 
   <dialog id="detail-dialog">
-    <div class="section-head"><h2>安全扫描与审核详情</h2><button id="close-dialog" class="secondary">关闭</button></div>
+    <div class="section-head"><h2 data-i18n="admin.detail.title"></h2><button id="close-dialog" class="secondary" data-i18n="common.close"></button></div>
     <pre id="detail-content"></pre>
   </dialog>
 </body>

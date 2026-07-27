@@ -13,7 +13,7 @@ import (
 	"go-core/internal/session"
 )
 
-const coreVersion = "0.4.0"
+const coreVersion = "0.5.0"
 
 var (
 	coreMutex   sync.RWMutex

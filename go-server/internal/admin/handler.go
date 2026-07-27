@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +27,6 @@ type Handler struct {
 	mailer              *mailer.Mailer
 	relay               *relay.Manager
 	gamesDir            string
-	scanSlots           chan struct{}
 	mutex               sync.RWMutex
 	updatePublicBaseURL func(string)
 }
@@ -51,63 +49,7 @@ func NewHandler(
 		config: cfg, store: database, packages: packageService,
 		mailer: mailService, relay: relayManager,
 		gamesDir:            cfg.Storage.GamesDirectory,
-		scanSlots:           make(chan struct{}, cfg.Storage.MaxConcurrentScans),
 		updatePublicBaseURL: updatePublicBaseURL,
-	}
-}
-
-func (h *Handler) PublicUpload(c *gin.Context) {
-	select {
-	case h.scanSlots <- struct{}{}:
-		defer func() { <-h.scanSlots }()
-	default:
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "scanner_busy", "message": "安全扫描任务已满，请稍后重试",
-		})
-		return
-	}
-	header, err := c.FormFile("package")
-	if c.Request.MultipartForm != nil {
-		defer c.Request.MultipartForm.RemoveAll()
-	}
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "package_required", "message": "请选择 ZIP 游戏包",
-		})
-		return
-	}
-	file, err := header.Open()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "package_invalid", "message": "无法读取上传文件",
-		})
-		return
-	}
-	defer file.Close()
-	game, err := h.packages.ProcessUpload(
-		c.Request.Context(), file, header.Filename, c.PostForm("email"),
-	)
-	var rejected *packages.RejectedError
-	var input *packages.InputError
-	switch {
-	case errors.As(err, &rejected):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"error": "package_rejected", "message": rejected.Reason,
-			"recordId": rejected.Game.ID,
-		})
-	case errors.As(err, &input):
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "upload_invalid", "message": input.Reason,
-		})
-	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "upload_failed", "message": "上传处理失败，请稍后重试",
-		})
-	default:
-		c.JSON(http.StatusAccepted, gin.H{
-			"id": game.ID, "packageId": game.PackageID,
-			"status": game.Status, "message": "上传成功，等待管理员审核",
-		})
 	}
 }
 
@@ -170,24 +112,15 @@ func (h *Handler) PublicSourceQRCode(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	settings, err := h.store.GetSettings(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_failed"})
+	publicURL, err := url.Parse(baseURL)
+	if err != nil || publicURL.Host == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "public_url_invalid"})
 		return
 	}
-	sourceName := strings.TrimSpace(settings.Name)
-	if sourceName == "" {
-		sourceName = "Playmesh 游戏源"
-	}
-	query := url.Values{}
-	query.Set("host", baseURL)
+	query := publicURL.Query()
 	query.Set("token", token)
-	query.Set("name", sourceName)
-	payload := (&url.URL{
-		Scheme:   "playmesh",
-		Host:     "catalog-source",
-		RawQuery: query.Encode(),
-	}).String()
+	publicURL.RawQuery = query.Encode()
+	payload := publicURL.String()
 	code, err := qrcode.New(payload)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "qrcode_failed"})
@@ -218,8 +151,7 @@ func (h *Handler) PublicSourceInfo(c *gin.Context) {
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
 	c.Header("Pragma", "no-cache")
 	c.JSON(http.StatusOK, gin.H{
-		"publicBaseUrl":  baseURL,
-		"publishedToken": token,
+		"publicURL": baseURL + "?token=" + url.QueryEscape(token),
 	})
 }
 
@@ -229,9 +161,16 @@ func (h *Handler) PublicDownload(c *gin.Context) {
 		return
 	}
 	game, err := h.store.GetGame(c.Request.Context(), id)
-	// The status condition is deliberately enforced in the backend. Pending
-	// packages remain unavailable even when callers construct the URL manually.
-	if err != nil || game.Status != store.StatusApproved || game.StoredPath == "" {
+	if err == nil {
+		visible, visibleErr := h.store.GetCatalogGame(
+			c.Request.Context(), game.PackageID, game.Version,
+		)
+		if visibleErr != nil || visible.ID != game.ID {
+			err = store.ErrNotFound
+		}
+	}
+	// 浏览器下载也执行与 Catalog 相同的 latest + published 可见性规则。
+	if err != nil || game.StoredPath == "" {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "game_not_found", "message": "游戏包不存在或尚未通过审核",
 		})
@@ -316,6 +255,7 @@ func (h *Handler) AdminUpdateGame(c *gin.Context) {
 	}
 	game, err := h.store.UpdateGameStatus(
 		c.Request.Context(), id, body.Status, body.Reason,
+		store.AdminReviewActor(h.config.AdminUsername),
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -341,19 +281,69 @@ func (h *Handler) AdminDeleteGame(c *gin.Context) {
 	if !ok {
 		return
 	}
-	storedPath, err := h.store.DeleteGame(c.Request.Context(), id)
+	game, err := h.store.BeginDeleteOwnedGame(
+		c.Request.Context(), id, store.AdminReviewActor(h.config.AdminUsername),
+	)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "game_not_found"})
+		status := http.StatusConflict
+		code := "game_operation_failed"
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+			code = "game_not_found"
+		} else if errors.Is(err, store.ErrGameMustBeUnpublished) {
+			code = "game_must_be_unpublished"
+		}
+		c.JSON(status, gin.H{"code": code, "message": err.Error()})
 		return
 	}
-	if storedPath != "" {
-		if resolved, resolveErr := packages.ResolveStoredArchive(
-			h.gamesDir, storedPath,
-		); resolveErr == nil {
-			_ = os.Remove(resolved)
-		}
+	if err := packages.DeleteStoredFiles(
+		h.gamesDir, game.StoredPath, game.IconPath,
+	); err != nil {
+		c.JSON(http.StatusAccepted, gin.H{
+			"code": "deletion_pending", "status": store.StatusDeleting,
+			"message": "删除已进入后台清理队列",
+		})
+		return
+	}
+	_, err = h.store.CompleteDeletingGame(
+		c.Request.Context(), id, store.AdminReviewActor(h.config.AdminUsername),
+	)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		c.JSON(http.StatusAccepted, gin.H{
+			"code": "deletion_pending", "status": store.StatusDeleting,
+			"message": "删除已进入后台清理队列",
+		})
+		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) AdminPublishGame(c *gin.Context) {
+	h.adminSetPublished(c, true)
+}
+
+func (h *Handler) AdminUnpublishGame(c *gin.Context) {
+	h.adminSetPublished(c, false)
+}
+
+func (h *Handler) adminSetPublished(c *gin.Context, published bool) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	game, err := h.store.SetPublished(
+		c.Request.Context(), id,
+		store.AdminReviewActor(h.config.AdminUsername), published,
+	)
+	if err != nil {
+		code := "invalid_game_state"
+		if errors.Is(err, store.ErrNotLatestVersion) {
+			code = "not_latest_version"
+		}
+		c.JSON(http.StatusConflict, gin.H{"code": code, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, game)
 }
 
 func (h *Handler) AdminDownload(c *gin.Context) {
@@ -362,7 +352,7 @@ func (h *Handler) AdminDownload(c *gin.Context) {
 		return
 	}
 	game, err := h.store.GetGame(c.Request.Context(), id)
-	if err != nil || game.StoredPath == "" {
+	if err != nil || game.StoredPath == "" || game.Status == store.StatusDeleting {
 		c.JSON(http.StatusNotFound, gin.H{"error": "package_missing"})
 		return
 	}
@@ -395,6 +385,13 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	settings.Name = strings.TrimSpace(settings.Name)
 	settings.Author = strings.TrimSpace(settings.Author)
 	settings.Homepage = strings.TrimSpace(settings.Homepage)
+	currentSettings, currentErr := h.store.GetSettings(c.Request.Context())
+	if currentErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_failed"})
+		return
+	}
+	settings.AllowUserRegistration = currentSettings.AllowUserRegistration
+	settings.RequireEmailVerification = currentSettings.RequireEmailVerification
 	if len([]rune(settings.Name)) > 120 || len([]rune(settings.Author)) > 120 ||
 		len(settings.Homepage) > 2048 {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -413,7 +410,10 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
-	if err := h.store.UpdateSettings(c.Request.Context(), settings); err != nil {
+	if err := h.store.UpdateSettings(
+		c.Request.Context(), settings,
+		store.AdminReviewActor(h.config.AdminUsername),
+	); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_failed"})
 		return
 	}
@@ -425,14 +425,17 @@ func (h *Handler) RelayStats(c *gin.Context) {
 }
 
 type editableConfig struct {
-	ExternalListen         string                  `json:"externalListen"`
-	SupportsGameRelay      bool                    `json:"supportsGameRelay"`
-	ShowPublicSourceQRCode bool                    `json:"showPublicSourceQRCode"`
-	AuthWhitelist          []config.WhitelistEntry `json:"authWhitelist"`
-	Admin                  config.Admin            `json:"admin"`
-	Storage                config.Storage          `json:"storage"`
-	Scanner                config.Scanner          `json:"scanner"`
-	Relay                  config.Relay            `json:"relay"`
+	ExternalListen           string                  `json:"externalListen"`
+	SupportsGameRelay        bool                    `json:"supportsGameRelay"`
+	ShowPublicSourceQRCode   bool                    `json:"showPublicSourceQRCode"`
+	AllowUserRegistration    bool                    `json:"allowUserRegistration"`
+	RequireEmailVerification bool                    `json:"requireEmailVerification"`
+	AuthWhitelist            []config.WhitelistEntry `json:"authWhitelist"`
+	Admin                    config.Admin            `json:"admin"`
+	Storage                  config.Storage          `json:"storage"`
+	Scanner                  config.Scanner          `json:"scanner"`
+	Relay                    config.Relay            `json:"relay"`
+	WebUI                    config.WebUI            `json:"webUI"`
 }
 
 func (h *Handler) RuntimeConfig(c *gin.Context) {
@@ -461,12 +464,18 @@ func (h *Handler) UpdateRuntimeConfig(c *gin.Context) {
 	next.Listen = next.ExternalListen
 	next.SupportsGameRelay = body.SupportsGameRelay
 	next.ShowPublicSourceQRCode = body.ShowPublicSourceQRCode
+	next.AllowUserRegistration = body.AllowUserRegistration
+	next.RequireEmailVerification = body.RequireEmailVerification
 	next.Auth.Whitelist = append([]config.WhitelistEntry(nil), body.AuthWhitelist...)
 	next.Admin = body.Admin
 	next.Storage = body.Storage
 	body.Scanner.Enabled = next.Scanner.Enabled
 	next.Scanner = body.Scanner
 	next.Relay = body.Relay
+	if strings.TrimSpace(body.WebUI.DefaultLocale) == "" {
+		body.WebUI = next.WebUI
+	}
+	next.WebUI = body.WebUI
 	if err := next.Validate(); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid_config", "message": err.Error(),
@@ -484,6 +493,21 @@ func (h *Handler) UpdateRuntimeConfig(c *gin.Context) {
 		h.updatePublicBaseURL(next.Relay.PublicBaseURL)
 	}
 	h.config = next
+	settings, settingsErr := h.store.GetSettings(c.Request.Context())
+	if settingsErr == nil {
+		settings.AllowUserRegistration = next.AllowUserRegistration
+		settings.RequireEmailVerification = next.RequireEmailVerification
+		settingsErr = h.store.UpdateSettings(
+			c.Request.Context(), settings,
+			store.AdminReviewActor(h.config.AdminUsername),
+		)
+	}
+	if settingsErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "settings_save_failed", "message": "server.json 已保存，但注册开关同步失败",
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"config":          editableFromConfig(next),
 		"restartRequired": true,
@@ -493,14 +517,17 @@ func (h *Handler) UpdateRuntimeConfig(c *gin.Context) {
 
 func editableFromConfig(cfg config.Config) editableConfig {
 	return editableConfig{
-		ExternalListen:         cfg.ExternalListen,
-		SupportsGameRelay:      cfg.SupportsGameRelay,
-		ShowPublicSourceQRCode: cfg.ShowPublicSourceQRCode,
-		AuthWhitelist:          append([]config.WhitelistEntry(nil), cfg.Auth.Whitelist...),
-		Admin:                  cfg.Admin,
-		Storage:                cfg.Storage,
-		Scanner:                cfg.Scanner,
-		Relay:                  cfg.Relay,
+		ExternalListen:           cfg.ExternalListen,
+		SupportsGameRelay:        cfg.SupportsGameRelay,
+		ShowPublicSourceQRCode:   cfg.ShowPublicSourceQRCode,
+		AllowUserRegistration:    cfg.AllowUserRegistration,
+		RequireEmailVerification: cfg.RequireEmailVerification,
+		AuthWhitelist:            append([]config.WhitelistEntry(nil), cfg.Auth.Whitelist...),
+		Admin:                    cfg.Admin,
+		Storage:                  cfg.Storage,
+		Scanner:                  cfg.Scanner,
+		Relay:                    cfg.Relay,
+		WebUI:                    cfg.WebUI,
 	}
 }
 

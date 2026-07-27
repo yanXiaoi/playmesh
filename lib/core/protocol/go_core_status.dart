@@ -1,4 +1,4 @@
-const goCoreProtocolVersion = '1.2.0';
+const goCoreProtocolVersion = '1.3.0';
 
 class GoCoreStatus {
   const GoCoreStatus({

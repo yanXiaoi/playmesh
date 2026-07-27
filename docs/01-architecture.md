@@ -11,7 +11,6 @@ Flutter App
 Native Adapters
   - Android: Kotlin
   - iOS: Swift
-  - HarmonyOS: ArkTS capability HAR + OHOS Flutter plugins
   - Desktop: native bridge later
   |
   v
@@ -32,7 +31,7 @@ HTML Game Runtime
 
 ## 当前实现边界
 
-当前代码已完成第一至第六阶段并归档；第六阶段之后改用版本日志维护，当前正式基线为 Playmesh `1.6.1+8`。
+第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前工作树实现版本为 Playmesh App `3.0.0+22`，完整组件矩阵和未发布状态见 `docs/version/NEXT.md`，本地实现落点见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能继续作为当前项目、SDK 或 Catalog 的生成基线。
 
 ```text
 已经完成：
@@ -49,18 +48,7 @@ Go Developer CLI、项目整包拉取/原子发布、同源 SDK/类型同步与�
 可选且不阻塞运行的全屏、Android 外部文件与导出链路、无需预装游戏的 App 加入、Game SDK/App Bridge 双层边界、App/浏览器持久身份、单 ID 连接约束、离线成员与重连事件、移动工作区和界面切换性能收口
 
 当前发布能力：
-统一发布脚本接受 `harmony`、`android`、`windows` 和 `all` 目标，分别生成 OpenHarmony arm64 HAP、Android 通用 APK 和 Windows x64 便携 ZIP。鸿蒙构建使用 API 12 Public SDK 与独立依赖清单，避免改变 Android/Windows 的稳定依赖解析；本地能力 HAR 提供全屏、触觉、加速度计、陀螺仪、系统分享和 Go Core Host。发布脚本使用固定的 OpenHarmony SIG Go 与 OHOS Native SDK，以 `GOOS=openharmony`、`GOARCH=arm64` 将 `go-core/mobile` 交叉编译为 AArch64 ELF，通过异步 N-API 桥接并注入 `NativePlaymeshHarmonyCoreAdapter`。
-```
-
-鸿蒙端当前可以运行游戏库、WebView、系统分享、设备能力和内置 Go Core 多人主机。`EntryAbility` 必须显式注入 `NativePlaymeshHarmonyCoreAdapter`，插件通过 `AbilityAware` 获取 `UIAbilityContext`；构建必须同时包含 `libplaymesh_core.so` 和 `libplaymesh_core_napi.so`，任何一项缺失都拒绝发布。Public SDK 不含 HMS `@kit.ScanKit`，因此扫码页面只提供手动输入回退；Android 的 `ACTION_VIEW` 外部文件接收能力也不在鸿蒙清单中冒充支持。完整构建和签名说明见 [HarmonyOS 构建与适配](harmony-release.md)。
-
-```text
-Flutter GoCoreRuntime
-  -> MethodChannel: playmesh/go_core_host
-  -> NativePlaymeshHarmonyCoreAdapter (ArkTS)
-  -> libplaymesh_core_napi.so (异步 Node-API)
-  -> libplaymesh_core.so (OpenHarmony arm64 Go c-shared)
-  -> go-core/mobile
+统一发布脚本接受 `android`、`windows` 和 `all` 目标，分别生成 Android 通用 APK 和 Windows x64 便携 ZIP。脚本在构建前生成 SDK、重新构建目标平台 Go Core、校验包内入口并输出 SHA-256。
 ```
 
 `go-core/` 已提供可启动、可停止的 HTTP 服务。宿主必须使用 `0.0.0.0:0` 请求系统分配空闲端口，并在启动成功后把实际端口上报给 Flutter；Flutter 本机连接时使用回环地址，分享时使用当前设备全部可用的局域网 IPv4 地址。页面不得猜测、缓存固定端口或自行拼接 Core 地址。
@@ -208,7 +196,7 @@ Binary WS（按需）
 
 ## 游戏页布局原则
 
-游戏库只负责展示游戏并提供明确的“查看详情”操作。游戏详情页以紧凑信息区展示名称、作者、最后上传时间、版本、简介、人数、模式、主画面/控制器方向、SDK 版本和运行入口，并提供唯一的“开始游戏”操作；点击后进入独立的游戏页，不在游戏库或详情页内嵌 WebView。清单中的时间保存为 Unix 毫秒时间戳，展示时转换为当前设备时区。
+游戏库只负责展示游戏并提供明确的“查看详情”操作。游戏详情页以紧凑信息区展示名称、发布者、最后上传时间、版本、简介、人数、模式、主画面/控制器方向、SDK 版本和运行入口，并提供唯一的“开始游戏”操作；点击后进入独立的游戏页，不在游戏库或详情页内嵌 WebView。清单中的时间保存为 Unix 毫秒时间戳，展示时转换为当前设备时区。
 
 进入游戏页后会并行请求当前平台全屏，移动端按当前页面角色使用 `orientation` 或 `controllerOrientation` 请求横屏或竖屏，但游戏运行时和会话初始化不等待全屏结果。App/WebView 通过原生宿主处理全屏和方向；普通浏览器由 Game SDK 无提示层地尽力调用 Fullscreen API 与 Screen Orientation API，被浏览器拒绝时继续游玩，并保留 SDK 悬浮工具栏的全屏按钮供用户手势重试。离开游戏页时恢复进入前的全屏状态和系统默认方向。
 
@@ -238,7 +226,6 @@ FPS 由 Game SDK 统计游戏主动上报的真实渲染帧：DOM/CSS 游戏可�
 | 本地核心 | Go | HTTP、WebSocket、房间与协议 |
 | Flutter/Native 桥接 | Pigeon 或 Platform Channel | 类型安全调用原生能力 |
 | Android 原生 | Kotlin | 手柄、摄像头、权限、传感器 |
-| HarmonyOS 原生 | ArkTS HAR + N-API + Go ELF | 全屏、触觉、传感器、系统分享与内置 Playmesh Core；扫码手动回退 |
 | iOS 原生 | Swift | GameController、摄像头、本地网络权限 |
 | 游戏容器 | webview_flutter + webview_flutter_windows | 移动端/Apple 平台 WebView 与 Windows WebView2 |
 | Game SDK | TypeScript | HTML 游戏访问房间、输入、生命周期 |
@@ -521,13 +508,13 @@ Flutter 没有一个在 Android、iOS、Windows 等平台路径完全相同的�
 
 ### 本机游戏源与在线游戏库
 
-Playmesh App 可以在独立固定端口启动 `GameCatalogServer`，把当前统一游戏库作为局域网游戏源分享。Catalog Gateway 与动态 Go Core、游戏会话分享网关和 Developer Gateway 分离，默认端口 `16668`，开关、端口与可选 Token 持久化到 `playmesh-library/catalog/settings.json`。Token 非空时 `/apps/*` 必须使用 Bearer 鉴权，留空时不鉴权。
+Playmesh App 可以在独立固定端口启动 `GameCatalogServer`，把当前统一游戏库作为局域网游戏源分享。Catalog Gateway 与动态 Go Core、游戏会话分享网关和 Developer Gateway 分离，默认端口 `16668`。源配置只接受经过 `/apps/info` 校验的 HTTP/HTTPS `publicURL`；读取 Token 可以随 URL 导入，上传密钥只保存在本机私密配置中，分享源时绝不序列化上传密钥。
 
-`GET /apps/list` 每次重新扫描统一游戏库，按名称、标签和描述过滤并分页返回完整 `GameManifest`；`GET /apps/download` 临时导出只含 `main.json`、可选 `capabilities.json` 与 `app/` 的标准包。服务不分享 `data/`、`cache/`、其他私有文件或内置资源游戏。
+Catalog API 当前为 `2.0.0`。`GET /apps/list` 对每个 `gameId` 只返回当前最新公开版本，`GET /apps/download` 必须显式携带 `gameId + version`，同源图标由独立图标 URL 提供。游戏包列表图标只认包根可选 `icon.png`；下载包只包含 `main.json`、可选 `icon.png`、可选 `capabilities.json` 与 `app/`，不分享 `data/`、`cache/`、其他私有文件或内置平台资源。
 
-在线游戏库属于现有游戏库内部能力，不在首页增加第二个游戏库入口。它并发请求全部启用的 Host/Token 源，将各源返回按 `GameManifest.id` 去重后展示；单个源失败不阻断其他源。源配置支持手动输入、二维码导入、启用、禁用、编辑、删除和二维码分享。默认每源取 `5` 个，可配置为 `1` 至 `100`。
+在线游戏库属于现有游戏库内部能力，不在首页增加第二个游戏库入口。首页只读取 `enabled && showOnHome` 的源，并保留每个源独立的加载、空、错误和重试状态；搜索并发查询全部启用源，按 `gameId + author.trim()` 聚合发布者相同的结果，空发布者按 sourceId 隔离。聚合结果保留所有原始来源和版本，单个源失败不阻断其他源。源配置支持文本或二维码导入、校验、启用、首页显示、编辑、删除和二维码分享。
 
-多选下载进入顺序队列，每个任务使用独立 HTTP Client，支持进度、停止和删除。远程包下载到临时文件后必须继续走 `GamePackageTransferService.importPackage` 的完整安全校验和原子安装；成功、失败、停止或 App 退出后删除临时文件。完整契约见 `docs/catalog-api.md`。
+下载任务使用 `sourceId + gameId + version` 作为稳定键并进入顺序队列，支持进度、停止和删除。快速升级在安装前必须重新校验游戏 ID、发布者一致且目标语义版本严格更高，避免检查后本地版本变化造成竞态。远程包继续走 `GamePackageTransferService.importPackage` 的完整安全校验和原子安装；成功、失败、停止或 App 退出后清理中转文件。完整契约见 `docs/catalog-api.md`。
 
 ### 游戏运行分享与公共中转
 
@@ -594,14 +581,24 @@ SDK 无法替代的受控底层连接能力，例如当前游戏的 WebSocket Up
 
 游戏文件管理和编辑统一由开发者工作区提供。桌面浏览器通过局域网地址进入，App 端在开启开发者模式后使用内置 WebView 打开同一个地址和同一套界面，不再实现独立 App 文件编辑器。游戏库中的每个游戏都必须能在工作区中查看、编辑、保存和运行，包括用户导入包和工作区新建的游戏；平台不内置游戏 Demo。
 
+内置开发者工作区属于 App 界面，不是独立产品。Flutter 页面、工作区 HTML/JS 和平台注入到游戏 WebView 的工具、能力确认、昵称、信息与日志界面，显示文案都以 `assets/playmesh-localization/locales/{locale}/app.json` 为唯一真源。Developer Gateway 或 WebView 宿主只向工作区暴露已经按 App fallback 解析的只读 `locale + messages` 投影，并在 App 语言变化时推送同一结构；工作区更新 `document.documentElement.lang` 和现有 DOM，不维护 `zh-CN`/`en-US` 字典、不写死可见文案，也不保存一份脱离 App 的语言偏好。平台注入游戏 UI 同样只接收 `platform.game.*` 的宿主投影，游戏内容与用户内容不参与平台翻译。
+
+游戏业务语言与平台 UI 投影严格分离。Game SDK 在 `playmesh.ready` 后公开同步只读
+`playmesh.runtime.getLocale(): string`：App WebView 返回实际显示当前游戏的本机
+App locale，远程加入时仍是加入方 App 的语言，绝不读取 Authority 主机语言；普通
+浏览器直接返回 `navigator.languages`、`navigator.language` 中第一个合法的系统
+locale，读取或解析失败固定回退 `zh`，不受 Playmesh 自身已翻译语言集合限制。
+SDK 只返回 locale 字符串，不向游戏暴露
+`app.json`、`platform.game.*` 或其他 messages。游戏开发者自行维护业务翻译并按
+该 locale 渲染；Playmesh 不自动改写游戏 DOM、资源、标签或用户内容。
+
 工作区按浏览器来源持久化最近打开的项目。再次进入时仅在该项目仍存在于统一游戏库时自动恢复；首次进入或项目已删除时必须保持项目下拉菜单展开，选定或新建项目后才能进入编辑。顶部只保留项目、运行、保存和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
 
-复制项目是变更稳定 ID 的正式入口：以当前项目为来源创建新的唯一 ID 和名称，作者使用当前 App 用户昵称，只复制发布内容，不复制根目录 `data/`、`cache/`、`.playmesh/`。普通项目设置继续禁止修改 `id`、`author` 和 `lastModifiedAt`。删除项目会删除包、运行数据、缓存和本地历史，正在运行的项目不得删除。
+复制项目是变更稳定 ID 的正式入口：以当前项目为来源创建新的唯一 ID 和名称，`author` 发布者元数据使用当前 App 用户昵称，只复制发布内容，不复制根目录 `data/`、`cache/`、`.playmesh/`。普通项目设置继续禁止修改 `id`、`author` 和 `lastModifiedAt`。删除项目会删除包、运行数据、缓存和本地历史，正在运行的项目不得删除。
 
 新建游戏时，用户只需要在开发者工作区填写必要信息：
 
 - 游戏名称。
-- 游戏图标或是否使用默认图标。
 - 支持的 `displayModes`。
 - 玩家人数范围。
 - 游戏方向。
@@ -609,6 +606,8 @@ SDK 无法替代的受控底层连接能力，例如当前游戏的 WebSocket Up
 - 是否启用多人权威处理端，以及权威入口路径。
 
 确认后平台自动生成默认项目骨架，包括 `main.json`、`app/`、控制器入口、玩家运行层、权威处理层和共享数据层。生成的 SDK 接入、角色判断、消息分发和生命周期代码已经存在，用户或 AI 只修改标记的业务区域。
+如需自定义列表图标，创建后通过普通文件操作在项目根上传可选 `icon.png`；缺省时
+使用平台默认图标，不在 `main.json` 中维护图标字段。
 
 开发者工作区必须提供以下文件操作：
 
@@ -690,24 +689,30 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 
 ```json
 {
-  "icon": "app/static/image/icon.png",
   "id": "com.playmesh.quiz",
   "name": "多人抢答",
+  "author": "当前 App 昵称",
+  "lastModifiedAt": 1784851200000,
   "remarks": "局域网多人抢答游戏",
   "version": "0.1.0",
-  "sdkVersion": "2.2.2",
+  "sdkVersion": "2.3.0",
   "appSdkVersion": "2.1.1",
   "orientation": "landscape",
+  "controllerOrientation": "portrait",
   "modes": ["multiplayer"],
+  "displayModes": ["single_screen_multiplayer"],
   "players": {
     "min": 1,
     "max": 4
   },
+  "entries": {
+    "game": "app/index.html",
+    "controller": "app/controller/index.html"
+  },
   "authority": {
     "entry": "app/static/js/service/index.js"
   },
-  "tags": ["example", "multiplayer", "single_screen_multiplayer"],
-  "displayModes": ["single_screen_multiplayer"]
+  "tags": ["example", "multiplayer", "single_screen_multiplayer"]
 }
 ```
 
@@ -725,12 +730,22 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 
 字段规则：
 
-- `icon` 是包内路径。上传后由 App 保存到本地，游戏库读取本地副本。
-- `id` 在创建或导入时自动生成，并作为游戏稳定身份；更新版本不能随意改变它。`author` 和 `lastModifiedAt` 同样由平台管理：保存或上传项目时使用当前 App 昵称和 Unix 毫秒时间戳覆盖，工作区只读展示，项目内容不能自行修改。为兼容旧包，两者缺失时不阻断扫描，分别显示“佚名”和“无”。
+- 游戏列表图标只读取包根可选 `icon.png`；`main.json` 不定义 `icon` 或
+  `permissions`。读取额外字段不赋予语义；规范化保存、CLI 重写、导入和导出都只
+  写当前已知字段，因此所有普通多余字段都不会进入新产物。受保护平台能力只由同级
+  `capabilities.json` 声明。无效或超限 PNG 被忽略并显示默认图标，不得阻断安全
+  游戏包的安装或运行。
+- `id` 在创建或导入时自动生成，并作为游戏稳定身份；必须为 1–64 个 ASCII 字符，
+  首字符是字母或数字，后续只能是字母、数字、点、下划线或连字符。更新版本不能
+  随意改变它。`author` 和 `lastModifiedAt` 同样由平台管理：保存或上传项目时使用
+  当前 App 昵称和 Unix 毫秒时间戳覆盖，工作区只读展示，项目内容不能自行修改。
+  两者缺失时不阻断扫描；缺失发布者在数据层保持空字符串，仅由 App 固定外壳显示
+  本地化“未知发布者”，缺失时间由固定外壳显示本地化“无”。任何非空发布者和
+  API 返回值均逐字显示，不作为国际化键。
 - `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
 - `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。单屏多人还必须声明 `controllerOrientation`，其他显示模式禁止声明。App 必须在创建游戏 WebView 前按当前角色应用方向，并在退出游戏后恢复系统方向。
-- `sdkVersion` 和 `appSdkVersion` 用于选择游戏要求的两套平台 SDK 兼容发行版，当前模板分别使用 `2.2.2` 和 `2.1.1`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。运行时按注册表中的明确范围解析到不可变 Dart bundle，未注册版本拒绝启动。
+- `sdkVersion` 和 `appSdkVersion` 用于选择游戏要求的两套平台 SDK 兼容发行版，当前模板分别使用 `2.3.0` 和 `2.1.1`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。运行时按注册表中的明确范围解析到不可变 Dart bundle，未注册版本拒绝启动。
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。`required` 用于主游戏页面，单屏多人可用 `controllerRequired` 独立声明控制器页面需求；能力 ID 按功能命名，不绑定 App 或浏览器实现，平台按运行角色和环境选择适配器。
 - 平台能力由 `lib/core/capabilities/` 下的插件注册表统一维护。每个能力拥有独立目录，并在同一插件中定义描述符、`apiVersion`、方法、事件、可用性、实例创建、自检与释放；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。Flutter 不支持运行时目录扫描，新增插件后只需在默认注册入口增加该插件，不再维护平行元数据或测试适配器。
 - 当前支持声明 `sensor.accelerometer`、`sensor.gyroscope` 和 `device.vibration`。文件缺失或 `required` 为空时不弹确认框；非空时主 SDK 在 App 和浏览器每次加载游戏时展示全部所需能力，并等待用户“同意并进入”或“拒绝并退出”。当前平台不支持的能力显示“本平台暂不支持”，但不会阻止同意后进入。授权结果不持久化，也不写入权威主机。
@@ -842,7 +857,7 @@ MVP 建议默认关闭普通浏览器发布，由用户在每次游玩时单独�
   "author": "小明",
   "lastModifiedAt": 1784851200000,
   "version": "0.1.0",
-  "sdkVersion": "2.2.2",
+  "sdkVersion": "2.3.0",
   "appSdkVersion": "2.1.1",
   "orientation": "landscape",
   "controllerOrientation": "portrait",

@@ -12,6 +12,7 @@ import 'package:playmesh/core/developer/developer_event_hub.dart';
 import 'package:playmesh/core/developer/developer_project_catalog.dart';
 import 'package:playmesh/core/developer/developer_preferences.dart';
 import 'package:playmesh/core/developer/developer_run_controller.dart';
+import 'package:playmesh/core/developer/developer_web_gateway.dart';
 import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_package/asset_game_library_scanner.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
@@ -35,6 +36,10 @@ void main() {
     );
     var restartCount = 0;
     var stopCount = 0;
+    var workspaceLocaleId = 'zh-CN';
+    var workspaceLocaleMode = 'system';
+    var workspaceThemeMode = 'system';
+    var workspaceEffectiveTheme = 'light';
     final executedJavaScript = <String>[];
     final runController = DeveloperRunController(onLaunch: (_) async {});
     final unregisterRestart = runController.registerRestartHandler(
@@ -67,6 +72,35 @@ void main() {
       developerCapabilityTests: DeveloperCapabilityTestService(
         motionSource: const _UnavailableMotionSource(),
       ),
+      developerWorkspaceLocalizationBridge:
+          DeveloperWorkspaceLocalizationBridge(
+            current: () => DeveloperWorkspaceLocalization(
+              localeId: workspaceLocaleId,
+              localeMode: workspaceLocaleMode,
+              defaultLocale: 'zh-CN',
+              allowLocaleSwitch: true,
+              themeMode: workspaceThemeMode,
+              effectiveTheme: workspaceEffectiveTheme,
+              allowThemeSwitch: true,
+              locales: const [
+                DeveloperWorkspaceLocale(id: 'zh-CN', label: '简体中文'),
+                DeveloperWorkspaceLocale(id: 'en-US', label: 'English'),
+              ],
+              messages: {
+                'workspace.title': workspaceLocaleId == 'zh-CN'
+                    ? 'Playmesh 开发者工作区'
+                    : 'Playmesh Developer Workspace',
+              },
+            ),
+            useLocale: (localeId) async {
+              workspaceLocaleMode = localeId == null ? 'system' : 'fixed';
+              workspaceLocaleId = localeId ?? 'zh-CN';
+            },
+            useTheme: (themeMode) async {
+              workspaceThemeMode = themeMode;
+              workspaceEffectiveTheme = themeMode == 'dark' ? 'dark' : 'light';
+            },
+          ),
     );
     addTearDown(runtime.close);
     addTearDown(() => promptRoot.delete(recursive: true));
@@ -85,7 +119,18 @@ void main() {
 
     final workspace = await http.get(links.first);
     expect(workspace.statusCode, HttpStatus.ok);
-    expect(workspace.body, contains('Playmesh 开发者工作区'));
+    expect(workspace.headers['referrer-policy'], 'no-referrer');
+    expect(workspace.headers['x-content-type-options'], 'nosniff');
+    expect(workspace.body, contains('data-i18n="workspace.brand"'));
+    expect(workspace.body, contains('workspace-localization.js'));
+    expect(
+      workspace.body,
+      contains(
+        '{"themeMode":"system","effectiveTheme":"light",'
+        '"allowThemeSwitch":true}',
+      ),
+    );
+    expect(workspace.body, isNot(contains('__PLAYMESH_APP_UI_BOOTSTRAP__')));
     expect(workspace.body, contains('id="aiPanel" class="ai-action"'));
     expect(
       workspace.body.indexOf('id="aiPanel"'),
@@ -96,14 +141,26 @@ void main() {
     expect(workspace.body, contains('id="copyProjectFromPicker"'));
     expect(workspace.body, contains('id="deleteProjectFromPicker"'));
     expect(workspace.body, contains('id="manifestForm"'));
-    expect(workspace.body, contains('id="manifestId" readonly'));
+    expect(
+      workspace.body,
+      contains('id="manifestId" name="manifestId" readonly'),
+    );
+    expect(workspace.body, isNot(contains('id="manifestIcon"')));
+    expect(workspace.body, isNot(contains('id="manifestPermissions"')));
+    expect(workspace.body, contains('id="manifestAuthor"'));
+    expect(workspace.body, contains('data-i18n="workspace.publisher"'));
+    expect(workspace.body, contains('id="publishModal"'));
+    expect(workspace.body, contains('id="publishForm"'));
+    expect(workspace.body, contains('id="publishSources"'));
+    expect(workspace.body, contains('id="retryPublish"'));
     expect(workspace.body, contains('id="manifestTags"'));
     expect(workspace.body, contains('id="capabilityOptions"'));
     expect(workspace.body, contains('id="capabilityTests"'));
     expect(workspace.body, contains('id="capabilityTestModal"'));
+    expect(workspace.body, contains('id="capabilityTestDetail"'));
     expect(workspace.body, contains('id="capabilityTestLog"'));
     expect(workspace.body, contains('id="clearGameData"'));
-    expect(workspace.body, contains('清理游戏数据'));
+    expect(workspace.body, contains('data-i18n="workspace.clear_game_data"'));
     expect(workspace.body, contains('id="projectDescription"'));
     expect(workspace.body, contains('id="projectTags"'));
     expect(workspace.body, contains('id="projectCapabilityOptions"'));
@@ -112,29 +169,125 @@ void main() {
     expect(workspace.body, contains('id="projectSearch"'));
     expect(workspace.body, contains('id="toolbarMenu"'));
     expect(workspace.body, contains('id="diffMergeHost"'));
-    expect(workspace.body, contains('对话控制台'));
+    expect(
+      workspace.body,
+      contains('data-i18n="workspace.conversation_console"'),
+    );
     expect(workspace.body, contains('id="aiApprovalModal"'));
-    expect(workspace.body, contains('允许一次'));
-    expect(workspace.body, contains('此游戏/项目允许'));
-    expect(workspace.body, contains('始终允许'));
+    expect(workspace.body, contains('data-i18n="workspace.ai_allow_once"'));
+    expect(workspace.body, contains('data-i18n="workspace.ai_allow_project"'));
+    expect(workspace.body, contains('data-i18n="workspace.ai_allow_always"'));
     expect(workspace.body, contains('id="historyMergeHost"'));
     expect(workspace.body, contains('codemirror/addon/merge/merge.js'));
     expect(workspace.body, contains('diff-match-patch/index.js'));
     expect(workspace.body, contains('id="stop"'));
     expect(workspace.body, contains('id="diffLeftFile"'));
     expect(workspace.body, contains('addon/hint/javascript-hint.js'));
-    expect(workspace.body, contains('✨ 获取项目提示词'));
+    expect(
+      workspace.body,
+      contains('data-i18n="workspace.get_project_prompts"'),
+    );
     expect(workspace.body, contains('id="copyPlatformCapabilities"'));
     expect(workspace.body, contains('id="agentBaseUrl"'));
     expect(workspace.body, contains('id="webviewJavaScriptPanel"'));
     expect(workspace.body, contains('id="webviewJavaScriptModal"'));
     expect(workspace.body, contains('id="webviewJavaScriptHistory"'));
+    expect(workspace.body, contains('/playmesh/developer/workspace-icons.js'));
+    expect(workspace.body, contains('href="#play"'));
+    expect(workspace.body, isNot(contains('/playmesh/developer/lucide.svg#')));
+    expect(workspace.body, isNot(contains('cdn')));
+    expect(workspace.body, isNot(matches(RegExp(r'[\u3400-\u9fff]'))));
 
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
+    final localization = await http.get(
+      base.resolve('/dev/api/localization?token=custom-dev-token'),
+    );
+    expect(localization.statusCode, HttpStatus.ok);
+    expect(
+      localization.headers['x-playmesh-operation-id'],
+      'workspace.localization',
+    );
+    final localizationJson = Map<String, Object?>.from(
+      jsonDecode(localization.body) as Map,
+    );
+    expect(localizationJson['formatVersion'], '1.0.0');
+    expect(localizationJson['localeId'], 'zh-CN');
+    expect(localizationJson['localeMode'], 'system');
+    expect(localizationJson['themeMode'], 'system');
+    expect(localizationJson['effectiveTheme'], 'light');
+    expect(localizationJson['allowThemeSwitch'], isTrue);
+    expect(localization.headers['referrer-policy'], 'no-referrer');
+    expect(localization.headers['x-content-type-options'], 'nosniff');
+    expect(
+      localizationJson['messages'],
+      containsPair('workspace.title', 'Playmesh 开发者工作区'),
+    );
+
+    final switchedLocalization = await http.put(
+      base.resolve('/dev/api/localization?token=custom-dev-token'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'localeId': 'en-US'}),
+    );
+    expect(switchedLocalization.statusCode, HttpStatus.ok);
+    expect(
+      switchedLocalization.headers['x-playmesh-operation-id'],
+      'workspace.localization_update',
+    );
+    final switchedLocalizationJson = Map<String, Object?>.from(
+      jsonDecode(switchedLocalization.body) as Map,
+    );
+    expect(switchedLocalizationJson['localeId'], 'en-US');
+    expect(switchedLocalizationJson['localeMode'], 'fixed');
+    expect(
+      switchedLocalizationJson['messages'],
+      containsPair('workspace.title', 'Playmesh Developer Workspace'),
+    );
+
+    final systemLocalization = await http.put(
+      base.resolve('/dev/api/localization?token=custom-dev-token'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'localeId': null}),
+    );
+    expect(systemLocalization.statusCode, HttpStatus.ok);
+    expect(
+      jsonDecode(systemLocalization.body),
+      containsPair('localeMode', 'system'),
+    );
+
+    final themedLocalization = await http.put(
+      base.resolve('/dev/api/localization?token=custom-dev-token'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'themeMode': 'dark'}),
+    );
+    expect(themedLocalization.statusCode, HttpStatus.ok);
+    final themedLocalizationJson = Map<String, Object?>.from(
+      jsonDecode(themedLocalization.body) as Map,
+    );
+    expect(themedLocalizationJson['localeMode'], 'system');
+    expect(themedLocalizationJson['themeMode'], 'dark');
+    expect(themedLocalizationJson['effectiveTheme'], 'dark');
+
+    final combinedUiUpdate = await http.put(
+      base.resolve('/dev/api/localization?token=custom-dev-token'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'localeId': 'en-US', 'themeMode': 'light'}),
+    );
+    expect(combinedUiUpdate.statusCode, HttpStatus.ok);
+    expect(
+      jsonDecode(combinedUiUpdate.body),
+      allOf(
+        containsPair('localeId', 'en-US'),
+        containsPair('themeMode', 'light'),
+        containsPair('effectiveTheme', 'light'),
+      ),
+    );
+
     final workspaceScript = await http.get(
       base.resolve('/playmesh/developer/workspace.js?token=custom-dev-token'),
     );
     expect(workspaceScript.statusCode, HttpStatus.ok);
+    expect(workspaceScript.headers['referrer-policy'], 'no-referrer');
+    expect(workspaceScript.headers['x-content-type-options'], 'nosniff');
     expect(workspaceScript.body, contains('localStorage.setItem'));
     expect(workspaceScript.body, contains('openProjectPicker()'));
     expect(workspaceScript.body, contains('positionAnchoredMenu'));
@@ -145,13 +298,47 @@ void main() {
     expect(workspaceScript.body, contains('executeWebViewJavaScript'));
     expect(workspaceScript.body, contains('webviewJavaScriptHistory'));
     expect(workspaceScript.body, contains('applyHistoryChunks'));
-    expect(workspaceScript.body, contains('appendCapabilityTestResults'));
-    expect(workspaceScript.body, contains('while(generation==='));
+    expect(workspaceScript.body, contains('appendCapabilityTestJson'));
+    expect(workspaceScript.body, contains('createCapabilitySchemaEditor'));
+    expect(workspaceScript.body, contains('capabilitySchemaNode'));
+    expect(workspaceScript.body, contains("'capability.test.event'"));
+    expect(workspaceScript.body, isNot(contains('capabilityDraftText')));
     expect(workspaceScript.body, contains('copyPlatformCapabilities'));
+    expect(workspaceScript.body, contains('openPublishPanel'));
+    expect(workspaceScript.body, contains('JSON.stringify({sourceIds})'));
+    expect(
+      workspaceScript.body,
+      contains("bindMenuKeyboard(q('moreActions'),toolbarMenu"),
+    );
+    expect(workspaceScript.body, isNot(contains('manifestIcon')));
+    expect(workspaceScript.body, isNot(contains('manifestPermissions')));
+    expect(
+      workspaceScript.body,
+      isNot(contains('delete manifest.permissions')),
+    );
+    expect(workspaceScript.body, isNot(contains('delete manifest.icon')));
+    expect(workspaceScript.body, isNot(contains('...manifestSource')));
+    expect(
+      workspaceScript.body,
+      contains('appSdkVersion:manifestSource.appSdkVersion'),
+    );
+    expect(workspaceScript.body, isNot(contains('uploadKey')));
     final gatewaySource = await File(
       'lib/core/developer/developer_web_gateway_io.dart',
     ).readAsString();
     expect(gatewaySource, contains('_developerOperationRegistry.dispatch'));
+    expect(gatewaySource, contains("..set('Referrer-Policy', 'no-referrer')"));
+    expect(
+      gatewaySource,
+      contains("..set('X-Content-Type-Options', 'nosniff')"),
+    );
+    expect(
+      gatewaySource,
+      contains(
+        "workspaceTemplate.replaceFirst(\n"
+        "        '__PLAYMESH_APP_UI_BOOTSTRAP__',",
+      ),
+    );
     final dispatchSource = gatewaySource.substring(
       gatewaySource.indexOf('Future<void> _dispatch'),
       gatewaySource.indexOf('String _requireCurrentAuthor'),
@@ -162,21 +349,29 @@ void main() {
       reason: '所有 Developer 接口必须通过统一操作注册表，不得在网关分发入口手写旁路路由',
     );
     final workspaceStyles = await http.get(
-      base.resolve(
-        '/playmesh/developer/workspace-v1.css?token=custom-dev-token',
-      ),
+      base.resolve('/playmesh/developer/workspace.css?token=custom-dev-token'),
     );
     expect(workspaceStyles.statusCode, HttpStatus.ok);
+    expect(workspaceStyles.headers['referrer-policy'], 'no-referrer');
+    expect(workspaceStyles.headers['x-content-type-options'], 'nosniff');
     expect(
       workspaceStyles.body,
-      contains('grid-template-columns: minmax(44px, 1fr) 44px 50px 58px 44px'),
+      contains('grid-template-columns: minmax(112px, 1fr) repeat(4, 46px)'),
     );
-    expect(workspaceStyles.body, contains('min-width: 120px'));
+    expect(workspaceStyles.body, contains('min-width: 180px'));
     expect(workspaceStyles.body, contains('@media (max-width: 360px)'));
     expect(
       workspaceStyles.body,
-      contains('grid-template-columns: repeat(4, minmax(0, 1fr))'),
+      contains('grid-template-columns: minmax(84px, 1fr) repeat(4, 42px)'),
     );
+    final workspaceIcons = await http.get(
+      base.resolve(
+        '/playmesh/developer/workspace-icons.js?token=custom-dev-token',
+      ),
+    );
+    expect(workspaceIcons.statusCode, HttpStatus.ok);
+    expect(workspaceIcons.body, contains('"folder-kanban"'));
+    expect(workspaceIcons.body, contains('"file-question"'));
     final status = await http.get(
       base.resolve('/dev/api/status?token=custom-dev-token'),
     );
@@ -188,15 +383,15 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '2.2.3');
-    expect(statusJson['appSdkVersion'], '2.1.1');
+    expect(statusJson['gameSdkVersion'], '2.4.0');
+    expect(statusJson['appSdkVersion'], '2.2.0');
     expect(
       statusJson['gameSdkCompatibility'],
       contains(containsPair('minimumRequestedVersion', '1.0.0')),
     );
     expect(
       statusJson['appSdkCompatibility'],
-      contains(containsPair('maximumRequestedVersion', '2.1.1')),
+      contains(containsPair('maximumRequestedVersion', '2.2.0')),
     );
 
     final sdkBundle = await http.get(
@@ -204,15 +399,15 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '2.2.3');
-    expect(sdkBundleJson['appSdkVersion'], '2.1.1');
+    expect(sdkBundleJson['gameSdkVersion'], '2.4.0');
+    expect(sdkBundleJson['appSdkVersion'], '2.2.0');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '2.2.3')),
+      contains(containsPair('bundleVersion', '2.4.0')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
-      contains(containsPair('bundleVersion', '2.1.1')),
+      contains(containsPair('bundleVersion', '2.2.0')),
     );
     expect(
       (sdkBundleJson['files'] as Map).keys,
@@ -280,6 +475,21 @@ void main() {
       jsonDecode(capabilityTestRun.body) as Map,
     );
     expect(capabilityTestResult['total'], 1);
+    final unavailableCapabilityInstance = await http.post(
+      base.resolve(
+        '/dev/api/capability-tests/instances?token=custom-dev-token',
+      ),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({
+        'code': 'sensor.accelerometer',
+        'options': {'fps': 30},
+      }),
+    );
+    expect(unavailableCapabilityInstance.statusCode, HttpStatus.conflict);
+    expect(
+      jsonDecode(unavailableCapabilityInstance.body)['error']['code'],
+      'capability_unavailable',
+    );
     expect(capabilityTestResult['results'], isA<List>());
     final editorHint = await http.get(
       base.resolve(
@@ -344,6 +554,8 @@ void main() {
     );
     final sseResponse = await sseClient.send(sseRequest);
     expect(sseResponse.statusCode, HttpStatus.ok);
+    expect(sseResponse.headers['referrer-policy'], 'no-referrer');
+    expect(sseResponse.headers['x-content-type-options'], 'nosniff');
     final approvalEvent = sseResponse.stream
         .transform(utf8.decoder)
         .transform(const LineSplitter())
@@ -512,7 +724,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "2.1.1"'));
+    expect(aiPrompt.body, contains('readonly version: "2.2.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -818,7 +1030,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '2.1.0');
+    expect((openApiJson['info'] as Map)['version'], '2.3.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );
@@ -895,6 +1107,8 @@ void main() {
     final unauthorized = await http.get(base.resolve('/dev/api/projects'));
     expect(unauthorized.statusCode, HttpStatus.unauthorized);
     expect(unauthorized.headers['x-request-id'], isNotEmpty);
+    expect(unauthorized.headers['referrer-policy'], 'no-referrer');
+    expect(unauthorized.headers['x-content-type-options'], 'nosniff');
   });
 
   test('重新开启或 App Runtime 重建后复用开发者地址', () async {
@@ -1057,7 +1271,10 @@ void main() {
             jsonDecode(utf8.decode(manifest.bytes)) as Map,
           )
           ..['name'] = 'Updated Game'
-          ..['tags'] = ['party', 'motion'];
+          ..['tags'] = ['party', 'motion']
+          ..['permissions'] = ['keyboard']
+          ..['icon'] = 'app/legacy.png'
+          ..['redundant'] = {'nested': true};
     final updatedManifest = await catalog.updateManifest(
       project.id,
       manifestJson,
@@ -1066,6 +1283,12 @@ void main() {
     expect(updatedManifest.readOnly, isTrue);
     expect(utf8.decode(updatedManifest.bytes), contains('Updated Game'));
     expect(utf8.decode(updatedManifest.bytes), contains('motion'));
+    expect(
+      utf8.decode(updatedManifest.bytes),
+      isNot(contains('"permissions"')),
+    );
+    expect(utf8.decode(updatedManifest.bytes), isNot(contains('"icon"')));
+    expect(utf8.decode(updatedManifest.bytes), isNot(contains('"redundant"')));
     expect(
       repository.cachedGames.singleWhere((game) => game.id == project.id).name,
       'Updated Game',
@@ -1110,6 +1333,18 @@ void main() {
     );
     final history = await catalog.listLocalHistory(project.id, '');
     expect(history, hasLength(1));
+    expect(history.single.summaryCode, 'delete_directory');
+    expect(history.single.summaryArguments, {'path': 'app/static/empty'});
+    expect(
+      history.single.toJson()['summary'],
+      contains('app/static/empty'),
+      reason: 'The raw API summary remains available for unknown clients.',
+    );
+    expect(
+      history.single.toJson()['summaryCode'],
+      'delete_directory',
+      reason: 'The App shell localizes only the stable built-in code.',
+    );
     final historyDiff = await catalog.localHistoryDiff(
       project.id,
       history.single.id,
@@ -1210,6 +1445,17 @@ void main() {
         maxPlayers: 4,
       ),
     );
+    final sourceManifestFile = File(
+      '${workspace.path}${Platform.pathSeparator}${source.id}'
+      '${Platform.pathSeparator}main.json',
+    );
+    final sourceManifest =
+        jsonDecode(await sourceManifestFile.readAsString()) as Map;
+    sourceManifest
+      ..['permissions'] = ['keyboard']
+      ..['icon'] = 'app/legacy.png'
+      ..['redundant'] = true;
+    await sourceManifestFile.writeAsString(jsonEncode(sourceManifest));
     await catalog.writeFile(
       source.id,
       'app/copied.js',
@@ -1262,6 +1508,9 @@ void main() {
     expect(await catalog.listFiles(copied.id), contains('app/cache/asset.js'));
     expect(manifest['id'], copied.id);
     expect(manifest['name'], copied.name);
+    expect(manifest, isNot(contains('permissions')));
+    expect(manifest, isNot(contains('icon')));
+    expect(manifest, isNot(contains('redundant')));
     expect(manifest['author'], 'Current Nickname');
     expect(
       manifest['lastModifiedAt'],
@@ -1577,6 +1826,10 @@ void main() {
       ..reportRunning(projectId: 'demo')
       ..registerStopHandler('demo', () async => stopCount += 1)
       ..registerJavaScriptExecutor('demo', (_) async => 'unexpected');
+    var notificationLocalization = _notificationLocalization(
+      localeId: 'zh-CN',
+      title: '开发者模式',
+    );
     final runtime = GoCoreRuntime(
       host: _StubHost(),
       client: _StubHealthClient(),
@@ -1586,6 +1839,8 @@ void main() {
       developerCapabilityTests: DeveloperCapabilityTestService(
         motionSource: const _UnavailableMotionSource(),
       ),
+      developerBackgroundNotificationLocalizationProvider: () =>
+          notificationLocalization,
       developerBackgroundHost: backgroundHost,
     );
     addTearDown(runtime.close);
@@ -1593,6 +1848,22 @@ void main() {
     await runtime.enableDeveloperMode(
       port: port,
       token: 'background-dev-token',
+    );
+    expect(backgroundHost.port, port);
+    expect(backgroundHost.localization?.localeId, 'zh-CN');
+    notificationLocalization = _notificationLocalization(
+      localeId: 'en-US',
+      title: 'Developer mode',
+    );
+    await runtime.refreshDeveloperBackgroundNotification();
+    expect(backgroundHost.notificationUpdateCount, 1);
+    expect(backgroundHost.port, port);
+    expect(backgroundHost.localization?.localeId, 'en-US');
+    expect(
+      backgroundHost
+          .localization
+          ?.messages['platform.android.developer_service.title'],
+      'Developer mode',
     );
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
     Uri api(String path) => base.resolve('$path?token=background-dev-token');
@@ -1634,6 +1905,135 @@ void main() {
 
     await runtime.disableDeveloperMode();
     expect(backgroundHost.active, isFalse);
+  });
+
+  test('工作区发布仅暴露候选源并支持部分成功后重试失败源', () async {
+    final port = await _availablePort();
+    final publisher = _FakeProjectPublisher();
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: 'publish-dev-token',
+      catalog: _FakeCatalog(),
+      projectPublisher: publisher,
+    );
+    addTearDown(gateway.close);
+    final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
+    const headers = {
+      HttpHeaders.authorizationHeader: 'Bearer publish-dev-token',
+      HttpHeaders.contentTypeHeader: 'application/json',
+    };
+
+    final candidates = await http.get(
+      base.resolve('/dev/api/projects/demo/publish'),
+      headers: headers,
+    );
+    expect(candidates.statusCode, HttpStatus.ok, reason: candidates.body);
+    expect(
+      candidates.headers['x-playmesh-operation-id'],
+      'projects.publish_sources',
+    );
+    expect(candidates.body, isNot(contains('uploadKey')));
+    expect(candidates.body, isNot(contains('token')));
+    final candidateJson = jsonDecode(candidates.body) as Map;
+    expect(candidateJson['available'], isTrue);
+    final candidateSources = (candidateJson['sources'] as List).cast<Map>();
+    expect(candidateSources.map((source) => source['id']), [
+      'official',
+      'community',
+    ]);
+
+    final first = await http.post(
+      base.resolve('/dev/api/projects/demo/publish'),
+      headers: headers,
+      body: jsonEncode({
+        'sourceIds': ['official', 'community'],
+      }),
+    );
+    expect(first.statusCode, HttpStatus.ok, reason: first.body);
+    expect(first.headers['x-playmesh-operation-id'], 'projects.publish');
+    final firstJson = jsonDecode(first.body) as Map;
+    final firstResult = firstJson['result'] as Map;
+    expect(firstResult['succeeded'], isFalse);
+    expect(firstResult['partiallySucceeded'], isTrue);
+    expect(firstResult['failedSourceIds'], ['community']);
+    expect(publisher.requests.single, ['official', 'community']);
+
+    final retry = await http.post(
+      base.resolve('/dev/api/projects/demo/publish'),
+      headers: headers,
+      body: jsonEncode({
+        'sourceIds': ['community'],
+      }),
+    );
+    expect(retry.statusCode, HttpStatus.ok, reason: retry.body);
+    final retryResult = (jsonDecode(retry.body) as Map)['result'] as Map;
+    expect(retryResult['succeeded'], isTrue);
+    expect(retryResult['failedSourceIds'], isEmpty);
+    expect(publisher.requests.last, ['community']);
+
+    final extraField = await http.post(
+      base.resolve('/dev/api/projects/demo/publish'),
+      headers: headers,
+      body: jsonEncode({
+        'projectId': 'demo',
+        'sourceIds': ['official'],
+      }),
+    );
+    expect(extraField.statusCode, HttpStatus.badRequest);
+    expect(publisher.requests, hasLength(2));
+
+    final unavailable = await http.post(
+      base.resolve('/dev/api/projects/demo/publish'),
+      headers: headers,
+      body: jsonEncode({
+        'sourceIds': ['hidden-source'],
+      }),
+    );
+    expect(unavailable.statusCode, HttpStatus.conflict);
+    expect(
+      (jsonDecode(unavailable.body) as Map)['error'],
+      containsPair('code', 'publish_source_not_eligible'),
+    );
+    expect(publisher.requests, hasLength(2));
+  });
+
+  test('工作区发布在服务端完整校验失败时不准备或导出游戏包', () async {
+    final port = await _availablePort();
+    final catalog = _InvalidPublishCatalog();
+    final publisher = _FakeProjectPublisher();
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: 'invalid-publish-token',
+      catalog: catalog,
+      projectPublisher: publisher,
+    );
+    addTearDown(gateway.close);
+    final response = await http.post(
+      Uri(
+        scheme: 'http',
+        host: '127.0.0.1',
+        port: port,
+        path: '/dev/api/projects/demo/publish',
+      ),
+      headers: const {
+        HttpHeaders.authorizationHeader: 'Bearer invalid-publish-token',
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: jsonEncode({
+        'sourceIds': ['official'],
+      }),
+    );
+
+    expect(
+      response.statusCode,
+      HttpStatus.unprocessableEntity,
+      reason: response.body,
+    );
+    final body = jsonDecode(response.body) as Map;
+    expect(body['error'], containsPair('code', 'package_validation_failed'));
+    expect(body['validation'], containsPair('valid', false));
+    expect(catalog.prepareCount, 0);
+    expect(publisher.requests, isEmpty);
   });
 }
 
@@ -1865,6 +2265,86 @@ class _FakeCatalog implements DeveloperProjectCatalog {
   );
 }
 
+class _InvalidPublishCatalog extends _FakeCatalog {
+  int prepareCount = 0;
+
+  @override
+  Future<DeveloperProjectValidationReport> validateProject(
+    String projectId,
+  ) async => const DeveloperProjectValidationReport(
+    projectId: 'demo',
+    diagnostics: [
+      DeveloperProjectDiagnostic(
+        code: 'entry_missing',
+        severity: DeveloperDiagnosticSeverity.error,
+        message: '主游戏入口不存在',
+        path: 'app/index.html',
+      ),
+    ],
+    fileCount: 2,
+    totalBytes: 64,
+  );
+
+  @override
+  Future<GameSummary> prepareGame(String projectId) {
+    prepareCount += 1;
+    return super.prepareGame(projectId);
+  }
+}
+
+class _FakeProjectPublisher implements DeveloperProjectPublisher {
+  final List<List<String>> requests = [];
+
+  @override
+  Future<List<DeveloperPublishSource>> listCandidates() async => const [
+    DeveloperPublishSource(
+      id: 'official',
+      name: 'Official',
+      protocolVersion: '1.0.0',
+      maxUploadBytes: 1024 * 1024,
+    ),
+    DeveloperPublishSource(
+      id: 'community',
+      name: 'Community',
+      protocolVersion: '1.0.0',
+      maxUploadBytes: 2 * 1024 * 1024,
+    ),
+  ];
+
+  @override
+  Future<DeveloperPublishBatchResult> publish({
+    required GameSummary game,
+    required Iterable<String> sourceIds,
+    DeveloperPublishEventCallback? onEvent,
+  }) async {
+    final ids = List<String>.unmodifiable(sourceIds);
+    requests.add(ids);
+    final isRetry = ids.length == 1 && ids.single == 'community';
+    final sources = <DeveloperPublishSourceResult>[
+      for (final id in ids)
+        DeveloperPublishSourceResult(
+          sourceId: id,
+          sourceName: id == 'official' ? 'Official' : 'Community',
+          status: id == 'community' && !isRetry
+              ? 'network_failed'
+              : 'entered_review',
+        ),
+    ];
+    for (final source in sources) {
+      onEvent?.call(source);
+    }
+    return DeveloperPublishBatchResult(
+      gameId: game.id,
+      version: game.version,
+      sources: List.unmodifiable(sources),
+      failedSourceIds: List.unmodifiable([
+        for (final source in sources)
+          if (!source.succeeded) source.sourceId,
+      ]),
+    );
+  }
+}
+
 class _UnavailableMotionSource implements MotionSensorSource {
   const _UnavailableMotionSource();
 
@@ -1883,15 +2363,49 @@ class _UnavailableMotionSource implements MotionSensorSource {
       Stream.error(UnsupportedError('测试环境无陀螺仪'));
 }
 
+DeveloperBackgroundNotificationLocalization _notificationLocalization({
+  required String localeId,
+  required String title,
+}) {
+  return DeveloperBackgroundNotificationLocalization.fromAppMessages(
+    localeId: localeId,
+    messages: {
+      'platform.android.developer_service.channel_name': 'channel',
+      'platform.android.developer_service.channel_description': 'description',
+      'platform.android.developer_service.title': title,
+      'platform.android.developer_service.listening': 'port {port}',
+      'platform.android.developer_service.running': 'running',
+    },
+  );
+}
+
 class _FakeDeveloperBackgroundHost implements DeveloperBackgroundHost {
   _FakeDeveloperBackgroundHost(this.availability);
 
   DeveloperViewAvailability availability;
   bool active = false;
+  int? port;
+  DeveloperBackgroundNotificationLocalization? localization;
+  var notificationUpdateCount = 0;
 
   @override
-  Future<void> start({required int port}) async {
+  Future<void> start({
+    required int port,
+    DeveloperBackgroundNotificationLocalization? localization,
+  }) async {
     active = true;
+    this.port = port;
+    this.localization = localization;
+  }
+
+  @override
+  Future<void> updateNotification({
+    required int port,
+    required DeveloperBackgroundNotificationLocalization localization,
+  }) async {
+    this.port = port;
+    this.localization = localization;
+    notificationUpdateCount += 1;
   }
 
   @override

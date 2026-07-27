@@ -73,7 +73,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		})
 		return
 	}
-	if !h.validateCaptcha(body.CaptchaID, body.CaptchaAnswer) {
+	if !h.ValidateCaptcha(body.CaptchaID, body.CaptchaAnswer) {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "captcha_invalid", "message": "验证码错误或已过期",
 		})
@@ -137,7 +137,7 @@ func (h *AuthHandler) RequireSession() gin.HandlerFunc {
 	}
 }
 
-func (h *AuthHandler) validateCaptcha(id, answer string) bool {
+func (h *AuthHandler) ValidateCaptcha(id, answer string) bool {
 	h.mutex.Lock()
 	record, ok := h.captchas[id]
 	delete(h.captchas, id)

@@ -115,6 +115,7 @@ func updateManifestSDKVersions(projectRoot string, versions sdkVersions) (string
 	if projectID == "" {
 		return "", errors.New("main.json.id 不能为空")
 	}
+	manifest = projectManifest(manifest)
 	manifest["sdkVersion"] = versions.Game
 	manifest["appSdkVersion"] = versions.App
 	encoded, err := json.MarshalIndent(manifest, "", "  ")

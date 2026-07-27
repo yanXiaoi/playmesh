@@ -1,6 +1,6 @@
 {
-  "version": "2.2.3",
-  "channelVersion": "2.1.1",
+  "version": "2.4.0",
+  "channelVersion": "2.2.0",
   "script": "/playmesh/sdk/v1/playmesh.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -8,7 +8,7 @@
   "initialization": {
     "required": "await playmesh.ready",
     "failure": "Promise rejects with Error when the host transport or browser join fails",
-    "rule": "Do not call session, player, game, authority, binary or storage methods before ready resolves"
+    "rule": "Do not call runtime, session, player, game, authority, binary or storage methods before ready resolves"
   },
   "environments": [
     {
@@ -141,7 +141,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "2.2.3"
+          "value": "2.4.0"
         },
         {
           "name": "ready",
@@ -157,6 +157,36 @@
           "name": "isAvailable",
           "signature": "isAvailable(): boolean",
           "behavior": "True only when playmesh-app.js is injected by a Playmesh App WebView"
+        },
+        {
+          "name": "openSharePanel",
+          "signature": "openSharePanel(): Promise<void>",
+          "availability": "The current App Authority during transient user activation",
+          "behavior": "Opens the App-owned share panel and resolves after it is shown; returns no token, URL, QR code, or other share payload",
+          "errors": [
+            "not_authority",
+            "user_activation_required",
+            "ui_unavailable",
+            "rate_limited"
+          ]
+        },
+        {
+          "name": "showToolDock",
+          "signature": "showToolDock(): Promise<void>",
+          "availability": "Playmesh App WebView",
+          "behavior": "Shows and expands the App-owned game tool dock, then moves focus to its first control"
+        },
+        {
+          "name": "hideToolDock",
+          "signature": "hideToolDock(): Promise<void>",
+          "availability": "Playmesh App WebView",
+          "behavior": "Hides the App-owned game tool dock and restores the game DOM focus captured by showToolDock"
+        },
+        {
+          "name": "exitGame",
+          "signature": "exitGame(): Promise<void>",
+          "availability": "Playmesh App WebView",
+          "behavior": "Requests the App to end the current game runtime and return to the previous App page"
         },
         {
           "name": "identity.getCurrent",
@@ -197,6 +227,19 @@
           "name": "device.onInput",
           "signature": "device.onInput(callback: (input: JsonObject) => void): Unsubscribe",
           "availability": "Playmesh App WebView when an input capability is declared"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.runtime",
+      "members": [
+        {
+          "name": "getLocale",
+          "signature": "getLocale(): string",
+          "returnsSchema": "/dev/schemas/sdk-v1.json#/$defs/RuntimeLocale",
+          "availability": "After await playmesh.ready",
+          "behavior": "Returns the locale of the App that is displaying this game; ordinary browsers resolve navigator.languages then navigator.language and fall back to zh",
+          "privacy": "Exposes only the locale identifier. Platform UI message dictionaries remain host-private, and game content localization stays game-owned."
         }
       ]
     },

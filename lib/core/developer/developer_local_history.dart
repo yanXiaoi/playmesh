@@ -13,6 +13,8 @@ class DeveloperLocalHistoryOperation {
     required this.changeCount,
     required this.labels,
     required this.paths,
+    this.summaryCode,
+    this.summaryArguments = const {},
   });
 
   final String id;
@@ -21,6 +23,8 @@ class DeveloperLocalHistoryOperation {
   final int changeCount;
   final List<String> labels;
   final List<String> paths;
+  final String? summaryCode;
+  final Map<String, Object?> summaryArguments;
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -29,7 +33,9 @@ class DeveloperLocalHistoryOperation {
     'changeCount': changeCount,
     'labels': labels,
     'paths': paths,
-    'summary': labels.isEmpty ? '项目变更' : labels.last,
+    'summary': labels.isEmpty ? '' : labels.last,
+    if (summaryCode != null) 'summaryCode': summaryCode,
+    if (summaryCode != null) 'summaryArguments': summaryArguments,
   };
 }
 
@@ -103,6 +109,8 @@ class DeveloperLocalHistoryStore {
     required String label,
     required String path,
     required Future<T> Function() action,
+    String? summaryCode,
+    Map<String, Object?> summaryArguments = const {},
     bool forceNew = false,
   }) async {
     final previous = _tail;
@@ -121,6 +129,8 @@ class DeveloperLocalHistoryStore {
         operation,
         label: label,
         path: path,
+        summaryCode: summaryCode,
+        summaryArguments: summaryArguments,
         sealed: forceNew,
       );
       await _prune(workspace);
@@ -238,6 +248,8 @@ class DeveloperLocalHistoryStore {
     Directory operation, {
     required String label,
     required String path,
+    required String? summaryCode,
+    required Map<String, Object?> summaryArguments,
     required bool sealed,
   }) async {
     final snapshot = Directory(
@@ -261,6 +273,8 @@ class DeveloperLocalHistoryStore {
         'labels': labels,
         'paths': paths.toList()..sort(),
         'sealed': existing?['sealed'] == true || sealed,
+        'summaryCode': ?summaryCode,
+        if (summaryCode != null) 'summaryArguments': summaryArguments,
       }),
       flush: true,
     );
@@ -467,6 +481,12 @@ class DeveloperLocalHistoryStore {
     changeCount: json['changeCount'] as int? ?? 0,
     labels: (json['labels'] as List? ?? const []).whereType<String>().toList(),
     paths: (json['paths'] as List? ?? const []).whereType<String>().toList(),
+    summaryCode: json['summaryCode'] is String
+        ? json['summaryCode'] as String
+        : null,
+    summaryArguments: json['summaryArguments'] is Map
+        ? Map<String, Object?>.from(json['summaryArguments'] as Map)
+        : const {},
   );
 
   Directory _historyRoot(Directory workspace) => Directory(

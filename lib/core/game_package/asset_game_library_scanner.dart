@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart';
 
-import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../../models/local_game_entry.dart';
 import 'asset_game_package_loader.dart';
@@ -61,7 +60,7 @@ class AssetGameLibraryScanner {
       minPlayers: manifest.players.min,
       maxPlayers: manifest.players.max,
       supportsMultiplayer: manifest.supportsMultiplayer,
-      displayModeLabel: _displayModeLabel(displayMode),
+      displayModeLabel: displayMode.manifestValue,
       displayMode: displayMode.manifestValue,
       orientation: manifest.orientation,
       controllerOrientation: manifest.controllerOrientation,
@@ -76,9 +75,4 @@ class AssetGameLibraryScanner {
       ),
     );
   }
-
-  String _displayModeLabel(GameDisplayMode mode) => switch (mode) {
-    GameDisplayMode.multiScreen => '多屏模式',
-    GameDisplayMode.singleScreenMultiplayer => '大屏模式',
-  };
 }

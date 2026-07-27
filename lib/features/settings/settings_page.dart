@@ -6,12 +6,16 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/developer/developer_channel.dart';
 import '../../core/catalog/online_game_catalog.dart';
+import '../../core/localization/playmesh_localization.dart';
+import '../../core/localization/playmesh_ui_controller.dart';
+import '../../core/localization/playmesh_ui_preferences.dart';
 import '../../core/protocol/go_core_status.dart';
 import '../../core/release/playmesh_release_notes.dart';
 import '../../core/services/go_core_runtime.dart';
 import '../../core/services/go_core_status_service.dart';
 import '../../ui/playmesh_ui.dart';
 import '../developer/developer_workspace_page.dart';
+import '../games/online_game_library_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -19,6 +23,7 @@ class SettingsPage extends StatefulWidget {
     this.statusProvider,
     this.developerProvider,
     this.catalogController,
+    this.uiController,
   });
 
   static const routeName = '/settings';
@@ -26,6 +31,7 @@ class SettingsPage extends StatefulWidget {
   final GoCoreStatusProvider? statusProvider;
   final DeveloperModeProvider? developerProvider;
   final GameCatalogController? catalogController;
+  final PlaymeshUiController? uiController;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -77,7 +83,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
+      appBar: AppBar(title: Text(context.tr('settings.title'))),
       body: PlaymeshBackground(
         child: ListView(
           children: [
@@ -86,16 +92,30 @@ class _SettingsPageState extends State<SettingsPage> {
               child: Column(
                 children: [
                   const EntranceAnimation(child: _AboutSection()),
-                  if (widget.catalogController case final catalog?) ...[
+                  const SizedBox(height: 14),
+                  if (widget.uiController case final ui?) ...[
+                    EntranceAnimation(
+                      delay: const Duration(milliseconds: 20),
+                      child: _AppearanceSection(controller: ui),
+                    ),
                     const SizedBox(height: 14),
+                  ],
+                  if (widget.catalogController case final catalog?) ...[
                     EntranceAnimation(
                       delay: const Duration(milliseconds: 40),
+                      child: _GameSourceManagementSection(controller: catalog),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  if (widget.catalogController case final catalog?) ...[
+                    EntranceAnimation(
+                      delay: const Duration(milliseconds: 60),
                       child: _CatalogShareSection(controller: catalog),
                     ),
+                    const SizedBox(height: 14),
                   ],
-                  const SizedBox(height: 14),
                   EntranceAnimation(
-                    delay: const Duration(milliseconds: 60),
+                    delay: const Duration(milliseconds: 80),
                     child: _DeveloperModeSection(
                       providerAvailable: _developerProvider != null,
                       portController: _developerPortController,
@@ -148,13 +168,15 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _enableDeveloperMode() async {
     final provider = _developerProvider;
     if (provider == null) {
-      setState(() => _developerError = '当前运行时不支持开发者模式。');
+      setState(
+        () => _developerError = context.tr('settings.developer_unsupported'),
+      );
       return;
     }
 
     final port = int.tryParse(_developerPortController.text.trim());
     if (port == null || port < 1 || port > 65535) {
-      setState(() => _developerError = '端口必须在 1 到 65535 之间。');
+      setState(() => _developerError = context.tr('settings.port_range_error'));
       return;
     }
 
@@ -286,6 +308,152 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
+class _GameSourceManagementSection extends StatelessWidget {
+  const _GameSourceManagementSection({required this.controller});
+
+  final GameCatalogController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        minVerticalPadding: 10,
+        leading: const GradientIcon(icon: Icons.hub_outlined),
+        title: Text(context.tr('settings.game_sources')),
+        subtitle: Text(context.tr('settings.game_sources_description')),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => CatalogSourcesPage(controller: controller),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppearanceSection extends StatelessWidget {
+  const _AppearanceSection({required this.controller});
+
+  static const _systemLocaleValue = '__system__';
+
+  final PlaymeshUiController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final manifest = controller.catalog.manifest;
+    final preferences = controller.preferences;
+    final selectedLocale = preferences.localeMode == PlaymeshLocaleMode.system
+        ? _systemLocaleValue
+        : preferences.localeId!;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const GradientIcon(
+                  icon: Icons.contrast_rounded,
+                  size: 44,
+                  iconSize: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    context.tr('settings.appearance'),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            if (manifest.allowLocaleSwitch)
+              DropdownButtonFormField<String>(
+                initialValue: selectedLocale,
+                decoration: InputDecoration(
+                  labelText: context.tr('settings.language'),
+                  prefixIcon: const Icon(Icons.language_rounded),
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: _systemLocaleValue,
+                    child: Text(context.tr('settings.language_system')),
+                  ),
+                  for (final locale in manifest.enabledLocales)
+                    DropdownMenuItem(
+                      value: locale.id,
+                      child: Text(locale.label),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  unawaited(
+                    value == _systemLocaleValue
+                        ? controller.useSystemLocale()
+                        : controller.useLocale(value),
+                  );
+                },
+              )
+            else
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.language_rounded),
+                title: Text(context.tr('settings.language')),
+                subtitle: Text(
+                  manifest
+                      .descriptor(
+                        preferences.localeId ?? manifest.defaultLocale,
+                      )
+                      .label,
+                ),
+              ),
+            const SizedBox(height: 16),
+            Text(
+              context.tr('settings.theme'),
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 8),
+            if (manifest.allowThemeSwitch)
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<PlaymeshThemePreference>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(
+                      value: PlaymeshThemePreference.system,
+                      icon: const Icon(Icons.brightness_auto_outlined),
+                      label: Text(context.tr('settings.theme_system')),
+                    ),
+                    ButtonSegment(
+                      value: PlaymeshThemePreference.light,
+                      icon: const Icon(Icons.light_mode_outlined),
+                      label: Text(context.tr('settings.theme_light')),
+                    ),
+                    ButtonSegment(
+                      value: PlaymeshThemePreference.dark,
+                      icon: const Icon(Icons.dark_mode_outlined),
+                      label: Text(context.tr('settings.theme_dark')),
+                    ),
+                  ],
+                  selected: {preferences.theme},
+                  onSelectionChanged: (selection) {
+                    if (selection.isNotEmpty) {
+                      unawaited(controller.useTheme(selection.first));
+                    }
+                  },
+                ),
+              )
+            else
+              Text(context.tr('settings.theme_${preferences.theme.wireName}')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CatalogShareSection extends StatefulWidget {
   const _CatalogShareSection({required this.controller});
 
@@ -346,7 +514,7 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
                 children: [
                   Expanded(
                     child: Text(
-                      '分享本机游戏库',
+                      context.tr('settings.catalog_share'),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -368,16 +536,16 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
                     controller: _portController,
                     enabled: !enabled && !_busy,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: '端口',
+                    decoration: InputDecoration(
+                      labelText: context.tr('settings.port'),
                       hintText: '16668',
                     ),
                   );
                   final token = TextField(
                     controller: _tokenController,
                     enabled: !enabled && !_busy,
-                    decoration: const InputDecoration(
-                      labelText: 'Token（留空则无需鉴权）',
+                    decoration: InputDecoration(
+                      labelText: context.tr('settings.catalog_token'),
                     ),
                   );
                   if (constraints.maxWidth < 520) {
@@ -396,9 +564,16 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
               ),
               const SizedBox(height: 10),
               if (_error != null || widget.controller.shareError != null)
-                Text('游戏库分享不可用：${_error ?? widget.controller.shareError}')
+                Text(
+                  context.tr(
+                    'settings.catalog_unavailable',
+                    arguments: {
+                      'error': _error ?? widget.controller.shareError,
+                    },
+                  ),
+                )
               else if (!enabled)
-                const Text('开启后提供分页搜索和游戏包下载接口。Token 留空时局域网设备无需鉴权。')
+                Text(context.tr('settings.catalog_share_description'))
               else
                 FutureBuilder<List<Uri>>(
                   future: _links,
@@ -418,7 +593,7 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             if (links.isEmpty)
-                              const Text('未发现可用局域网地址。')
+                              Text(context.tr('settings.no_lan_address'))
                             else
                               for (final link in links)
                                 ListTile(
@@ -437,7 +612,9 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
                                     ),
                                   ),
                                   trailing: IconButton(
-                                    tooltip: '复制游戏源配置',
+                                    tooltip: context.tr(
+                                      'settings.copy_catalog_config',
+                                    ),
                                     onPressed: config == null
                                         ? null
                                         : () => _copyConfig(config),
@@ -446,7 +623,7 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
                                   onTap: () =>
                                       setState(() => _selectedLink = link),
                                 ),
-                            const Text('扫码会同时配置 Host 和 Token；下载仍会经过本机游戏包安全校验。'),
+                            Text(context.tr('settings.catalog_qr_description')),
                           ],
                         );
                         final qr = config == null
@@ -499,7 +676,9 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
     try {
       if (enabled) {
         final port = int.tryParse(_portController.text.trim());
-        if (port == null) throw const FormatException('端口必须是整数');
+        if (port == null) {
+          throw FormatException(context.tr('settings.port_integer_error'));
+        }
         await widget.controller.enableSharing(
           port: port,
           token: _tokenController.text,
@@ -520,9 +699,9 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
   Future<void> _copyConfig(Uri configuration) async {
     await Clipboard.setData(ClipboardData(text: configuration.toString()));
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('游戏源配置已复制')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.tr('settings.catalog_config_copied'))),
+    );
   }
 }
 
@@ -567,7 +746,7 @@ class _DeveloperModeSection extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    '开发者模式',
+                    context.tr('settings.developer_mode'),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -589,17 +768,17 @@ class _DeveloperModeSection extends StatelessWidget {
                   controller: portController,
                   enabled: providerAvailable && !enabled && !loading,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: '端口',
+                  decoration: InputDecoration(
+                    labelText: context.tr('settings.port'),
                     hintText: '16666',
                   ),
                 );
                 final token = TextField(
                   controller: tokenController,
                   enabled: providerAvailable && !enabled && !loading,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Token',
-                    hintText: '留空则复用已保存值',
+                    hintText: context.tr('settings.developer_token_hint'),
                   ),
                 );
                 if (constraints.maxWidth < 520) {
@@ -618,15 +797,22 @@ class _DeveloperModeSection extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (!providerAvailable)
-              const Text('当前 Go Core Provider 不支持开发者通道。')
+              Text(context.tr('settings.developer_channel_unsupported'))
             else if (error != null)
-              Text('开发者模式不可用：${_developerErrorMessage(error)}')
-            else if (loading)
-              Text(targetEnabled == false ? '正在关闭开发者通道…' : '正在启动开发者通道并准备工作区地址…')
-            else if (!enabled)
-              const Text(
-                '开发者通道独立监听指定端口；端口、Token 和工作区链接会持久保存，不会重启当前 Go Core 或中断游戏会话。',
+              Text(
+                context.tr(
+                  'settings.developer_unavailable',
+                  arguments: {'error': _developerErrorMessage(error)},
+                ),
               )
+            else if (loading)
+              Text(
+                targetEnabled == false
+                    ? context.tr('settings.developer_stopping')
+                    : context.tr('settings.developer_starting'),
+              )
+            else if (!enabled)
+              Text(context.tr('settings.developer_description'))
             else
               _DeveloperLinks(
                 session: session!,
@@ -678,59 +864,71 @@ class _DeveloperLinksState extends State<_DeveloperLinks> {
   @override
   Widget build(BuildContext context) {
     final selectedLink = _selectedLink;
+    final colors = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         final details = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('已开启，token 尾号 ${widget.session.tokenHint ?? '------'}'),
+            Text(
+              context.tr(
+                'settings.developer_enabled',
+                arguments: {'hint': widget.session.tokenHint ?? '------'},
+              ),
+            ),
             const SizedBox(height: 8),
             if (selectedLink != null) ...[
               FilledButton.icon(
                 onPressed: () => widget.onOpenWorkspace(selectedLink),
                 icon: const Icon(Icons.code),
-                label: const Text('打开工作区'),
+                label: Text(context.tr('settings.open_workspace')),
               ),
               const SizedBox(height: 12),
             ],
             if (widget.links.isEmpty)
-              const Text('未发现可用局域网地址。')
+              Text(context.tr('settings.no_lan_address'))
             else
               for (final link in widget.links)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
-                  child: Material(
-                    color: link == selectedLink
-                        ? const Color(0xffdcebe5)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(
-                        link == selectedLink
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_off,
-                      ),
-                      title: Text(link.host),
-                      subtitle: SelectableText(
-                        link.toString(),
-                        style: const TextStyle(fontFamily: 'Consolas'),
-                      ),
-                      trailing: IconButton(
-                        tooltip: '复制开发者链接',
-                        onPressed: () => _copyLink(context, link),
-                        icon: const Icon(Icons.copy),
-                      ),
-                      onTap: () => setState(() => _selectedLink = link),
+                  child: ListTile(
+                    dense: true,
+                    selected: link == selectedLink,
+                    selectedTileColor: colors.secondaryContainer,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
                     ),
+                    textColor: colors.onSurface,
+                    iconColor: colors.onSurfaceVariant,
+                    selectedColor: colors.onSecondaryContainer,
+                    leading: Icon(
+                      link == selectedLink
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_off,
+                    ),
+                    title: Text(link.host),
+                    subtitle: SelectableText(
+                      link.toString(),
+                      style: TextStyle(
+                        fontFamily: 'Consolas',
+                        color: link == selectedLink
+                            ? colors.onSecondaryContainer
+                            : colors.onSurfaceVariant,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      tooltip: context.tr('settings.copy_developer_link'),
+                      onPressed: () => _copyLink(context, link),
+                      icon: const Icon(Icons.copy),
+                    ),
+                    onTap: () => setState(() => _selectedLink = link),
                   ),
                 ),
-            const Text('点击地址可切换二维码。关闭开发者模式后当前地址立即失效。'),
+            Text(context.tr('settings.developer_qr_description')),
             if (Theme.of(context).platform == TargetPlatform.android) ...[
               const SizedBox(height: 6),
               Text(
-                'Android 会持续披露开发者模式前台服务，并在后台或锁屏时保持工作区服务；'
-                '启动游戏等需要可见页面的操作会返回明确的不可用状态。',
+                context.tr('settings.developer_android_description'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -767,9 +965,9 @@ class _DeveloperLinksState extends State<_DeveloperLinks> {
   Future<void> _copyLink(BuildContext context, Uri link) async {
     await Clipboard.setData(ClipboardData(text: link.toString()));
     if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('开发者链接已复制')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.tr('settings.developer_link_copied'))),
+    );
   }
 }
 
@@ -804,14 +1002,14 @@ class _CoreStatusSection extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Go Core',
+                      context.tr('settings.core_status'),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                   IconButton(
-                    tooltip: '重新检查 Go Core',
+                    tooltip: context.tr('settings.core_refresh'),
                     onPressed: isLoading ? null : onRefresh,
                     icon: const Icon(Icons.refresh),
                   ),
@@ -826,19 +1024,26 @@ class _CoreStatusSection extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.link_outlined),
-              title: const Text('服务地址'),
+              title: Text(context.tr('settings.service_address')),
               subtitle: SelectableText(endpoint.toString()),
             ),
             if (status != null)
               ListTile(
                 leading: const Icon(Icons.memory_outlined),
                 title: Text('Core ${status.coreVersion}'),
-                subtitle: Text('启动于 ${_formatTimestamp(status.startedAt)}'),
+                subtitle: Text(
+                  context.tr(
+                    'settings.started_at',
+                    arguments: {
+                      'time': _formatTimestamp(context, status.startedAt),
+                    },
+                  ),
+                ),
               ),
             if (requestId != null)
               ListTile(
                 leading: const Icon(Icons.tag),
-                title: const Text('请求 ID'),
+                title: Text(context.tr('settings.request_id')),
                 subtitle: SelectableText(requestId),
               ),
           ],
@@ -868,8 +1073,8 @@ class _StatusPresentation {
   ) {
     if (isLoading) {
       return _StatusPresentation(
-        label: '正在检查',
-        message: '正在连接本机 Go Core。',
+        label: context.tr('settings.core_checking'),
+        message: context.tr('settings.core_connecting'),
         icon: Icons.sync,
         color: Theme.of(context).colorScheme.primary,
       );
@@ -877,30 +1082,30 @@ class _StatusPresentation {
 
     switch (result?.availability) {
       case GoCoreAvailability.online:
-        return const _StatusPresentation(
-          label: '在线',
-          message: 'Go Core 连接正常。',
+        return _StatusPresentation(
+          label: context.tr('settings.core_online'),
+          message: context.tr('settings.core_online_description'),
           icon: Icons.check_circle_outline,
-          color: Color(0xff287d3c),
+          color: const Color(0xff287d3c),
         );
       case GoCoreAvailability.offline:
         return _StatusPresentation(
-          label: '离线',
+          label: context.tr('settings.core_offline'),
           message: result!.message,
           icon: Icons.cloud_off_outlined,
           color: const Color(0xffa35b00),
         );
       case GoCoreAvailability.error:
         return _StatusPresentation(
-          label: '错误',
+          label: context.tr('settings.core_error'),
           message: result!.message,
           icon: Icons.error_outline,
           color: const Color(0xffb3261e),
         );
       case null:
-        return const _StatusPresentation(
-          label: '尚未检查',
-          message: '点击刷新按钮检查 Go Core。',
+        return _StatusPresentation(
+          label: context.tr('settings.core_unchecked'),
+          message: context.tr('settings.core_unchecked_description'),
           icon: Icons.help_outline,
           color: Colors.grey,
         );
@@ -931,14 +1136,17 @@ class _AboutSection extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    '局域网优先的 HTML 游戏平台 · 正式版 · 构建 $playmeshBuildNumber',
+                  Text(
+                    context.tr(
+                      'settings.about_description',
+                      arguments: {'build': playmeshBuildNumber},
+                    ),
                   ),
                 ],
               ),
             ),
             IconButton(
-              tooltip: '查看本次更新',
+              tooltip: context.tr('settings.release_notes'),
               onPressed: () => _showReleaseNotes(context),
               icon: const Icon(Icons.new_releases_outlined),
             ),
@@ -952,7 +1160,12 @@ class _AboutSection extends StatelessWidget {
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Playmesh $playmeshVersion 更新'),
+        title: Text(
+          context.tr(
+            'settings.release_title',
+            arguments: {'version': playmeshVersion},
+          ),
+        ),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: SingleChildScrollView(
@@ -960,7 +1173,11 @@ class _AboutSection extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final item in playmeshReleaseHighlights)
+                for (
+                  var index = 0;
+                  index < playmeshReleaseHighlightCount;
+                  index++
+                )
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: Row(
@@ -971,12 +1188,19 @@ class _AboutSection extends StatelessWidget {
                           child: Icon(Icons.circle, size: 5),
                         ),
                         const SizedBox(width: 9),
-                        Expanded(child: Text(item)),
+                        Expanded(
+                          child: Text(
+                            context.tr('release.highlight_${index + 1}'),
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 Text(
-                  '构建 $playmeshBuildNumber',
+                  context.tr(
+                    'settings.build_number',
+                    arguments: {'build': playmeshBuildNumber},
+                  ),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -986,7 +1210,7 @@ class _AboutSection extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
+            child: Text(context.tr('common.close')),
           ),
         ],
       ),
@@ -994,12 +1218,11 @@ class _AboutSection extends StatelessWidget {
   }
 }
 
-String _formatTimestamp(DateTime timestamp) {
+String _formatTimestamp(BuildContext context, DateTime timestamp) {
   final local = timestamp.toLocal();
-  String twoDigits(int value) => value.toString().padLeft(2, '0');
-
-  return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
-      '${twoDigits(local.hour)}:${twoDigits(local.minute)}:${twoDigits(local.second)}';
+  final material = MaterialLocalizations.of(context);
+  return '${material.formatMediumDate(local)} '
+      '${material.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
 }
 
 String _developerErrorMessage(Object? error) => switch (error) {

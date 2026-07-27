@@ -12,6 +12,7 @@ import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../game_sdk/sdk_feature_registry.dart';
+import '../localization/platform_game_ui_assets.dart';
 import 'game_web_gateway_contract.dart';
 import 'local_tunnel_gateway_contract.dart';
 
@@ -54,6 +55,7 @@ Future<GameWebGateway> startGameWebGateway({
   final resolvedAppSdkVersion = SdkFeatureRegistry.resolveAppSdkVersion(
     appSdkVersion,
   );
+  final platformUiAssets = await PlatformGameUiAssets.load();
   _appRelativeHtmlEntry(gameEntryPath, field: 'entries.game');
   _appRelativeHtmlEntry(controllerEntryPath, field: 'entries.controller');
   final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
@@ -71,6 +73,7 @@ Future<GameWebGateway> startGameWebGateway({
     gameName: gameName,
     gameSdkVersion: resolvedGameSdkVersion,
     appSdkVersion: resolvedAppSdkVersion,
+    platformUiAssets: platformUiAssets,
     requiredCapabilities: List.unmodifiable(requiredCapabilities),
     controllerRequiredCapabilities: List.unmodifiable(
       controllerRequiredCapabilities,
@@ -99,6 +102,7 @@ class _IoGameWebGateway implements GameWebGateway {
     required this.gameName,
     required this.gameSdkVersion,
     required this.appSdkVersion,
+    required this.platformUiAssets,
     required this.requiredCapabilities,
     required this.controllerRequiredCapabilities,
     required this.coreEndpoint,
@@ -120,6 +124,7 @@ class _IoGameWebGateway implements GameWebGateway {
   final String gameName;
   final String gameSdkVersion;
   final String appSdkVersion;
+  final PlatformGameUiAssets platformUiAssets;
   final List<String> requiredCapabilities;
   final List<String> controllerRequiredCapabilities;
   final Uri? coreEndpoint;
@@ -243,6 +248,7 @@ class _IoGameWebGateway implements GameWebGateway {
         : '/app/${relativePath.substring(0, lastSeparator + 1)}';
     html = html.replaceFirst('<head>', '<head><base href="$basePath">');
     final browserConfig = jsonEncode({
+      '_playmeshPlatformUi': platformUiAssets.browserCatalog.toJson(),
       'mode': multiplayer ? 'multiplayer' : 'solo',
       if (multiplayer)
         'coreBase': Uri(
@@ -264,7 +270,8 @@ class _IoGameWebGateway implements GameWebGateway {
           .map((definition) => definition.toJson())
           .toList(),
       'bucketEndpoint': '/bucket',
-      'nickname': ?request.uri.queryParameters['playmeshNickname'],
+      if (request.uri.queryParameters['playmeshNickname'] != null)
+        'nickname': request.uri.queryParameters['playmeshNickname'],
     });
     html = html.replaceFirst(
       '<script src="/playmesh/sdk/v1/playmesh.js"></script>',

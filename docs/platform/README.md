@@ -26,7 +26,7 @@ Gateway 的平台开发者。游戏作者只需要阅读 [`docs/game/`](../game/
 - [开发环境与统一发布](../04-dev-env.md)
 - [局域网与公共中转](../remote-game-relay.md)
 - [Catalog API](../catalog-api.md)
-- [HarmonyOS 构建与适配](../harmony-release.md)
+- [当前本地实现](../implementation/README.md)
 - [当前版本日志](../version/README.md)
 
 ## 共同原则
@@ -38,6 +38,21 @@ Gateway 的平台开发者。游戏作者只需要阅读 [`docs/game/`](../game/
 - 能力插件由插件描述符和实例实现驱动注册表、工作区、自检与 SDK。
 - SDK 由 Dart Feature 驱动 TypeScript、`.d.ts`、宿主执行器和兼容发行版。
 - Developer API 由 Operation Definition 驱动路由、OpenAPI、AI 目录和中间件。
+- App 内全部显示文案由 locale 对应的 `app.json` 驱动 Flutter、Developer
+  Workspace 和平台注入 Web UI；网页只消费宿主解析后的命名空间投影。
+
+### App 所有的 Web UI
+
+内置 Developer Workspace 和平台注入游戏 WebView 的工具、能力确认、昵称、信息与
+日志界面都属于 App。它们不能维护 `developer.json`、JavaScript 内置中英字典或可见
+硬编码 fallback。App 先按统一清单解析 locale/fallback，再通过 Developer Gateway
+或私有 WebView bootstrap 暴露只读 `locale + messages`；语言切换必须实时更新已经
+打开的页面。
+
+工作区只消费 `workspace.*`，平台游戏 UI 只消费 `platform.game.*`，两者都不能获得
+完整 App 词典或改变游戏内容。API 路径、机器错误 code、Schema 与原始日志保持语言
+无关。独立部署的 Go Server 不属于 App 内界面，可继续使用统一清单中的
+`goServer` bundle。
 
 ### 明确的边界
 

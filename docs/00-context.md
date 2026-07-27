@@ -9,12 +9,11 @@
 3. `02-roadmap.md`：当前阶段和后续路线。
 4. `05-next-steps.md`：最近可执行任务清单。
 5. `04-dev-env.md`：本机开发环境记录。
-6. `harmony-release.md`：OpenHarmony 工具链、能力边界、Go Core 注入、HAP 构建与签名。
-7. `06-engineering-standards.md`：代码复用、调用链、测试、日志和文档规范。
-8. `version/README.md`：第六阶段之后的版本更新日志与 App 简略日志规则。
-9. `catalog-api.md`：本机游戏源、在线多源游戏库、鉴权和下载队列。
-10. `remote-game-relay.md`：局域网、本地回环网关、公共中转和端到端加密边界。
-11. `game/README.md`：游戏开发文档入口，包含游戏包、SDK、默认模板和开发者通道文档。
+6. `06-engineering-standards.md`：代码复用、调用链、测试、日志和文档规范。
+7. `version/README.md`：第六阶段之后的版本更新日志与 App 简略日志规则。
+8. `catalog-api.md`：本机游戏源、在线多源游戏库、鉴权和下载队列。
+9. `remote-game-relay.md`：局域网、本地回环网关、公共中转和端到端加密边界。
+10. `game/README.md`：游戏开发文档入口，包含游戏包、SDK、默认模板和开发者通道文档。
 
 ## 项目定位
 
@@ -32,7 +31,7 @@ Playmesh 是一个局域网优先的跨平台派对游戏平台。应用负责�
 ## 当前核心判断
 
 - Go 适合做本地通讯、房间、协议、包管理，不适合直接读取摄像头、手柄和系统权限。
-- Android/iOS/HarmonyOS 的硬件能力分别由 Kotlin、Swift、ArkTS 原生层采集，再传给 Flutter/Go/HTML SDK。
+- Android/iOS 的硬件能力分别由 Kotlin、Swift 原生层采集，再传给 Flutter/Go/HTML SDK。
 - AI 生成的 HTML 游戏不能直接获得原生 JS Bridge 权限，必须经过受限 SDK 和权限系统。
 - 默认自动验证限于静态分析、Flutter/Go/SDK 代码级测试以及与平台编译无关的资源和语法检查。只有用户明确要求平台构建时，才可使用其已配置工具链生成并检查产物；安装、真机行为和生产签名仍需用户或 CI 验证。iOS 发布、体感和云端仍放在后续版本评估。
 - 第三阶段已完成真实会话、WebSocket、Game SDK、统一游戏包扫描和浏览器控制器入口；平台当前不内置游戏 Demo。
@@ -76,7 +75,23 @@ Flutter App
 
 ## 当前开发建议
 
-第一至第六阶段均已完成并归档，第六阶段是最后一个阶段。正式基线仍为 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2`、App Bridge SDK `1.2.1`、Developer API / OpenAPI `1.4.0`、Developer CLI `1.1.0`、Catalog API `1.1.0`。当前开发版本为 Playmesh `2.2.0+21`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.2`、App Bridge SDK `2.1.1`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.1.0`、Developer CLI `1.3.1`；两套 SDK 已收敛为 Dart 唯一手写源、统一 feature 注册、运行时自动组装和显式多版本兼容发行。所有游戏/分享/Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority 决定玩法开始和结束条件，SDK 只提交受控会话状态请求。变化统一记录在 `docs/version/2.2.0.md` 与 `docs/version/NEXT.md`。后续不再建立阶段，所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
+`1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。当前
+开发版本为 Playmesh `3.0.0+22`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
+`2.3.0`、App Bridge SDK `2.1.1`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、
+Developer API / OpenAPI `2.2.0`、Developer CLI `1.4.0`；两套 SDK 已收敛为 Dart
+唯一手写源、统一 feature 注册、运行时自动组装和显式多版本兼容发行。所有游戏、
+分享和 Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority
+决定玩法开始和结束条件，SDK 只提交受控会话状态请求。当前变化记录在
+`docs/version/NEXT.md`，工程落点记录在
+`docs/implementation/playmesh-3.0.0-local-implementation.md`。后续不再建立阶段，
+所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并
+按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+
+App 内置 Developer Workspace 和平台注入游戏 WebView 的 UI 都使用 App
+`app.json` 作为唯一文案源，并由宿主同步 locale/messages；网页端不维护独立词典。
+游戏业务不读取 App messages，只在 `playmesh.ready` 后通过只读
+`playmesh.runtime.getLocale()` 获取当前显示端 locale，再使用游戏自己的翻译资源。
 
 建议顺序：
 
@@ -102,10 +117,7 @@ docs/status/phase-02-go-core.md          第二阶段事实归档
 go-core/go.mod                        Go Core 模块已创建，使用 Go 1.26.2
 go-core/main.go                       动态端口 HTTP Core 进程入口
 go-core/mobile/                       Android gomobile 生命周期入口
-go-core/harmony/                      OpenHarmony c-shared C ABI 入口
-ohos/                                 OpenHarmony API 12 Flutter/ArkTS/HAR 工程
-tool/build_release.ps1                HarmonyOS/Android/Windows 统一发布入口
-tool/install_harmony_go.ps1           固定 SIG Go 工具链安装与校验
+tool/build_release.ps1                Android/Windows 统一发布入口
 lib/core/                             Flutter Core 宿主、Client、协议与状态服务
 go-core/internal/session/             会话、Player/Authority 拓扑与 WS 路由
 go-server/                            游戏源声明、空目录与无密钥公共中转服务器
@@ -146,12 +158,11 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
   `channelId + shareToken`；公共中转链接只包含
   `tunnelId + fragment inviteToken`，不再公开 Core 端口、联机码或游戏元数据。
 - 主游戏网页和控制端网页都可以通过同级可选 `capabilities.json` 声明平台能力；能力 code、中文名、说明和 App/HTML 适配状态由统一能力注册表提供。
-- `permissions` 保留给键盘等既有输入声明；传感器以及后续摄像头、麦克风等受保护能力使用 `capabilities.json`。两者都不控制浏览器自身的 DOM 键盘事件或浏览器原生权限。
+- `main.json` 不再定义 `permissions`；传感器以及后续摄像头、麦克风等受保护能力只使用同级 `capabilities.json`。浏览器自身的 DOM 键盘事件或浏览器原生权限不依赖游戏清单字段。
 - 是否允许普通浏览器访问游戏，是游玩期间的会话设置，由用户单独确认，默认不公开。
 - 未安装 App 的玩家通过房主分享的局域网地址进入浏览器游戏端或控制端。SDK 在浏览器 `localStorage` 中持久化随机玩家 ID 与昵称，刷新后复用同一身份；分享链接不携带昵称或玩家 ID。
 - 公开浏览器页面前必须提示游戏包和不可信网络风险，并使用短期会话凭证。
 - 用户昵称可修改；唯一 ID 首次创建时自动生成，之后保持稳定，避免仅依赖昵称识别玩家。
 - 头像只保存到本地，MVP 不做云端头像同步。
 - 阶段归档只记录功能和代码路径。平台构建只在用户明确要求时执行并写入独立验证记录；安装、真机运行和商店签名不能由静态或包结构检查替代。
-- OpenHarmony Public SDK API 12 不提供 HMS `@kit.ScanKit`。鸿蒙包保留手动输入加入码/游戏源的回退，不把扫码列为已适配能力；系统文件分享则由 ArkTS HAR 使用 `ohos.want.action.sendData` 实现。
 - 第一阶段不以二维码、联机码、真实 Go 服务、浏览器加入或硬件输入作为验收条件。

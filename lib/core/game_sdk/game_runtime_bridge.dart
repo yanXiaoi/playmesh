@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'game_sdk_bridge.dart';
 import 'sdk_feature_registry.dart';
@@ -93,6 +94,7 @@ class GameRuntimeBridge implements GameSdkBridge {
         'type': 'command.error',
         'requestId': requestId,
         'error': error.toString(),
+        if (error is SdkCommandException) 'code': error.code,
       });
     }
   }
@@ -126,6 +128,16 @@ class GameRuntimeBridge implements GameSdkBridge {
   }
 
   Future<void> _handleTransportMessage(Map<String, Object?> message) async {
+    if (message['type'] == 'platform.avatar.write' && connection.isAuthority) {
+      await _handleAvatarWrite(message);
+      return;
+    }
+    final session = message['session'];
+    if (connection.isAuthority &&
+        session is Map &&
+        session['state'] == 'stopped') {
+      await storage.clearSystemAvatars();
+    }
     final payload = message['payload'];
     if (payload is Map) {
       final normalized = Map<String, Object?>.from(payload);
@@ -146,6 +158,32 @@ class GameRuntimeBridge implements GameSdkBridge {
       }
     }
     _send({'type': 'transport.message', 'message': message});
+  }
+
+  Future<void> _handleAvatarWrite(Map<String, Object?> message) async {
+    final payload = message['payload'];
+    if (payload is! Map) return;
+    final normalized = Map<String, Object?>.from(payload);
+    String? playerId;
+    String? digest;
+    try {
+      playerId = sdkRequiredString(normalized, 'playerId');
+      digest = sdkRequiredString(normalized, 'digest');
+      final bytes = Uint8List.fromList(
+        base64Decode(sdkRequiredString(normalized, 'png')),
+      );
+      await storage.writeUserAvatar(
+        playerId: playerId,
+        pngBytes: bytes,
+        sha256: digest,
+      );
+      connection.confirmAvatarWritten(playerId: playerId, sha256: digest);
+    } on Object {
+      // 头像同步失败不能阻止玩家入局，Core 会继续保持 avatar=null。
+      if (playerId != null && digest != null) {
+        connection.rejectAvatarWrite(playerId: playerId, sha256: digest);
+      }
+    }
   }
 
   Future<void> _handleRemoteStorageRequest(
@@ -217,6 +255,11 @@ class GameRuntimeBridge implements GameSdkBridge {
     _send({'type': 'performance.visibility', 'visible': visible});
   }
 
+  @override
+  void restoreGameContentFocus() {
+    _send({'type': 'platform.ui.restoreGameFocus'});
+  }
+
   Future<void> persistStorage() => storage.flushAll();
 
   @override
@@ -229,6 +272,7 @@ class GameRuntimeBridge implements GameSdkBridge {
       _sendError(requestId, '主机存储连接已关闭');
     }
     _remoteStorageRequests.clear();
+    if (connection.isAuthority) await storage.clearSystemAvatars();
     await storage.close();
     await _sessionSubscription.cancel();
     await connection.close();

@@ -7,11 +7,29 @@ const source = fs.readFileSync(
   "utf8",
 );
 const commands = [];
+const gameDocumentBody = {
+  isConnected: true,
+  tabIndex: -1,
+  getAttribute() { return null; },
+  setAttribute() { this.tabIndex = -1; },
+  removeAttribute() {},
+  focus() { window.document.activeElement = this; },
+};
+const gameFocusTarget = {
+  isConnected: true,
+  focus() { window.document.activeElement = this; },
+};
 const window = {
   console,
   queueMicrotask,
   setTimeout,
   clearTimeout,
+  navigator: { userActivation: { isActive: true } },
+  document: {
+    activeElement: gameFocusTarget,
+    body: gameDocumentBody,
+    documentElement: { isConnected: true },
+  },
   PlaymeshAppBridge: {
     postMessage(rawMessage) {
       const command = JSON.parse(rawMessage);
@@ -19,8 +37,12 @@ const window = {
       let result = null;
       if (command.command === "app.bootstrap") {
         result = {
+          _playmeshPlatformUi: {
+            locale: "en-US",
+            messages: { "toolbar.expand": "Open game tools" },
+          },
           available: true,
-          sdkVersion: "2.1.1",
+          sdkVersion: "2.2.0",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
@@ -64,8 +86,21 @@ const window = {
 window.window = window;
 vm.runInNewContext(source, window, { filename: "playmesh-app.js" });
 
-await window.playmeshApp.ready;
-assert.equal(window.playmeshApp.version, "2.1.1");
+const publicBootstrap = await window.playmeshApp.ready;
+assert.equal("_playmeshPlatformUi" in publicBootstrap, false);
+assert.equal("__getPlatformUiConfiguration" in window.playmeshApp, false);
+assert.deepEqual(
+  JSON.parse(
+    JSON.stringify(
+      window[Symbol.for("playmesh.platform-ui.configuration")],
+    ),
+  ),
+  {
+    locale: "en-US",
+    messages: { "toolbar.expand": "Open game tools" },
+  },
+);
+assert.equal(window.playmeshApp.version, "2.2.0");
 assert.equal(window.playmeshApp.isAvailable(), true);
 assert.deepEqual(
   JSON.parse(JSON.stringify(window.playmeshApp.identity.getCurrent())),
@@ -107,5 +142,26 @@ assert.deepEqual(
 assert.equal(commands.some((item) => item.command === "app.capability.create"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.invoke"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.dispose"), true);
+
+window.document.activeElement = gameFocusTarget;
+await window.playmeshApp.openSharePanel();
+assert.deepEqual(
+  commands.findLast((item) => item.command === "app.ui.openSharePanel").payload,
+  { userActivation: true },
+);
+window.document.activeElement = { isConnected: true };
+window.playmeshApp.__restoreGameContentFocus();
+assert.equal(window.document.activeElement, gameFocusTarget);
+
+window.document.activeElement = gameFocusTarget;
+await window.playmeshApp.showToolDock();
+window.document.activeElement = { isConnected: true };
+await window.playmeshApp.hideToolDock();
+assert.equal(window.document.activeElement, gameFocusTarget);
+assert.equal(commands.some((item) => item.command === "app.ui.toolDock.show"), true);
+assert.equal(commands.some((item) => item.command === "app.ui.toolDock.hide"), true);
+
+await window.playmeshApp.exitGame();
+assert.equal(commands.some((item) => item.command === "app.game.exit"), true);
 
 console.log("Playmesh App capability plugin bridge contract passed");

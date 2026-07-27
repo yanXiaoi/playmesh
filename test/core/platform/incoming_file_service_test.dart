@@ -23,7 +23,13 @@ void main() {
   test('拒绝缺少路径或文件名的原生消息', () {
     expect(
       () => IncomingFile.fromMap(const {'name': 'game.zip'}),
-      throwsFormatException,
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          'incoming_file_payload_incomplete',
+        ),
+      ),
     );
   });
 }

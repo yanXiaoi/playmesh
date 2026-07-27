@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,414 +7,774 @@ import 'package:playmesh/core/catalog/game_catalog_models.dart';
 import 'package:playmesh/core/catalog/game_catalog_preferences.dart';
 import 'package:playmesh/core/catalog/game_catalog_server.dart';
 import 'package:playmesh/core/catalog/online_game_catalog.dart';
-import 'package:playmesh/core/game_package/file_game_library_scanner.dart';
+import 'package:playmesh/core/game_package/game_library_local_metadata.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/models/game_manifest.dart';
+import 'package:playmesh/models/game_summary.dart';
+import 'package:playmesh/models/local_game_entry.dart';
 
 void main() {
-  test('本地游戏源支持鉴权、分页搜索和安全包下载', () async {
-    final root = await Directory.systemTemp.createTemp('playmesh-catalog-');
-    final importRoot = await Directory.systemTemp.createTemp(
-      'playmesh-catalog-import-',
+  test('publicURL 只接受 HTTP/HTTPS origin 和可选 token', () {
+    final parsed = parseCatalogPublicUrl(
+      'https://games.example.com?token=read-token',
     );
-    addTearDown(() async {
-      await root.delete(recursive: true);
-      await importRoot.delete(recursive: true);
-    });
-    await _writeInstalledGame(
-      root,
-      id: 'com.example.catalog',
-      name: '星海竞速',
-      description: '支持局域网竞速',
-      tags: ['race', 'party'],
-    );
-    await _writeInstalledGame(
-      root,
-      id: 'com.example.other',
-      name: '另一款游戏',
-      description: '其他描述',
-      tags: ['casual'],
-    );
-    final scanner = FileGameLibraryScanner(libraryRoot: root);
-    final library = GameLibraryRepository(scanner.scan);
-    final transfer = GamePackageTransferService(libraryRoot: root);
-    final server = GameCatalogServer(
-      library,
-      transfer,
-      nicknameProvider: () => '测试玩家',
-    );
-    addTearDown(server.stop);
-    final port = await _freePort();
-    await server.start(port: port, token: 'catalog-token');
-    final base = Uri.parse('http://127.0.0.1:$port');
-
-    final unauthorized = await http.get(base.resolve('/apps/list'));
-    expect(unauthorized.statusCode, HttpStatus.unauthorized);
-
-    final list = await http.get(
-      base.replace(
-        path: '/apps/list',
-        queryParameters: {
-          'page': '1',
-          'size': '5',
-          's_name': '星海',
-          's_tag': 'race',
-          's_desc': '局域网',
-        },
+    expect(parsed.host.toString(), 'https://games.example.com');
+    expect(parsed.token, 'read-token');
+    expect(
+      () => parseCatalogPublicUrl(
+        'playmesh://catalog-source?host=https://games.example.com',
       ),
-      headers: const {HttpHeaders.authorizationHeader: 'Bearer catalog-token'},
+      throwsFormatException,
     );
-    expect(list.statusCode, HttpStatus.ok);
-    expect(list.headers['x-playmesh-catalog-version'], '1.4.0');
-    final listJson = jsonDecode(list.body) as Map<String, Object?>;
-    expect(listJson['total'], 1);
-    expect(listJson['current'], 1);
-    final manifest = (listJson['data']! as List).single as Map;
-    expect(manifest['id'], 'com.example.catalog');
-    expect(manifest['sdkVersion'], '1.3.0');
-    expect(manifest['entries'], isA<Map>());
+    expect(
+      () => parseCatalogPublicUrl('https://games.example.com?token=a&x=b'),
+      throwsFormatException,
+    );
+  });
 
-    final info = await http.get(
-      base.resolve('/apps/info'),
-      headers: const {HttpHeaders.authorizationHeader: 'Bearer catalog-token'},
-    );
-    expect(info.statusCode, HttpStatus.ok);
-    expect(jsonDecode(info.body), {
-      'catalogApiVersion': '1.4.0',
-      'name': '测试玩家的游戏库',
-      'supportsGameRelay': false,
-    });
+  test(
+    'publicURL probe sends token only as Bearer and failure never overwrites config',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'playmesh-public-url-probe-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final requests = <({Uri uri, String? authorization})>[];
+      var sourceAvailable = true;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        requests.add((
+          uri: request.uri,
+          authorization: request.headers.value(HttpHeaders.authorizationHeader),
+        ));
+        if (request.uri.path != '/apps/info') {
+          request.response.statusCode = HttpStatus.notFound;
+        } else if (!sourceAvailable) {
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+        } else {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'catalogApiVersion': '2.0.0',
+              'name': 'Remote Dynamic Source / 原样',
+              'author': 'Remote Publisher / 原样',
+              'supportsGameRelay': false,
+              'userUpload': {'supported': false},
+            }),
+          );
+        }
+        await request.response.close();
+      });
+      addTearDown(() => server.close(force: true));
+      final controller = await _catalogController(root, const []);
+      addTearDown(controller.close);
+      final publicUrl =
+          'http://127.0.0.1:${server.port}?token=stable-read-token';
 
-    final secondPage = await http.get(
-      base.replace(
-        path: '/apps/list',
-        queryParameters: {'page': '2', 'size': '1'},
-      ),
-      headers: const {HttpHeaders.authorizationHeader: 'Bearer catalog-token'},
-    );
-    final secondPageJson = jsonDecode(secondPage.body) as Map<String, Object?>;
-    expect(secondPageJson['total'], 2);
-    expect(secondPageJson['current'], 2);
-    expect(secondPageJson['size'], 1);
-    expect(secondPageJson['data'], hasLength(1));
+      final imported = await controller.verifyAndUpsertSource(publicUrl);
 
-    final download = await http.get(
-      base.replace(
-        path: '/apps/download',
-        queryParameters: {'id': 'com.example.catalog'},
-      ),
-      headers: const {HttpHeaders.authorizationHeader: 'Bearer catalog-token'},
-    );
-    expect(download.statusCode, HttpStatus.ok);
-    final file = File('${importRoot.path}${Platform.pathSeparator}remote.zip');
-    await file.writeAsBytes(download.bodyBytes);
-    final imported = await GamePackageTransferService(
-      libraryRoot: importRoot,
-    ).importPackage(file);
-    expect(imported.id, 'com.example.catalog');
+      expect(imported.name, 'Remote Dynamic Source / 原样');
+      expect(imported.declaration?.author, 'Remote Publisher / 原样');
+      expect(requests.single.uri.path, '/apps/info');
+      expect(requests.single.uri.queryParameters, isEmpty);
+      expect(requests.single.authorization, 'Bearer stable-read-token');
 
-    final queueImported = Completer<void>();
-    final queue = GameDownloadQueue(
-      GamePackageTransferService(libraryRoot: importRoot),
-      (_) async => queueImported.complete(),
-    );
-    addTearDown(queue.close);
-    queue.enqueue([
-      OnlineCatalogGame(
-        manifest: GameManifest.fromJson(Map<String, Object?>.from(manifest)),
-        source: OnlineGameSource(
-          id: 'local',
-          name: '本机源',
-          host: base,
-          token: 'catalog-token',
+      sourceAvailable = false;
+      await expectLater(
+        controller.verifyAndUpsertSource(
+          'http://127.0.0.1:${server.port}?token=replacement-token',
         ),
-      ),
-    ]);
-    await queueImported.future.timeout(const Duration(seconds: 5));
-    await _waitUntil(
-      () => queue.tasks.single.status == GameDownloadStatus.completed,
-    );
-    expect(queue.tasks.single.status, GameDownloadStatus.completed);
+        throwsFormatException,
+      );
 
-    await server.start(port: port, token: '');
-    final publicList = await http.get(base.resolve('/apps/list?size=1'));
-    expect(publicList.statusCode, HttpStatus.ok);
+      expect(requests.last.uri.path, '/apps/info');
+      expect(requests.last.uri.queryParameters, isEmpty);
+      expect(requests.last.authorization, 'Bearer replacement-token');
+      expect(controller.sources, hasLength(1));
+      expect(controller.sources.single.id, imported.id);
+      expect(controller.sources.single.name, imported.name);
+      expect(controller.sources.single.token, 'stable-read-token');
+      expect(
+        controller.sources.single.declaration?.name,
+        'Remote Dynamic Source / 原样',
+      );
+
+      final persisted = await GameCatalogPreferences(libraryRoot: root).load();
+      expect(persisted.sources, hasLength(1));
+      expect(persisted.sources.single.id, imported.id);
+      expect(persisted.sources.single.token, 'stable-read-token');
+      expect(
+        persisted.sources.single.declaration?.name,
+        'Remote Dynamic Source / 原样',
+      );
+    },
+  );
+
+  test(
+    'source declaration refresh uses apps info and replaces persisted cache',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'playmesh-source-refresh-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final paths = <String>[];
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        paths.add(request.uri.path);
+        if (request.uri.path != '/apps/info') {
+          request.response.statusCode = HttpStatus.notFound;
+        } else {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'catalogApiVersion': '2.0.0',
+              'name': 'Fresh API Source / 原样',
+              'author': 'Fresh API Publisher / 原样',
+              'supportsGameRelay': false,
+              'userUpload': {'supported': false},
+            }),
+          );
+        }
+        await request.response.close();
+      });
+      addTearDown(() => server.close(force: true));
+      final cached = OnlineGameSource(
+        id: 'cached',
+        name: 'User Source Name / 原样',
+        host: Uri.parse('http://127.0.0.1:${server.port}'),
+        declaration: const GameCatalogDeclaration(
+          catalogApiVersion: gameCatalogApiVersion,
+          name: 'Cached API Source / 原样',
+          author: 'Cached API Publisher / 原样',
+          supportsGameRelay: false,
+        ),
+        lastValidatedAt: DateTime.utc(2026, 7, 25),
+      );
+      final controller = await _catalogController(root, [cached]);
+      addTearDown(controller.close);
+
+      expect(
+        controller.sources.single.declaration?.name,
+        'Cached API Source / 原样',
+      );
+
+      final probe = await controller.refreshSourceDeclaration(cached.id);
+
+      expect(paths, ['/apps/info']);
+      expect(probe.error, isNull);
+      expect(controller.sources.single.name, 'User Source Name / 原样');
+      expect(
+        controller.sources.single.declaration?.name,
+        'Fresh API Source / 原样',
+      );
+      expect(
+        controller.sources.single.declaration?.author,
+        'Fresh API Publisher / 原样',
+      );
+      final persisted = await GameCatalogPreferences(libraryRoot: root).load();
+      expect(
+        persisted.sources.single.declaration?.name,
+        'Fresh API Source / 原样',
+      );
+    },
+  );
+
+  test('Catalog 2.0 声明严格校验 userUpload 能力', () {
+    final declaration = GameCatalogDeclaration.fromJson({
+      'catalogApiVersion': '2.0.0',
+      'name': 'Source',
+      'supportsGameRelay': false,
+      'userUpload': {'supported': false},
+    });
+    expect(declaration.userUpload.supported, isFalse);
+    expect(
+      () => GameCatalogDeclaration.fromJson({
+        'catalogApiVersion': '1.4.0',
+        'supportsGameRelay': false,
+        'userUpload': {'supported': false},
+      }),
+      throwsFormatException,
+    );
   });
 
-  test('多个在线源并发获取并按 ID 去重，下载队列可停止和删除', () async {
-    final root = await Directory.systemTemp.createTemp('playmesh-sources-');
-    final installRoot = await Directory.systemTemp.createTemp(
-      'playmesh-source-install-',
+  test('旧 source config 被隔离且不会兼容读取', () async {
+    final root = await Directory.systemTemp.createTemp('playmesh-source-v1-');
+    addTearDown(() => root.delete(recursive: true));
+    final file = File(
+      '${root.path}${Platform.pathSeparator}catalog'
+      '${Platform.pathSeparator}settings.json',
     );
-    addTearDown(() async {
-      await root.delete(recursive: true);
-      await installRoot.delete(recursive: true);
-    });
-    final barrier = Completer<void>();
-    var requests = 0;
-    final first = await _sourceServer(
-      barrier: barrier,
-      onList: () {
-        requests += 1;
-        if (requests == 2) barrier.complete();
-      },
-      manifests: [
-        _manifest('com.example.same', '相同游戏'),
-        _manifest('com.example.first', '第一个源'),
-      ],
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      jsonEncode({'formatVersion': 1, 'sources': <Object?>[]}),
     );
-    final second = await _sourceServer(
-      barrier: barrier,
-      onList: () {
-        requests += 1;
-        if (requests == 2) barrier.complete();
-      },
-      manifests: [
-        _manifest('com.example.same', '重复游戏'),
-        _manifest('com.example.second', '第二个源'),
-      ],
+    final preferences = GameCatalogPreferences(
+      libraryRoot: root,
+      now: () => DateTime.utc(2026, 7, 26),
     );
-    addTearDown(() => first.close(force: true));
-    addTearDown(() => second.close(force: true));
-    final preferences = GameCatalogPreferences(libraryRoot: root);
-    await preferences.save(
-      GameCatalogPreferencesValue(
-        sources: [
-          OnlineGameSource(
-            id: 'first',
-            name: '第一源',
-            host: Uri.parse('http://127.0.0.1:${first.port}'),
-          ),
-          OnlineGameSource(
-            id: 'second',
-            name: '第二源',
-            host: Uri.parse('http://127.0.0.1:${second.port}'),
-          ),
-        ],
-      ),
+    expect((await preferences.load()).sources, isEmpty);
+    expect(await file.exists(), isTrue);
+    expect(
+      await file.parent
+          .list()
+          .where((entry) => entry.path.endsWith('.unsupported'))
+          .length,
+      1,
     );
-    final controller = GameCatalogController(
-      library: GameLibraryRepository(() async => const []),
-      transfer: GamePackageTransferService(libraryRoot: installRoot),
-      onImported: (_) async {},
-      nicknameProvider: () => '测试玩家',
-      preferences: preferences,
-    );
-    addTearDown(controller.close);
-
-    final result = await controller.search().timeout(
-      const Duration(seconds: 5),
-    );
-
-    expect(requests, 2);
-    expect(result.errors, isEmpty);
-    expect(result.games.map((game) => game.manifest.id).toSet(), {
-      'com.example.same',
-      'com.example.first',
-      'com.example.second',
-    });
-
-    controller.downloads.enqueue(result.games.take(2));
-    final queued = controller.downloads.tasks.last;
-    controller.downloads.stop(queued.id);
-    expect(queued.status, GameDownloadStatus.stopped);
-    controller.downloads.delete(queued.id);
-    expect(controller.downloads.tasks, isNot(contains(queued)));
   });
 
-  test('游戏源设置和扫码配置可以持久化恢复', () async {
+  test('聚合保留同 gameId 的不同发布者并按本机热度排序', () {
+    final first = OnlineGameSource(
+      id: 'first',
+      name: 'First',
+      host: Uri.parse('https://first.example'),
+    );
+    final second = OnlineGameSource(
+      id: 'second',
+      name: 'Second',
+      host: Uri.parse('https://second.example'),
+    );
+    final results = aggregateCatalogOffers(
+      [
+        OnlineCatalogGame(
+          manifest: _manifest(id: 'shared', author: 'A', version: '1.0.0'),
+          source: first,
+        ),
+        OnlineCatalogGame(
+          manifest: _manifest(id: 'shared', author: 'A', version: '2.0.0'),
+          source: second,
+        ),
+        OnlineCatalogGame(
+          manifest: _manifest(id: 'shared', author: 'B', version: '3.0.0'),
+          source: second,
+        ),
+      ],
+      usage: {'shared': const GameLibraryUsageStats(launchCount: 7)},
+      sourceOrder: const ['first', 'second'],
+    );
+    expect(results, hasLength(2));
+    expect(results.every((result) => result.heat == 7), isTrue);
+    expect(
+      results.firstWhere((result) => result.publisher == 'A').versions.length,
+      2,
+    );
+  });
+
+  test('更新候选只匹配同 gameId、同发布者和更高严格版本', () {
+    final source = OnlineGameSource(
+      id: 'source',
+      name: 'Local Source Name',
+      host: Uri.parse('https://source.example'),
+    );
+    final installed = _summary('unused');
+    final updates = findGameUpdates(
+      installedGames: [installed],
+      offers: [
+        OnlineCatalogGame(
+          manifest: _manifest(version: '2.0.0'),
+          source: source,
+        ),
+        OnlineCatalogGame(
+          manifest: _manifest(author: 'Other', version: '9.0.0'),
+          source: source,
+        ),
+        OnlineCatalogGame(
+          manifest: _manifest(version: '1.0.0'),
+          source: source,
+        ),
+      ],
+    );
+    expect(updates.single.versions.single.targetVersion, '2.0.0');
+    expect(
+      updates.single.versions.single.sources.single.localSourceName,
+      'Local Source Name',
+    );
+  });
+
+  test('搜索为每个源维护独立页码', () async {
+    final requestedPages = <String, List<int>>{
+      'first': <int>[],
+      'second': <int>[],
+    };
+    final firstServer = await _startCatalogServer((request) {
+      final page = int.parse(request.uri.queryParameters['page']!);
+      requestedPages['first']!.add(page);
+      return {
+        'total': 20,
+        'current': page,
+        'size': 5,
+        'data': [_manifest(id: 'com.example.first$page').toJson()],
+      };
+    });
+    final secondServer = await _startCatalogServer((request) {
+      final page = int.parse(request.uri.queryParameters['page']!);
+      requestedPages['second']!.add(page);
+      return {
+        'total': 20,
+        'current': page,
+        'size': 5,
+        'data': [_manifest(id: 'com.example.second$page').toJson()],
+      };
+    });
+    addTearDown(() => firstServer.close(force: true));
+    addTearDown(() => secondServer.close(force: true));
     final root = await Directory.systemTemp.createTemp(
-      'playmesh-source-settings-',
+      'playmesh-source-pages-',
     );
     addTearDown(() => root.delete(recursive: true));
-    final preferences = GameCatalogPreferences(libraryRoot: root);
-    final source = OnlineGameSource.fromConfigurationUri(
-      'playmesh://catalog-source?host=http%3A%2F%2F192.168.1.8%3A16668'
-      '&token=abc&name=LivingRoom',
+    final controller = await _catalogController(root, [
+      _sourceFor(firstServer, id: 'first'),
+      _sourceFor(secondServer, id: 'second'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.search(
+      pagesBySource: const {'first': 2, 'second': 3},
     );
-    await preferences.save(
-      GameCatalogPreferencesValue(
-        share: const GameCatalogShareConfig(
-          enabled: true,
-          port: 17777,
-          token: 'share-token',
-        ),
-        defaultPageSize: 20,
-        sources: [source],
+
+    expect(requestedPages['first'], [2]);
+    expect(requestedPages['second'], [3]);
+    expect(
+      {for (final section in result.sections) section.source.id: section.page},
+      {'first': 2, 'second': 3},
+    );
+  });
+
+  test('后台更新检查读取每个源的全部分页', () async {
+    final requestedPages = <int>[];
+    final server = await _startCatalogServer((request) {
+      final page = int.parse(request.uri.queryParameters['page']!);
+      requestedPages.add(page);
+      final data = page == 1
+          ? [
+              for (var index = 0; index < 5; index += 1)
+                _manifest(id: 'com.example.unrelated$index').toJson(),
+            ]
+          : [_manifest(id: 'com.example.catalog', version: '2.0.0').toJson()];
+      return {'total': 6, 'current': page, 'size': 5, 'data': data};
+    });
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-update-pages-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'updates'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.checkUpdates([_summary('unused')]);
+
+    expect(requestedPages, [1, 2]);
+    expect(result.candidates.single.versions.single.targetVersion, '2.0.0');
+    expect(result.sourceErrors, isEmpty);
+  });
+
+  test('latest 协议错误保留同源合法游戏并只采用最高版本', () async {
+    final server = await _startCatalogServer(
+      (_) => {
+        'total': 3,
+        'data': [
+          _manifest(id: 'com.example.catalog', version: '1.5.0').toJson(),
+          _manifest(id: 'com.example.other', version: '4.0.0').toJson(),
+          _manifest(id: 'com.example.catalog', version: '2.0.0').toJson(),
+        ],
+      },
+    );
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-latest-protocol-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'latest-source'),
+    ]);
+    addTearDown(controller.close);
+
+    final search = await controller.search();
+    final catalogOffers = search.games
+        .where((offer) => offer.manifest.id == 'com.example.catalog')
+        .toList();
+    expect(search.errors['latest-source'], contains('多个版本'));
+    expect(
+      search.games.map((offer) => offer.manifest.id),
+      contains('com.example.other'),
+    );
+    expect(catalogOffers, hasLength(1));
+    expect(catalogOffers.single.manifest.version, '2.0.0');
+
+    final update = await controller.checkUpdates([_summary('unused')]);
+    expect(update.sourceErrors, hasLength(1));
+    expect(update.candidates.single.versions.single.targetVersion, '2.0.0');
+  });
+
+  test('跨页重复 gameId 排除历史 offer 且继续保留其他游戏', () async {
+    final server = await _startCatalogServer((request) {
+      final page = int.parse(request.uri.queryParameters['page']!);
+      if (page == 1) {
+        return {
+          'total': 7,
+          'data': [
+            _manifest(id: 'com.example.catalog', version: '1.5.0').toJson(),
+            for (var index = 0; index < 4; index += 1)
+              _manifest(id: 'com.example.cross$index').toJson(),
+          ],
+        };
+      }
+      return {
+        'total': 7,
+        'data': [
+          _manifest(id: 'com.example.catalog', version: '2.0.0').toJson(),
+          _manifest(id: 'com.example.cross-final').toJson(),
+        ],
+      };
+    });
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-cross-page-latest-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'cross-source'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.searchAll();
+    final catalogOffers = result.games
+        .where((offer) => offer.manifest.id == 'com.example.catalog')
+        .toList();
+
+    expect(result.errors['cross-source'], contains('不同分页重复'));
+    expect(catalogOffers, hasLength(1));
+    expect(catalogOffers.single.manifest.version, '2.0.0');
+    expect(
+      result.games.map((offer) => offer.manifest.id),
+      contains('com.example.cross-final'),
+    );
+  });
+
+  test('全量查询继续使用源返回的 cursor', () async {
+    final requestedCursors = <String?>[];
+    final server = await _startCatalogServer((request) {
+      final cursor = request.uri.queryParameters['cursor'];
+      requestedCursors.add(cursor);
+      if (cursor == null) {
+        return {
+          'total': 999,
+          'data': [
+            for (var index = 0; index < 5; index += 1)
+              _manifest(id: 'com.example.cursor$index').toJson(),
+          ],
+          'nextCursor': 'opaque-cursor-2',
+        };
+      }
+      expect(cursor, 'opaque-cursor-2');
+      return {
+        'total': 999,
+        'data': [
+          _manifest(id: 'com.example.catalog', version: '2.0.0').toJson(),
+        ],
+      };
+    });
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-update-cursor-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'cursor-source'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.checkUpdates([_summary('unused')]);
+
+    expect(requestedCursors, [null, 'opaque-cursor-2']);
+    expect(result.candidates.single.versions.single.targetVersion, '2.0.0');
+  });
+
+  test('更新检查隔离源错误并记录完成时间', () async {
+    final good = await _startCatalogServer(
+      (_) => {
+        'total': 1,
+        'data': [
+          _manifest(id: 'com.example.catalog', version: '2.0.0').toJson(),
+        ],
+      },
+    );
+    final bad = await _startCatalogServer((_) => {'unexpected': true});
+    addTearDown(() => good.close(force: true));
+    addTearDown(() => bad.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-update-errors-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final checkedAt = DateTime.utc(2026, 7, 26, 8, 30);
+    final controller = await _catalogController(root, [
+      _sourceFor(good, id: 'good'),
+      OnlineGameSource(
+        id: 'bad',
+        name: '用户源 β / 原样',
+        host: Uri.parse('http://127.0.0.1:${bad.port}'),
       ),
-    );
+    ], now: () => checkedAt);
+    addTearDown(controller.close);
 
-    final loaded = await preferences.load();
+    final result = await controller.checkUpdates([_summary('unused')]);
 
-    expect(loaded.share.port, 17777);
-    expect(loaded.share.token, 'share-token');
-    expect(loaded.defaultPageSize, 20);
-    expect(loaded.sources.single.host.port, 16668);
-    expect(loaded.sources.single.token, 'abc');
+    expect(result.checkedAt, checkedAt);
+    expect(result.candidates, hasLength(1));
+    expect(result.sourceErrors, hasLength(1));
+    expect(result.sourceErrors.single.sourceId, 'bad');
+    expect(result.sourceErrors.single.localSourceName, '用户源 β / 原样');
+    expect(result.sourceErrors.single.message, contains('FormatException'));
   });
 
-  test('游戏源声明校验中转字段并格式化默认端口', () {
-    final declaration = GameCatalogDeclaration.fromJson({
-      'catalogApiVersion': '1.4.0',
-      'supportsGameRelay': true,
-      'relay': {
-        'protocolVersion': '2.0.0',
-        'transport': 'playmesh-tcp-upgrade',
-        'publicBaseUrl': 'https://relay.example.com:8443',
-        'hostPath': '/relay/v1/host',
-        'clientPath': '/relay/v1/client',
-        'maxConnectionsPerTunnel': 64,
-      },
-    });
+  test('App Catalog 暴露 2.0 info/icon/带版本 download', () async {
+    final root = await Directory.systemTemp.createTemp('playmesh-catalog-v2-');
+    addTearDown(() => root.delete(recursive: true));
+    final package = Directory(
+      '${root.path}${Platform.pathSeparator}packages'
+      '${Platform.pathSeparator}com.example.catalog',
+    );
+    await Directory(
+      '${package.path}${Platform.pathSeparator}app',
+    ).create(recursive: true);
+    await File(
+      '${package.path}${Platform.pathSeparator}app'
+      '${Platform.pathSeparator}index.html',
+    ).writeAsString('<!doctype html>');
+    await File(
+      '${package.path}${Platform.pathSeparator}main.json',
+    ).writeAsString(jsonEncode(_manifest().toJson()));
+    await File(
+      '${package.path}${Platform.pathSeparator}icon.png',
+    ).writeAsBytes(_pngBytes);
+    final game = _summary(package.path);
+    final repository = GameLibraryRepository(
+      () async => [game],
+      initialGames: [game],
+    );
+    final server = GameCatalogServer(
+      repository,
+      GamePackageTransferService(libraryRoot: root),
+      nicknameProvider: () => 'Tester',
+    );
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = socket.port;
+    await socket.close();
+    await server.start(port: port, token: 'read-token');
+    addTearDown(server.stop);
+    final base = Uri.parse('http://127.0.0.1:$port');
+    const headers = {HttpHeaders.authorizationHeader: 'Bearer read-token'};
 
-    expect(
-      declaration.displayNameFor(Uri.parse('https://example.com:443')),
-      'example.com',
+    final info = await http.get(base.resolve('/apps/info'), headers: headers);
+    expect(info.statusCode, HttpStatus.ok);
+    expect(jsonDecode(info.body), containsPair('catalogApiVersion', '2.0.0'));
+    expect((jsonDecode(info.body) as Map)['userUpload'], {'supported': false});
+
+    final list = await http.get(base.resolve('/apps/list'), headers: headers);
+    final offer =
+        ((jsonDecode(list.body) as Map)['data'] as List).single as Map;
+    expect(offer['icon'], contains('/apps/icon'));
+
+    final missingVersion = await http.get(
+      base.resolve('/apps/download?id=com.example.catalog'),
+      headers: headers,
     );
-    expect(declaration.supportsGameRelay, isTrue);
-    expect(
-      declaration.relay!.publicBaseUrl,
-      Uri.parse('https://relay.example.com:8443'),
+    expect(missingVersion.statusCode, HttpStatus.badRequest);
+    final download = await http.get(
+      base.resolve('/apps/download?id=com.example.catalog&version=1.2.3'),
+      headers: headers,
     );
-    expect(declaration.relay!.maxConnectionsPerTunnel, 64);
-    expect(
-      () => GameCatalogDeclaration.fromJson({
-        'catalogApiVersion': '1.4.0',
-        'supportsGameRelay': true,
-      }),
-      throwsFormatException,
+    expect(download.statusCode, HttpStatus.ok);
+    expect(download.bodyBytes, isNotEmpty);
+    final icon = await http.get(
+      base.resolve('/apps/icon?id=com.example.catalog&version=1.2.3'),
+      headers: headers,
     );
-    expect(
-      () => GameCatalogDeclaration.fromJson({
-        'catalogApiVersion': '1.4.0',
-        'supportsGameRelay': true,
-        'relay': {
-          'protocolVersion': '2.0.0',
-          'transport': 'playmesh-tcp-upgrade',
-          'hostPath': '/relay/v1/host',
-          'clientPath': '/relay/v1/client',
-          'maxConnectionsPerTunnel': 64,
-        },
-      }),
-      throwsFormatException,
+    expect(icon.statusCode, HttpStatus.ok);
+    expect(icon.headers[HttpHeaders.contentTypeHeader], contains('image/png'));
+  });
+
+  test('App Catalog skips a repair item without hiding valid games', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-catalog-repair-isolation-',
     );
-    final httpDeclaration = GameCatalogDeclaration.fromJson({
-      'catalogApiVersion': '1.4.0',
-      'supportsGameRelay': true,
-      'relay': {
-        'protocolVersion': '2.0.0',
-        'transport': 'playmesh-tcp-upgrade',
-        'publicBaseUrl': 'http://relay.example.com',
-        'hostPath': '/relay/v1/host',
-        'clientPath': '/relay/v1/client',
-        'maxConnectionsPerTunnel': 64,
-      },
-    });
-    expect(httpDeclaration.relay!.publicBaseUrl.scheme, 'http');
-    expect(
-      () => GameCatalogDeclaration.fromJson({
-        'catalogApiVersion': '1.4.0',
-        'supportsGameRelay': true,
-        'relay': {
-          'protocolVersion': '2.0.0',
-          'transport': 'playmesh-tcp-upgrade',
-          'publicBaseUrl': 'https://relay.example.com',
-          'hostPath': '/relay/v1/host',
-          'clientPath': '/relay/v1/client',
-        },
-      }),
-      throwsFormatException,
+    addTearDown(() => root.delete(recursive: true));
+    final packages = Directory('${root.path}${Platform.pathSeparator}packages');
+    final validPackage = Directory(
+      '${packages.path}${Platform.pathSeparator}com.example.valid',
     );
+    final repairPackage = Directory(
+      '${packages.path}${Platform.pathSeparator}com.example.repair',
+    );
+    for (final package in [validPackage, repairPackage]) {
+      await Directory(
+        '${package.path}${Platform.pathSeparator}app',
+      ).create(recursive: true);
+      await File(
+        '${package.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).writeAsString('<!doctype html>');
+    }
+    await File(
+      '${validPackage.path}${Platform.pathSeparator}main.json',
+    ).writeAsString(jsonEncode(_manifest(id: 'com.example.valid').toJson()));
+    await File(
+      '${repairPackage.path}${Platform.pathSeparator}main.json',
+    ).writeAsString('{broken json');
+    await File(
+      '${repairPackage.path}${Platform.pathSeparator}icon.png',
+    ).writeAsBytes(_pngBytes);
+
+    final valid = _summary(validPackage.path, id: 'com.example.valid');
+    final repair = _summary(
+      repairPackage.path,
+      id: 'com.example.repair',
+      version: '9.9.9',
+      manifestError: 'raw parser error',
+    );
+    final repository = GameLibraryRepository(
+      () async => [repair, valid],
+      initialGames: [repair, valid],
+    );
+    final server = GameCatalogServer(
+      repository,
+      GamePackageTransferService(libraryRoot: root),
+      nicknameProvider: () => 'Tester',
+    );
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = socket.port;
+    await socket.close();
+    await server.start(port: port, token: '');
+    addTearDown(server.stop);
+    final base = Uri.parse('http://127.0.0.1:$port');
+
+    final response = await http.get(base.resolve('/apps/list'));
+    expect(response.statusCode, HttpStatus.ok);
+    final body = jsonDecode(response.body) as Map;
+    expect(body['total'], 1);
+    final offers = body['data']! as List;
+    expect(offers, hasLength(1));
+    expect((offers.single as Map)['id'], 'com.example.valid');
+
+    final repairDownload = await http.get(
+      base.resolve('/apps/download?id=com.example.repair&version=9.9.9'),
+    );
+    expect(repairDownload.statusCode, HttpStatus.notFound);
+    final repairIcon = await http.get(
+      base.resolve('/apps/icon?id=com.example.repair&version=9.9.9'),
+    );
+    expect(repairIcon.statusCode, HttpStatus.notFound);
   });
 }
 
-Future<void> _writeInstalledGame(
-  Directory root, {
-  required String id,
-  required String name,
-  required String description,
-  required List<String> tags,
-}) async {
-  final package = Directory(
-    '${root.path}${Platform.pathSeparator}packages'
-    '${Platform.pathSeparator}$id',
-  );
-  await Directory(
-    '${package.path}${Platform.pathSeparator}app',
-  ).create(recursive: true);
-  await File('${package.path}${Platform.pathSeparator}main.json').writeAsString(
-    jsonEncode(_manifest(id, name, description: description, tags: tags)),
-  );
-  await File(
-    '${package.path}${Platform.pathSeparator}app'
-    '${Platform.pathSeparator}index.html',
-  ).writeAsString('<!doctype html><title>$name</title>');
-}
+GameManifest _manifest({
+  String id = 'com.example.catalog',
+  String author = 'Publisher',
+  String version = '1.2.3',
+}) => GameManifest(
+  id: id,
+  name: 'Catalog Game',
+  author: author,
+  lastModifiedAt: DateTime.utc(2026, 7, 26),
+  remarks: 'Catalog test',
+  version: version,
+  sdkVersion: '1.0.0',
+  appSdkVersion: '1.0.0',
+  orientation: GameOrientation.landscape,
+  modes: const {GameMode.solo},
+  displayModes: const {GameDisplayMode.multiScreen},
+  players: const GamePlayerLimits(min: 1, max: 1),
+  tags: const [],
+  entries: const GameEntriesManifest(
+    game: 'app/index.html',
+    controller: 'app/controller/index.html',
+  ),
+);
 
-Map<String, Object?> _manifest(
-  String id,
-  String name, {
-  String description = '在线游戏',
-  List<String> tags = const ['party'],
-}) => {
-  'id': id,
-  'name': name,
-  'author': 'Test Author',
-  'lastModifiedAt': 1784851200000,
-  'remarks': description,
-  'version': '1.0.0',
-  'sdkVersion': '1.3.0',
-  'orientation': 'portrait',
-  'modes': ['solo'],
-  'displayModes': ['multi_screen'],
-  'players': {'min': 1, 'max': 1},
-  'entries': {'game': 'app/index.html'},
-  'permissions': <String>[],
-  'tags': tags,
-};
+GameSummary _summary(
+  String packagePath, {
+  String id = 'com.example.catalog',
+  String version = '1.2.3',
+  String? manifestError,
+}) => GameSummary(
+  id: id,
+  name: 'Catalog Game',
+  version: version,
+  author: 'Publisher',
+  manifestError: manifestError,
+  description: 'Catalog test',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: '多人多屏',
+  displayMode: 'multi_screen',
+  orientation: GameOrientation.landscape,
+  entry: LocalGameEntry(
+    assetPath: 'app/index.html',
+    statusLabel: 'SDK',
+    packageRootFilePath: packagePath,
+  ),
+);
 
-Future<int> _freePort() async {
-  final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-  final port = server.port;
-  await server.close();
-  return port;
-}
+final _pngBytes = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+  'AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);
 
-Future<HttpServer> _sourceServer({
-  required Completer<void> barrier,
-  required void Function() onList,
-  required List<Map<String, Object?>> manifests,
-}) async {
+Future<HttpServer> _startCatalogServer(
+  Map<String, Object?> Function(HttpRequest request) listResponse,
+) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   server.listen((request) async {
+    request.response.headers.contentType = ContentType.json;
     if (request.uri.path == '/apps/list') {
-      onList();
-      await barrier.future;
-      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode(listResponse(request)));
+    } else if (request.uri.path == '/apps/info') {
       request.response.write(
         jsonEncode({
-          'total': manifests.length,
-          'current': 1,
-          'size': 5,
-          'data': manifests,
+          'catalogApiVersion': '2.0.0',
+          'supportsGameRelay': false,
+          'userUpload': {'supported': false},
         }),
       );
-      await request.response.close();
-      return;
+    } else {
+      request.response.statusCode = HttpStatus.notFound;
     }
-    request.response.statusCode = HttpStatus.notFound;
     await request.response.close();
   });
   return server;
 }
 
-Future<void> _waitUntil(bool Function() predicate) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 5));
-  while (!predicate()) {
-    if (DateTime.now().isAfter(deadline)) {
-      throw TimeoutException('等待条件超时');
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 10));
-  }
+OnlineGameSource _sourceFor(HttpServer server, {required String id}) {
+  return OnlineGameSource(
+    id: id,
+    name: id,
+    host: Uri.parse('http://127.0.0.1:${server.port}'),
+  );
+}
+
+Future<GameCatalogController> _catalogController(
+  Directory root,
+  List<OnlineGameSource> sources, {
+  DateTime Function()? now,
+}) async {
+  final preferences = GameCatalogPreferences(libraryRoot: root);
+  await preferences.save(GameCatalogPreferencesValue(sources: sources));
+  final repository = GameLibraryRepository(
+    () async => const <GameSummary>[],
+    initialGames: const <GameSummary>[],
+  );
+  final controller = GameCatalogController(
+    library: repository,
+    transfer: GamePackageTransferService(libraryRoot: root),
+    onImported: (_) async {},
+    nicknameProvider: () => 'Tester',
+    preferences: preferences,
+    now: now,
+  );
+  await controller.initialize();
+  return controller;
 }

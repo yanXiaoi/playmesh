@@ -51,7 +51,7 @@ class _ProjectPackageOperation implements _DeveloperHttpOperation {
         orientation: GameOrientation.landscape,
         entry: LocalGameEntry(
           assetPath: 'app/index.html',
-          statusLabel: '开发项目',
+          statusLabel: '',
           packageRootFilePath: rootFilePath,
         ),
       );

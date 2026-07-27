@@ -122,7 +122,7 @@ Game Package
 - 对外提供的 SDK、开发者通道和 Go API 必须提供机器可读接口文档；AI 应通过正式 API 契约调用能力，不为单个 AI 客户端编写专用 Agent。
 - HTTP 接口使用 OpenAPI，数据、事件和错误使用 JSON Schema；每个接口记录权限、风险等级、幂等性、重试规则和示例。
 - `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。WebView 必须按当前页面角色在方向应用完成后创建，进入全屏时把对应方向传到原生宿主，退出游戏后恢复系统方向。
-- `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描，分别显示“佚名”和“无”，有时间值时按设备本地时区换算。
+- `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描。缺失 `author` 在模型中保持空动态值，App 固定外壳用统一 `app.json` 显示本地化“未知发布者”；非空发布者始终逐字显示。缺失时间由 App 外壳显示本地化“无”，有值时按设备本地时区换算。
 - `sdkVersion/appSdkVersion` 用于声明游戏包要求的 SDK 版本；运行时必须通过统一 Dart
   发行注册表选择明确兼容的 bundle，不能静默改用未声明兼容的版本。
 - SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本。`PATCH/MINOR` 必须保持已注册范围内向后
@@ -133,6 +133,28 @@ Game Package
 - 参数、消息结构、返回值、事件、错误语义或入口发生不兼容变化时必须升级主版本，
   封口旧执行器范围并注册不重叠的新范围；旧游戏继续选择旧发行版，不能由静态 JS、
   文件读取或 Bridge 分支形成旁路。
+- App 内所有界面文案只有一个国际化事实源：
+  `assets/playmesh-localization/locales/{locale}/app.json`。这里的“App 内”同时包括
+  Flutter 页面、内置 Developer Workspace，以及由平台注入游戏 WebView 的工具栏、
+  能力确认、昵称、信息和日志 UI。工作区或 SDK 网页代码不得自带中文/英文字典，
+  不得用 fallback 参数或硬编码字符串形成第二份可见文案。
+- Flutter `BuildContext.tr` 不接受调用点 fallback；缺少 delegate/catalog 或静态 key
+  必须立即抛出 `FlutterError`，Widget 测试挂载真实本地化宿主。catalog 建立前的启动
+  失败只显示机器诊断码与原始错误，不另设启动文案。
+- App 宿主必须先按统一清单解析 locale、fallback 和 `app.json`，再以只读
+  `{locale, messages}` 投影桥接给内置 Web UI；只投影对应命名空间，不向游戏脚本
+  暴露完整 App 词典。App 语言变化时必须向已经打开的工作区和平台注入 UI 推送更新，
+  Web 端更新 `lang`、现有 DOM 和后续动态渲染。Web 端不得另存一份与 App 脱节的
+  locale 偏好。
+- API 路径、机器错误 code、Schema、游戏内容、用户内容和日志原文不翻译；渲染层
+  使用 App 文案解释机器状态。独立部署的 Go Server 不是 App 内界面，可以使用统一
+  locale 清单中的 `goServer` bundle，但不得被内置工作区复用。
+- Game SDK 只以同步只读 `playmesh.runtime.getLocale(): string` 向游戏公开当前显示
+  端 locale，不公开 App messages。App WebView 必须返回当前加入方/显示方 App 的
+  locale，不能读取 Authority 主机语言；普通浏览器直接返回
+  `navigator.languages`、`navigator.language` 中第一个合法系统 locale，读取失败
+  回退 `zh`，不得把返回值限制为平台覆盖层已有的语言。游戏业务文案由游戏包自行
+  翻译，平台不得把 `app.json` 当作游戏语言包或自动修改游戏 DOM。
 
 ## 版本与升级策略
 
@@ -144,26 +166,29 @@ Game Package
 - Flutter App 每次形成新的可分发构建时，除语义版本外还必须递增 `+build`；只修改说明文字且不形成新构建时不递增 App 版本。
 - 纯文档勘误、阶段归档或未改变执行约束的提示词整理，不单独推动运行时版本；一旦提示词、Schema、Manifest 或 OpenAPI 反映了新的运行时契约，必须与对应组件在同一变更中升级。
 
-版本按组件独立维护，不升级没有受到影响的组件。当前发布版本基线为：
+版本按组件独立维护，不升级没有受到影响的组件。当前工作树实现版本矩阵为：
 
-| 组件 | 当前版本 | 版本来源 |
+| 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `1.6.1+8` | `pubspec.yaml` |
-| Go Core | `0.2.0` | `go-core/main.go`、`go-core/mobile/core.go` |
-| Game SDK | `1.4.2` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
-| App Bridge SDK | `1.2.1` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
-| Developer API / OpenAPI | `1.4.0` | Developer Gateway 契约 |
-| Developer CLI | `1.1.0` | `dev-cli/`、`playmesh-cli` 文件名、CLI User-Agent 与桌面平台构建规则 |
-| Catalog API | `1.1.0` | `/apps/list`、`/apps/download` 与 `docs/catalog-api.md` |
-| Core 协议 | `1.0.0` | Flutter/Go health 与会话协议定义 |
+| Playmesh App | `3.0.0+22` | `pubspec.yaml` |
+| Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
+| Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
+| Game SDK | `2.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
+| App Bridge SDK | `2.1.1` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
+| Developer API / OpenAPI | `2.2.0` | Developer Gateway 契约 |
+| Developer CLI | `1.4.0` | `dev-cli/`、CLI User-Agent 与桌面平台构建规则 |
+| Catalog API | `2.0.0` | `/apps/info`、latest-only 列表、版本化下载、图标与上传声明 |
+| Relay 协议 | `2.0.0` | App 端点加密邀请与 Go Server 中转协议 |
 
-当前发布线在 `docs/version/2.2.0.md` 与 `docs/version/NEXT.md` 维护；当前开发版本为 Playmesh App `2.2.0+21`、Go Core `0.4.0`、Core 协议 `1.2.0`、Game SDK `2.2.2`、App Bridge SDK `2.1.1`、Catalog API `1.4.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.1.0` 和 Developer CLI `1.3.1`，不得继续按上表正式基线生成新项目。
+该矩阵描述当前代码与生成契约，不等同于已经完成发行构建或真机验收；发布状态和
+历史版本见 `docs/version/README.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+`docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
-游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
+游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、可选根 `icon.png`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；远端缺少有效 `icon.png` 时必须删除本地陈旧图标。`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、可选 `icon.png`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 
-Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。每个命令执行器必须声明 `supportedVersions`，未改变调用契约的实现以 `SdkVersionRange.last` 表示持续支持后续已注册最新版。命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时按 `main.json` 声明解析 Game/App bundle，SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。只有调用契约发生不兼容变化时，才冻结旧范围并可在 `features/game/v3/`、`features/app/v3/` 等版本目录注册新实现；未变化的旧 feature 不复制、不改版本上界。
+Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`，未改变调用契约的实现以 `SdkVersionRange.last` 表示持续支持后续已注册最新版。命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时按 `main.json` 声明解析 Game/App bundle，SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。只有调用契约发生不兼容变化时，才冻结旧范围并可在 `features/game/v3/`、`features/app/v3/` 等版本目录注册新实现；未变化的旧 feature 不复制、不改版本上界。
 
-开发运行时、游戏资源网关、分享网关、本地 App SDK 服务、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `tool/generate_sdk.ps1`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、兼容范围、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架、Schema、AI 提示词和开发下载只暴露最新版；已安装旧游戏运行时按其清单版本选择已注册的兼容发行版，不依赖历史静态文件、字段双写或网关旁路。
+开发运行时、游戏资源网关、分享网关、本地 App SDK 服务、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `node tool/generate_sdk.mjs`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、兼容范围、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架、Schema、AI 提示词和开发下载只暴露最新版；已安装旧游戏运行时按其清单版本选择已注册的兼容发行版，不依赖历史静态文件、字段双写或网关旁路。
 
 ## 错误和日志
 
@@ -212,7 +237,6 @@ Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 
 - 修改架构边界：更新 `01-architecture.md` 和调用链。
 - 修改 Flutter 结构：更新 `01-architecture.md`、`05-next-steps.md` 和测试说明。
 - 修改环境或依赖：更新 `04-dev-env.md` 和运行命令。
-- 修改 HarmonyOS/OpenHarmony 工具链、能力或打包链：同步更新 `harmony-release.md`、`01-architecture.md`、`version/NEXT.md` 和相应 `verification/` 记录。
 - 修改规范：更新本文件，并在任务记录中说明原因和影响。
 - 修改任何代码、契约、模板或提示词：按“版本与升级策略”检查受影响组件，并同步升级所有需要升级的版本来源。
 - 每个重要决策记录“背景、选择、替代方案、影响、回滚方式”。

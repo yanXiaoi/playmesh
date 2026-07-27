@@ -16,11 +16,6 @@ analyzer:
     # Release staging mirrors are generated from source and may target another
     # Flutter/Dart toolchain. Analyze the real source tree, not prior artifacts.
     - build/**
-    # This standalone compatibility package keeps a lower Dart SDK floor and is
-    # validated by the Harmony build instead of the root app analyzer.
-    - ohos/share_plus_compat/**
-    - tool/harmony/**
-
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

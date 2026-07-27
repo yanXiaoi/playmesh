@@ -58,10 +58,20 @@ void main() {
       isTrue,
     );
 
-    final controller = await http.get(shareLinks.first);
+    final controller = await http.get(
+      shareLinks.first,
+      headers: const {'Accept-Language': 'en-GB, zh-CN;q=0.8'},
+    );
     expect(controller.statusCode, HttpStatus.ok);
     expect(controller.body, contains('window.__PLAYMESH_BROWSER__'));
     expect(controller.body, contains('"gameName"'));
+    expect(controller.body, contains('"_playmeshPlatformUi"'));
+    expect(controller.body, contains('"fallbackLocale":"zh-CN"'));
+    expect(controller.body, contains('"locale":"zh-CN"'));
+    expect(controller.body, contains('"locale":"en-US"'));
+    expect(controller.body, contains('"toolbar.expand":"展开游戏工具"'));
+    expect(controller.body, contains('"toolbar.expand":"Open game tools"'));
+    expect(controller.body, isNot(contains('"home.title"')));
     expect(
       controller.body,
       contains('"requiredCapabilities":["sensor.gyroscope"]'),
@@ -91,7 +101,7 @@ void main() {
     expect(appController.body, contains('"nickname":"App 玩家"'));
     expect(
       appController.body,
-      contains('http://127.0.0.1:45678/playmesh-app.js?version=2.1.1'),
+      contains('http://127.0.0.1:45678/playmesh-app.js?version=2.2.0'),
     );
     expect(
       appController.body,
@@ -99,7 +109,7 @@ void main() {
     );
     expect(
       appController.body.indexOf(
-        'http://127.0.0.1:45678/playmesh-app.js?version=2.1.1',
+        'http://127.0.0.1:45678/playmesh-app.js?version=2.2.0',
       ),
       lessThan(appController.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
     );

@@ -51,13 +51,6 @@ class SystemGameOrientationController
       return;
     }
 
-    if (isHarmonyOS) {
-      await const AppDeviceService().setFullscreen(true);
-      _wasFullScreen ??= false;
-      await _setPreferredOrientation(orientation);
-      return;
-    }
-
     _wasFullScreen ??= FullScreen.isFullScreen;
     if (!FullScreen.isFullScreen && !FullScreen.isFullScreenForced) {
       if (!_listening) {
@@ -113,12 +106,6 @@ class SystemGameOrientationController
 
     final wasFullScreen = _wasFullScreen;
     _wasFullScreen = null;
-    if (isHarmonyOS) {
-      if (wasFullScreen != null) {
-        await const AppDeviceService().setFullscreen(wasFullScreen);
-      }
-      return;
-    }
     if (_supportsDesktopFullscreen) {
       if (wasFullScreen != null) {
         await windowManager.setFullScreen(wasFullScreen);

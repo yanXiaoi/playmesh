@@ -20,8 +20,7 @@ Game SDK 为单机与多人游戏提供权威状态、JSON 消息、二进制 Ch
   运行、日志、AI 对话控制台和 Agent API。
 - 提供 Go 编写的 `playmesh-cli`，支持在 IDEA 等外部 IDE 中创建、拉取、发布、
   运行项目并跟随日志。
-- 支持 Android、Windows 和 OpenHarmony/HarmonyOS 发布构建；桌面包自动携带
-  Go Core 与 Developer CLI。
+- 支持 Android 与 Windows 发布构建；桌面包自动携带 Go Core 与 Developer CLI。
 
 ## 架构概览
 
@@ -64,6 +63,7 @@ HTML Game Runtime
 | 当前后续事项与人工验收项 | [下一步计划](docs/05-next-steps.md) |
 | 第一至第六阶段事实归档 | [阶段状态](docs/status/) |
 | 正式版本与下一版本变更 | [版本日志](docs/version/README.md) |
+| 当前需求的本地工程落点 | [本地实现说明](docs/implementation/README.md) |
 | 自动验证、构建产物与已知边界 | [验证记录](docs/verification/) |
 
 ## 开始运行
@@ -101,6 +101,10 @@ flutter run
 纯聊天 AI 输出的 JSON 指令粘贴到工作区“对话控制台”；Agent 直接调用同一套
 Developer Operation API。危险操作统一经过工作区审批。
 
+Playmesh 只翻译 App 自己的界面。游戏在 `playmesh.ready` 后可用
+`playmesh.runtime.getLocale()` 读取当前显示端 locale，但不会获得 App 词典；游戏
+业务文案仍由游戏包自行提供和切换。
+
 ### IDEA / CLI 开发
 
 先复制 App 显示的完整工作区链接：
@@ -127,6 +131,10 @@ playmesh-cli dev
 | 开发者工作区 | [开发者工作区开发约定](docs/platform/developer-workspace-development.md) | Operation Definition 同时驱动路由、文档、权限、审批和 AI 操作目录 |
 | Go Server | [Go Server 开发约定](docs/platform/go-server-development.md) | 游戏包源与公共中转共用轻量部署载体，但接口、存储、鉴权和协议版本保持独立 |
 
+App 内置 Developer Workspace 和平台注入游戏 WebView 的 UI 都属于 App 表面。
+Flutter、工作区和平台 Web UI 的显示文案统一来自当前 locale 的 `app.json`，由宿主
+桥接只读 `locale + messages` 投影并随 App 语言实时更新；网页端不维护独立词典。
+
 新增平台级领域时，在 `docs/platform/` 增加独立约定文档，并同步更新
 [平台开发目录](docs/platform/README.md)和本 README。游戏作者文档只描述公开能力，
 不得暴露回环代理、中转密钥、内部 Bridge 或 Core 帧格式。
@@ -143,6 +151,7 @@ dev-cli/                     Go Developer CLI
 assets/playmesh-library/     SDK 生成物、开发者工作区和默认游戏模板
 docs/game/                   游戏作者文档
 docs/platform/               平台维护与扩展约定
+docs/implementation/         当前需求的本地实现落点
 docs/status/                 第一至第六阶段事实归档
 docs/version/                阶段结束后的版本日志
 docs/verification/           自动验证、平台构建和已知边界记录
@@ -168,22 +177,19 @@ Catalog、已审核下载与 Relay；`16669` 是只承载 `PLAYMESH_ADMIN_PATH` 
 
 ## 构建与发布
 
-统一发布入口支持 `harmony`、`android`、`windows` 和 `all`：
+统一发布入口支持 `android`、`windows` 和 `all`：
 
 ```powershell
 .\tool\build_release.ps1 -Target all
 ```
 
-Android/Windows 使用标准 Flutter；OpenHarmony 使用独立 Flutter fork 和
-OpenHarmony Go 工具链。脚本会在构建前生成 SDK，重新构建目标平台 Go Core，
-校验包内入口并输出 SHA-256。
+脚本会在构建前生成 SDK，重新构建目标平台 Go Core，校验包内入口并输出 SHA-256。
 
 签名、产物目录、工具链隔离和 Windows Ninja 构建说明见：
 
 - [开发环境与统一发布](docs/04-dev-env.md)
-- [HarmonyOS 构建与适配](docs/harmony-release.md)
 - [版本日志](docs/version/README.md)
 - [验证记录](docs/verification/)
 
-构建成功不替代 Android/OpenHarmony 真机、多设备联机、Windows WebView2 或生产签名
-验收。发布结论必须同时记录自动验证、产物检查和仍需人工完成的项目。
+构建成功不替代 Android 真机、多设备联机、Windows WebView2 或生产签名验收。
+发布结论必须同时记录自动验证、产物检查和仍需人工完成的项目。

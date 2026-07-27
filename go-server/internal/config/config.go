@@ -14,11 +14,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go-server/internal/localization"
 )
 
 const (
-	CatalogAPIVersion    = "1.4.0"
-	RelayProtocolVersion = "2.0.0"
+	CatalogAPIVersion         = "2.0.0"
+	RelayProtocolVersion      = "2.0.0"
+	UserUploadProtocolVersion = "1.0.0"
 )
 
 type WhitelistEntry struct {
@@ -93,34 +96,48 @@ type Relay struct {
 	MaxConnectionsPerIP             int    `json:"maxConnectionsPerIP"`
 }
 
+type WebUI struct {
+	DefaultLocale     string   `json:"defaultLocale"`
+	EnabledLocales    []string `json:"enabledLocales"`
+	AllowLocaleSwitch bool     `json:"allowLocaleSwitch"`
+	DefaultThemeMode  string   `json:"defaultThemeMode"`
+	AllowThemeSwitch  bool     `json:"allowThemeSwitch"`
+}
+
 type Config struct {
 	// Listen is the legacy external listen field.
-	Listen                 string  `json:"listen,omitempty"`
-	ExternalListen         string  `json:"externalListen"`
-	Name                   string  `json:"name"`
-	Author                 string  `json:"author"`
-	Homepage               string  `json:"homepage"`
-	SupportsGameRelay      bool    `json:"supportsGameRelay"`
-	ShowPublicSourceQRCode bool    `json:"showPublicSourceQRCode"`
-	Auth                   Auth    `json:"auth"`
-	Admin                  Admin   `json:"admin"`
-	Storage                Storage `json:"storage"`
-	Scanner                Scanner `json:"scanner"`
-	Relay                  Relay   `json:"relay"`
+	Listen                   string  `json:"listen,omitempty"`
+	ExternalListen           string  `json:"externalListen"`
+	Name                     string  `json:"name"`
+	Author                   string  `json:"author"`
+	Homepage                 string  `json:"homepage"`
+	SupportsGameRelay        bool    `json:"supportsGameRelay"`
+	ShowPublicSourceQRCode   bool    `json:"showPublicSourceQRCode"`
+	AllowUserRegistration    bool    `json:"allowUserRegistration"`
+	RequireEmailVerification bool    `json:"requireEmailVerification"`
+	Auth                     Auth    `json:"auth"`
+	Admin                    Admin   `json:"admin"`
+	Storage                  Storage `json:"storage"`
+	Scanner                  Scanner `json:"scanner"`
+	Relay                    Relay   `json:"relay"`
+	WebUI                    WebUI   `json:"webUI"`
 
-	AdminUsername string `json:"-"`
-	AdminPassword string `json:"-"`
-	AdminPath     string `json:"-"`
-	Mail          Mail   `json:"-"`
-	ConfigPath    string `json:"-"`
+	AdminUsername   string `json:"-"`
+	AdminPassword   string `json:"-"`
+	AdminPath       string `json:"-"`
+	Mail            Mail   `json:"-"`
+	UploadKeyPepper string `json:"-"`
+	ConfigPath      string `json:"-"`
 }
 
 func Default() Config {
 	return Config{
-		ExternalListen:         "0.0.0.0:16668",
-		Name:                   "Playmesh 公共游戏源",
-		SupportsGameRelay:      true,
-		ShowPublicSourceQRCode: true,
+		ExternalListen:           "0.0.0.0:16668",
+		Name:                     "Playmesh 公共游戏源",
+		SupportsGameRelay:        true,
+		ShowPublicSourceQRCode:   true,
+		AllowUserRegistration:    true,
+		RequireEmailVerification: false,
 		Auth: Auth{
 			PublishedToken: "test-published-token-at-least-32-bytes",
 			ReviewToken:    "test-review-token-at-least-32-bytes",
@@ -214,11 +231,13 @@ func Default() Config {
 			MaxConnectionsPerTunnel:         64,
 			MaxConnectionsPerIP:             32,
 		},
+		WebUI: defaultWebUI(),
 		// These values only preserve config.Default() compatibility for unit
 		// callers. Load rejects them unless .env overrides them.
-		AdminUsername: "test-admin",
-		AdminPassword: "test-admin-password",
-		AdminPath:     "/admin",
+		AdminUsername:   "test-admin",
+		AdminPassword:   "test-admin-password",
+		AdminPath:       "/admin",
+		UploadKeyPepper: "test-upload-key-pepper-at-least-32-bytes",
 	}
 }
 
@@ -252,6 +271,9 @@ func Load(path string) (Config, error) {
 	if cfg.AdminPath == "/admin" {
 		return Config{}, errors.New("必须在 .env 配置不可预测的 PLAYMESH_ADMIN_PATH")
 	}
+	if cfg.UploadKeyPepper == "test-upload-key-pepper-at-least-32-bytes" {
+		return Config{}, errors.New("必须在 .env 配置 PLAYMESH_UPLOAD_KEY_PEPPER")
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -272,6 +294,7 @@ func (c Config) Save() error {
 	copyForDisk.AdminPassword = ""
 	copyForDisk.AdminPath = ""
 	copyForDisk.Mail = Mail{}
+	copyForDisk.UploadKeyPepper = ""
 	copyForDisk.ConfigPath = ""
 	data, err := json.MarshalIndent(copyForDisk, "", "  ")
 	if err != nil {
@@ -369,6 +392,7 @@ func (c *Config) applyEnvironment() error {
 		return err
 	}
 	c.Mail.SendReviewFailures, err = envBool("PLAYMESH_SMTP_SEND_REVIEW_FAILURES", true)
+	c.UploadKeyPepper = os.Getenv("PLAYMESH_UPLOAD_KEY_PEPPER")
 	return err
 }
 
@@ -388,6 +412,9 @@ func (c Config) Validate() error {
 	}
 	if c.Auth.PublishedToken == c.Auth.ReviewToken {
 		return errors.New("正式发布 Token 与待审核 Token 必须不同")
+	}
+	if len(c.UploadKeyPepper) < 32 {
+		return errors.New("必须通过 PLAYMESH_UPLOAD_KEY_PEPPER 配置至少 32 字节的上传密钥 Pepper")
 	}
 	if strings.TrimSpace(c.AdminUsername) == "" ||
 		strings.TrimSpace(c.AdminPassword) == "" {
@@ -411,6 +438,7 @@ func (c Config) Validate() error {
 		"GET /health":          {},
 		"GET /apps/info":       {},
 		"GET /apps/list":       {},
+		"GET /apps/icon":       {},
 		"GET /apps/download":   {},
 		"GET /relay/v1/client": {},
 	}
@@ -430,6 +458,9 @@ func (c Config) Validate() error {
 		if err := validateHTTPURL("homepage", c.Homepage, false); err != nil {
 			return err
 		}
+	}
+	if err := validateWebUI(c.WebUI); err != nil {
+		return err
 	}
 	if c.Storage.DatabasePath == "" || c.Storage.GamesDirectory == "" ||
 		c.Storage.QuarantineDirectory == "" {
@@ -504,7 +535,7 @@ func (c Config) Validate() error {
 	if enabledRules == 0 {
 		return errors.New("scanner.contentRules 至少需要一条启用的内容扫描规则")
 	}
-	if c.SupportsGameRelay || c.ShowPublicSourceQRCode {
+	if c.SupportsGameRelay || c.ShowPublicSourceQRCode || c.RequireEmailVerification {
 		if err := validateHTTPURL("relay.publicBaseUrl", c.Relay.PublicBaseURL, true); err != nil {
 			return err
 		}
@@ -533,6 +564,9 @@ func (c Config) Validate() error {
 		if _, err := mail.ParseAddress(c.Mail.From); err != nil {
 			return fmt.Errorf("PLAYMESH_SMTP_FROM 无效: %w", err)
 		}
+	}
+	if c.RequireEmailVerification && !c.Mail.Enabled {
+		return errors.New("启用邮箱验证时必须同时启用 SMTP")
 	}
 	return nil
 }
@@ -581,6 +615,61 @@ func validateHTTPURL(name, value string, originOnly bool) error {
 		return fmt.Errorf("%s 只能包含协议、主机和端口", name)
 	}
 	return nil
+}
+
+func validateWebUI(value WebUI) error {
+	catalog, err := localization.Load()
+	if err != nil {
+		return fmt.Errorf("加载 go-server 本地化资源: %w", err)
+	}
+	if strings.TrimSpace(value.DefaultLocale) == "" || len(value.EnabledLocales) == 0 {
+		return errors.New("webUI 必须配置默认语言和至少一种启用语言")
+	}
+	available := make(map[string]struct{})
+	for _, locale := range catalog.EnabledLocaleIDs() {
+		available[locale] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(value.EnabledLocales))
+	defaultEnabled := false
+	for _, locale := range value.EnabledLocales {
+		locale = strings.TrimSpace(locale)
+		if locale == "" {
+			return errors.New("webUI.enabledLocales 不能包含空语言")
+		}
+		if _, exists := available[locale]; !exists {
+			return fmt.Errorf("webUI.enabledLocales 引用未知语言 %s", locale)
+		}
+		if _, exists := seen[locale]; exists {
+			return errors.New("webUI.enabledLocales 不能包含重复语言")
+		}
+		seen[locale] = struct{}{}
+		if locale == value.DefaultLocale {
+			defaultEnabled = true
+		}
+	}
+	if !defaultEnabled {
+		return errors.New("webUI.defaultLocale 必须位于 enabledLocales")
+	}
+	switch value.DefaultThemeMode {
+	case "system", "light", "dark":
+	default:
+		return errors.New("webUI.defaultThemeMode 只能是 system、light 或 dark")
+	}
+	return nil
+}
+
+func defaultWebUI() WebUI {
+	catalog, err := localization.Load()
+	if err != nil {
+		return WebUI{}
+	}
+	return WebUI{
+		DefaultLocale:     catalog.Manifest.DefaultLocale,
+		EnabledLocales:    catalog.EnabledLocaleIDs(),
+		AllowLocaleSwitch: catalog.Manifest.UI.AllowLocaleSwitch,
+		DefaultThemeMode:  catalog.Manifest.UI.DefaultThemeMode,
+		AllowThemeSwitch:  catalog.Manifest.UI.AllowThemeSwitch,
+	}
 }
 
 func validateStorageLayout(storage Storage) error {

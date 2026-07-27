@@ -204,7 +204,7 @@ func TestPlayerSourceAndLatencyRemainInUnifiedRoomSnapshot(t *testing.T) {
 		JoinCode: snapshot.JoinCode,
 		Nickname: "Remote App",
 		PlayerID: "u_remote_app",
-		Source:   "server",
+		Access:   playerAccessServer,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -342,5 +342,116 @@ func TestFinishAndResetPruneOnlyDisconnectedPlayers(t *testing.T) {
 	finished, err := store.Finish(snapshot.ID, host.Token)
 	if err != nil || finished.State != StateStopped || len(finished.Players) != 0 {
 		t.Fatalf("Finish() = %#v, %v", finished, err)
+	}
+}
+
+func TestCommittedAppAvatarSurvivesReconnect(t *testing.T) {
+	store := NewStore()
+	snapshot, _, err := store.Create(CreateInput{
+		GameID: "avatar", DisplayMode: "single_screen_multiplayer",
+		MinPlayers: 1, MaxPlayers: 2, Nickname: "Host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, first, err := store.Join(JoinInput{
+		JoinCode: snapshot.JoinCode, Nickname: "App",
+		PlayerID: "u_avatar_player", Access: playerAccessLANApp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _, err := store.Authenticate(snapshot.ID, first.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, committed, err := store.CommitAvatar(record, first.Player.ID, "digest-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Avatar == nil ||
+		*committed.Avatar != "/bucket/_sys-user-avatars/u_avatar_player.png" {
+		t.Fatalf("committed player = %#v", committed)
+	}
+	store.SetConnected(record, first.Player.ID, false)
+	_, second, err := store.Join(JoinInput{
+		JoinCode: snapshot.JoinCode, Nickname: "App",
+		PlayerID: "u_avatar_player", Access: playerAccessLANApp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Reconnected || second.Player.Avatar == nil ||
+		*second.Player.Avatar != *committed.Avatar {
+		t.Fatalf("reconnected player = %#v", second.Player)
+	}
+}
+
+func TestAvatarAuthorizationUsesVerifiedAccessInsteadOfPublicSource(t *testing.T) {
+	store := NewStore()
+	snapshot, _, err := store.Create(CreateInput{
+		GameID: "avatar-access", DisplayMode: "single_screen_multiplayer",
+		MinPlayers: 1, MaxPlayers: 2, Nickname: "Host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, browser, err := store.Join(JoinInput{
+		JoinCode: snapshot.JoinCode,
+		Nickname: "Browser",
+		PlayerID: "p_browser",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _, err := store.Authenticate(snapshot.ID, browser.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.mutex.Lock()
+	forged := record.players[browser.Player.ID]
+	forged.Source = "lan_app"
+	record.players[browser.Player.ID] = forged
+	record.mutex.Unlock()
+
+	if _, _, err := store.CommitAvatar(
+		record,
+		browser.Player.ID,
+		"forged-digest",
+	); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("CommitAvatar() error = %v, want ErrUnauthorized", err)
+	}
+}
+
+func TestReconnectCannotChangeVerifiedAccessIdentity(t *testing.T) {
+	store := NewStore()
+	snapshot, _, err := store.Create(CreateInput{
+		GameID: "access-reconnect", DisplayMode: "single_screen_multiplayer",
+		MinPlayers: 1, MaxPlayers: 2, Nickname: "Host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, app, err := store.Join(JoinInput{
+		JoinCode: snapshot.JoinCode,
+		Nickname: "App",
+		PlayerID: "u_same_identity",
+		Access:   playerAccessLANApp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _, err := store.Authenticate(snapshot.ID, app.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SetConnected(record, app.Player.ID, false)
+
+	if _, _, err := store.Join(JoinInput{
+		JoinCode: snapshot.JoinCode,
+		Nickname: "Forged browser",
+		PlayerID: "u_same_identity",
+	}); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("cross-access reconnect error = %v, want ErrUnauthorized", err)
 	}
 }

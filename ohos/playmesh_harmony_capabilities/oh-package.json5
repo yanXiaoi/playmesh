@@ -1,9 +1,0 @@
-{
-  "name": "@playmesh/harmony_capabilities",
-  "version": "1.0.0",
-  "description": "HarmonyOS native capability adapter for Playmesh",
-  "main": "index.ets",
-  "dependencies": {
-    "@ohos/flutter_ohos": "file:../har/flutter.har"
-  }
-}

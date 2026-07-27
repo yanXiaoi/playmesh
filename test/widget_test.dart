@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:playmesh/app.dart';
 import 'package:playmesh/core/developer/developer_event_hub.dart';
+import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
 import 'package:playmesh/features/game/game_launcher.dart';
@@ -13,9 +16,12 @@ import 'package:playmesh/features/game/game_page.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
 import 'package:playmesh/features/game/local_game_web_view.dart';
 import 'package:playmesh/features/games/game_library_page.dart';
+import 'package:playmesh/features/home/home_page.dart';
 import 'package:playmesh/models/game_capabilities.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 import 'package:playmesh/models/game_summary.dart';
+
+import 'support/localized_test_app.dart';
 
 const _primaryGame = GameSummary(
   id: 'com.playmesh.test-game',
@@ -33,14 +39,38 @@ const _primaryGame = GameSummary(
     statusLabel: 'Game SDK 1.0',
   ),
 );
+const _updatedGame = GameSummary(
+  id: 'com.playmesh.updated-game',
+  name: '更新后的游戏',
+  version: '2.0.0',
+  description: '用于验证同一 GamePage State 切换运行实例',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: '多屏模式',
+  displayMode: 'multi_screen',
+  orientation: GameOrientation.portrait,
+  entry: LocalGameEntry(
+    assetPath: 'updated-game/app/index.html',
+    statusLabel: 'Game SDK 2.3',
+  ),
+);
 const _games = [_primaryGame];
 
+Widget _gamePreview(GameSummary game) => Text('Fake WebView: ${game.id}');
+
 void main() {
+  setUpAll(initializeLocalizedTestApp);
+
   testWidgets('join action works without an installed game', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const PlaymeshApp(goCoreStatusProvider: _FakeStatusProvider(), games: []),
+      PlaymeshApp(
+        goCoreStatusProvider: const _FakeStatusProvider(),
+        games: const [],
+        uiBootstrap: localizedTestUiBootstrap(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -48,7 +78,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(JoinGamePage), findsOneWidget);
-    expect(find.text('加入主机对局'), findsOneWidget);
+    expect(find.text('加入主机对局'), findsWidgets);
     expect(find.text('对局邀请链接'), findsOneWidget);
     expect(find.text('主机地址'), findsNothing);
     expect(find.text('加入码'), findsNothing);
@@ -60,17 +90,20 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const PlaymeshApp(
-        goCoreStatusProvider: _FakeStatusProvider(),
+      PlaymeshApp(
+        goCoreStatusProvider: const _FakeStatusProvider(),
         games: _games,
+        uiBootstrap: localizedTestUiBootstrap(),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(find.text('Playmesh'), findsOneWidget);
-    expect(find.text('用户资料'), findsOneWidget);
-    expect(find.text('游戏库'), findsAtLeastNWidgets(1));
-    expect(find.text('设置'), findsOneWidget);
+    expect(find.byKey(HomePage.profileHeroKey), findsOneWidget);
+    expect(find.text('用户资料'), findsNothing);
+    expect(find.text('游戏库－最近游戏'), findsOneWidget);
+    expect(find.byKey(HomePage.scanJoinKey), findsOneWidget);
+    expect(find.byTooltip('设置'), findsOneWidget);
 
     await tester.ensureVisible(find.text('测试游戏').last);
 
@@ -78,47 +111,89 @@ void main() {
     expect(find.byIcon(Icons.add), findsNothing);
   });
 
+  testWidgets('Windows 首页支持初始焦点、方向键与 Enter 激活', (WidgetTester tester) async {
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await tester.pumpWidget(
+        PlaymeshApp(
+          goCoreStatusProvider: const _FakeStatusProvider(),
+          games: _games,
+          uiBootstrap: localizedTestUiBootstrap(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final initialFocus = FocusManager.instance.primaryFocus;
+      expect(initialFocus, isNotNull);
+      final initialContext = initialFocus!.context;
+      expect(initialContext, isNotNull);
+      expect(
+        find.ancestor(
+          of: find.byElementPredicate(
+            (element) => identical(element, initialContext),
+          ),
+          matching: find.byKey(HomePage.profileHeroKey),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(FocusManager.instance.primaryFocus, isNot(same(initialFocus)));
+
+      initialFocus.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.byType(HomePage), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
+  });
+
   testWidgets('opens profile and settings pages from home', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const PlaymeshApp(
-        goCoreStatusProvider: _FakeStatusProvider(),
+      PlaymeshApp(
+        goCoreStatusProvider: const _FakeStatusProvider(),
         games: _games,
+        uiBootstrap: localizedTestUiBootstrap(),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('用户资料').first);
+    await tester.tap(find.byKey(HomePage.profileHeroKey));
     await tester.pumpAndSettle();
 
     expect(find.text('唯一 ID'), findsOneWidget);
     expect(find.textContaining(RegExp(r'^u_[a-f0-9]{32}$')), findsOneWidget);
 
-    await tester.pageBack();
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('设置').first);
-    await tester.tap(find.text('设置').first);
+    await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 2.2.0'), findsOneWidget);
-    expect(find.text('Go Core'), findsOneWidget);
+    expect(find.text('Playmesh 3.0.0'), findsOneWidget);
+    expect(find.text('Core 0.1.0'), findsOneWidget);
   });
 
   testWidgets('opens details, starts, restarts, and returns from a game', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const PlaymeshApp(
-        goCoreStatusProvider: _FakeStatusProvider(),
+      PlaymeshApp(
+        goCoreStatusProvider: const _FakeStatusProvider(),
         gameOrientationController: _ImmediateOrientationController(),
         games: _games,
+        uiBootstrap: localizedTestUiBootstrap(),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('游戏库').first);
+    await tester.tap(find.text('查看全部'));
     await tester.pumpAndSettle();
 
     expect(find.text('游戏库'), findsOneWidget);
@@ -164,23 +239,28 @@ void main() {
     expect(find.byTooltip('刷新游戏'), findsOneWidget);
     expect(find.byTooltip('退出游戏'), findsNothing);
     expect(find.byTooltip('二维码与链接'), findsOneWidget);
-    expect(find.byTooltip('隐藏性能信息'), findsOneWidget);
+    expect(find.byTooltip('运行日志'), findsOneWidget);
+    expect(find.byTooltip('显示性能信息'), findsNothing);
 
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pumpAndSettle();
-    expect(find.text('运行日志'), findsOneWidget);
-    await tester.tap(find.text('运行日志'));
+    await tester.tap(find.byTooltip('运行日志'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('关闭运行日志'), findsOneWidget);
     await tester.tap(find.byTooltip('关闭运行日志'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('隐藏性能信息'));
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示性能信息'));
     await tester.pumpAndSettle();
     expect(find.text('-- FPS'), findsNothing);
-    expect(find.byTooltip('显示性能信息'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('显示性能信息'));
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('隐藏性能信息'));
     await tester.pumpAndSettle();
     expect(find.text('-- FPS'), findsNothing);
 
@@ -188,6 +268,8 @@ void main() {
       'type': 'runtime.log',
       'message': 'current game log',
     });
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('刷新游戏'));
     await tester.pumpAndSettle();
 
@@ -200,7 +282,16 @@ void main() {
     expect(find.byKey(GamePage.runtimeKey(0)), findsNothing);
     expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
     expect(find.text('游戏内容已刷新。'), findsOneWidget);
+    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+    expect(find.byTooltip('显示性能信息'), findsNothing);
 
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.pumpAndSettle();
+    expect(find.text('显示性能信息'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('game-action-menu-dismiss-area')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('返回上一页'));
     await tester.pumpAndSettle();
 
@@ -212,7 +303,7 @@ void main() {
   ) async {
     final navigatorKey = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         navigatorKey: navigatorKey,
         home: const Text('HOME'),
         routes: {'/developer-workspace': (_) => const Text('WORKSPACE')},
@@ -251,7 +342,7 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: GamePage(
           game: _primaryGame,
           orientationController: const _ImmediateOrientationController(),
@@ -271,6 +362,93 @@ void main() {
     expect(find.byTooltip('展开游戏工具'), findsOneWidget);
     expect(find.text('-- FPS'), findsNothing);
     expect(find.text('Fake WebView: test-game/app/index.html'), findsOneWidget);
+  });
+
+  testWidgets('game runtime always starts with performance tools disabled', (
+    WidgetTester tester,
+  ) async {
+    final visibilityChanges = <bool>[];
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          game: _primaryGame,
+          initialPerformanceVisible: true,
+          onPerformanceVisibilityChanged: visibilityChanges.add,
+          orientationController: const _ImmediateOrientationController(),
+          previewBuilder: (_) => const ColoredBox(color: Colors.black),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('显示性能信息'), findsNothing);
+    expect(visibilityChanges, isEmpty);
+
+    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示性能信息'));
+    await tester.pump();
+    expect(visibilityChanges, [true]);
+    await tester.tap(find.byTooltip('刷新游戏'));
+    await tester.pumpAndSettle();
+    expect(visibilityChanges, [true, false]);
+    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+  });
+
+  testWidgets('changing the GamePage runtime identity clears transient UI', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          key: ValueKey('reused-game-page'),
+          game: _primaryGame,
+          orientationController: _ImmediateOrientationController(),
+          previewBuilder: _gamePreview,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.pump();
+    await tester.tap(find.text('显示性能信息'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('运行日志'));
+    await tester.pump();
+    expect(find.byTooltip('关闭运行日志'), findsOneWidget);
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          key: ValueKey('reused-game-page'),
+          game: _updatedGame,
+          orientationController: _ImmediateOrientationController(),
+          previewBuilder: _gamePreview,
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
+    expect(
+      find.text('Fake WebView: com.playmesh.updated-game'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('关闭运行日志'), findsNothing);
+    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('显示性能信息'), findsNothing);
+    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.pumpAndSettle();
+    expect(find.text('显示性能信息'), findsOneWidget);
   });
 
   testWidgets('single-screen authority display receives only required', (
@@ -306,7 +484,7 @@ void main() {
     );
 
     await tester.pumpWidget(
-      const MaterialApp(
+      localizedTestApp(
         home: GameLauncher(
           game: game,
           localUserId: 'u-authority',
@@ -332,7 +510,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       await tester.pumpWidget(
-        MaterialApp(
+        localizedTestApp(
           home: GamePage(
             game: _primaryGame,
             orientationController: const _ImmediateOrientationController(),
@@ -392,14 +570,23 @@ void main() {
     );
     var refreshCalls = 0;
     final refreshResult = Completer<List<GameSummary>>();
+    var indexedGames = _games;
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: GameLibraryPage(
           games: _games,
           onRefresh: () async {
             refreshCalls += 1;
-            return refreshResult.future;
+            indexedGames = await refreshResult.future;
+            return indexedGames;
           },
+          onQuery: (_) => GameLibraryQueryResult(
+            games: indexedGames,
+            total: indexedGames.length,
+            offset: 0,
+            revision: refreshCalls,
+            refreshedAt: null,
+          ),
         ),
       ),
     );
@@ -411,7 +598,13 @@ void main() {
     expect(refreshCalls, 1);
     expect(find.text('测试游戏'), findsOneWidget);
     expect(find.text('新加入的游戏'), findsNothing);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byTooltip('重新扫描游戏库'),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
 
     refreshResult.complete(const [..._games, addedGame]);
     await tester.pumpAndSettle();
@@ -426,7 +619,7 @@ void main() {
     final orientationController = _RecordingOrientationController();
 
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: GamePage(
           game: _primaryGame,
           orientationController: orientationController,
@@ -456,7 +649,7 @@ void main() {
     final orientationController = _RetryOrientationController();
 
     await tester.pumpWidget(
-      MaterialApp(
+      localizedTestApp(
         home: GamePage(
           game: _primaryGame,
           orientationController: orientationController,

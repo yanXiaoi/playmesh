@@ -5,6 +5,7 @@ import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/developer/developer_run_controller.dart';
 
@@ -189,7 +190,7 @@ class _WindowsWebViewFailure extends StatelessWidget {
             const Icon(Icons.error_outline, color: Colors.white, size: 42),
             const SizedBox(height: 16),
             Text(
-              '$title 无法启动',
+              context.tr('game.start_failed', arguments: {'title': title}),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: Colors.white,

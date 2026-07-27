@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/platform/app_platform.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../game/windows_local_game_web_view.dart';
 
 class DeveloperWorkspacePage extends StatefulWidget {
@@ -53,10 +54,10 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('开发者工作区'),
+        title: Text(context.tr('home.developer')),
         actions: [
           IconButton(
-            tooltip: '重新加载工作区',
+            tooltip: context.tr('developer.reload_workspace'),
             onPressed: _reload,
             icon: const Icon(Icons.refresh),
           ),
@@ -72,7 +73,13 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: SelectableText('工作区加载失败\n$error', textAlign: TextAlign.center),
+          child: SelectableText(
+            context.tr(
+              'developer.workspace_failed',
+              arguments: {'error': error},
+            ),
+            textAlign: TextAlign.center,
+          ),
         ),
       );
     }
@@ -81,7 +88,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
         key: ValueKey('developer-workspace-$_windowsReloadKey'),
         assetPath: 'developer-workspace',
         entryUri: widget.workspaceUri,
-        title: '开发者工作区',
+        title: context.tr('home.developer'),
       );
     }
     final controller = _controller;

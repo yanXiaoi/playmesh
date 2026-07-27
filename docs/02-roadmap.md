@@ -210,19 +210,6 @@ AI 心智负担要求：
 
 第六阶段是最后一个阶段。后续更改不再新增阶段、阶段中间状态或阶段完成文档，改为按实际发布版本维护 `docs/version/{MAJOR.MINOR.PATCH}.md` 详细更新日志，并同步 App 内简略更新日志。版本与日志规则见 `docs/version/README.md` 和 `docs/06-engineering-standards.md`。
 
-## 第六阶段后的发布扩展
-
-当前开发版本新增 OpenHarmony API 12 arm64 发布目标，但不新增“第七阶段”：
-
-- `tool/build_release.ps1` 统一选择 `harmony`、`android`、`windows` 或 `all`。
-- OpenHarmony SIG Go 以 `c-shared` 生成 `libplaymesh_core.so`，ArkTS HAR 通过异步 N-API 把 Core 注入 Flutter 生命周期。
-- HAP 发布检查必须包含 `libapp.so`、`libplaymesh_core.so` 与 `libplaymesh_core_napi.so`。
-- Public SDK 可用能力包括 WebView、文件选择、应用目录、全屏、触觉、加速度计、陀螺仪和系统分享。
-- HMS `@kit.ScanKit` 不属于 Public SDK；鸿蒙端扫码入口降级为手动输入，不作为已完成的原生能力。
-- Android `ACTION_VIEW` 文件接收不是鸿蒙能力；鸿蒙只声明真实实现和权限。
-
-实现与签名说明见 [HarmonyOS 构建与适配](harmony-release.md)，本次构建证据见 [Playmesh 1.6.2 OpenHarmony 构建验证](verification/playmesh-1.6.2-harmony-build-2026-07-22.md)。
-
 ## 阶段调整规则
 
 本节仅适用于已经结束的第一至第六阶段。历史实施中如果阶段定义与实际实现、技术限制或验证结果冲突，文档更正必须记录原定义、实际发现、调整原因、影响范围和新的验收标准。第六阶段之后不再定义新阶段。
@@ -252,7 +239,7 @@ AI 心智负担要求：
 ### 二维码分享
 
 - 二维码本质上是链接的可视化编码，不另行设计一套独立协议。
-- 支持原生扫码的平台由 App 原生路由处理；OpenHarmony Public SDK 构建因不含 HMS ScanKit 而显示手动输入回退。普通浏览器扫码时进入兼容加入页或游戏包获取页。
+- 支持原生扫码的平台由 App 原生路由处理；普通浏览器扫码时进入兼容加入页或游戏包获取页。
 - 若当前链接无法同时兼容 App 和浏览器，必须同时提供 App 端二维码/链接和浏览器端二维码/链接。
 - 二维码与链接使用相同的本局 token，二维码图片本身不提供超出当前游戏会话的授权。
 
@@ -260,7 +247,7 @@ AI 心智负担要求：
 
 - App 显示已安装游戏包或导出游戏包的本地文件地址。
 - 用户可以使用系统文件管理器打开该地址。
-- Android/iOS 支持时调用系统原生分享意图/分享面板；OpenHarmony 使用 `ohos.want.action.sendData` 与只读 URI 授权将游戏包交给其他应用。
+- Android/iOS 支持时调用系统原生分享意图或分享面板。
 - 文件分享时从已安装目录临时生成明确的导出压缩包，不直接分享 App 内部运行时目录；分享完成后删除临时压缩包，接收端仍需经过包校验和安装流程。
 
 分享功能必须复用游戏包校验、版本记录、权限提示和安全边界。分享地址、二维码和文件导出不应绕过 `main.json` 校验、压缩包路径检查、恶意资源限制或用户确认流程。

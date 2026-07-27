@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/game_package/asset_game_package_loader.dart';
+import '../../core/localization/playmesh_localization.dart';
 import '../../models/game_summary.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/developer/developer_run_controller.dart';
@@ -14,6 +15,9 @@ class GameLauncher extends StatefulWidget {
     required this.localNickname,
     this.bridge,
     this.controllerRole = false,
+    this.onOpenSharePanel,
+    this.onShowToolDock,
+    this.onHideToolDock,
     this.onExitRequested,
     this.onJavaScriptExecutorChanged,
   });
@@ -23,6 +27,9 @@ class GameLauncher extends StatefulWidget {
   final String localNickname;
   final GameSdkBridge? bridge;
   final bool controllerRole;
+  final Future<void> Function()? onOpenSharePanel;
+  final Future<void> Function()? onShowToolDock;
+  final Future<void> Function()? onHideToolDock;
   final Future<void> Function()? onExitRequested;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
@@ -93,6 +100,9 @@ class _GameLauncherState extends State<GameLauncher> {
           declaredCapabilities: widget.game.capabilities
               .requiredForRole(controller: widget.controllerRole)
               .toList(),
+          onOpenSharePanel: widget.onOpenSharePanel,
+          onShowToolDock: widget.onShowToolDock,
+          onHideToolDock: widget.onHideToolDock,
           onExitRequested: widget.onExitRequested,
           onJavaScriptExecutorChanged: widget.onJavaScriptExecutorChanged,
         );
@@ -114,7 +124,10 @@ class _PackageFailure extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            '游戏包校验失败\n$error',
+            context.tr(
+              'game.package_validation_failed',
+              arguments: {'error': error},
+            ),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white),
           ),

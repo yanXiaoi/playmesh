@@ -19,20 +19,23 @@ import (
 	"go-server/internal/packages"
 	"go-server/internal/relay"
 	"go-server/internal/store"
+	"go-server/internal/user"
 	"go-server/internal/webui"
 )
 
 type Server struct {
 	// Engine remains the external App engine for compatibility with existing
 	// embedders and tests.
-	Engine       *gin.Engine
-	AdminEngine  *gin.Engine
-	manager      *relay.Manager
-	store        *store.Store
-	config       config.Config
-	externalHTTP *http.Server
-	adminHTTP    *http.Server
-	closeOnce    sync.Once
+	Engine        *gin.Engine
+	AdminEngine   *gin.Engine
+	manager       *relay.Manager
+	store         *store.Store
+	config        config.Config
+	externalHTTP  *http.Server
+	adminHTTP     *http.Server
+	cleanupCancel context.CancelFunc
+	cleanupDone   chan struct{}
+	closeOnce     sync.Once
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
@@ -45,7 +48,9 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	database, err := store.Open(cfg.Storage, store.Settings{
 		Name: cfg.Name, Author: cfg.Author, Homepage: cfg.Homepage,
-		SupportsGameRelay: cfg.SupportsGameRelay,
+		SupportsGameRelay:        cfg.SupportsGameRelay,
+		AllowUserRegistration:    cfg.AllowUserRegistration,
+		RequireEmailVerification: cfg.RequireEmailVerification,
 	})
 	if err != nil {
 		return nil, err
@@ -60,11 +65,20 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		logger,
 	)
 	authHandler := admin.NewAuthHandler(cfg, database)
+	userAuthConfig := cfg
+	userAuthConfig.Admin.CaptchaMode = "math"
+	userCaptchaHandler := admin.NewAuthHandler(userAuthConfig, database)
+	userHandler := user.New(
+		cfg, database, packageService, mailService, userCaptchaHandler,
+	)
 	adminHandler := admin.NewHandler(
 		cfg, database, packageService, mailService, manager,
-		catalogHandler.UpdatePublicBaseURL,
+		func(value string) {
+			catalogHandler.UpdatePublicBaseURL(value)
+			userHandler.UpdatePublicBaseURL(value)
+		},
 	)
-	ui := webui.New()
+	ui := webui.New(cfg.WebUI)
 
 	external := gin.New()
 	external.MaxMultipartMemory = 1 << 20
@@ -77,50 +91,142 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	external.Use(middleware.SecurityHeaders())
 	external.Use(middleware.CORS())
 	external.GET("/", ui.User)
+	external.GET("/login", ui.User)
+	external.GET("/register", ui.User)
 	external.GET("/assets/:name", ui.UserAsset)
+	external.GET("/i18n/manifest", ui.LocalizationManifest)
+	external.GET("/i18n/:locale", ui.LocalizationBundle)
 	external.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
 	sourceToken := middleware.CatalogToken(cfg.Auth)
+	catalogToken := middleware.CatalogReadToken(cfg.Auth)
 	appReadLimiter := middleware.NewWindowLimiter(60, time.Second)
 	appDownloadLimiter := middleware.NewIntervalLimiter(time.Second)
 	external.GET(
 		"/apps/info",
 		middleware.WindowRateLimit(appReadLimiter, "apps-info"),
-		sourceToken,
+		catalogToken,
 		catalogHandler.Info,
 	)
 	external.GET(
 		"/apps/list",
 		middleware.WindowRateLimit(appReadLimiter, "apps-list"),
-		sourceToken,
+		catalogToken,
 		catalogHandler.List,
 	)
 	external.GET(
 		"/apps/download",
 		middleware.RateLimit(appDownloadLimiter, "apps-download"),
-		sourceToken,
+		catalogToken,
 		catalogHandler.Download,
 	)
-
-	uploadLimiter := middleware.NewIntervalLimiter(
-		time.Duration(cfg.Storage.PublicUploadIntervalSeconds) * time.Second,
+	external.GET(
+		"/apps/icon",
+		middleware.WindowRateLimit(appReadLimiter, "apps-icon"),
+		catalogToken,
+		catalogHandler.Icon,
 	)
+
 	publicListLimiter := middleware.NewIntervalLimiter(250 * time.Millisecond)
 	publicDownloadLimiter := middleware.NewIntervalLimiter(time.Second)
 	publicQRCodeLimiter := middleware.NewIntervalLimiter(time.Second)
 	publicSourceInfoLimiter := middleware.NewIntervalLimiter(time.Second)
-	external.POST(
-		"/api/public/upload",
-		middleware.RateLimit(uploadLimiter, "public-upload"),
-		limitRequestBody(cfg.Storage.MaxUploadBytes+(1<<20)),
-		adminHandler.PublicUpload,
-	)
 	external.GET(
 		"/api/public/games",
 		middleware.RateLimit(publicListLimiter, "public-list"),
 		adminHandler.PublicGames,
+	)
+
+	userCaptchaLimiter := middleware.NewIntervalLimiter(
+		time.Duration(cfg.Admin.CaptchaIntervalMilliseconds) * time.Millisecond,
+	)
+	userLoginLimiter := middleware.NewIntervalLimiter(
+		time.Duration(cfg.Admin.LoginIntervalMilliseconds) * time.Millisecond,
+	)
+	userUploadLimiter := middleware.NewIntervalLimiter(30 * time.Second)
+	external.GET("/api/user/config", userHandler.RegistrationState)
+	external.GET(
+		"/api/user/auth/captcha",
+		middleware.RateLimit(userCaptchaLimiter, "user-captcha"),
+		userCaptchaHandler.Captcha,
+	)
+	external.POST(
+		"/api/user/auth/register",
+		middleware.RateLimit(userLoginLimiter, "user-register"),
+		limitRequestBody(64<<10),
+		userHandler.Register,
+	)
+	external.POST(
+		"/api/user/auth/login",
+		middleware.RateLimit(userLoginLimiter, "user-login"),
+		limitRequestBody(64<<10),
+		userHandler.Login,
+	)
+	external.GET("/api/user/auth/verify-email", userHandler.VerifyEmail)
+	external.POST(
+		"/api/user/auth/resend-verification",
+		middleware.RateLimit(userLoginLimiter, "user-resend"),
+		limitRequestBody(64<<10),
+		userHandler.ResendVerification,
+	)
+	external.POST(
+		"/api/user/uploads",
+		middleware.RateLimit(userUploadLimiter, "user-upload"),
+		limitRequestBody(cfg.Storage.MaxUploadBytes+(1<<20)),
+		userHandler.RequireUploadKey(),
+		userHandler.KeyUpload,
+	)
+	external.GET("/api/user/me", userHandler.RequireSession(false), userHandler.Me)
+	external.PATCH(
+		"/api/user/me",
+		limitRequestBody(64<<10),
+		userHandler.RequireSession(true),
+		userHandler.UpdateMe,
+	)
+	external.POST(
+		"/api/user/auth/logout",
+		userHandler.RequireSession(true),
+		userHandler.Logout,
+	)
+	external.PUT(
+		"/api/user/upload-key",
+		limitRequestBody(64<<10),
+		userHandler.RequireSession(true),
+		userHandler.PutUploadKey,
+	)
+	external.GET(
+		"/api/user/games",
+		userHandler.RequireSession(false),
+		userHandler.Games,
+	)
+	external.POST(
+		"/api/user/games/uploads",
+		middleware.RateLimit(userUploadLimiter, "user-upload"),
+		limitRequestBody(cfg.Storage.MaxUploadBytes+(1<<20)),
+		userHandler.RequireSession(true),
+		userHandler.BrowserUpload,
+	)
+	external.POST(
+		"/api/user/games/:id/publish",
+		userHandler.RequireSession(true),
+		userHandler.Publish,
+	)
+	external.POST(
+		"/api/user/games/:id/unpublish",
+		userHandler.RequireSession(true),
+		userHandler.Unpublish,
+	)
+	external.DELETE(
+		"/api/user/games/by-package/:gameId",
+		userHandler.RequireSession(true),
+		userHandler.DeletePackage,
+	)
+	external.DELETE(
+		"/api/user/games/:id",
+		userHandler.RequireSession(true),
+		userHandler.DeleteGame,
 	)
 	external.GET(
 		"/api/public/source-qrcode",
@@ -183,6 +289,8 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	management.Use(middleware.NoStore())
 	management.GET(cfg.AdminPath, ui.Admin)
 	management.GET(cfg.AdminPath+"/assets/:name", ui.AdminAsset)
+	management.GET(cfg.AdminPath+"/i18n/manifest", ui.LocalizationManifest)
+	management.GET(cfg.AdminPath+"/i18n/:locale", ui.LocalizationBundle)
 
 	captchaLimiter := middleware.NewIntervalLimiter(
 		time.Duration(cfg.Admin.CaptchaIntervalMilliseconds) * time.Millisecond,
@@ -204,17 +312,14 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	adminAPI := management.Group(cfg.AdminPath + "/api/admin")
 	adminAPI.Use(authHandler.RequireSession())
 	adminAPI.POST("/logout", authHandler.Logout)
-	adminAPI.POST(
-		"/games",
-		limitRequestBody(cfg.Storage.MaxUploadBytes+(1<<20)),
-		adminHandler.PublicUpload,
-	)
 	adminAPI.GET("/games", adminHandler.AdminGames)
 	adminAPI.GET("/games/:id", adminHandler.AdminGame)
 	adminAPI.PATCH(
 		"/games/:id", limitRequestBody(64<<10), adminHandler.AdminUpdateGame,
 	)
 	adminAPI.DELETE("/games/:id", adminHandler.AdminDeleteGame)
+	adminAPI.POST("/games/:id/publish", adminHandler.AdminPublishGame)
+	adminAPI.POST("/games/:id/unpublish", adminHandler.AdminUnpublishGame)
 	adminAPI.GET("/games/:id/download", adminHandler.AdminDownload)
 	adminAPI.GET("/settings", adminHandler.Settings)
 	adminAPI.PUT(
@@ -226,10 +331,39 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	)
 	adminAPI.GET("/relay/stats", adminHandler.RelayStats)
 
-	return &Server{
+	result := &Server{
 		Engine: external, AdminEngine: management, manager: manager,
-		store: database, config: cfg,
-	}, nil
+		store: database, config: cfg, cleanupDone: make(chan struct{}),
+	}
+	cleanupContext, cancelCleanup := context.WithCancel(context.Background())
+	result.cleanupCancel = cancelCleanup
+	go func() {
+		defer close(result.cleanupDone)
+		runCleanup := func() {
+			completed, err := packageService.CleanupDeleting(cleanupContext)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("background artifact cleanup incomplete", "error", err)
+			}
+			if completed > 0 {
+				logger.Info(
+					"background deleting-record cleanup completed",
+					"records", completed,
+				)
+			}
+		}
+		runCleanup()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-cleanupContext.Done():
+				return
+			case <-ticker.C:
+				runCleanup()
+			}
+		}
+	}()
+	return result, nil
 }
 
 func (s *Server) Run(address string) error {
@@ -269,6 +403,12 @@ func (s *Server) Close() {
 	s.closeOnce.Do(func() {
 		_ = s.shutdownHTTP()
 		s.manager.Close()
+		if s.cleanupCancel != nil {
+			s.cleanupCancel()
+		}
+		if s.cleanupDone != nil {
+			<-s.cleanupDone
+		}
 		_ = s.store.Close()
 	})
 }

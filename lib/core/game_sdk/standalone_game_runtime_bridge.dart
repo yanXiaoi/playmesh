@@ -65,6 +65,8 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
           standalonePlayer: {
             'id': userId,
             'nickname': nickname,
+            'avatar': null,
+            'role': 'authority_player',
             'connected': true,
           },
           ensureStorage: ensureStorage,
@@ -104,6 +106,7 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
         'type': 'command.error',
         'requestId': requestId,
         'error': error.toString(),
+        if (error is SdkCommandException) 'code': error.code,
       });
     }
   }
@@ -124,6 +127,11 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
   @override
   void setPerformanceVisible(bool visible) {
     _send({'type': 'performance.visibility', 'visible': visible});
+  }
+
+  @override
+  void restoreGameContentFocus() {
+    _send({'type': 'platform.ui.restoreGameFocus'});
   }
 
   @override

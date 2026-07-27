@@ -20,6 +20,7 @@ func TestPushProjectNormalizesVersionsAndUploadsPublishedFiles(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.push","version":"1.0.0","sdkVersion":"9.9.9"}`)
 	writeTestFile(t, filepath.Join(root, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(root, "app", "index.html"), "<!doctype html>")
+	writeTestBytes(t, filepath.Join(root, rootIconName), validRootIcon(t))
 	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh.js"), `const PLAYMESH_SDK_VERSION = "1.4.0";`)
 	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "1.2.0";`)
 
@@ -74,7 +75,8 @@ func TestPushProjectNormalizesVersionsAndUploadsPublishedFiles(t *testing.T) {
 	for _, entry := range reader.File {
 		paths[entry.Name] = true
 	}
-	if !paths["main.json"] || !paths["capabilities.json"] || !paths["app/index.html"] {
+	if !paths["main.json"] || !paths["capabilities.json"] ||
+		!paths[rootIconName] || !paths["app/index.html"] {
 		t.Fatalf("uploaded package is incomplete: %#v", paths)
 	}
 	for path := range paths {

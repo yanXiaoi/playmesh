@@ -35,6 +35,14 @@ class _DeveloperErrorMiddleware implements _DeveloperRequestMiddleware {
           },
         },
       });
+    } on DeveloperCapabilityUnavailable catch (error) {
+      await _error(
+        request.response,
+        HttpStatus.conflict,
+        requestId,
+        'capability_unavailable',
+        error.message,
+      );
     } on FormatException catch (error) {
       await _error(
         request.response,

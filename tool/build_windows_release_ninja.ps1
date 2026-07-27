@@ -1,11 +1,26 @@
 [CmdletBinding()]
-param()
+param(
+  [string]$ReleaseAssetSnapshot,
+  [switch]$SkipReleaseAssetPreflight,
+  [switch]$SkipSdkGeneration
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-& (Join-Path $PSScriptRoot 'generate_sdk.ps1')
+if (-not $SkipSdkGeneration) {
+  & (Join-Path $PSScriptRoot 'generate_sdk.ps1')
+}
+$releaseAssetVerifier = Join-Path $PSScriptRoot 'verify_release_assets.ps1'
+if (-not $ReleaseAssetSnapshot) {
+  $ReleaseAssetSnapshot = Join-Path $repoRoot 'build\release-assets-snapshot.json'
+}
+if (-not $SkipReleaseAssetPreflight) {
+  & $releaseAssetVerifier `
+    -Action preflight `
+    -Snapshot $ReleaseAssetSnapshot
+}
 $pubspec = Get-Content -LiteralPath (Join-Path $repoRoot 'pubspec.yaml') -Encoding UTF8
 $versionLine = $pubspec | Where-Object { $_ -match '^version:\s*(\S+)\s*$' } | Select-Object -First 1
 if (-not $versionLine -or
@@ -106,6 +121,25 @@ if ($LASTEXITCODE -ne 0) {
 & $cmake --build $buildDir --target install
 if ($LASTEXITCODE -ne 0) {
   throw "Windows release build failed: $LASTEXITCODE"
+}
+
+try {
+  & $releaseAssetVerifier `
+    -Action verify `
+    -Snapshot $ReleaseAssetSnapshot `
+    -Artifact $bundleDir `
+    -Kind windows
+} catch {
+  if (Test-Path -LiteralPath $bundleDir -PathType Container) {
+    $resolvedBundle = (Resolve-Path -LiteralPath $bundleDir).Path
+    $resolvedBuild = (Resolve-Path -LiteralPath $buildDir).Path
+    if ($resolvedBundle.StartsWith(
+        $resolvedBuild + [IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase)) {
+      Remove-Item -LiteralPath $resolvedBundle -Recurse -Force
+    }
+  }
+  throw
 }
 
 Write-Output "Windows Release bundle: $bundleDir"

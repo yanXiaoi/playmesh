@@ -8,8 +8,26 @@ const appDeviceSdkSource = SdkSourceFragment(
   const playmeshApp = {
     version: PLAYMESH_APP_SDK_VERSION,
     ready: null,
+    openSharePanel() {
+      return openAppSharePanel();
+    },
+    showToolDock() {
+      return showAppToolDock();
+    },
+    hideToolDock() {
+      return hideAppToolDock();
+    },
+    exitGame() {
+      return request("app.game.exit");
+    },
     __requestExit() {
       return request("app.game.exit");
+    },
+    __restoreGameContentFocus() {
+      restoreAppUiReturnFocus();
+    },
+    __syncAvatar(sessionId, credentialToken) {
+      return request("app.identity.syncAvatar", { sessionId, credentialToken });
     },
     __confirmCapabilities() {
       return request("app.capabilities.confirm");
@@ -73,10 +91,27 @@ const appDeviceSdkSource = SdkSourceFragment(
     gameName: runtimeDeclaration.gameName,
     declaredCapabilities: runtimeDeclaration.requiredCapabilities || [],
   } : {}).then((result) => {
-    bootstrap = result;
+    const privateUi = result?._playmeshPlatformUi;
+    if (privateUi && typeof privateUi === "object") {
+      Object.defineProperty(global, PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY, {
+        value: clone(privateUi),
+        configurable: true,
+        enumerable: false,
+        writable: false,
+      });
+    } else {
+      delete global[PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY];
+    }
+    bootstrap = result && typeof result === "object"
+      ? { ...result }
+      : result;
+    if (bootstrap && typeof bootstrap === "object") {
+      delete bootstrap._playmeshPlatformUi;
+    }
     global.console?.info?.("Playmesh App SDK 就绪");
-    return clone(result);
+    return clone(bootstrap);
   }).catch((error) => {
+    delete global[PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY];
     bootstrap = {
       available: false,
       identity: null,
@@ -101,7 +136,11 @@ class _AppDeviceFeature implements _AppSdkCommandFeature {
   ];
 
   @override
-  Set<String> get commands => const {'app.device.fullscreen', 'app.game.exit'};
+  Set<String> get commands => const {
+    'app.device.fullscreen',
+    'app.game.exit',
+    'app.identity.syncAvatar',
+  };
 
   @override
   Future<Object?> execute(
@@ -113,6 +152,8 @@ class _AppDeviceFeature implements _AppSdkCommandFeature {
         return context.setFullscreen(command.payload);
       case 'app.game.exit':
         return context.requestExit();
+      case 'app.identity.syncAvatar':
+        return context.syncAvatar(command.payload);
     }
     throw StateError('未注册的 App 设备命令: ${command.name}');
   }

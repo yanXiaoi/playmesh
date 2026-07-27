@@ -1,7 +1,0 @@
-{
-  "module": {
-    "name": "playmesh_harmony_capabilities",
-    "type": "har",
-    "deviceTypes": ["default", "tablet"]
-  }
-}

@@ -2,6 +2,7 @@ package packages
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,10 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"log/slog"
 	"mime/multipart"
-	"net/mail"
 	"os"
 	"os/exec"
 	"path"
@@ -23,8 +24,10 @@ import (
 	"time"
 
 	"go-server/internal/config"
+	"go-server/internal/gameid"
 	"go-server/internal/mailer"
 	"go-server/internal/store"
+	"go-server/internal/version"
 )
 
 type RejectedError struct {
@@ -40,6 +43,10 @@ type InputError struct {
 	Reason string
 }
 
+type BusyError struct{}
+
+func (e *BusyError) Error() string { return "安全扫描任务已满，请稍后重试" }
+
 func (e *InputError) Error() string {
 	return e.Reason
 }
@@ -49,6 +56,18 @@ const (
 	maxActiveTextBytes  int64 = 4 << 20
 	maxFindingBytes           = 8 << 10
 	maxArchivePathBytes       = 512
+	maxRootIconBytes          = 2 << 20
+	maxRootIconEdge           = 8192
+	maxRootIconPixels   int64 = 4 * 1024 * 1024
+)
+
+var (
+	storedArtifactName = regexp.MustCompile(
+		`^[1-9][0-9]*-[0-9a-f]{16}-[0-9a-f]{16}\.(zip|png)(\.tmp)?$`,
+	)
+	quarantineArtifactName = regexp.MustCompile(
+		`^(upload|normalized)-[0-9]+\.zip$`,
+	)
 )
 
 type ScanReport struct {
@@ -68,6 +87,32 @@ type manifestSummary struct {
 	Remarks  string
 	TagsText string
 	JSON     string
+	Icon     []byte
+}
+
+var knownManifestFields = []string{
+	"id",
+	"name",
+	"author",
+	"lastModifiedAt",
+	"remarks",
+	"version",
+	"sdkVersion",
+	"appSdkVersion",
+	"orientation",
+	"controllerOrientation",
+	"modes",
+	"displayModes",
+	"players",
+	"entries",
+	"authority",
+	"tags",
+}
+
+var knownManifestObjectFields = map[string][]string{
+	"players":   {"min", "max"},
+	"entries":   {"game", "controller"},
+	"authority": {"entry"},
 }
 
 type Service struct {
@@ -76,6 +121,7 @@ type Service struct {
 	mailer       *mailer.Mailer
 	logger       *slog.Logger
 	contentRules []compiledContentRule
+	scanSlots    chan struct{}
 	mutex        sync.RWMutex
 }
 
@@ -95,6 +141,7 @@ func New(
 	return &Service{
 		config: cfg, store: database, mailer: mailService, logger: logger,
 		contentRules: compileContentRules(cfg.Scanner.ContentRules),
+		scanSlots:    make(chan struct{}, cfg.Storage.MaxConcurrentScans),
 	}
 }
 
@@ -123,22 +170,170 @@ func (s *Service) UpdateScanner(scanner config.Scanner) {
 	s.contentRules = compileContentRules(scanner.ContentRules)
 }
 
-func (s *Service) ProcessUpload(
+func (s *Service) CleanupDeleting(ctx context.Context) (int, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	games, err := s.store.ListDeletingGames(ctx)
+	if err != nil {
+		return 0, err
+	}
+	completed := 0
+	failures := make([]error, 0)
+	for _, game := range games {
+		if err := DeleteStoredFiles(
+			s.config.Storage.GamesDirectory, game.StoredPath, game.IconPath,
+		); err != nil {
+			failures = append(failures, fmt.Errorf(
+				"清理 deleting 游戏 %d 文件: %w", game.ID, err,
+			))
+			continue
+		}
+		if _, err := s.store.CompleteDeletingGame(
+			ctx, game.ID, store.SystemReviewActor(),
+		); err != nil && !errors.Is(err, store.ErrNotFound) {
+			failures = append(failures, fmt.Errorf(
+				"完成 deleting 游戏 %d: %w", game.ID, err,
+			))
+			continue
+		}
+		completed++
+	}
+	orphaned, orphanErr := s.cleanupOrphanedFiles(ctx)
+	if orphanErr != nil {
+		failures = append(failures, orphanErr)
+	}
+	if orphaned > 0 && s.logger != nil {
+		s.logger.Info("orphan artifact cleanup completed", "files", orphaned)
+	}
+	return completed, errors.Join(failures...)
+}
+
+func (s *Service) cleanupOrphanedFiles(ctx context.Context) (int, error) {
+	storedPaths, err := s.store.ListStoredFilePaths(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list stored file references: %w", err)
+	}
+	gamesRoot, err := filepath.Abs(filepath.Clean(s.config.Storage.GamesDirectory))
+	if err != nil {
+		return 0, fmt.Errorf("resolve games directory: %w", err)
+	}
+	referencedNames := make(map[string]struct{}, len(storedPaths))
+	for _, candidate := range storedPaths {
+		target, resolveErr := filepath.Abs(filepath.Clean(candidate))
+		if resolveErr != nil || !pathWithin(gamesRoot, target) {
+			continue
+		}
+		relative, relativeErr := filepath.Rel(gamesRoot, target)
+		if relativeErr == nil && filepath.Dir(relative) == "." {
+			referencedNames[relative] = struct{}{}
+		}
+	}
+	gamesRemoved, gamesErr := cleanupGeneratedArtifacts(
+		ctx,
+		gamesRoot,
+		storedArtifactName,
+		referencedNames,
+	)
+	quarantineRemoved, quarantineErr := cleanupGeneratedArtifacts(
+		ctx,
+		s.config.Storage.QuarantineDirectory,
+		quarantineArtifactName,
+		nil,
+	)
+	return gamesRemoved + quarantineRemoved, errors.Join(gamesErr, quarantineErr)
+}
+
+func cleanupGeneratedArtifacts(
+	ctx context.Context,
+	root string,
+	namePattern *regexp.Regexp,
+	referencedNames map[string]struct{},
+) (int, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return 0, fmt.Errorf("scan artifact directory %q: %w", root, err)
+	}
+	removed := 0
+	failures := make([]error, 0)
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			break
+		}
+		name := entry.Name()
+		if !namePattern.MatchString(name) {
+			continue
+		}
+		if _, referenced := referencedNames[name]; referenced {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			failures = append(
+				failures,
+				fmt.Errorf("inspect orphan artifact %q: %w", name, err),
+			)
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			continue
+		}
+		target := filepath.Join(root, name)
+		if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+			failures = append(
+				failures,
+				fmt.Errorf("remove orphan artifact %q: %w", name, err),
+			)
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(failures...)
+}
+
+func (s *Service) removeTemporaryFile(filePath string, kind string) {
+	err := os.Remove(filePath)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if s.logger != nil {
+		s.logger.Warn(
+			"temporary upload cleanup failed",
+			"kind", kind,
+			"file", filepath.Base(filePath),
+			"error", err,
+		)
+	}
+}
+
+func (s *Service) logUploadCleanupFailure(stage string, err error) {
+	if err == nil || s.logger == nil {
+		return
+	}
+	s.logger.Warn(
+		"failed upload artifact cleanup deferred to background retry",
+		"stage", stage,
+		"error", err,
+	)
+}
+
+func (s *Service) ProcessUserUpload(
 	ctx context.Context,
 	file multipart.File,
 	filename string,
-	email string,
+	user store.User,
 ) (store.Game, error) {
+	select {
+	case s.scanSlots <- struct{}{}:
+		defer func() { <-s.scanSlots }()
+	default:
+		return store.Game{}, &BusyError{}
+	}
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 	filename = filepath.Base(strings.TrimSpace(filename))
 	if filename == "." || len(filename) > 255 || strings.ContainsRune(filename, '\x00') {
 		return store.Game{}, &InputError{Reason: "上传文件名无效或过长"}
-	}
-	email = strings.TrimSpace(email)
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email || len(email) > 320 {
-		return store.Game{}, &InputError{Reason: "必须填写有效邮箱"}
 	}
 	if !strings.EqualFold(filepath.Ext(filename), ".zip") {
 		return store.Game{}, &InputError{Reason: "只接受 .zip 标准游戏包"}
@@ -148,7 +343,7 @@ func (s *Service) ProcessUpload(
 		return store.Game{}, fmt.Errorf("创建隔离文件: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer s.removeTemporaryFile(tempPath, "upload quarantine")
 	hasher := sha256.New()
 	written, copyErr := io.Copy(
 		io.MultiWriter(temp, hasher),
@@ -163,7 +358,7 @@ func (s *Service) ProcessUpload(
 	}
 	hash := hex.EncodeToString(hasher.Sum(nil))
 	if written > s.config.Storage.MaxUploadBytes {
-		return s.reject(ctx, filename, email, hash, manifestSummary{}, ScanReport{
+		return s.reject(hash, ScanReport{
 			Passed: false, SHA256: hash, Antivirus: "not_run",
 			Findings:  []string{"压缩包超过上传大小上限"},
 			ScannedAt: time.Now().UnixMilli(),
@@ -182,73 +377,80 @@ func (s *Service) ProcessUpload(
 
 	summary, findings := s.inspectArchive(tempPath)
 	report.Findings = append(report.Findings, findings...)
+	if summary.ID != "" {
+		if err := s.store.CheckOwnership(ctx, summary.ID, user.ID); err != nil {
+			return store.Game{}, err
+		}
+	}
+	// 所有权冲突必须优先于版本详情，避免向其他账号泄露当前最高版本。
+	// 对已成功解析的 main.json，非法版本使用稳定的 invalid_version 契约，
+	// 而不是降级为普通安全扫描拒绝。
+	if summary.JSON != "" {
+		if _, err := version.Parse(summary.Version); err != nil {
+			return store.Game{}, err
+		}
+	}
 	report.Passed = len(report.Findings) == 0
 	if !report.Passed {
-		return s.reject(ctx, filename, email, hash, summary, report)
+		return s.reject(hash, report)
 	}
-
-	storedPath, err := s.persistArchive(tempPath, hash)
+	summary.Author = user.DisplayName
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(summary.JSON), &manifest); err != nil {
+		return store.Game{}, &InputError{Reason: "main.json 无法规范化"}
+	}
+	manifest["author"] = user.DisplayName
+	canonical, _ := json.Marshal(manifest)
+	summary.JSON = string(canonical)
+	rewrittenPath, err := s.rewriteArchiveManifest(tempPath, canonical)
 	if err != nil {
 		return store.Game{}, err
 	}
+	defer s.removeTemporaryFile(rewrittenPath, "normalized upload")
+	normalizedHash, err := fileSHA256(rewrittenPath)
+	if err != nil {
+		return store.Game{}, err
+	}
+	report.SHA256 = normalizedHash
+	storedPath, err := s.persistArchive(rewrittenPath, normalizedHash)
+	if err != nil {
+		return store.Game{}, err
+	}
+	iconPath, err := s.persistIcon(summary.Icon, normalizedHash)
+	if err != nil {
+		cleanupErr := DeleteStoredFiles(
+			s.config.Storage.GamesDirectory, storedPath,
+		)
+		s.logUploadCleanupFailure("persist icon", cleanupErr)
+		return store.Game{}, errors.Join(err, cleanupErr)
+	}
 	reportJSON, _ := json.Marshal(report)
-	game, err := s.store.CreateGame(ctx, store.CreateGameInput{
+	game, err := s.store.CreateOwnedGame(ctx, store.CreateGameInput{
 		PackageID: summary.ID, Name: summary.Name, Author: summary.Author,
 		Version: summary.Version, Remarks: summary.Remarks, TagsText: summary.TagsText,
-		Email: email, Status: store.StatusPending, OriginalFilename: filename,
-		StoredPath: storedPath, ManifestJSON: summary.JSON, ScanStatus: "clean",
+		OwnerUserID: user.ID, Status: store.StatusPending, OriginalFilename: filename,
+		StoredPath: storedPath, IconPath: iconPath,
+		ManifestJSON: summary.JSON, ScanStatus: "clean",
 		ScanReport: string(reportJSON),
 	})
 	if err != nil {
-		_ = os.Remove(storedPath)
-		return store.Game{}, err
+		cleanupErr := DeleteStoredFiles(
+			s.config.Storage.GamesDirectory, storedPath, iconPath,
+		)
+		s.logUploadCleanupFailure("persist database record", cleanupErr)
+		return store.Game{}, errors.Join(err, cleanupErr)
 	}
 	return game, nil
 }
 
-func (s *Service) reject(
-	ctx context.Context,
-	filename string,
-	email string,
-	hash string,
-	summary manifestSummary,
-	report ScanReport,
-) (store.Game, error) {
+func (s *Service) reject(hash string, report ScanReport) (store.Game, error) {
 	report.Passed = false
 	reason := truncateText(strings.Join(report.Findings, "；"), maxFindingBytes)
 	if reason == "" {
 		reason = "安全扫描未通过"
 	}
-	if summary.ID == "" {
-		summary.ID = "rejected-" + shortHash(hash)
-	}
-	if summary.Name == "" {
-		summary.Name = "未通过安全扫描的上传"
-	}
-	if summary.Version == "" {
-		summary.Version = "unknown"
-	}
-	if summary.JSON == "" {
-		summary.JSON = "{}"
-	}
-	reportJSON, _ := json.Marshal(report)
-	game, err := s.store.CreateGame(ctx, store.CreateGameInput{
-		PackageID: summary.ID, Name: summary.Name, Author: summary.Author,
-		Version: summary.Version, Remarks: summary.Remarks, TagsText: summary.TagsText,
-		Email: email, Status: store.StatusRejected, OriginalFilename: filename,
-		ManifestJSON: summary.JSON, ScanStatus: "rejected",
-		ScanReport: string(reportJSON), RejectionReason: reason,
-	})
-	if err != nil {
-		return store.Game{}, err
-	}
-	if s.config.Mail.SendReviewFailures && s.mailer.Enabled() {
-		if err := s.mailer.SendReviewResult(email, summary.Name, false, reason); err != nil {
-			s.logger.Warn("发送安全扫描拒绝邮件失败",
-				"gameId", game.ID, "error", err)
-		}
-	}
-	return game, &RejectedError{Reason: reason, Game: game}
+	_ = hash
+	return store.Game{}, &RejectedError{Reason: reason}
 }
 
 func (s *Service) scanClamAV(
@@ -364,6 +566,10 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 			findings = append(findings, "不允许的文件类型: "+name)
 			continue
 		}
+		if name == "icon.png" {
+			// 图标不是可执行内容，解码失败或超限时按协议忽略而不拒绝整个包。
+			continue
+		}
 		if name == "main.json" || isActiveText(extension) {
 			readLimit := maxActiveTextBytes
 			if name == "main.json" {
@@ -376,6 +582,7 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 			}
 			if name == "main.json" {
 				manifestBytes = content
+				continue
 			}
 			for _, issue := range s.scanActiveContent(name, content) {
 				findings = append(findings, issue)
@@ -393,8 +600,34 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 		return manifestSummary{}, uniqueStrings(findings)
 	}
 	summary, manifestFindings := parseManifest(manifestBytes)
+	if summary.JSON != "" {
+		manifestFindings = append(
+			manifestFindings,
+			s.scanActiveContent("main.json", []byte(summary.JSON))...,
+		)
+	}
+	if iconEntry := findArchiveEntry(reader.File, "icon.png"); iconEntry != nil {
+		if content, err := readZipEntry(iconEntry, maxRootIconBytes); err == nil &&
+			isSafeRootIcon(content) {
+			summary.Icon = content
+		}
+	}
 	findings = append(findings, manifestFindings...)
 	return summary, uniqueStrings(findings)
+}
+
+func isSafeRootIcon(content []byte) bool {
+	if len(content) == 0 || int64(len(content)) > maxRootIconBytes {
+		return false
+	}
+	decoded, err := png.DecodeConfig(bytes.NewReader(content))
+	if err != nil || decoded.Width < 1 || decoded.Height < 1 ||
+		decoded.Width > maxRootIconEdge || decoded.Height > maxRootIconEdge ||
+		int64(decoded.Width)*int64(decoded.Height) > maxRootIconPixels {
+		return false
+	}
+	_, err = png.Decode(bytes.NewReader(content))
+	return err == nil
 }
 
 func (s *Service) persistArchive(source string, hash string) (string, error) {
@@ -427,27 +660,155 @@ func (s *Service) persistArchive(source string, hash string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cleanup := func() {
-		_ = output.Close()
-		_ = gamesRoot.Remove(tempName)
+	cleanup := func() error {
+		closeErr := output.Close()
+		if errors.Is(closeErr, os.ErrClosed) {
+			closeErr = nil
+		}
+		removeErr := gamesRoot.Remove(tempName)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return errors.Join(closeErr, removeErr)
 	}
 	if _, err := io.Copy(output, input); err != nil {
-		cleanup()
-		return "", err
+		return "", errors.Join(err, cleanup())
 	}
 	if err := output.Sync(); err != nil {
-		cleanup()
-		return "", err
+		return "", errors.Join(err, cleanup())
 	}
 	if err := output.Close(); err != nil {
-		_ = gamesRoot.Remove(tempName)
-		return "", err
+		removeErr := gamesRoot.Remove(tempName)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return "", errors.Join(err, removeErr)
 	}
 	if err := gamesRoot.Rename(tempName, finalName); err != nil {
-		_ = gamesRoot.Remove(tempName)
-		return "", err
+		removeErr := gamesRoot.Remove(tempName)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return "", errors.Join(err, removeErr)
 	}
 	return filepath.Join(s.config.Storage.GamesDirectory, finalName), nil
+}
+
+func (s *Service) persistIcon(content []byte, hash string) (string, error) {
+	if len(content) == 0 {
+		return "", nil
+	}
+	random, err := randomHex(8)
+	if err != nil {
+		return "", err
+	}
+	finalName := fmt.Sprintf("%d-%s-%s.png", time.Now().UnixMilli(), shortHash(hash), random)
+	tempName := finalName + ".tmp"
+	root, err := os.OpenRoot(s.config.Storage.GamesDirectory)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	output, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	cleanup := func() error {
+		closeErr := output.Close()
+		if errors.Is(closeErr, os.ErrClosed) {
+			closeErr = nil
+		}
+		removeErr := root.Remove(tempName)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return errors.Join(closeErr, removeErr)
+	}
+	if _, err := output.Write(content); err != nil {
+		return "", errors.Join(err, cleanup())
+	}
+	if err := output.Sync(); err != nil {
+		return "", errors.Join(err, cleanup())
+	}
+	if err := output.Close(); err != nil {
+		removeErr := root.Remove(tempName)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return "", errors.Join(err, removeErr)
+	}
+	if err := root.Rename(tempName, finalName); err != nil {
+		removeErr := root.Remove(tempName)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return "", errors.Join(err, removeErr)
+	}
+	return filepath.Join(s.config.Storage.GamesDirectory, finalName), nil
+}
+
+func (s *Service) rewriteArchiveManifest(source string, manifest []byte) (string, error) {
+	reader, err := zip.OpenReader(source)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	output, err := os.CreateTemp(s.config.Storage.QuarantineDirectory, "normalized-*.zip")
+	if err != nil {
+		return "", err
+	}
+	outputPath := output.Name()
+	cleanup := func() error {
+		closeErr := output.Close()
+		if errors.Is(closeErr, os.ErrClosed) {
+			closeErr = nil
+		}
+		removeErr := os.Remove(outputPath)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return errors.Join(closeErr, removeErr)
+	}
+	writer := zip.NewWriter(output)
+	for _, entry := range reader.File {
+		header := entry.FileHeader
+		target, err := writer.CreateHeader(&header)
+		if err != nil {
+			return "", errors.Join(err, cleanup())
+		}
+		if entry.Name == "main.json" {
+			if _, err := target.Write(manifest); err != nil {
+				return "", errors.Join(err, cleanup())
+			}
+			continue
+		}
+		input, err := entry.Open()
+		if err != nil {
+			return "", errors.Join(err, cleanup())
+		}
+		_, copyErr := io.Copy(target, input)
+		closeErr := input.Close()
+		if copyErr != nil || closeErr != nil {
+			if copyErr != nil {
+				return "", errors.Join(copyErr, cleanup())
+			}
+			return "", errors.Join(closeErr, cleanup())
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return "", errors.Join(err, cleanup())
+	}
+	if err := output.Sync(); err != nil {
+		return "", errors.Join(err, cleanup())
+	}
+	if err := output.Close(); err != nil {
+		removeErr := os.Remove(outputPath)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		return "", errors.Join(err, removeErr)
+	}
+	return outputPath, nil
 }
 
 func safeArchivePath(name string) (string, bool) {
@@ -471,8 +832,17 @@ func safeArchivePath(name string) (string, bool) {
 }
 
 func allowedRoot(name string) bool {
-	return name == "main.json" || name == "capabilities.json" ||
+	return name == "main.json" || name == "capabilities.json" || name == "icon.png" ||
 		name == "app" || strings.HasPrefix(name, "app/")
+}
+
+func findArchiveEntry(entries []*zip.File, name string) *zip.File {
+	for _, entry := range entries {
+		if entry.Name == name && !entry.FileInfo().IsDir() {
+			return entry
+		}
+	}
+	return nil
 }
 
 func allowedExtension(extension string) bool {
@@ -558,21 +928,22 @@ func parseManifest(content []byte) (manifestSummary, []string) {
 	if err := json.Unmarshal(content, &manifest); err != nil {
 		return manifestSummary{}, []string{"main.json 不是有效 JSON"}
 	}
+	manifest = projectManifest(manifest)
 	canonical, _ := json.Marshal(manifest)
 	summary := manifestSummary{
-		ID: stringField(manifest, "id"), Name: stringField(manifest, "name"),
-		Author: stringField(manifest, "author"), Version: stringField(manifest, "version"),
+		ID: exactStringField(manifest, "id"), Name: stringField(manifest, "name"),
+		Author: stringField(manifest, "author"), Version: exactStringField(manifest, "version"),
 		Remarks: stringField(manifest, "remarks"), JSON: string(canonical),
 	}
 	findings := make([]string, 0)
-	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`).MatchString(summary.ID) {
+	if !gameid.Valid(summary.ID) {
 		findings = append(findings, "main.json.id 缺失或格式无效")
 	}
 	if summary.Name == "" || len([]rune(summary.Name)) > 120 {
 		findings = append(findings, "main.json.name 缺失或过长")
 	}
-	if summary.Version == "" || len(summary.Version) > 64 {
-		findings = append(findings, "main.json.version 缺失或过长")
+	if _, err := version.Parse(summary.Version); err != nil {
+		findings = append(findings, "main.json.version 必须是无前缀的 MAJOR.MINOR.PATCH")
 	}
 	if len([]rune(summary.Author)) > 120 {
 		findings = append(findings, "main.json.author 过长")
@@ -597,9 +968,43 @@ func parseManifest(content []byte) (manifestSummary, []string) {
 	return summary, findings
 }
 
+func projectManifest(source map[string]any) map[string]any {
+	projected := make(map[string]any, len(knownManifestFields))
+	for _, field := range knownManifestFields {
+		value, exists := source[field]
+		if !exists {
+			continue
+		}
+		if objectFields, nested := knownManifestObjectFields[field]; nested {
+			value = projectManifestObject(value, objectFields)
+		}
+		projected[field] = value
+	}
+	return projected
+}
+
+func projectManifestObject(value any, fields []string) any {
+	source, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	projected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		if fieldValue, exists := source[field]; exists {
+			projected[field] = fieldValue
+		}
+	}
+	return projected
+}
+
 func stringField(object map[string]any, name string) string {
 	value, _ := object[name].(string)
 	return strings.TrimSpace(value)
+}
+
+func exactStringField(object map[string]any, name string) string {
+	value, _ := object[name].(string)
+	return value
 }
 
 func randomHex(size int) (string, error) {
@@ -608,6 +1013,19 @@ func randomHex(size int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(value), nil
+}
+
+func fileSHA256(filePath string) (string, error) {
+	input, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer input.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, input); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func shortHash(value string) string {
@@ -648,8 +1066,44 @@ func truncateText(value string, maximum int) string {
 // ResolveStoredArchive treats database paths as untrusted input. It resolves
 // symlinks and requires the target to remain a regular ZIP below gamesRoot.
 func ResolveStoredArchive(gamesRoot, candidate string) (string, error) {
+	return resolveStoredFile(gamesRoot, candidate, ".zip")
+}
+
+func ResolveStoredIcon(gamesRoot, candidate string) (string, error) {
+	return resolveStoredFile(gamesRoot, candidate, ".png")
+}
+
+func DeleteStoredFiles(gamesRoot string, candidates ...string) error {
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		var resolved string
+		var err error
+		switch strings.ToLower(filepath.Ext(candidate)) {
+		case ".zip":
+			resolved, err = ResolveStoredArchive(gamesRoot, candidate)
+		case ".png":
+			resolved, err = ResolveStoredIcon(gamesRoot, candidate)
+		default:
+			err = errors.New("存储文件扩展名无效")
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(resolved); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolveStoredFile(gamesRoot, candidate string, extension string) (string, error) {
 	if strings.TrimSpace(candidate) == "" {
-		return "", errors.New("游戏包路径为空")
+		return "", errors.New("存储路径为空")
 	}
 	root, err := filepath.Abs(filepath.Clean(gamesRoot))
 	if err != nil {
@@ -664,15 +1118,21 @@ func ResolveStoredArchive(gamesRoot, candidate string) (string, error) {
 		return "", err
 	}
 	target, err = filepath.EvalSymlinks(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
 	if err != nil || !pathWithin(root, target) {
 		return "", errors.New("游戏包符号链接越过存储目录")
 	}
 	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", errors.New("游戏包不是常规文件")
 	}
-	if !strings.EqualFold(filepath.Ext(target), ".zip") {
-		return "", errors.New("游戏包扩展名无效")
+	if !strings.EqualFold(filepath.Ext(target), extension) {
+		return "", errors.New("存储文件扩展名无效")
 	}
 	return target, nil
 }

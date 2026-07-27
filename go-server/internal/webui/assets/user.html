@@ -1,115 +1,136 @@
 <!doctype html>
-<html lang="zh-CN">
+<html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Playmesh 游戏源</title>
+  <title data-i18n="site.title"></title>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      root.dataset.uiBooting = "true";
+      let mode = "system";
+      try { mode = localStorage.getItem("playmesh.theme") || "system"; } catch (_) {}
+      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+      const theme = mode === "light" || mode === "dark" ? mode : (dark ? "dark" : "light");
+      root.dataset.theme = theme;
+      root.style.colorScheme = theme;
+      try {
+        const saved = localStorage.getItem("playmesh.locale");
+        const locale = saved || (Array.isArray(navigator.languages) ? navigator.languages[0] : "") || navigator.language;
+        if (locale) root.lang = locale;
+      } catch (_) {}
+      window.__playmeshRevealUI = () => {
+        clearTimeout(window.__playmeshRevealTimer);
+        root.removeAttribute("data-ui-booting");
+      };
+      window.__playmeshRevealTimer = setTimeout(window.__playmeshRevealUI, 4000);
+    })();
+  </script>
   <link rel="stylesheet" href="/assets/style.css">
   <script defer src="/assets/user.js"></script>
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark">P</span> Playmesh 游戏源</div>
+      <div class="brand"><span class="brand-mark">P</span> <span data-i18n="site.title"></span></div>
+      <div class="row-actions">
+        <select id="locale-select" class="hidden" aria-label="" data-i18n-aria="settings.language"></select>
+        <button id="account-open" type="button" class="secondary" data-i18n="nav.login"></button>
+        <button id="theme-toggle" type="button" class="secondary" data-i18n="theme.switch"></button>
+      </div>
     </header>
 
     <section class="hero">
       <article class="hero-copy">
-        <div class="eyebrow">Community game packages</div>
-        <h1>发现，也分享<br>你的下一局游戏</h1>
-        <p>浏览已经通过审核的 Playmesh 游戏包，或提交包含根目录
-          <strong>main.json</strong> 的标准 ZIP 包。每次上传都会经过病毒扫描、
-          归档边界检查与活动内容静态分析。</p>
+        <div class="eyebrow" data-i18n="user.hero.eyebrow"></div>
+        <h1 data-i18n="user.hero.title"></h1>
+        <p data-i18n="user.hero.description"></p>
       </article>
-      <aside class="panel upload-panel">
-        <h2>提交游戏包</h2>
-        <form id="upload-form" class="stack">
-          <label>联系邮箱
-            <input name="email" type="email" required autocomplete="email" placeholder="you@example.com">
-          </label>
-          <label>Playmesh ZIP 游戏包
-            <input name="package" type="file" accept=".zip,application/zip" required>
-          </label>
-          <button type="submit">安全扫描并提交</button>
-          <div id="upload-notice" class="notice">公开上传严格限流，请确认文件后再提交。</div>
-        </form>
+      <aside class="panel manual-source-panel">
+        <div>
+          <div class="eyebrow" data-i18n="user.source.eyebrow"></div>
+          <h2 data-i18n="user.source.title"></h2>
+        </div>
+        <div class="copy-row">
+          <input id="public-source-url" readonly aria-label="" data-i18n-aria="user.source.url">
+          <button type="button" class="secondary" data-copy-target="public-source-url" data-i18n="common.copy"></button>
+        </div>
+        <div id="source-info-notice" class="notice" data-i18n="user.source.loading"></div>
+        <img id="source-qr-image" class="source-qr-image hidden" alt="" data-i18n-alt="user.source.qr_alt">
       </aside>
     </section>
 
-    <section class="panel manual-source-panel">
-      <div>
-        <div class="eyebrow">Manual source setup</div>
-        <h2>手动添加当前游戏源</h2>
-        <p class="muted">无法扫码时，复制下面的地址和正式加入 Token，在 Playmesh App 中手动添加。</p>
+    <section id="auth-panel" class="panel hidden">
+      <div class="tabs">
+        <button type="button" class="active" data-auth-tab="login" data-i18n="nav.login"></button>
+        <button type="button" data-auth-tab="register" data-i18n="nav.register"></button>
       </div>
-      <div class="manual-source-fields">
-        <label>当前访问地址
-          <div class="copy-row">
-            <input id="current-source-url" readonly>
-            <button type="button" class="secondary" data-copy-target="current-source-url">复制</button>
-          </div>
-        </label>
-        <label>配置公开地址
-          <div class="copy-row">
-            <input id="configured-source-url" readonly>
-            <button type="button" class="secondary" data-copy-target="configured-source-url">复制</button>
-          </div>
-        </label>
-        <label>正式加入 Token
-          <div class="copy-row">
-            <input id="published-source-token" readonly autocomplete="off">
-            <button type="button" class="secondary" data-copy-target="published-source-token">复制</button>
-          </div>
-        </label>
-        <div id="source-info-notice" class="notice">正在读取游戏源连接信息…</div>
-      </div>
+      <form id="login-form" class="stack">
+        <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="email"></label>
+        <label data-i18n-label="auth.password"><input name="password" type="password" required autocomplete="current-password"></label>
+        <div class="captcha-block">
+          <img class="captcha-image" alt="" data-i18n-alt="auth.login_captcha">
+          <input name="captchaAnswer" required autocomplete="off" placeholder="" data-i18n-placeholder="auth.captcha_answer">
+        </div>
+        <button type="submit" data-i18n="nav.login"></button>
+      </form>
+      <form id="register-form" class="stack hidden">
+        <div id="registration-state" class="notice"></div>
+        <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="email"></label>
+        <label data-i18n-label="auth.password"><input name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
+        <label data-i18n-label="auth.confirm_password"><input name="confirmPassword" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
+        <div class="captcha-block">
+          <img class="captcha-image" alt="" data-i18n-alt="auth.register_captcha">
+          <input name="captchaAnswer" required autocomplete="off" placeholder="" data-i18n-placeholder="auth.captcha_answer">
+        </div>
+        <button type="submit" data-i18n="auth.create_account"></button>
+      </form>
+      <div id="auth-notice" class="notice"></div>
     </section>
 
-    <section id="source-qr-panel" class="panel source-qr-panel hidden">
-      <div>
-        <div class="eyebrow">Quick add source</div>
-        <h2>扫码快速添加当前游戏源</h2>
-        <p class="muted">使用 Playmesh App 扫描二维码，即可添加此游戏源并浏览已发布游戏。</p>
-        <div class="notice">二维码包含此公开游戏源的正式访问凭据，请只在可信页面扫描。</div>
+    <section id="account-panel" class="hidden">
+      <div class="toolbar">
+        <div><div class="eyebrow" data-i18n="user.portal.eyebrow"></div><h2 data-i18n="user.portal.title"></h2></div>
+        <button id="logout" type="button" class="danger" data-i18n="nav.logout"></button>
       </div>
-      <div class="source-qr-image">
-        <img id="source-qr-image" alt="快速添加当前游戏源二维码">
+      <div class="account-grid">
+        <form id="profile-form" class="panel stack">
+          <h3 data-i18n="nav.account"></h3>
+          <label><span data-i18n="auth.email"></span><input id="profile-email" readonly></label>
+          <label><span data-i18n="auth.display_name"></span><input name="displayName" maxlength="40" required></label>
+          <button type="submit" data-i18n="common.save"></button>
+        </form>
+        <form id="key-form" class="panel stack">
+          <h3 data-i18n="uploads.key"></h3>
+          <label data-i18n-label="uploads.manual_key"><input name="key" type="password" minlength="10" maxlength="128" autocomplete="new-password"></label>
+          <div class="row-actions">
+            <button type="submit" data-i18n="uploads.save_rotate"></button>
+            <button id="generate-key" type="button" class="secondary" data-i18n="uploads.create_key"></button>
+          </div>
+          <label data-i18n-label="uploads.key_once_label"><input id="created-key" readonly></label>
+        </form>
+        <form id="game-upload-form" class="panel stack">
+          <h3 data-i18n="uploads.submit_version"></h3>
+          <label><span data-i18n="uploads.zip"></span><input name="package" type="file" accept=".zip,application/zip" required></label>
+          <button type="submit" data-i18n="uploads.scan_submit"></button>
+          <div id="upload-notice" class="notice" data-i18n="uploads.version_hint"></div>
+        </form>
       </div>
+      <div id="my-games" class="cards"></div>
     </section>
 
     <section>
       <div class="toolbar">
-        <div>
-          <div class="eyebrow">Package catalog</div>
-          <h2>游戏包目录</h2>
-        </div>
-        <div class="tabs">
-          <button class="active" data-status="approved">已通过</button>
-          <button data-status="pending">待审核</button>
-        </div>
+        <div><div class="eyebrow" data-i18n="catalog.eyebrow"></div><h2 data-i18n="catalog.title"></h2></div>
       </div>
       <form id="filters" class="filters">
-        <input name="id" placeholder="游戏 ID">
-        <input name="name" placeholder="游戏名称">
-        <input name="author" placeholder="作者">
-        <input name="from" type="date" title="上传起始时间">
-        <input name="to" type="date" title="上传结束时间">
-        <select name="sort">
-          <option value="time">按上传时间</option>
-          <option value="id">按游戏 ID</option>
-          <option value="name">按名称</option>
-          <option value="author">按作者</option>
-        </select>
-        <select name="order">
-          <option value="desc">降序</option>
-          <option value="asc">升序</option>
-        </select>
+        <input name="name" placeholder="" data-i18n-placeholder="catalog.search">
       </form>
       <div id="games" class="cards"></div>
       <div class="pager">
-        <button id="previous" class="secondary">上一页</button>
+        <button id="previous" class="secondary" data-i18n="common.previous"></button>
         <span id="page-label" class="muted"></span>
-        <button id="next" class="secondary">下一页</button>
+        <button id="next" class="secondary" data-i18n="common.next"></button>
       </div>
     </section>
   </main>

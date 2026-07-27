@@ -43,7 +43,7 @@
 | 本机 App Bridge SDK | `assets/playmesh-library/public/sdk/v1/playmesh-app.js`、`lib/core/game_sdk/app_webview_bridge.dart`、`lib/core/platform/app_device_service.dart` |
 | 浏览器持久身份与加入网关 | `assets/playmesh-library/public/sdk/v1/playmesh.js`、`lib/core/game_web/` |
 | 同 ID 约束、离线成员与会话结束 | `go-core/internal/session/`、`lib/core/session/` |
-| 移动开发工作区与 SDK 补全 | `assets/playmesh-library/public/developer/workspace.html`、`workspace.js`、`workspace-v1.css` |
+| 移动开发工作区与 SDK 补全 | `assets/playmesh-library/public/developer/workspace.html`、`workspace.js`、`workspace.css` |
 | 响应式页面与切换动效 | `lib/app.dart`、`lib/ui/playmesh_ui.dart`、`lib/features/settings/settings_page.dart` |
 | 机器契约与 AI 提示词 | `assets/playmesh-library/public/developer/contracts/`、`assets/playmesh-library/public/developer/prompts/` |
 

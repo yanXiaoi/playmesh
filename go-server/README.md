@@ -13,7 +13,7 @@ Go Server 不是 Go Core，不运行游戏规则，也无法解密公共中转�
 1. 安装 Go 1.26.5 或更高的已修复版本；`go.mod` 已固定安全工具链。
 2. 按 [ClamAV 官方安装文档](https://docs.clamav.net/manual/Installing.html)
    安装并更新病毒库。Windows、Linux 与 macOS 均可使用官方发行包。
-3. 复制 `.env.example` 为 `.env`，替换管理员密码与两个 App Token。
+3. 复制 `.env.example` 为 `.env`，替换管理员密码、App Token 与上传密钥 Pepper。
 4. 启动：
 
 ```powershell
@@ -47,29 +47,43 @@ SQLite 路径、游戏包限制、验证码、ClamAV、鉴权白名单和 Relay 
 提示重启生效。游戏源名称、作者、主页与 Relay 声明使用独立表单和 SQLite 存储，
 可以即时反映到 `/apps/info`。
 
-## Token 与游戏可见性
+Web 语言与主题由 `server.json.webUI` 配置。可用语言只来自仓库统一清单
+`assets/playmesh-localization/manifest.json`；发布前运行
+`node tool/generate_localization.mjs` 更新 Go 嵌入副本。服务启动会拒绝未知 locale、
+未启用默认语言、词典 key 漂移、回退环和非法主题模式。UI 词典通过 `/i18n/**`
+提供，`/api/**` 与 `/apps/**` 不读取 locale，JSON 契约不会随界面语言改变。
+用户页和管理页的 HTML 壳不内嵌固定文案或本地化属性 fallback；首帧在统一
+`go-server.json` bundle 投影完成前保持隐藏。Playmesh、ClamAV、URL 示例等技术值
+可以保留原样，动态游戏名、账号和 API 数据从不进入词典。
+
+## Token、账号与游戏可见性
 
 `.env` 中必须配置两个不同 Token：
 
 ```text
 PLAYMESH_PUBLISHED_TOKEN  正式游戏 Token
-PLAYMESH_REVIEW_TOKEN     待审核游戏 Token
+PLAYMESH_REVIEW_TOKEN     Relay/管理兼容凭据，不进入 Catalog 展示
+PLAYMESH_UPLOAD_KEY_PEPPER 用户上传密钥 HMAC Pepper
 ```
 
 两个 Token 必须非空且互不相同，不能使用示例占位值或复用其他凭据。
 
 外部端口使用统一 Gin 中间件解析 Bearer Token：
 
-- 正式 Token 的 `/apps/list` 与 `/apps/download` 只读取 `approved` 游戏。
-- 待审核 Token 只读取 `pending` 游戏，列表响应会主动追加 `待审核` 标签。
-- `rejected` 游戏不会出现在任何 App Catalog。
+- `/apps/list` 每个 gameId 只返回语义版本最高的 `approved + published` 记录。
+- 最新 approved 版本下架后不回退历史版本。
+- `/apps/download` 与 `/apps/icon` 必须指定同一个当前公开版本。
+- `pending`、`rejected` 与历史 approved 版本不进入任何 App Catalog。
 - `auth.whitelist` 是精确的 `{method, path}` 白名单；命中后跳过 App Token。
 - Relay Client 即使在 Token 白名单中，仍必须通过 Join Capability 鉴权。
 
-公开门户与 App 审核 Token 是两个不同边界。公开门户可以展示待审核游戏的元数据，
-但不会生成下载链接；`/api/public/games/:id/download` 也在后端强制要求
-`status == approved`。待审核包只能由持有待审核 App Token 的客户端或已登录管理员
-读取。
+用户使用邮箱账号登录门户；App/工作区使用每账号独立上传密钥。上传密钥只保存
+HMAC-SHA256，明文只在创建或轮换时返回一次。`allowUserRegistration` 关闭后注册
+接口返回 `403 registration_disabled`，已有用户登录、验证、上传和游戏管理不受影响。
+注册成功和重复注册统一返回 `202 {"status":"registration_received"}`，客户端只根据
+公开的邮箱验证开关提示下一步，不通过响应判断邮箱是否已存在。
+上传客户端固定使用 `Authorization: UploadKey <upload-key>`，不接受 Bearer 别名；
+ZIP 使用 multipart 的 `package` 字段。
 
 ## 管理端
 
@@ -116,10 +130,11 @@ POST   <ADMIN_PATH>/api/auth/login
 
 POST   <ADMIN_PATH>/api/admin/logout
 GET    <ADMIN_PATH>/api/admin/games
-POST   <ADMIN_PATH>/api/admin/games
 GET    <ADMIN_PATH>/api/admin/games/:id
 PATCH  <ADMIN_PATH>/api/admin/games/:id
 DELETE <ADMIN_PATH>/api/admin/games/:id
+POST   <ADMIN_PATH>/api/admin/games/:id/publish
+POST   <ADMIN_PATH>/api/admin/games/:id/unpublish
 GET    <ADMIN_PATH>/api/admin/games/:id/download
 GET    <ADMIN_PATH>/api/admin/settings
 PUT    <ADMIN_PATH>/api/admin/settings
@@ -128,38 +143,44 @@ PUT    <ADMIN_PATH>/api/admin/config
 GET    <ADMIN_PATH>/api/admin/relay/stats
 ```
 
-管理员可以分页、搜索、查看扫描报告、下载隔离后保留的干净原包、通过、拒绝或删除
-记录，通过表单编辑 `/apps/info`，并通过“运行配置”表单管理 `server.json`。
+管理员可以分页、搜索、查看扫描报告、下载服务端覆盖发布者信息后的干净包、通过、
+拒绝、上下架或删除记录，通过表单编辑 `/apps/info`，并通过“运行配置”表单管理
+`server.json`。
 
 ## 公开门户
 
-App 外部端口的 `/` 是免登录的游戏源门户：
+App 外部端口的 `/` 是游戏源与用户门户：
 
-- 上传带根目录 `main.json` 的标准 ZIP 游戏包，上传者必须填写有效邮箱。
-- 浏览已通过与待审核游戏。
-- 按游戏 ID、名称、作者和上传时间筛选。
-- 按游戏 ID、名称、作者或时间升序/降序排列。
-- 只有已通过游戏显示下载入口。
+- 匿名用户只浏览每个 gameId 当前公开的最新版本。
+- 注册用户登录后管理展示名称、上传密钥、版本审核状态和上架状态。
+- 网页上传使用 HttpOnly/Secure/SameSite=Lax 会话 Cookie 与 Secure CSRF Cookie，
+  所有写操作同时校验会话绑定的 CSRF Token。Cookie 始终带 Secure，因此匿名
+  Catalog 可继续通过纯 HTTP 浏览，但账号登录和用户门户必须部署在 HTTPS 上。
+- App 上传与网页上传共用同一 IP 的 30 秒窗口；限流发生在读取请求体之前，
+  `Retry-After` 返回当前窗口的剩余整秒。两个入口共享所有权和严格递增版本事务。
 - 默认显示“快速添加当前游戏源”二维码；管理员可通过
   `showPublicSourceQRCode` 开关隐藏。二维码由后端使用 `publicBaseUrl`、正式发布
-  Token 和当前游戏源名称编码为既有的 `playmesh://catalog-source` URI。
+  Token 生成唯一的 `publicURL?token=...` 链接；二维码和复制文本逐字一致。
 
 公开 API 使用独立的严格 IP 限流：
 
 ```text
-POST /api/public/upload
 GET  /api/public/games
 GET  /api/public/games/:id/download
 GET  /api/public/source-qrcode
 GET  /api/public/source-info
+GET/POST /api/user/auth/**
+GET/PATCH /api/user/me
+PUT  /api/user/upload-key
+GET/POST/DELETE /api/user/games/**
+POST /api/user/uploads
 ```
 
 源二维码面向匿名用户分发，因此其中的正式发布 Token 应被视为公开的只读源凭据，
 不能复用管理员密码、待审核 Token 或其他高权限秘密。
 
-首页还会通过 `/api/public/source-info` 显示当前浏览器访问地址、配置的
-`publicBaseUrl` 和正式发布 Token，并为每项提供复制按钮，方便无法扫码的用户在 App
-中手动添加。该接口与二维码具有相同的公开凭据边界，不返回待审核 Token。
+首页通过 `/api/public/source-info` 返回唯一的 `publicURL?token=...`。该接口与
+二维码具有相同的公开只读凭据边界，不返回上传密钥、待审核 Token 或管理员路径。
 
 ## 上传安全模型
 
@@ -169,16 +190,31 @@ GET  /api/public/source-info
 2. 限制请求大小、ZIP 文件数量、单文件大小、展开总大小和压缩比。
 3. 拒绝绝对路径、目录穿越、反斜杠路径、隐藏文件、大小写冲突路径、Windows
    设备名、符号链接、特殊文件、重复路径和加密 ZIP 条目。
-4. 只允许 `main.json`、可选 `capabilities.json` 与 `app/`，并使用 Web 资源扩展名
+4. 只允许 `main.json`、可选 `capabilities.json`、可选根 `icon.png` 与 `app/`，并使用 Web 资源扩展名
    白名单。
 5. 使用 ClamAV 扫描原始 ZIP；默认扫描器缺失、超时或报错都会拒绝上传。
 6. 静态检查 HTML、JavaScript、CSS 与 SVG 中的外部 HTTP/WS 地址、`file:`、
    `javascript:`、动态代码执行、Service Worker 和嵌入文档元素。
-7. 完整校验 `main.json` 后才把原包原子写入游戏包目录。
-8. 敏感或感染文件立即删除，SQLite 仍保留哈希、检测结果、拒绝原因和上传邮箱。
+7. 完整校验 `main.json` 后才把原包原子写入游戏包目录；`id` 只接受 1–64 个
+   安全字符。解析器对所有未知字段一律静默忽略，不产生 finding、告警、错误或兼容
+   分支；规范化使用当前已知 Manifest 字段投影，因此数据库和 ZIP 中统一丢弃所有
+   未知字段。`permissions`、`icon` 只是普通未知键；能力只读取独立
+   `capabilities.json`，图标只读取包根 `icon.png`。
+8. 敏感或感染文件立即删除，不创建版本、所有权或审核记录。
 9. 并发扫描数默认限制为 4；可在后台通过 `maxConcurrentScans` 调整。
 10. 下载和删除时把 SQLite 路径重新视为不可信值，解析符号链接并强制目标仍是
     游戏包目录中的常规 ZIP；持久化写入使用目录范围文件 API。
+
+版本删除先在 SQLite 事务中标记为 `deleting` 并写入审计，再删除 ZIP、图标和派生
+文件，最后在第二个事务中删除版本记录并在必要时释放 gameId 所有权。`deleting`
+不会进入 Catalog、公开下载或用户门户；启动时会立即重试未完成清理，运行期间也会
+每 30 秒继续清理，文件暂时被占用或数据库瞬时失败不会恢复公开状态。
+
+同一后台任务还会执行数据库引用安全扫描：只清理由服务端命名规则明确识别、且没有被
+任何版本记录引用的游戏目录文件，以及隔离目录中的 `upload-*` / `normalized-*`
+临时 ZIP。用户或运维自行放置的文件、目录、符号链接和不符合服务端命名规则的内容
+不会被扫描器删除。上传冲突或失败时若即时删除失败，错误会被记录并由启动任务及每
+30 秒的后台任务持续重试。
 
 ClamAV 是纵深防御的一层，不替代 ZIP 边界、扩展名白名单和静态分析。生产环境应让
 ClamAV 使用低权限服务账号，并定期通过 `freshclam` 更新签名库。
@@ -226,16 +262,22 @@ data/playmesh-server.db
 
 - 游戏包、上传者邮箱、状态与 Manifest 摘要。
 - 病毒扫描和静态检测报告。
-- 审核事件。
+- 审核、上架、下架、删除和设置变更事件；每条事件包含稳定账号标识、角色、
+  gameId/版本、前后状态与时间。
 - `/apps/info` 可编辑设置。
 - 只存哈希的管理员 Session。
 
 游戏 ZIP 保存在数据库外的受控目录，SQLite 只保存服务端生成的路径。
 
+当前 SQLite schema 版本为 3。服务端采用破坏式 schema 边界，不执行旧数据库迁移；
+版本不匹配时会拒绝启动，部署者应备份后创建全新数据库。
+
 ## 邮件
 
-SMTP 在 `.env` 配置。启用后，自动安全拒绝与管理员审核可以向上传邮箱发送结果。
-邮件发送失败不会丢失 SQLite 中的审核结果。
+SMTP 在 `.env` 配置。启用邮箱验证后用于发送一次性验证链接；管理员审核也可向
+上传账号发送结果。审核结果先写入 SQLite，邮件发送失败不会回滚审核事务。
+验证邮件重发在同一 SQLite 写事务中检查 60 秒间隔和每小时 5 次上限、作废旧
+Token 并预留新 Token；来自不同 IP 的并发请求也只有一个请求能取得有效链接。
 
 隐式 TLS SMTP 使用：
 

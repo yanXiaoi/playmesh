@@ -47,4 +47,4 @@ Flutter 测试在受限沙箱中无法启动 `flutter_tester` 子进程并超时
 
 ## 尚需真机验证
 
-本轮环境没有已连接的 Android/iOS/HarmonyOS 传感器真机，因此未验证实际加速度计/陀螺仪数值、系统权限 UI、页面切换时的硬件功耗以及厂商 WebView 生命周期差异。安装 debug APK 后，应在开发者工作区打开“更多 → 能力测试”，确认全平台注册表中的两个插件均能持续返回 `passed` 和真实 `reading` 样本，再进入声明对应能力的游戏验证 `start/stop/dispose`。
+本轮环境没有已连接的 Android/iOS 传感器真机，因此未验证实际加速度计/陀螺仪数值、系统权限 UI、页面切换时的硬件功耗以及厂商 WebView 生命周期差异。安装 debug APK 后，应在开发者工作区打开“更多 → 能力测试”，确认全平台注册表中的两个插件均能持续返回 `passed` 和真实 `reading` 样本，再进入声明对应能力的游戏验证 `start/stop/dispose`。

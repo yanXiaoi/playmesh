@@ -31,12 +31,23 @@
         }
       ]
     },
+    "RuntimeLocale": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$",
+      "examples": [
+        "zh",
+        "zh-CN",
+        "en-US"
+      ],
+      "description": "Locale identifier returned by playmesh.runtime.getLocale(); no platform message dictionary is exposed."
+    },
     "Player": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
         "nickname",
+        "avatar",
         "role",
         "connected"
       ],
@@ -46,6 +57,13 @@
         },
         "nickname": {
           "type": "string"
+        },
+        "avatar": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Same-origin App avatar path after synchronization; null when unavailable or for HTML players"
         },
         "role": {
           "enum": [
@@ -421,7 +439,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "2.2.3"
+          "const": "2.4.0"
         },
         "isAuthority": {
           "type": "boolean"
