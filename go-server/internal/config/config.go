@@ -41,6 +41,10 @@ type Auth struct {
 type Admin struct {
 	Listen                      string `json:"listen"`
 	CaptchaMode                 string `json:"captchaMode"`
+	CaptchaImageSource          string `json:"captchaImageSource"`
+	CaptchaImageDirectory       string `json:"captchaImageDirectory"`
+	CaptchaImageURL             string `json:"captchaImageUrl"`
+	CaptchaImageCacheSize       int    `json:"captchaImageCacheSize"`
 	SessionTTLMinutes           int    `json:"sessionTtlMinutes"`
 	LoginIntervalMilliseconds   int    `json:"loginIntervalMilliseconds"`
 	CaptchaIntervalMilliseconds int    `json:"captchaIntervalMilliseconds"`
@@ -148,7 +152,11 @@ func Default() Config {
 		},
 		Admin: Admin{
 			Listen:                      "127.0.0.1:16669",
-			CaptchaMode:                 "math",
+			CaptchaMode:                 "slide",
+			CaptchaImageSource:          "local",
+			CaptchaImageDirectory:       "data/captcha-images",
+			CaptchaImageURL:             "",
+			CaptchaImageCacheSize:       8,
 			SessionTTLMinutes:           480,
 			LoginIntervalMilliseconds:   1000,
 			CaptchaIntervalMilliseconds: 1000,
@@ -423,8 +431,31 @@ func (c Config) Validate() error {
 	if err := validateAdminPath(c.AdminPath); err != nil {
 		return err
 	}
-	if c.Admin.CaptchaMode != "math" && c.Admin.CaptchaMode != "text" {
-		return errors.New("admin.captchaMode 只能是 math 或 text")
+	if c.Admin.CaptchaMode != "text" &&
+		c.Admin.CaptchaMode != "slide" &&
+		c.Admin.CaptchaMode != "rotate" {
+		return errors.New("admin.captchaMode 只能是 text、slide 或 rotate")
+	}
+	if c.Admin.CaptchaImageCacheSize < 0 || c.Admin.CaptchaImageCacheSize > 128 {
+		return errors.New("admin.captchaImageCacheSize 必须在 0 到 128 之间")
+	}
+	switch c.Admin.CaptchaImageSource {
+	case "local":
+		if strings.TrimSpace(c.Admin.CaptchaImageDirectory) == "" {
+			return errors.New("local 验证码图片源必须配置 admin.captchaImageDirectory")
+		}
+	case "remote":
+		if err := validateHTTPURL(
+			"admin.captchaImageUrl", c.Admin.CaptchaImageURL, false,
+		); err != nil {
+			return err
+		}
+		if c.Admin.CaptchaImageCacheSize < 1 ||
+			c.Admin.CaptchaImageCacheSize > 128 {
+			return errors.New("remote 验证码图片缓存数量必须在 1 到 128 之间")
+		}
+	default:
+		return errors.New("admin.captchaImageSource 只能是 local 或 remote")
 	}
 	if c.Admin.SessionTTLMinutes < 1 ||
 		c.Admin.SessionTTLMinutes > 30*24*60 ||
@@ -667,8 +698,8 @@ func defaultWebUI() WebUI {
 		DefaultLocale:     catalog.Manifest.DefaultLocale,
 		EnabledLocales:    catalog.EnabledLocaleIDs(),
 		AllowLocaleSwitch: catalog.Manifest.UI.AllowLocaleSwitch,
-		DefaultThemeMode:  catalog.Manifest.UI.DefaultThemeMode,
-		AllowThemeSwitch:  catalog.Manifest.UI.AllowThemeSwitch,
+		DefaultThemeMode:  "light",
+		AllowThemeSwitch:  false,
 	}
 }
 

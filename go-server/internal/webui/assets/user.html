@@ -8,12 +8,8 @@
     (() => {
       const root = document.documentElement;
       root.dataset.uiBooting = "true";
-      let mode = "system";
-      try { mode = localStorage.getItem("playmesh.theme") || "system"; } catch (_) {}
-      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-      const theme = mode === "light" || mode === "dark" ? mode : (dark ? "dark" : "light");
-      root.dataset.theme = theme;
-      root.style.colorScheme = theme;
+      root.dataset.theme = "light";
+      root.style.colorScheme = "light";
       try {
         const saved = localStorage.getItem("playmesh.locale");
         const locale = saved || (Array.isArray(navigator.languages) ? navigator.languages[0] : "") || navigator.language;
@@ -26,82 +22,153 @@
       window.__playmeshRevealTimer = setTimeout(window.__playmeshRevealUI, 4000);
     })();
   </script>
+  <link rel="stylesheet" href="/assets/gocaptcha.global.css">
   <link rel="stylesheet" href="/assets/style.css">
+  <script defer src="/assets/gocaptcha.global.js"></script>
+  <script defer src="/assets/captcha.js"></script>
   <script defer src="/assets/user.js"></script>
 </head>
-<body>
-  <main class="shell">
-    <header class="topbar">
-      <div class="brand"><span class="brand-mark">P</span> <span data-i18n="site.title"></span></div>
+<body class="user-site">
+  <main class="shell user-shell">
+    <header class="topbar site-header">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <span data-i18n="site.title"></span>
+      </a>
+      <nav class="primary-nav" aria-label="" data-i18n-aria="user.nav.aria">
+        <a href="/" data-user-view="home" data-i18n="nav.home"></a>
+        <a href="/games" data-user-view="games" data-i18n="nav.library"></a>
+        <a href="/my" data-user-view="my" data-i18n="nav.my"></a>
+      </nav>
       <div class="row-actions">
         <select id="locale-select" class="hidden" aria-label="" data-i18n-aria="settings.language"></select>
-        <button id="account-open" type="button" class="secondary" data-i18n="nav.login"></button>
-        <button id="theme-toggle" type="button" class="secondary" data-i18n="theme.switch"></button>
       </div>
     </header>
 
-    <section class="hero">
-      <article class="hero-copy">
-        <div class="eyebrow" data-i18n="user.hero.eyebrow"></div>
-        <h1 data-i18n="user.hero.title"></h1>
-        <p data-i18n="user.hero.description"></p>
-      </article>
-      <aside class="panel manual-source-panel">
-        <div>
-          <div class="eyebrow" data-i18n="user.source.eyebrow"></div>
-          <h2 data-i18n="user.source.title"></h2>
-        </div>
-        <div class="copy-row">
-          <input id="public-source-url" readonly aria-label="" data-i18n-aria="user.source.url">
-          <button type="button" class="secondary" data-copy-target="public-source-url" data-i18n="common.copy"></button>
-        </div>
-        <div id="source-info-notice" class="notice" data-i18n="user.source.loading"></div>
-        <img id="source-qr-image" class="source-qr-image hidden" alt="" data-i18n-alt="user.source.qr_alt">
-      </aside>
+    <section id="user-home-view" class="page-view">
+      <section class="home-hero">
+        <article class="home-intro">
+          <div class="eyebrow" data-i18n="user.hero.eyebrow"></div>
+          <h1 data-i18n="user.hero.title"></h1>
+          <p data-i18n="user.hero.description"></p>
+          <a class="button hero-action" href="/games" data-i18n="user.hero.browse"></a>
+        </article>
+        <aside class="source-card">
+          <div class="source-orbit">
+            <span class="orbit-dot orbit-dot-one" aria-hidden="true"></span>
+            <span class="orbit-dot orbit-dot-two" aria-hidden="true"></span>
+            <div class="source-qr-frame">
+              <img id="source-qr-image" class="source-qr-image hidden" alt="" data-i18n-alt="user.source.qr_alt">
+            </div>
+          </div>
+          <div class="source-card-copy">
+            <div class="eyebrow" data-i18n="user.source.eyebrow"></div>
+            <h2 data-i18n="user.source.title"></h2>
+            <p data-i18n="user.source.description"></p>
+            <label class="source-url-label">
+              <span data-i18n="user.source.url"></span>
+              <span class="copy-row">
+                <input id="public-source-url" readonly aria-label="" data-i18n-aria="user.source.url">
+                <button type="button" class="secondary" data-copy-target="public-source-url" data-i18n="common.copy"></button>
+              </span>
+            </label>
+            <div id="source-info-notice" class="notice source-status" data-i18n="user.source.loading"></div>
+          </div>
+        </aside>
+      </section>
+
     </section>
 
-    <section id="auth-panel" class="panel hidden">
-      <div class="tabs">
-        <button type="button" class="active" data-auth-tab="login" data-i18n="nav.login"></button>
-        <button type="button" data-auth-tab="register" data-i18n="nav.register"></button>
+    <section id="user-my-view" class="page-view hidden">
+      <div class="my-heading">
+        <div class="eyebrow" data-i18n="user.my.eyebrow"></div>
+        <h1 data-i18n="user.my.title"></h1>
+        <p data-i18n="user.my.description"></p>
       </div>
-      <form id="login-form" class="stack">
-        <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="email"></label>
-        <label data-i18n-label="auth.password"><input name="password" type="password" required autocomplete="current-password"></label>
-        <div class="captcha-block">
-          <img class="captcha-image" alt="" data-i18n-alt="auth.login_captcha">
-          <input name="captchaAnswer" required autocomplete="off" placeholder="" data-i18n-placeholder="auth.captcha_answer">
-        </div>
-        <button type="submit" data-i18n="nav.login"></button>
-      </form>
-      <form id="register-form" class="stack hidden">
-        <div id="registration-state" class="notice"></div>
-        <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="email"></label>
-        <label data-i18n-label="auth.password"><input name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
-        <label data-i18n-label="auth.confirm_password"><input name="confirmPassword" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
-        <div class="captcha-block">
-          <img class="captcha-image" alt="" data-i18n-alt="auth.register_captcha">
-          <input name="captchaAnswer" required autocomplete="off" placeholder="" data-i18n-placeholder="auth.captcha_answer">
-        </div>
-        <button type="submit" data-i18n="auth.create_account"></button>
-      </form>
-      <div id="auth-notice" class="notice"></div>
-    </section>
 
-    <section id="account-panel" class="hidden">
-      <div class="toolbar">
-        <div><div class="eyebrow" data-i18n="user.portal.eyebrow"></div><h2 data-i18n="user.portal.title"></h2></div>
-        <button id="logout" type="button" class="danger" data-i18n="nav.logout"></button>
-      </div>
-      <div class="account-grid">
-        <form id="profile-form" class="panel stack">
-          <h3 data-i18n="nav.account"></h3>
+      <div id="my-loading" class="panel my-loading" data-i18n="user.my.checking"></div>
+
+      <section id="auth-panel" class="my-auth-shell hidden">
+        <div class="my-auth-intro">
+          <div class="eyebrow" data-i18n="user.my.auth_eyebrow"></div>
+          <h2 data-i18n="user.my.auth_title"></h2>
+          <p data-i18n="user.my.auth_description"></p>
+        </div>
+        <div class="panel auth-panel">
+        <div class="tabs">
+          <button type="button" class="active" data-auth-tab="login" data-i18n="nav.login"></button>
+          <button type="button" data-auth-tab="register" data-i18n="nav.register"></button>
+        </div>
+        <form id="login-form" class="stack">
+          <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="email"></label>
+          <label data-i18n-label="auth.password"><input name="password" type="password" required autocomplete="current-password"></label>
+          <button type="submit" data-i18n="nav.login"></button>
+        </form>
+        <form id="register-form" class="stack hidden">
+          <div id="registration-state" class="notice"></div>
+          <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="email"></label>
+          <label data-i18n-label="auth.password"><input name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
+          <label data-i18n-label="auth.confirm_password"><input name="confirmPassword" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
+          <button type="submit" data-i18n="auth.create_account"></button>
+        </form>
+        </div>
+      </section>
+
+      <section id="account-panel" class="hidden">
+        <div class="my-account-bar">
+          <div class="my-user">
+            <span class="my-user-mark" aria-hidden="true">P</span>
+            <span>
+              <strong data-i18n="user.my.signed_in"></strong>
+              <small id="my-user-email"></small>
+            </span>
+          </div>
+          <div class="row-actions">
+            <div class="my-package-count" aria-live="polite">
+              <strong id="my-game-count">0</strong>
+              <span data-i18n="user.my.package_count"></span>
+            </div>
+            <button type="button" class="secondary" data-open-dialog="profile-dialog" data-i18n="nav.account"></button>
+            <button type="button" class="secondary" data-open-dialog="key-dialog" data-i18n="uploads.key"></button>
+            <button type="button" data-open-dialog="upload-dialog" data-i18n="user.my.upload"></button>
+            <button id="logout" type="button" class="secondary" data-i18n="nav.logout"></button>
+          </div>
+        </div>
+        <div class="my-packages-heading">
+          <div>
+            <div class="eyebrow" data-i18n="user.my.packages_eyebrow"></div>
+            <h2 data-i18n="user.my.packages_title"></h2>
+          </div>
+          <p data-i18n="user.my.packages_description"></p>
+        </div>
+        <div id="my-games" class="my-package-list"></div>
+      </section>
+
+      <dialog id="profile-dialog" class="my-dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow" data-i18n="user.my.account_eyebrow"></div>
+            <h2 data-i18n="nav.account"></h2>
+          </div>
+          <button type="button" class="secondary dialog-close" data-close-dialog data-i18n="common.close"></button>
+        </div>
+        <form id="profile-form" class="stack">
           <label><span data-i18n="auth.email"></span><input id="profile-email" readonly></label>
           <label><span data-i18n="auth.display_name"></span><input name="displayName" maxlength="40" required></label>
           <button type="submit" data-i18n="common.save"></button>
         </form>
-        <form id="key-form" class="panel stack">
-          <h3 data-i18n="uploads.key"></h3>
+      </dialog>
+
+      <dialog id="key-dialog" class="my-dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow" data-i18n="user.my.security_eyebrow"></div>
+            <h2 data-i18n="uploads.key"></h2>
+          </div>
+          <button type="button" class="secondary dialog-close" data-close-dialog data-i18n="common.close"></button>
+        </div>
+        <form id="key-form" class="stack">
+          <p class="dialog-description" data-i18n="user.my.key_description"></p>
           <label data-i18n-label="uploads.manual_key"><input name="key" type="password" minlength="10" maxlength="128" autocomplete="new-password"></label>
           <div class="row-actions">
             <button type="submit" data-i18n="uploads.save_rotate"></button>
@@ -109,22 +176,46 @@
           </div>
           <label data-i18n-label="uploads.key_once_label"><input id="created-key" readonly></label>
         </form>
-        <form id="game-upload-form" class="panel stack">
-          <h3 data-i18n="uploads.submit_version"></h3>
+      </dialog>
+
+      <dialog id="upload-dialog" class="my-dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow" data-i18n="user.my.upload_eyebrow"></div>
+            <h2 data-i18n="uploads.submit_version"></h2>
+          </div>
+          <button type="button" class="secondary dialog-close" data-close-dialog data-i18n="common.close"></button>
+        </div>
+        <form id="game-upload-form" class="stack">
+          <p class="dialog-description" data-i18n="user.my.upload_description"></p>
           <label><span data-i18n="uploads.zip"></span><input name="package" type="file" accept=".zip,application/zip" required></label>
           <button type="submit" data-i18n="uploads.scan_submit"></button>
           <div id="upload-notice" class="notice" data-i18n="uploads.version_hint"></div>
         </form>
-      </div>
-      <div id="my-games" class="cards"></div>
+      </dialog>
+
+      <dialog id="auth-captcha-dialog" class="captcha-dialog" aria-label="" data-i18n-aria="auth.captcha_title">
+        <div id="user-captcha-widget" class="captcha-host"></div>
+      </dialog>
     </section>
 
-    <section>
-      <div class="toolbar">
-        <div><div class="eyebrow" data-i18n="catalog.eyebrow"></div><h2 data-i18n="catalog.title"></h2></div>
+    <section id="user-games-view" class="page-view hidden">
+      <div class="library-heading">
+        <div>
+          <div class="eyebrow" data-i18n="catalog.eyebrow"></div>
+          <h1 data-i18n="catalog.title"></h1>
+          <p data-i18n="catalog.description"></p>
+        </div>
+        <div class="library-count" aria-live="polite">
+          <strong id="game-count">0</strong>
+          <span data-i18n="catalog.count_label"></span>
+        </div>
       </div>
       <form id="filters" class="filters">
-        <input name="name" placeholder="" data-i18n-placeholder="catalog.search">
+        <label class="library-search">
+          <span data-i18n="catalog.search_label"></span>
+          <input name="name" placeholder="" data-i18n-placeholder="catalog.search">
+        </label>
       </form>
       <div id="games" class="cards"></div>
       <div class="pager">

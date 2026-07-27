@@ -1,0 +1,54 @@
+{
+  "manifestVersion": "1.0.0",
+  "templates": [
+    {
+      "id": "common",
+      "name": "对话 AI 公共规则（仅项目能力）",
+      "category": "common",
+      "categoryName": "公共",
+      "file": "common.txt"
+    },
+    {
+      "id": "agent-common",
+      "name": "Agent 公共规则（能力与测试 API）",
+      "category": "common",
+      "categoryName": "公共",
+      "file": "agent-common.txt"
+    },
+    {
+      "id": "custom-ideas",
+      "name": "自定义想法",
+      "category": "common",
+      "categoryName": "公共",
+      "file": "custom-ideas.txt"
+    },
+    {
+      "id": "solo",
+      "name": "单机游戏",
+      "category": "mode",
+      "categoryName": "游戏模式",
+      "file": "solo.txt"
+    },
+    {
+      "id": "multiplayer",
+      "name": "联机游戏公共规则",
+      "category": "mode",
+      "categoryName": "游戏模式",
+      "file": "multiplayer.txt"
+    },
+    {
+      "id": "multi-screen",
+      "name": "普通多人多屏",
+      "category": "display",
+      "categoryName": "显示模式",
+      "file": "multi-screen.txt"
+    },
+    {
+      "id": "single-screen-multiplayer",
+      "name": "单屏多人",
+      "category": "display",
+      "categoryName": "显示模式",
+      "file": "single-screen-multiplayer.txt"
+    }
+  ]
+}

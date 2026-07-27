@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -254,7 +256,7 @@ class _JoinGamePageState extends State<JoinGamePage> {
 
   Future<void> _scanInvitation() async {
     final raw = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const _InvitationScannerPage()),
+      MaterialPageRoute(builder: (_) => const GameInvitationScannerPage()),
     );
     if (raw == null || !mounted) return;
     _invitationController.text = raw.trim();
@@ -290,15 +292,39 @@ class _JoinGamePageState extends State<JoinGamePage> {
   }
 }
 
-class _InvitationScannerPage extends StatefulWidget {
-  const _InvitationScannerPage();
+class GameInvitationScannerPage extends StatefulWidget {
+  const GameInvitationScannerPage({
+    super.key,
+    this.initialUserId,
+    this.initialNickname,
+  }) : assert(
+         (initialUserId == null) == (initialNickname == null),
+         'The direct-join identity must be provided as a complete pair.',
+       );
+
+  static const routeName = '/scan-game-invitation';
+
+  final String? initialUserId;
+  final String? initialNickname;
 
   @override
-  State<_InvitationScannerPage> createState() => _InvitationScannerPageState();
+  State<GameInvitationScannerPage> createState() =>
+      _GameInvitationScannerPageState();
 }
 
-class _InvitationScannerPageState extends State<_InvitationScannerPage> {
+class _GameInvitationScannerPageState extends State<GameInvitationScannerPage> {
+  late final MobileScannerController _scannerController =
+      MobileScannerController(
+        formats: const [BarcodeFormat.qrCode],
+        detectionSpeed: DetectionSpeed.noDuplicates,
+      );
   bool _handled = false;
+
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -313,23 +339,8 @@ class _InvitationScannerPageState extends State<_InvitationScannerPage> {
         fit: StackFit.expand,
         children: [
           MobileScanner(
-            controller: MobileScannerController(
-              formats: const [BarcodeFormat.qrCode],
-              detectionSpeed: DetectionSpeed.noDuplicates,
-            ),
-            onDetect: (capture) {
-              if (_handled) return;
-              String? value;
-              for (final barcode in capture.barcodes) {
-                if (barcode.rawValue case final raw?) {
-                  value = raw;
-                  break;
-                }
-              }
-              if (value == null) return;
-              _handled = true;
-              Navigator.of(context).pop(value);
-            },
+            controller: _scannerController,
+            onDetect: _handleDetection,
           ),
           Center(
             child: Container(
@@ -352,6 +363,50 @@ class _InvitationScannerPageState extends State<_InvitationScannerPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _handleDetection(BarcodeCapture capture) async {
+    if (_handled) return;
+    String? value;
+    for (final barcode in capture.barcodes) {
+      if (barcode.rawValue case final raw?) {
+        value = raw.trim();
+        break;
+      }
+    }
+    if (value == null || value.isEmpty) return;
+
+    final userId = widget.initialUserId;
+    if (userId == null) {
+      _handled = true;
+      Navigator.of(context).pop(value);
+      return;
+    }
+
+    late final GameInvitation invitation;
+    try {
+      invitation = GameInvitation.parse(value);
+    } on FormatException {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.tr('join.invalid_invite'))),
+      );
+      return;
+    }
+
+    _handled = true;
+    await _scannerController.stop();
+    if (!mounted) return;
+    unawaited(
+      Navigator.of(context).pushReplacement<void, void>(
+        MaterialPageRoute<void>(
+          builder: (_) => RemoteGamePage(
+            entryUri: invitation.entryUri,
+            userId: userId,
+            nickname: widget.initialNickname!,
+          ),
+        ),
       ),
     );
   }

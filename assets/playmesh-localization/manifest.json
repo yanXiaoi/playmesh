@@ -1,0 +1,31 @@
+{
+  "manifestVersion": "1.0.0",
+  "defaultLocale": "zh-CN",
+  "ui": {
+    "allowLocaleSwitch": true,
+    "defaultThemeMode": "system",
+    "allowThemeSwitch": true
+  },
+  "locales": [
+    {
+      "id": "zh-CN",
+      "label": "简体中文",
+      "enabled": true,
+      "fallback": null,
+      "bundles": {
+        "app": "locales/zh-CN/app.json",
+        "goServer": "locales/zh-CN/go-server.json"
+      }
+    },
+    {
+      "id": "en-US",
+      "label": "English (United States)",
+      "enabled": true,
+      "fallback": "zh-CN",
+      "bundles": {
+        "app": "locales/en-US/app.json",
+        "goServer": "locales/en-US/go-server.json"
+      }
+    }
+  ]
+}

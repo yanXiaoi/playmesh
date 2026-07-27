@@ -43,13 +43,33 @@ const _beta = GameSummary(
   entry: LocalGameEntry(assetPath: 'beta', statusLabel: 'Ready'),
 );
 
+GameSummary _numberedGame(int number) => GameSummary(
+  id: 'com.playmesh.local.$number',
+  name: 'Local $number',
+  version: '1.0.0',
+  author: 'Local Studio',
+  description: 'Local game $number',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: 'Single',
+  displayMode: 'single_screen_multiplayer',
+  orientation: GameOrientation.landscape,
+  entry: LocalGameEntry(assetPath: 'local-$number', statusLabel: 'Ready'),
+);
+
 GameLibraryQueryResult _queryResult(
   List<GameSummary> games, {
   int revision = 0,
+  int offset = 0,
+  int limit = 10,
 }) => GameLibraryQueryResult(
-  games: games,
+  games: games.sublist(
+    offset.clamp(0, games.length),
+    (offset + limit).clamp(0, games.length),
+  ),
   total: games.length,
-  offset: 0,
+  offset: offset.clamp(0, games.length),
   revision: revision,
   refreshedAt: null,
 );
@@ -64,7 +84,8 @@ void main() {
         home: GameLibraryPage(
           games: const [],
           onRefresh: () async => const [],
-          onQuery: (_) => _queryResult(const []),
+          onQuery: (_, {required offset, required limit}) =>
+              _queryResult(const [], offset: offset, limit: limit),
           onOpenOnline: () => opened = true,
         ),
       ),
@@ -86,11 +107,13 @@ void main() {
             refreshCalls += 1;
             return const [_alpha, _beta];
           },
-          onQuery: (query) {
+          onQuery: (query, {required offset, required limit}) {
             queries.add(query);
             return _queryResult(
               query.trim().isEmpty ? const [_beta, _alpha] : const [_beta],
               revision: 7,
+              offset: offset,
+              limit: limit,
             );
           },
         ),
@@ -126,7 +149,8 @@ void main() {
         home: GameLibraryPage(
           games: const [_alpha],
           onRefresh: () async => const [_alpha],
-          onQuery: (_) => _queryResult(const [_alpha]),
+          onQuery: (_, {required offset, required limit}) =>
+              _queryResult(const [_alpha], offset: offset, limit: limit),
         ),
       ),
     );
@@ -154,7 +178,8 @@ void main() {
           builder: (context, value, _) => GameLibraryPage(
             games: value,
             onRefresh: () async => value,
-            onQuery: (_) => _queryResult(value),
+            onQuery: (_, {required offset, required limit}) =>
+                _queryResult(value, offset: offset, limit: limit),
           ),
         ),
       ),
@@ -184,6 +209,59 @@ void main() {
     expect(alphaButton.focusNode!.hasFocus, isTrue);
   });
 
+  testWidgets('本地游戏库按页查询且方向键可在游戏间移动焦点', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final games = List.generate(25, (index) => _numberedGame(index + 1));
+    final offsets = <int>[];
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GameLibraryPage(
+          games: games,
+          onRefresh: () async => games,
+          onQuery: (_, {required offset, required limit}) {
+            offsets.add(offset);
+            return _queryResult(games, offset: offset, limit: limit);
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(offsets, [0]);
+    expect(find.text('Local 1'), findsOneWidget);
+    expect(find.text('Local 11'), findsNothing);
+    final first = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('game-tile-action-com.playmesh.local.1')),
+    );
+    expect(first.focusNode!.hasFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    final second = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('game-tile-action-com.playmesh.local.2')),
+    );
+    expect(second.focusNode!.hasFocus, isTrue);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -5000));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('game-library-next-page')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('game-library-next-page')));
+    await tester.pumpAndSettle();
+
+    expect(offsets.last, 10);
+    expect(find.text('Local 1'), findsNothing);
+    expect(find.text('Local 11'), findsOneWidget);
+    final eleventh = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('game-tile-action-com.playmesh.local.11')),
+    );
+    expect(eleventh.focusNode!.hasFocus, isTrue);
+  });
+
   testWidgets(
     'background update check keeps local library usable and queues post-install recheck',
     (tester) async {
@@ -199,7 +277,8 @@ void main() {
             builder: (context, value, _) => GameLibraryPage(
               games: value,
               onRefresh: () async => value,
-              onQuery: (_) => _queryResult(value),
+              onQuery: (_, {required offset, required limit}) =>
+                  _queryResult(value, offset: offset, limit: limit),
               onCheckUpdates: (installed) {
                 checkedIds.add(
                   installed.map((game) => game.id).toList(growable: false),
@@ -268,7 +347,8 @@ void main() {
           builder: (context, value, _) => GameLibraryPage(
             games: value,
             onRefresh: () async => value,
-            onQuery: (_) => _queryResult(value),
+            onQuery: (_, {required offset, required limit}) =>
+                _queryResult(value, offset: offset, limit: limit),
             onCheckUpdates: (_) => pending.future,
           ),
         ),
@@ -339,7 +419,8 @@ void main() {
         home: GameLibraryPage(
           games: const [_alpha],
           onRefresh: () async => const [_alpha],
-          onQuery: (_) => _queryResult(const [_alpha]),
+          onQuery: (_, {required offset, required limit}) =>
+              _queryResult(const [_alpha], offset: offset, limit: limit),
           onCheckUpdates: (_) async => _updateCheckResult(candidates: [update]),
           onDownloadUpdate: (offer) => selected = offer,
         ),
@@ -369,7 +450,7 @@ void main() {
     expect(selected?.source.name, '用户自定义源 β / 原样');
   });
 
-  testWidgets('no updates records a recent background check without a popup', (
+  testWidgets('no updates stays silent without a fixed success notice', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -377,7 +458,8 @@ void main() {
         home: GameLibraryPage(
           games: const [_alpha],
           onRefresh: () async => const [_alpha],
-          onQuery: (_) => _queryResult(const [_alpha]),
+          onQuery: (_, {required offset, required limit}) =>
+              _queryResult(const [_alpha], offset: offset, limit: limit),
           onCheckUpdates: (_) async => _updateCheckResult(),
         ),
       ),
@@ -386,7 +468,7 @@ void main() {
 
     expect(
       find.byKey(const ValueKey('library-update-check-current')),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.byType(AlertDialog), findsNothing);
   });
@@ -401,7 +483,8 @@ void main() {
         home: GameLibraryPage(
           games: const [_alpha],
           onRefresh: () async => const [_alpha],
-          onQuery: (_) => _queryResult(const [_alpha]),
+          onQuery: (_, {required offset, required limit}) =>
+              _queryResult(const [_alpha], offset: offset, limit: limit),
           onCheckUpdates: (_) async => _updateCheckResult(
             sourceErrors: const [
               GameUpdateSourceError(

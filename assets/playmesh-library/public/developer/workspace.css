@@ -1260,30 +1260,6 @@ summary:focus-visible,
   background: #ffffff;
 }
 
-.workspace-preferences-dialog {
-  width: min(520px, calc(100vw - 32px));
-  height: auto;
-}
-
-.workspace-preferences-body {
-  display: grid;
-  gap: 18px;
-  padding: 22px;
-}
-
-.workspace-preferences-body label {
-  display: grid;
-  gap: 7px;
-  color: var(--muted);
-  font-weight: 650;
-}
-
-.workspace-preferences-body select {
-  width: 100%;
-  min-height: 44px;
-  padding-inline: 10px;
-}
-
 @media (max-width: 720px) {
   .toolbar {
     overflow: visible;
@@ -1380,9 +1356,9 @@ summary:focus-visible,
 
 /* Visual editor for the platform-managed manifest and capability registry. */
 .manifest-dialog{width:min(920px,calc(100vw - 32px));height:min(860px,calc(100vh - 32px))}
-.manifest-form{overflow:auto;padding:18px 22px 22px}
-.manifest-form section{padding:0 0 20px}.manifest-form section+section{padding-top:18px;border-top:1px solid var(--line)}
-.manifest-form h3{margin:0 0 14px;color:var(--text);font-size:16px}.manifest-help{margin:-6px 0 14px;color:var(--muted);font-size:13px}
+.manifest-form{overflow:auto;padding:14px 18px 18px}
+.manifest-form section{padding:0 0 14px}.manifest-form section+section{padding-top:14px;border-top:1px solid var(--line)}
+.manifest-form h3{margin:0 0 10px;color:var(--text);font-size:16px}.manifest-help{margin:-4px 0 10px;color:var(--muted);font-size:13px}
 
 /* Primary project prompt export and Agent takeover address selection. */
 .prompt-export-action {
@@ -1462,9 +1438,9 @@ summary:focus-visible,
 .manifest-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 16px}.manifest-grid label,.manifest-tags-field{display:grid;gap:7px;color:var(--muted);font-size:13px}.manifest-grid .wide{grid-column:1/-1}
 .manifest-grid input,.manifest-grid select,.manifest-grid textarea,.manifest-tags-field input{box-sizing:border-box;width:100%;border:1px solid var(--line);border-radius: 8px;background:var(--field);color:var(--text);padding:10px 11px;font:inherit}.manifest-grid input[readonly]{color:var(--muted);background:var(--surface);cursor:not-allowed}.manifest-grid textarea{resize:vertical}
 .manifest-tags-field{margin-top:14px}.manifest-tags{display:flex;min-height:34px;flex-wrap:wrap;gap:8px}.manifest-tag{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid var(--success);border-radius:999px;background:var(--surface-soft);color:var(--success)}.manifest-tag button{padding:0;border:0;background:transparent;color:var(--danger);font-size:16px;line-height:1}
-.capability-options{display:grid;gap:10px}.capability-option{display:grid;grid-template-columns:auto 1fr auto;align-items:start;gap:10px;padding:13px 14px;border:1px solid var(--line);border-radius: 8px;background:var(--surface-soft)}.capability-option input{margin-top:3px}.capability-option strong{display:block;color:var(--text)}.capability-option p{margin:4px 0 3px;color:var(--muted);font-size:13px;line-height:1.5}.capability-option code{color:var(--muted);font-size:11px}.capability-badges{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}.capability-badge{padding:4px 7px;border-radius:999px;background:var(--surface);color:var(--muted);font-size:10px}.capability-badge.supported{color:var(--success)}.capability-badge.unsupported{color:var(--warning)}
+.capability-options{display:grid;gap:7px}.capability-option{display:grid;grid-template-columns:auto 1fr auto;align-items:start;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius: 8px;background:var(--surface-soft)}.capability-option input{margin-top:3px}.capability-option strong{display:block;color:var(--text)}.capability-option p{margin:3px 0 2px;color:var(--muted);font-size:12px;line-height:1.4}.capability-option code{color:var(--muted);font-size:11px}.capability-badges{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.capability-badge{padding:3px 6px;border-radius:999px;background:var(--surface);color:var(--muted);font-size:10px}.capability-badge.supported{color:var(--success)}.capability-badge.unsupported{color:var(--warning)}
 .manifest-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}.manifest-actions button{min-width:110px}.manifest-form .form-error{min-height:20px;margin-top:8px}
-@media(max-width:700px){.manifest-dialog{width:100vw;height:100vh;max-height:none;border-radius:0}.manifest-grid{grid-template-columns:1fr}.manifest-grid .wide{grid-column:auto}.capability-option{grid-template-columns:auto 1fr}.capability-badges{grid-column:2;justify-content:flex-start}}
+@media(max-width:700px){.manifest-dialog{width:100vw;height:100vh;max-height:none;border-radius:0}.manifest-form{padding:10px 12px 14px}.manifest-grid{grid-template-columns:1fr;gap:9px}.manifest-grid .wide{grid-column:auto}.manifest-form .capability-options{max-height:min(42svh,320px);overflow-y:auto;overscroll-behavior:contain;padding-right:3px;scrollbar-gutter:stable}.capability-option{grid-template-columns:auto 1fr}.capability-badges{grid-column:2;justify-content:flex-start}}
 .dialog input,.dialog select{box-sizing:border-box;min-height:42px;height:42px;padding:8px 11px;line-height:1.45}.dialog textarea{box-sizing:border-box;padding:10px 11px;line-height:1.5}.project-dialog{width:min(720px,calc(100vw - 32px));height:min(860px,calc(100vh - 32px));max-height:calc(100vh - 32px)}.project-form .wide{grid-column:1/-1}.project-capabilities{display:grid;gap:8px}.project-capabilities>p{margin:0;color:var(--muted)}.project-form textarea{width:100%;resize:vertical;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius: 8px;font:inherit}.project-form .capability-option input{width:18px;min-height:18px;height:18px;padding:0}@media(max-width:520px){.project-form .wide{grid-column:auto}.project-dialog{height:100vh;max-height:100vh}}
 
 .diff-body {
@@ -2206,7 +2182,7 @@ body :where(input[type="checkbox"], input[type="radio"]),
 .capability-test-list {
   min-width: 0;
   overflow: auto;
-  padding: 10px;
+  padding: 8px;
   border-right: 1px solid var(--line);
   background: var(--surface-soft);
 }
@@ -2215,12 +2191,12 @@ body :where(input[type="checkbox"], input[type="radio"]),
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   justify-items: start;
-  gap: 5px;
+  gap: 4px;
   width: 100%;
   height: auto;
-  min-height: 92px;
-  margin: 0 0 8px;
-  padding: 12px;
+  min-height: 72px;
+  margin: 0 0 6px;
+  padding: 9px 10px;
   color: var(--text);
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -2277,17 +2253,17 @@ body :where(input[type="checkbox"], input[type="radio"]),
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 12px;
   background: var(--bg);
 }
 
 .capability-test-detail > header {
-  padding: 2px 2px 16px;
+  padding: 0 2px 10px;
 }
 
 .capability-test-detail > header h2 {
-  margin: 0 0 7px;
-  font-size: 20px;
+  margin: 0 0 4px;
+  font-size: 18px;
 }
 
 .capability-test-detail > header code {
@@ -2295,7 +2271,7 @@ body :where(input[type="checkbox"], input[type="radio"]),
 }
 
 .capability-test-detail > header p {
-  margin: 11px 0 7px;
+  margin: 7px 0 5px;
   color: var(--text);
   line-height: 1.55;
 }
@@ -2316,8 +2292,8 @@ body :where(input[type="checkbox"], input[type="radio"]),
 }
 
 .capability-test-section {
-  margin-bottom: 14px;
-  padding: 14px;
+  margin-bottom: 9px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -2334,7 +2310,7 @@ body :where(input[type="checkbox"], input[type="radio"]),
   align-items: start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .capability-test-section-head > span {
@@ -2348,17 +2324,17 @@ body :where(input[type="checkbox"], input[type="radio"]),
 
 .capability-schema-editor {
   display: grid;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 7px;
+  margin-top: 8px;
 }
 
 .capability-schema-field {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .capability-schema-field {
-  padding: 10px;
+  padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: calc(var(--radius) - 2px);
   background: var(--surface-soft);
@@ -2376,7 +2352,7 @@ body :where(input[type="checkbox"], input[type="radio"]),
   display: flex;
   min-width: 0;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
 }
 
 .capability-schema-field-head strong {
@@ -2421,7 +2397,7 @@ body :where(input[type="checkbox"], input[type="radio"]),
 
 .capability-schema-array {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .capability-schema-array-items {
@@ -2431,8 +2407,8 @@ body :where(input[type="checkbox"], input[type="radio"]),
 
 .capability-schema-array-item {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: calc(var(--radius) - 2px);
   background: var(--field);
@@ -2461,8 +2437,8 @@ body :where(input[type="checkbox"], input[type="radio"]),
 .capability-test-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .capability-test-actions button:first-child {
@@ -2471,9 +2447,9 @@ body :where(input[type="checkbox"], input[type="radio"]),
 
 .capability-method-card {
   display: grid;
-  gap: 9px;
-  margin-top: 12px;
-  padding: 12px;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 9px 10px;
   border-left: 3px solid var(--violet);
   background: var(--surface-soft);
 }
@@ -2507,8 +2483,8 @@ body :where(input[type="checkbox"], input[type="radio"]),
 .capability-event-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin: 12px 0 0;
+  gap: 5px;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -2561,7 +2537,7 @@ body :where(input[type="checkbox"], input[type="radio"]),
 
 .capability-test-log {
   margin: 0 !important;
-  padding: 12px !important;
+  padding: 9px 10px !important;
   overflow: auto !important;
   color: var(--text) !important;
   white-space: pre-wrap !important;
@@ -2604,36 +2580,559 @@ body :where(input[type="checkbox"], input[type="radio"]),
   }
 
   .capability-test-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: 160px minmax(360px, 1fr) minmax(240px, 0.7fr);
-    overflow: auto;
+    display: block;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .capability-test-list {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     overflow-x: auto;
     overflow-y: hidden;
+    padding: 7px 8px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+    scroll-snap-type: x proximity;
+    scrollbar-gutter: stable;
   }
 
   .capability-test-item {
-    min-width: min(270px, calc(100vw - 36px));
+    min-width: min(220px, calc(82vw - 16px));
+    min-height: 66px;
     margin-bottom: 0;
+    scroll-snap-align: start;
   }
 
   .capability-test-detail {
     overflow: visible;
-    padding: 12px;
+    padding: 9px;
   }
 
   .capability-test-log-panel {
     grid-column: auto;
-    min-height: 240px;
+    height: min(260px, 40svh);
+    min-height: 190px;
+    border-top: 1px solid var(--line);
   }
 
   .capability-schema-field-head {
     align-items: start;
   }
+}
+
+/* Project-tree commands and the dedicated ZIP extraction dialog. */
+.run-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.run-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  height: 40px;
+  padding-inline: 9px;
+}
+
+.run-controls .lucide {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.manifest-tags-field {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.manifest-tags-field > span {
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding-top: 7px;
+  color: var(--muted);
+}
+
+.manifest-tags-field .manifest-tags {
+  min-height: 0;
+  gap: 5px;
+}
+
+.manifest-tags-field .manifest-tag {
+  min-height: 28px;
+  padding: 3px 5px 3px 8px;
+}
+
+.manifest-tags-field .manifest-tag button,
+.capability-picker-chip button {
+  width: 26px !important;
+  min-width: 26px !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 0 !important;
+}
+
+.manifest-tags-field .input-action {
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 6px;
+}
+
+#manifestTagInput,
+#manifestTagAdd {
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+.manifest-capability-section > strong,
+#controllerCapabilitySection > strong {
+  display: block;
+  margin: 12px 0 7px;
+}
+
+.capability-picker {
+  min-width: 0;
+}
+
+.capability-picker-field {
+  display: flex;
+  min-height: 44px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--field);
+}
+
+.capability-picker.open .capability-picker-field {
+  border-color: var(--focus);
+  outline: 2px solid color-mix(in srgb, var(--focus) 34%, transparent);
+  outline-offset: 1px;
+}
+
+.capability-picker-chips {
+  display: contents;
+}
+
+.capability-picker-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 3px 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--blue) 62%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--blue) 12%, var(--surface-soft));
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.capability-picker-chip > span {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-picker-placeholder {
+  color: var(--muted);
+  padding-inline: 4px;
+}
+
+.capability-picker-search {
+  flex: 1 1 180px;
+  width: auto !important;
+  min-width: 120px;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 4px 6px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.capability-picker-clear {
+  flex: 0 0 auto;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding-inline: 9px;
+}
+
+.capability-picker-panel {
+  display: none;
+  max-height: min(300px, 42vh);
+  overflow-y: auto;
+  margin-top: 5px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.capability-picker.open .capability-picker-panel {
+  display: grid;
+}
+
+.capability-picker-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 9px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.capability-picker-option:hover,
+.capability-picker-option:focus-within {
+  background: var(--surface-soft);
+}
+
+.capability-picker-option[hidden],
+.capability-picker-empty[hidden] {
+  display: none !important;
+}
+
+.capability-picker-option input {
+  width: 20px !important;
+  min-width: 20px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  margin: 2px 0 0;
+}
+
+.capability-picker-option strong,
+.capability-picker-option p,
+.capability-picker-option code {
+  display: block;
+}
+
+.capability-picker-option p {
+  margin: 3px 0 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.capability-picker-option code {
+  color: var(--blue);
+  font: 11px/1.4 Consolas, "Cascadia Code", monospace;
+}
+
+.capability-picker-option .capability-badges {
+  max-width: 150px;
+}
+
+.capability-picker-empty {
+  margin: 0;
+  padding: 18px 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.context-menu button[hidden] {
+  display: none !important;
+}
+
+.extract-dialog {
+  width: min(620px, calc(100vw - 32px));
+  height: auto;
+  max-height: calc(100vh - 32px);
+  grid-template-rows: 44px auto;
+}
+
+.extract-form {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.extract-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.extract-form input {
+  width: 100%;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--field);
+  font: 13px/1.45 Consolas, "Cascadia Code", monospace;
+}
+
+.extract-form input[readonly] {
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.extract-path-input {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--field);
+}
+
+.extract-path-input > span {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: var(--muted);
+  border-right: 1px solid var(--line);
+  font: 14px Consolas, "Cascadia Code", monospace;
+}
+
+.extract-path-input input {
+  border: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.extract-help {
+  margin: -2px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.extract-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.extract-actions button {
+  min-width: 92px;
+}
+
+@media (max-width: 520px) {
+  .manifest-tags-field {
+    grid-template-columns: 1fr;
+  }
+
+  .manifest-tags-field > span {
+    grid-row: auto;
+    padding-top: 0;
+  }
+
+  .capability-picker-option {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .capability-picker-option .capability-badges {
+    grid-column: 2;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .extract-dialog {
+    width: 100vw;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    grid-template-rows: 44px minmax(0, 1fr);
+  }
+
+  .extract-form {
+    align-content: start;
+    padding: 16px 12px;
+  }
+}
+
+/* Compact project tree with file-type and manifest-entry hierarchy. */
+.project-pane .pane-title {
+  height: 36px;
+  padding-inline: 10px;
+}
+
+.tree.tree {
+  --tree-folder-color: oklch(0.82 0.14 88);
+  --tree-style-color: oklch(0.78 0.15 330);
+  --tree-script-color: oklch(0.78 0.16 28);
+  --tree-markup-color: oklch(0.78 0.14 238);
+  --tree-data-color: oklch(0.79 0.14 154);
+  --tree-text-color: oklch(0.75 0.055 258);
+  --tree-image-color: oklch(0.8 0.13 190);
+  --tree-archive-color: oklch(0.82 0.14 112);
+  --tree-manifest-color: oklch(0.78 0.14 298);
+  --tree-unknown-color: oklch(0.68 0.035 15);
+  --tree-game-entry-color: oklch(0.84 0.16 62);
+  --tree-controller-entry-color: oklch(0.8 0.14 215);
+  --tree-authority-entry-color: oklch(0.77 0.16 275);
+  padding: 4px 5px 8px;
+  font-size: 12.5px;
+}
+
+.tree.tree details {
+  contain-intrinsic-size: auto 30px;
+}
+
+.tree.tree details > details,
+.tree.tree details > .file {
+  width: calc(100% - 20px);
+  margin-inline-start: 20px;
+}
+
+.tree.tree summary,
+.tree.tree .file {
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 5px;
+  border-radius: 5px;
+}
+
+.tree.tree summary {
+  gap: 5px;
+}
+
+.tree.tree .file {
+  gap: 2px;
+}
+
+.tree.tree summary::before {
+  width: 5px;
+  height: 5px;
+  margin: 0 5px 0 2px;
+}
+
+.tree.tree summary > .lucide,
+.tree.tree .file > .lucide {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.tree.tree .file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree.tree summary.directory > .lucide,
+.tree.tree summary.directory > .file-name {
+  color: var(--tree-folder-color);
+  font-weight: 650;
+}
+
+.tree.tree .file.style-file > .lucide,
+.tree.tree .file.style-file > .file-name {
+  color: var(--tree-style-color);
+}
+
+.tree.tree .file.script-file > .lucide,
+.tree.tree .file.script-file > .file-name {
+  color: var(--tree-script-color);
+}
+
+.tree.tree .file.markup-file > .lucide,
+.tree.tree .file.markup-file > .file-name {
+  color: var(--tree-markup-color);
+}
+
+.tree.tree .file.data-file > .lucide,
+.tree.tree .file.data-file > .file-name {
+  color: var(--tree-data-color);
+}
+
+.tree.tree .file.text-file > .lucide,
+.tree.tree .file.text-file > .file-name {
+  color: var(--tree-text-color);
+}
+
+.tree.tree .file.unknown-file > .lucide,
+.tree.tree .file.unknown-file > .file-name {
+  color: var(--tree-unknown-color);
+}
+
+.tree.tree .file.image-file > .lucide,
+.tree.tree .file.image-file > .file-name {
+  color: var(--tree-image-color);
+}
+
+.tree.tree .file.archive-file > .lucide,
+.tree.tree .file.archive-file > .file-name {
+  color: var(--tree-archive-color);
+}
+
+.tree.tree .file.manifest-file > .lucide,
+.tree.tree .file.manifest-file > .file-name {
+  color: var(--tree-manifest-color);
+  font-weight: 700;
+}
+
+.tree.tree .file.game-entry-file,
+.tree.tree .file.controller-entry-file,
+.tree.tree .file.authority-entry-file {
+  border-inline-start: 2px solid currentColor;
+  font-weight: 750;
+}
+
+.tree.tree .file.game-entry-file {
+  color: var(--tree-game-entry-color);
+  background: color-mix(in srgb, var(--tree-game-entry-color) 10%, transparent);
+}
+
+.tree.tree .file.controller-entry-file {
+  color: var(--tree-controller-entry-color);
+  background: color-mix(in srgb, var(--tree-controller-entry-color) 10%, transparent);
+}
+
+.tree.tree .file.authority-entry-file {
+  color: var(--tree-authority-entry-color);
+  background: color-mix(in srgb, var(--tree-authority-entry-color) 10%, transparent);
+}
+
+.tree.tree .file.game-entry-file > .lucide,
+.tree.tree .file.controller-entry-file > .lucide,
+.tree.tree .file.authority-entry-file > .lucide {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+  color: currentColor;
+  stroke-width: 2.35;
+}
+
+.tree.tree .file.game-entry-file > .file-name,
+.tree.tree .file.controller-entry-file > .file-name,
+.tree.tree .file.authority-entry-file > .file-name {
+  color: currentColor;
+}
+
+.tree.tree .entry-badge {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  padding: 1px 5px;
+  color: currentColor;
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 16px;
+}
+
+.tree.tree .file.active {
+  color: var(--text);
+  background: var(--selected);
+}
+
+.tree.tree .file.active > .file-name,
+.tree.tree .file.active > .lucide,
+.tree.tree .file.active > .entry-badge {
+  color: var(--text);
 }

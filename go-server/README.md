@@ -47,10 +47,10 @@ SQLite 路径、游戏包限制、验证码、ClamAV、鉴权白名单和 Relay 
 提示重启生效。游戏源名称、作者、主页与 Relay 声明使用独立表单和 SQLite 存储，
 可以即时反映到 `/apps/info`。
 
-Web 语言与主题由 `server.json.webUI` 配置。可用语言只来自仓库统一清单
+Web 语言由 `server.json.webUI` 配置，界面固定使用浅色主题。可用语言只来自仓库统一清单
 `assets/playmesh-localization/manifest.json`；发布前运行
 `node tool/generate_localization.mjs` 更新 Go 嵌入副本。服务启动会拒绝未知 locale、
-未启用默认语言、词典 key 漂移、回退环和非法主题模式。UI 词典通过 `/i18n/**`
+未启用默认语言、词典 key 漂移和回退环。UI 词典通过 `/i18n/**`
 提供，`/api/**` 与 `/apps/**` 不读取 locale，JSON 契约不会随界面语言改变。
 用户页和管理页的 HTML 壳不内嵌固定文案或本地化属性 fallback；首帧在统一
 `go-server.json` bundle 投影完成前保持隐藏。Playmesh、ClamAV、URL 示例等技术值
@@ -99,33 +99,55 @@ PLAYMESH_ADMIN_PATH=/manage-replace-with-a-long-random-path
 后台静态资源入口。隐藏入口只是纵深防御，所有管理员接口仍强制验证 Bearer Session。
 
 登录使用 `.env` 中的管理员账号密码。密码可以是非空明文，也可以是 bcrypt
-哈希。验证码图像不由项目自绘：数字计算模式使用 Apache-2.0 的
-[`mojocn/base64Captcha`](https://github.com/mojocn/base64Captcha)，文字点选模式使用
-Apache-2.0 的 [`wenlng/go-captcha/v2`](https://github.com/wenlng/go-captcha) 及其
-官方嵌入资源。验证码模式在 `server.json` 中配置：
+哈希。验证码已封装在独立的 `internal/captcha` 模块中，管理员登录、用户登录和注册
+共用生成、一次性存储、校验及图片供应逻辑。文字点选、滑动和旋转模式全部使用
+Apache-2.0 的 [`wenlng/go-captcha/v2`](https://github.com/wenlng/go-captcha)，
+不再保留自定义数字计算验证码。验证码模式在 `server.json` 中配置为 `text`、
+`slide` 或 `rotate`：
 
 ```json
-{ "captchaMode": "math" }
+{
+  "captchaMode": "slide",
+  "captchaImageSource": "local",
+  "captchaImageDirectory": "data/captcha-images",
+  "captchaImageUrl": "",
+  "captchaImageCacheSize": 8
+}
 ```
 
-或：
+`local` 模式从指定目录内的 JPG、PNG 或 GIF 图片中每次随机抽取一张，不按名称排序
+轮询，也不对源文件做预处理。`remote` 模式只配置一个“每次请求返回随机图片”的 URL：
 
 ```json
-{ "captchaMode": "text" }
+{
+  "captchaMode": "rotate",
+  "captchaImageSource": "remote",
+  "captchaImageDirectory": "data/captcha-images",
+  "captchaImageUrl": "https://www.dmoe.cc/random.php",
+  "captchaImageCacheSize": 12
+}
 ```
 
-`GET <ADMIN_PATH>/api/auth/captcha` 只返回不透明 ID、模式、图像和点选次数；不返回算式文本、
-答案、候选字符或目标坐标。算术答案和文字目标点只保存在后端，文字模式由前端按
-提示缩略图提交主图坐标，再使用开源库的区域校验；验证码两分钟过期且无论成功失败
-只消费一次。
+远程图片会按实际组件尺寸做中心裁剪和高质量缩放后进入内存缓存。生成验证码会消费
+一张缓存图片；余量低于配置数量时模块自动并发补齐，缓存为空时会同步拉取。远程拉取
+失败或本地目录没有有效图片时接口直接返回失败，不切换图片源或使用隐藏回退。
 
-验证码与登录接口分别按客户端 IP 限流，默认每秒一次。除验证码和登录外，
+验证码不会常驻登录/注册表单，只有点击登录或注册后才在弹窗中加载。验证码采用
+两阶段流程：GET 接口签发绑定用途的不透明挑战 ID；前端把 ID 和组件原样产生的答案
+提交给 `/captcha/verify`，验证成功后取得两分钟有效、仅可使用一次且绑定用户登录、
+用户注册或管理员登录用途的 `captchaToken`；最终登录或注册接口只消费这个 Token，
+不再接收验证码答案。挑战无论验证成功或失败都会立即消费，Token 在错误作用域使用后
+也会立即失效。
+
+验证码挑战签发、验证码答案验证和最终登录/注册分别按客户端 IP 使用独立限流键，
+默认每秒一次。自动刷新验证码同样经过挑战签发限流。除验证码和登录外，
 `/api/admin/**` 的每一个接口都必须携带管理员 Bearer Session。
 
 主要接口：
 
 ```text
 GET    <ADMIN_PATH>/api/auth/captcha
+POST   <ADMIN_PATH>/api/auth/captcha/verify
 POST   <ADMIN_PATH>/api/auth/login
 
 POST   <ADMIN_PATH>/api/admin/logout

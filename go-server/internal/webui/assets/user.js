@@ -1,8 +1,9 @@
 const state = {
   page: 1, size: 12, total: 0, csrfToken: "", user: null,
-  captcha: { login: "", register: "" }, registrationAllowed: true,
+  captcha: { id: "", kind: "" }, pendingAuth: null, registrationAllowed: true,
+  captchaRefreshTimer: null,
   registrationRequiresVerification: false,
-  messages: {}, ui: null
+  messages: {}, ui: null, view: "home"
 };
 state.csrfToken = decodeURIComponent(
   document.cookie.split("; ").find((value) => value.startsWith("playmesh_csrf="))?.split("=")[1] || ""
@@ -43,24 +44,6 @@ function localizeDocument() {
     textNode.nodeValue = t(element.dataset.i18nLabel);
   });
 }
-const colorScheme = matchMedia("(prefers-color-scheme: dark)");
-
-function applyTheme(mode) {
-  const normalized = ["system", "light", "dark"].includes(mode) ? mode : "system";
-  document.documentElement.dataset.theme =
-    normalized === "system" ? (colorScheme.matches ? "dark" : "light") : normalized;
-  const button = document.querySelector("#theme-toggle");
-  button.dataset.mode = normalized;
-  button.textContent = {
-    system: t("theme.system"),
-    light: t("theme.light"),
-    dark: t("theme.dark")
-  }[normalized];
-}
-
-colorScheme.addEventListener("change", () => {
-  if (document.querySelector("#theme-toggle").dataset.mode === "system") applyTheme("system");
-});
 
 function resolveLocale(preferences, available, fallback) {
   for (const preference of preferences) {
@@ -80,7 +63,9 @@ function resolveLocale(preferences, available, fallback) {
 }
 
 async function loadLocalization(localeOverride) {
-  const manifest = state.ui || await fetch("/i18n/manifest").then((response) => response.json());
+  const manifest = state.ui || await fetch(
+    "/i18n/manifest", { cache: "no-store" }
+  ).then((response) => response.json());
   state.ui = manifest;
   const available = manifest.locales.map((locale) => locale.id);
   const locale = resolveLocale([
@@ -89,7 +74,9 @@ async function loadLocalization(localeOverride) {
     ...(Array.isArray(navigator.languages) ? navigator.languages : []),
     navigator.language
   ], available, manifest.defaultLocale);
-  state.messages = await fetch(`/i18n/${encodeURIComponent(locale)}`).then((response) => response.json());
+  state.messages = await fetch(
+    `/i18n/${encodeURIComponent(locale)}`, { cache: "no-store" }
+  ).then((response) => response.json());
   document.documentElement.lang = locale;
   localizeDocument();
   const select = document.querySelector("#locale-select");
@@ -99,14 +86,19 @@ async function loadLocalization(localeOverride) {
     return option;
   }));
   select.classList.toggle("hidden", !manifest.allowLocaleSwitch);
-  document.querySelector("#theme-toggle").classList.toggle("hidden", !manifest.allowThemeSwitch);
-  applyTheme(localStorage.getItem("playmesh.theme") || manifest.defaultThemeMode);
 }
 document.querySelector("#locale-select").addEventListener("change", async (event) => {
   localStorage.setItem("playmesh.locale", event.target.value);
   await loadLocalization(event.target.value);
-  await Promise.all([loadSourceInfo(), loadRegistrationState(), loadGames()]);
-  if (state.user) await loadMyGames();
+  if (state.view === "home") await loadSourceInfo();
+  if (state.view === "games") await loadGames();
+  if (state.view === "my") {
+    await loadRegistrationState();
+    if (state.user) await loadMyGames();
+  }
+  if (document.querySelector("#auth-captcha-dialog").open) {
+    userCaptcha?.relocalize();
+  }
 });
 
 async function jsonRequest(path, options = {}) {
@@ -147,13 +139,70 @@ async function loadSourceInfo() {
   image.src = "/api/public/source-qrcode";
 }
 
-async function loadCaptcha(kind) {
-  const result = await jsonRequest("/api/user/auth/captcha");
-  state.captcha[kind] = result.id;
-  const form = document.querySelector(`#${kind}-form`);
-  form.querySelector(".captcha-image").src = result.image;
-  form.querySelector("[name=captchaAnswer]").value = "";
+let userCaptcha;
+async function loadCaptcha(kind, delay = 0, preserveNotice = false) {
+  clearTimeout(state.captchaRefreshTimer);
+  state.captchaRefreshTimer = null;
+  state.captcha = { id: "", kind };
+  userCaptcha.setLoading();
+  try {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    const result = await jsonRequest(
+      `/api/user/auth/captcha?purpose=${encodeURIComponent(kind)}`
+    );
+    state.captcha = { id: result.id, kind };
+    userCaptcha.load(result);
+  } catch (error) {
+    const rateLimited = error?.response?.status === 429;
+    const message = rateLimited
+      ? t("admin.captcha.rate_limited") : t("admin.captcha.failed");
+    userCaptcha.setError(message);
+    if (!preserveNotice) window.PlaymeshMessage.error(message);
+    if (rateLimited) {
+      const seconds = Number(error.response.headers.get("Retry-After")) || 1;
+      state.captchaRefreshTimer = setTimeout(() => {
+        const dialog = document.querySelector("#auth-captcha-dialog");
+        if (dialog.open && state.pendingAuth?.kind === kind) {
+          loadCaptcha(kind, 0, preserveNotice);
+        }
+      }, Math.min(60, Math.max(1, seconds)) * 1000);
+    }
+  }
 }
+
+function closeAuthCaptcha(cancelPending = true) {
+  clearTimeout(state.captchaRefreshTimer);
+  state.captchaRefreshTimer = null;
+  state.captcha = { id: "", kind: "" };
+  userCaptcha.clear();
+  const dialog = document.querySelector("#auth-captcha-dialog");
+  if (dialog.open) dialog.close();
+  if (cancelPending) state.pendingAuth = null;
+}
+
+userCaptcha = new window.PlaymeshCaptcha(
+  document.querySelector("#user-captcha-widget"),
+  t,
+  {
+    refresh: () => loadCaptcha(state.pendingAuth?.kind || "login", 1050),
+    close: () => closeAuthCaptcha(),
+    confirm: (answer, reset) => verifyUserCaptcha(answer, reset)
+  }
+);
+
+async function openAuthCaptcha(kind, formElement) {
+  state.pendingAuth = {
+    kind,
+    values: Object.fromEntries(new FormData(formElement).entries())
+  };
+  const dialog = document.querySelector("#auth-captcha-dialog");
+  if (!dialog.open) dialog.showModal();
+  await loadCaptcha(kind);
+}
+
+document.querySelector("#auth-captcha-dialog").addEventListener("cancel", () => {
+  closeAuthCaptcha();
+});
 
 async function loadRegistrationState() {
   const result = await jsonRequest("/api/user/config");
@@ -166,72 +215,133 @@ async function loadRegistrationState() {
       : t("auth.registration_immediate"))
     : t("auth.registration_disabled");
   document.querySelector("#register-form button[type=submit]").disabled = !state.registrationAllowed;
-  document.querySelector("#account-open").classList.toggle("hidden", !state.registrationAllowed && !state.user);
 }
 
-document.querySelector("#account-open").addEventListener("click", async () => {
-  document.querySelector("#auth-panel").classList.toggle("hidden");
-  if (!state.captcha.login) await loadCaptcha("login");
-});
 document.querySelectorAll("[data-auth-tab]").forEach((button) => {
-  button.addEventListener("click", async () => {
+  button.addEventListener("click", () => {
     const kind = button.dataset.authTab;
     document.querySelectorAll("[data-auth-tab]").forEach((item) =>
       item.classList.toggle("active", item === button));
     document.querySelector("#login-form").classList.toggle("hidden", kind !== "login");
     document.querySelector("#register-form").classList.toggle("hidden", kind !== "register");
-    if (!state.captcha[kind]) await loadCaptcha(kind);
   });
 });
 
-document.querySelector("#login-form").addEventListener("submit", async (event) => {
+document.querySelector("#login-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  try {
-    const result = await jsonRequest("/api/user/auth/login", {
-      method: "POST", body: JSON.stringify({
-        email: form.get("email"), password: form.get("password"),
-        captchaId: state.captcha.login, captchaAnswer: form.get("captchaAnswer")
-      })
-    });
-    state.csrfToken = result.csrfToken; state.user = result.user;
-    document.querySelector("#auth-panel").classList.add("hidden");
-    await showAccount();
-  } catch (error) {
-    document.querySelector("#auth-notice").textContent = localizedError(error);
-    await loadCaptcha("login");
-  }
+  openAuthCaptcha("login", event.currentTarget);
 });
 
-document.querySelector("#register-form").addEventListener("submit", async (event) => {
+document.querySelector("#register-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  try {
-    await jsonRequest("/api/user/auth/register", {
-      method: "POST", body: JSON.stringify({
-        email: form.get("email"), password: form.get("password"),
-        confirmPassword: form.get("confirmPassword"),
-        captchaId: state.captcha.register, captchaAnswer: form.get("captchaAnswer")
-      })
-    });
-    document.querySelector("#auth-notice").textContent = state.registrationRequiresVerification
-      ? t("auth.registration_success_verify") : t("auth.registration_success_login");
-    event.currentTarget.reset();
-  } catch (error) {
-    document.querySelector("#auth-notice").textContent = localizedError(error);
-  }
-  await loadCaptcha("register");
+  openAuthCaptcha("register", event.currentTarget);
 });
+
+async function verifyUserCaptcha(answer, reset) {
+  const pending = state.pendingAuth;
+  if (!pending || !state.captcha.id) return;
+  let verified;
+  try {
+    verified = await jsonRequest(
+      `/api/user/auth/captcha/verify?purpose=${encodeURIComponent(pending.kind)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          id: state.captcha.id,
+          answer
+        })
+      }
+    );
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+    state.captcha.id = "";
+    reset?.();
+    const rateLimited = error?.response?.status === 429;
+    const seconds = rateLimited
+      ? Number(error.response.headers.get("Retry-After")) || 1 : 0;
+    await loadCaptcha(
+      pending.kind,
+      rateLimited ? Math.min(60, Math.max(1, seconds)) * 1000 : 1050,
+      true
+    );
+    return;
+  }
+
+  closeAuthCaptcha(false);
+  try {
+    if (pending.kind === "login") {
+      const result = await jsonRequest("/api/user/auth/login", {
+        method: "POST", body: JSON.stringify({
+          email: pending.values.email,
+          password: pending.values.password,
+          captchaToken: verified.captchaToken
+        })
+      });
+      state.csrfToken = result.csrfToken;
+      state.user = result.user;
+      document.querySelector("#auth-panel").classList.add("hidden");
+      await showAccount();
+      window.PlaymeshMessage.success(t("auth.login_success"));
+    } else {
+      await jsonRequest("/api/user/auth/register", {
+        method: "POST", body: JSON.stringify({
+          email: pending.values.email,
+          password: pending.values.password,
+          confirmPassword: pending.values.confirmPassword,
+          captchaToken: verified.captchaToken
+        })
+      });
+      window.PlaymeshMessage.success(
+        state.registrationRequiresVerification
+          ? t("auth.registration_success_verify")
+          : t("auth.registration_success_login"),
+        4200
+      );
+      document.querySelector("#register-form").reset();
+    }
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error), 4200);
+  } finally {
+    state.pendingAuth = null;
+  }
+}
 
 async function showAccount() {
   const user = state.user || await jsonRequest("/api/user/me");
   state.user = user;
-  document.querySelector("#account-open").classList.add("hidden");
+  document.querySelector("#my-loading").classList.add("hidden");
+  document.querySelector("#auth-panel").classList.add("hidden");
   document.querySelector("#account-panel").classList.remove("hidden");
+  document.querySelector("#my-user-email").textContent = user.email;
   document.querySelector("#profile-email").value = user.email;
   document.querySelector("#profile-form").elements.displayName.value = user.displayName;
   await loadMyGames();
 }
+
+async function showSignedOut(kind = "login") {
+  document.querySelector("#my-loading").classList.add("hidden");
+  document.querySelector("#account-panel").classList.add("hidden");
+  document.querySelector("#auth-panel").classList.remove("hidden");
+  document.querySelectorAll("[data-auth-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.authTab === kind);
+  });
+  document.querySelector("#login-form").classList.toggle("hidden", kind !== "login");
+  document.querySelector("#register-form").classList.toggle("hidden", kind !== "register");
+}
+
+document.querySelectorAll("[data-open-dialog]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelector(`#${button.dataset.openDialog}`).showModal();
+  });
+});
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  button.addEventListener("click", () => button.closest("dialog").close());
+});
+document.querySelectorAll(".my-dialog").forEach((dialog) => {
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+});
 
 document.querySelector("#profile-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -239,6 +349,7 @@ document.querySelector("#profile-form").addEventListener("submit", async (event)
   state.user = await jsonRequest("/api/user/me", {
     method: "PATCH", body: JSON.stringify({ displayName: form.elements.displayName.value })
   });
+  document.querySelector("#profile-dialog").close();
 });
 
 async function saveUploadKey(generate) {
@@ -281,6 +392,7 @@ document.querySelector("#game-upload-form").addEventListener("submit", async (ev
 
 async function loadMyGames() {
   const result = await jsonRequest("/api/user/games");
+  document.querySelector("#my-game-count").textContent = String(result.data.length);
   document.querySelector("#my-games").innerHTML = result.data.map((game) => {
     const canPublish = game.status === "approved" && !game.published;
     const canUnpublish = game.status === "approved" && game.published;
@@ -308,15 +420,16 @@ document.querySelector("#my-games").addEventListener("click", async (event) => {
     (action === "delete" ? "" : `/${action}`);
   try {
     await jsonRequest(path, { method: action === "delete" ? "DELETE" : "POST" });
-    await loadMyGames(); await loadGames();
+    await loadMyGames();
   } catch (error) { alert(localizedError(error)); }
 });
 
 document.querySelector("#logout").addEventListener("click", async () => {
   await jsonRequest("/api/user/auth/logout", { method: "POST" });
   state.user = null; state.csrfToken = "";
-  document.querySelector("#account-panel").classList.add("hidden");
-  document.querySelector("#account-open").classList.toggle("hidden", !state.registrationAllowed);
+  state.captcha = { id: "", kind: "" };
+  document.querySelectorAll(".my-dialog[open]").forEach((dialog) => dialog.close());
+  await showSignedOut("login");
 });
 
 async function loadGames() {
@@ -327,14 +440,23 @@ async function loadGames() {
   });
   const result = await jsonRequest(`/api/public/games?${params}`);
   state.total = result.total;
+  document.querySelector("#game-count").textContent = String(result.total);
   games.innerHTML = result.data.map((game) => `<article class="game-card">
-    <div class="actions"><span class="badge">${escapeHTML(t("games.published"))}</span><span class="muted">v${escapeHTML(game.version)}</span></div>
-    <h3>${escapeHTML(game.name)}</h3><div class="muted">${escapeHTML(game.id)}</div>
+    <div class="game-card-head">
+      <span class="game-initial" aria-hidden="true">${escapeHTML(String(game.name || "P").trim().charAt(0).toUpperCase() || "P")}</span>
+      <div class="game-card-title">
+        <h3>${escapeHTML(game.name)}</h3>
+        <span class="game-id">${escapeHTML(game.id)}</span>
+      </div>
+      <span class="version-tag">v${escapeHTML(game.version)}</span>
+    </div>
     <p>${escapeHTML(game.remarks || t("catalog.no_description"))}</p>
-    <div class="meta"><span>${escapeHTML(t("catalog.publisher", "", {
-      publisher: game.author || t("catalog.unsigned")
-    }))}</span></div>
-    <a class="button" href="${escapeHTML(game.downloadUrl)}">${escapeHTML(t("catalog.download"))}</a>
+    <div class="game-card-footer">
+      <span class="publisher">${escapeHTML(t("catalog.publisher", "", {
+        publisher: game.author || t("catalog.unsigned")
+      }))}</span>
+      <a class="button game-download" href="${escapeHTML(game.downloadUrl)}">${escapeHTML(t("catalog.download"))}</a>
+    </div>
   </article>`).join("") || `<div class="empty">${escapeHTML(t("catalog.empty"))}</div>`;
   const pages = Math.max(1, Math.ceil(state.total / state.size));
   document.querySelector("#page-label").textContent = t("common.page", "", {
@@ -355,33 +477,35 @@ document.querySelector("#next").addEventListener("click", () => {
   if (state.page * state.size < state.total) { state.page++; loadGames(); }
 });
 
-document.querySelector("#theme-toggle").addEventListener("click", () => {
-  const modes = ["system", "light", "dark"];
-  const current = document.querySelector("#theme-toggle").dataset.mode || "system";
-  const next = modes[(modes.indexOf(current) + 1) % modes.length];
-  localStorage.setItem("playmesh.theme", next);
-  applyTheme(next);
-});
-applyTheme(localStorage.getItem("playmesh.theme") || "system");
+function applyUserView() {
+  state.view = location.pathname === "/games"
+    ? "games"
+    : ["/my", "/login", "/register"].includes(location.pathname) ? "my" : "home";
+  document.querySelector("#user-home-view").classList.toggle("hidden", state.view !== "home");
+  document.querySelector("#user-games-view").classList.toggle("hidden", state.view !== "games");
+  document.querySelector("#user-my-view").classList.toggle("hidden", state.view !== "my");
+  document.querySelectorAll("[data-user-view]").forEach((link) => {
+    const active = link.dataset.userView === state.view;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
 
 async function initialize() {
   try {
+    applyUserView();
     await loadLocalization();
-    await Promise.all([loadSourceInfo(), loadRegistrationState(), loadGames()]);
-    jsonRequest("/api/user/me").then((user) => {
-      state.user = user;
-      showAccount();
-    }).catch(() => {});
-    if (location.pathname === "/login" || location.pathname === "/register") {
-      document.querySelector("#auth-panel").classList.remove("hidden");
-      const kind = location.pathname === "/register" ? "register" : "login";
-      document.querySelectorAll("[data-auth-tab]").forEach((button) => {
-        const active = button.dataset.authTab === kind;
-        button.classList.toggle("active", active);
-      });
-      document.querySelector("#login-form").classList.toggle("hidden", kind !== "login");
-      document.querySelector("#register-form").classList.toggle("hidden", kind !== "register");
-      loadCaptcha(kind);
+    if (state.view === "home") await loadSourceInfo();
+    if (state.view === "games") await loadGames();
+    if (state.view === "my") {
+      await loadRegistrationState();
+      try {
+        state.user = await jsonRequest("/api/user/me");
+        await showAccount();
+      } catch {
+        await showSignedOut(location.pathname === "/register" ? "register" : "login");
+      }
     }
   } finally {
     window.__playmeshRevealUI?.();

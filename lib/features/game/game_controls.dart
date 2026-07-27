@@ -1038,7 +1038,7 @@ class GameRuntimeLogOverlay extends StatelessWidget {
                               child: SelectableText(
                                 _formatLog(event),
                                 style: TextStyle(
-                                  color: _logColor(level),
+                                  color: _logColor(colorScheme, level),
                                   fontFamily: 'monospace',
                                   fontSize: 12,
                                   height: 1.4,
@@ -1102,12 +1102,13 @@ class GameRuntimeLogOverlay extends StatelessWidget {
     return '$message\n$stack';
   }
 
-  static Color _logColor(String level) {
+  static Color _logColor(ColorScheme colorScheme, String level) {
+    final dark = colorScheme.brightness == Brightness.dark;
     return switch (level) {
-      'error' => const Color(0xffff8a80),
-      'warn' => const Color(0xffffd180),
-      'debug' => const Color(0xff80cbc4),
-      _ => const Color(0xffe5e7eb),
+      'error' => dark ? const Color(0xffffb4ab) : const Color(0xffa91515),
+      'warn' => dark ? const Color(0xffffd180) : const Color(0xff7a4600),
+      'debug' => dark ? const Color(0xff80cbc4) : const Color(0xff00675f),
+      _ => colorScheme.onSurface,
     };
   }
 }

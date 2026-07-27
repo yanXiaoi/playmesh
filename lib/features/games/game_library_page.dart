@@ -16,7 +16,12 @@ import 'game_detail_page.dart';
 
 typedef GameLibraryRefresh = Future<List<GameSummary>> Function();
 typedef GamePackageImport = Future<GameSummary> Function(String path);
-typedef GameLibraryQuery = GameLibraryQueryResult Function(String search);
+typedef GameLibraryQuery =
+    GameLibraryQueryResult Function(
+      String search, {
+      required int offset,
+      required int limit,
+    });
 typedef GameLibraryUpdateCheck =
     Future<GameUpdateCheckResult> Function(
       Iterable<GameSummary> installedGames,
@@ -53,12 +58,19 @@ class GameLibraryPage extends StatefulWidget {
 }
 
 class _GameLibraryPageState extends State<GameLibraryPage> {
+  static const _pageSize = 10;
+
   late List<GameSummary> _games;
   List<GameSummary> _visibleGames = const [];
   int _totalMatches = 0;
+  int _pageIndex = 0;
   int _libraryRevision = 0;
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode(debugLabel: 'game-library-search');
+  final _previousPageFocusNode = FocusNode(
+    debugLabel: 'game-library-previous-page',
+  );
+  final _nextPageFocusNode = FocusNode(debugLabel: 'game-library-next-page');
   final _scrollController = ScrollController();
   final _gameFocusRestoration = PlaymeshFocusRestorationController();
   final Map<String, FocusNode> _gameFocusNodes = {};
@@ -81,6 +93,7 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
   void initState() {
     super.initState();
     _replaceGames(widget.games);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focusFirstGame());
     unawaited(_checkUpdates());
   }
 
@@ -107,6 +120,8 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _previousPageFocusNode.dispose();
+    _nextPageFocusNode.dispose();
     _scrollController.dispose();
     _gameFocusRestoration.dispose();
     for (final node in _gameFocusNodes.values) {
@@ -283,26 +298,12 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
               ),
               actionLabel: context.tr('common.details'),
               onAction: _showUpdateSourceErrors,
-            )
-          else if (_updates.isEmpty && _lastUpdateCheckedAt != null)
-            _StatusNotice(
-              key: const ValueKey('library-update-check-current'),
-              icon: Icons.cloud_done_outlined,
-              text: context.tr(
-                'library.update_check_current',
-                arguments: {
-                  'time': _formatUpdateCheckedAt(
-                    context,
-                    _lastUpdateCheckedAt!,
-                  ),
-                },
-              ),
             ),
         ],
         if (_checkingUpdates ||
             _updateError != null ||
             _updates.isNotEmpty ||
-            _lastUpdateCheckedAt != null)
+            _updateSourceErrors.isNotEmpty)
           const SizedBox(height: 12),
         if (_operationErrorText != null)
           _StatusNotice(
@@ -368,6 +369,7 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
     final updatesByGame = {
       for (final update in _updates) update.gameId: update,
     };
+    final pageCount = _pageCount;
     return [
       SliverList(
         key: ValueKey('library-results-$_libraryRevision'),
@@ -376,7 +378,9 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
           return ResponsivePage(
             maxWidth: 1000,
             top: 0,
-            bottom: index == _visibleGames.length - 1 ? 32 : 10,
+            bottom: index == _visibleGames.length - 1 && pageCount == 1
+                ? 32
+                : 10,
             child: EntranceAnimation(
               key: ValueKey('library-game-${game.id}'),
               delay: Duration(milliseconds: index.clamp(0, 4) * 35),
@@ -385,13 +389,37 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
                 update: updatesByGame[game.id],
                 onDeleted: _removeDeletedGame,
                 focusNode: _focusNodeForGame(game.id),
+                autofocus: index == 0 && !_searchFocusNode.hasFocus,
               ),
             ),
           );
         }, childCount: _visibleGames.length),
       ),
+      if (pageCount > 1)
+        SliverToBoxAdapter(
+          child: ResponsivePage(
+            maxWidth: 1000,
+            top: 2,
+            bottom: 32,
+            child: _PaginationBar(
+              page: _pageIndex + 1,
+              pageCount: pageCount,
+              previousFocusNode: _previousPageFocusNode,
+              nextFocusNode: _nextPageFocusNode,
+              onPrevious: _pageIndex == 0
+                  ? null
+                  : () => _changePage(_pageIndex - 1),
+              onNext: _pageIndex + 1 >= pageCount
+                  ? null
+                  : () => _changePage(_pageIndex + 1),
+            ),
+          ),
+        ),
     ];
   }
+
+  int get _pageCount =>
+      _totalMatches == 0 ? 1 : (_totalMatches + _pageSize - 1) ~/ _pageSize;
 
   void _replaceGames(List<GameSummary> games) {
     final oldVisibleIds = _visibleGames.map((game) => game.id).toList();
@@ -468,18 +496,38 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
     });
   }
 
-  void _applyQuery({bool notify = true}) {
+  void _applyQuery({bool notify = true, bool resetPage = false}) {
     try {
       final query = _searchController.text;
-      final queried = widget.onQuery(query);
-      if (queried.offset != 0 || queried.games.length != queried.total) {
+      if (resetPage) _pageIndex = 0;
+      var requestedOffset = _pageIndex * _pageSize;
+      var queried = widget.onQuery(
+        query,
+        offset: requestedOffset,
+        limit: _pageSize,
+      );
+      if (queried.total > 0 &&
+          queried.games.isEmpty &&
+          requestedOffset >= queried.total) {
+        _pageIndex = (queried.total - 1) ~/ _pageSize;
+        requestedOffset = _pageIndex * _pageSize;
+        queried = widget.onQuery(
+          query,
+          offset: requestedOffset,
+          limit: _pageSize,
+        );
+      }
+      if (queried.offset != requestedOffset ||
+          queried.games.length > _pageSize ||
+          queried.offset + queried.games.length > queried.total) {
         throw StateError(
-          'GameLibraryPage requires a complete revision-consistent query.',
+          'GameLibraryPage requires a bounded revision-consistent page.',
         );
       }
       void update() {
         _visibleGames = queried.games.toList(growable: false);
         _totalMatches = queried.total;
+        _pageIndex = queried.total == 0 ? 0 : queried.offset ~/ _pageSize;
         _libraryRevision = queried.revision;
         _queryError = null;
       }
@@ -508,7 +556,7 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
     _searchDebounce?.cancel();
     _searchController.clear();
     _searchActive = false;
-    _applyQuery();
+    _applyQuery(resetPage: true);
     _searchFocusNode.requestFocus();
     _restoreFullListOffset();
   }
@@ -536,7 +584,7 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
     _searchDebounce = Timer(const Duration(milliseconds: 200), () {
       _searchDebounce = null;
       if (!mounted) return;
-      _applyQuery();
+      _applyQuery(resetPage: true);
       if (restore) _restoreFullListOffset();
     });
   }
@@ -544,7 +592,27 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
   void _runQueryNow() {
     _searchDebounce?.cancel();
     _searchDebounce = null;
+    _applyQuery(resetPage: true);
+  }
+
+  void _changePage(int pageIndex) {
+    final target = pageIndex.clamp(0, _pageCount - 1);
+    if (target == _pageIndex) return;
+    _pageIndex = target;
     _applyQuery();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _focusFirstGame());
+    });
+  }
+
+  void _focusFirstGame() {
+    if (!mounted || _visibleGames.isEmpty) return;
+    _gameFocusRestoration.restore(
+      preferredId: _visibleGames.first.id,
+      fallback: _searchFocusNode,
+    );
   }
 
   Future<void> _refresh() async {
@@ -906,18 +974,75 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+class _PaginationBar extends StatelessWidget {
+  const _PaginationBar({
+    required this.page,
+    required this.pageCount,
+    required this.previousFocusNode,
+    required this.nextFocusNode,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int page;
+  final int pageCount;
+  final FocusNode previousFocusNode;
+  final FocusNode nextFocusNode;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          OutlinedButton.icon(
+            key: const ValueKey('game-library-previous-page'),
+            focusNode: previousFocusNode,
+            onPressed: onPrevious,
+            icon: const Icon(Icons.chevron_left_rounded),
+            label: Text(context.tr('common.previous_page')),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Text(
+              context.tr(
+                'library.page_status',
+                arguments: {'page': page, 'pages': pageCount},
+              ),
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+          ),
+          OutlinedButton.icon(
+            key: const ValueKey('game-library-next-page'),
+            focusNode: nextFocusNode,
+            onPressed: onNext,
+            iconAlignment: IconAlignment.end,
+            icon: const Icon(Icons.chevron_right_rounded),
+            label: Text(context.tr('common.next_page')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GameTile extends StatelessWidget {
   const _GameTile({
     required this.game,
     required this.update,
     required this.onDeleted,
     required this.focusNode,
+    required this.autofocus,
   });
 
   final GameSummary game;
   final GameUpdateCandidate? update;
   final ValueChanged<String> onDeleted;
   final FocusNode focusNode;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -925,6 +1050,7 @@ class _GameTile extends StatelessWidget {
     final detailButton = FilledButton.icon(
       key: ValueKey('game-tile-action-${game.id}'),
       focusNode: focusNode,
+      autofocus: autofocus,
       onPressed: () => _openDetails(context),
       icon: const Icon(Icons.info_outline),
       label: Text(context.tr('library.open_details')),

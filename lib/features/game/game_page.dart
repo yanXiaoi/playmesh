@@ -125,6 +125,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   bool _disposing = false;
   bool _allowPop = false;
   Future<void>? _exitOperation;
+  Future<void>? _closeSessionOperation;
   bool _shareGrantActive = false;
   GameStorageService? _soloShareStorage;
   bool _debugVisible = false;
@@ -725,7 +726,20 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _closeSession() async {
+  Future<void> _closeSession() {
+    final active = _closeSessionOperation;
+    if (active != null) return active;
+    late final Future<void> operation;
+    operation = _performCloseSession().whenComplete(() {
+      if (identical(_closeSessionOperation, operation)) {
+        _closeSessionOperation = null;
+      }
+    });
+    _closeSessionOperation = operation;
+    return operation;
+  }
+
+  Future<void> _performCloseSession() async {
     await _stopShare();
     final roomSubscription = _roomSubscription;
     _roomSubscription = null;
@@ -1446,30 +1460,24 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _exitOperation ??= _performExitGame(toLibrary: true);
 
   Future<void> _performExitGame({required bool toLibrary}) async {
-    try {
-      await _closeSession();
-    } on Object catch (error) {
-      _exitOperation = null;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr('game.exit_save_failed', arguments: {'error': error}),
-            ),
-          ),
-        );
-      }
-      return;
-    }
     if (!mounted) return;
+    final closeOperation = _closeSession();
     setState(() => _allowPop = true);
-    final navigator = Navigator.of(context);
-    if (toLibrary) {
-      navigator.popUntil(
-        (route) => route.settings.name == '/games' || route.isFirst,
-      );
-    } else {
-      navigator.pop();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final navigator = Navigator.of(context);
+      if (toLibrary) {
+        navigator.popUntil(
+          (route) => route.settings.name == '/games' || route.isFirst,
+        );
+      } else {
+        navigator.pop();
+      }
+    });
+    try {
+      await closeOperation;
+    } on Object catch (error) {
+      debugPrint('Failed to close the game session after exit: $error');
     }
   }
 }

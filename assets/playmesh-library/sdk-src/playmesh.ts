@@ -1,0 +1,3663 @@
+// @ts-ignore
+const PLAYMESH_DECLARATION = String.raw`
+/** 取消一个事件、设备或状态订阅。重复调用不会产生新的业务效果。 */
+type PlaymeshUnsubscribe = () => void;
+
+/** SDK 可以跨 Bridge、HTTP 或 WebSocket 传输的 JSON 值。不能包含函数、循环引用或类实例。 */
+type PlaymeshJson = null | boolean | number | string | PlaymeshJson[] | { [key: string]: PlaymeshJson };
+type PlaymeshOrientation = "landscape" | "portrait";
+
+/** 当前会话中的玩家。 */
+interface PlaymeshPlayer {
+  /** 平台分配的稳定玩家 ID。不要相信业务消息中自行上报的玩家 ID。 */
+  id: string;
+  /** 当前展示昵称，长度为 1～32 个字符。 */
+  nickname: string;
+  /** App 玩家同步成功后的同源头像路径；未同步及 HTML 玩家为 `null`。 */
+  avatar: string | null;
+  /** 当前玩家在会话中的参与角色；Authority 资格仍以 `session.isAuthority()` 为准。 */
+  role: "authority" | "authority_player" | "player";
+  /** 玩家是否拥有在线连接；离线玩家可以保留在成员列表中等待重连。 */
+  connected: boolean;
+}
+
+/** 当前对局的只读快照。每次回调都应视为新快照，不要原地修改。 */
+interface PlaymeshSessionSnapshot {
+  /** 会话 ID。 */
+  id: string;
+  /** 可分享的局域网联机码；单机环境可能没有。 */
+  joinCode?: string;
+  /** 当前会话阶段。 */
+  state: "lobby" | "running" | "paused" | "stopped";
+  /** 固定 Authority Client ID。Authority 不按玩家顺序选举。 */
+  authorityClientId: string;
+  /** 实际参与游戏的玩家；单屏多人公共主屏不在此数组中。 */
+  players: PlaymeshPlayer[];
+  /** 开始游戏所需的最少玩家数。 */
+  minPlayers: number;
+  /** 允许加入的最大玩家数。 */
+  maxPlayers?: number;
+  [key: string]: unknown;
+}
+
+/** 玩家连接状态发生变化时的稳定事件载荷。 */
+interface PlaymeshPlayerConnectionEvent {
+  /** 发生连接变化的玩家。 */
+  player: PlaymeshPlayer;
+  /** 应用本次变化后的会话快照。 */
+  session: PlaymeshSessionSnapshot;
+  /** 该玩家是否就是当前页面参与的玩家。 */
+  isCurrentPlayer: boolean;
+}
+
+/** `await playmesh.ready` 的初始化结果。 */
+interface PlaymeshBootstrap {
+  /** 当前 Game SDK 版本。 */
+  sdkVersion: string;
+  /** 当前页面是否是固定 Authority Client。 */
+  isAuthority: boolean;
+  /** 当前参与玩家；公共主屏和单机分享页为 `null`。 */
+  player: PlaymeshPlayer | null;
+  /** 当前多人会话；单机分享页为 `null`。 */
+  session: PlaymeshSessionSnapshot | null;
+}
+
+/** Authority 处理游戏动作时由平台提供的可信上下文。 */
+interface PlaymeshAuthorityContext {
+  /** 经过会话验证的发送玩家 ID。 */
+  senderPlayerId: string;
+  /** 接收动作时的会话快照。 */
+  session: PlaymeshSessionSnapshot;
+  /** 与 `session.players` 对应的玩家成员。 */
+  members: PlaymeshPlayer[];
+  [key: string]: unknown;
+}
+
+/** Authority 对一次动作的路由结果。 */
+interface PlaymeshAuthorityResult {
+  /** 接收结果的玩家或 Authority Client ID。 */
+  targetPlayerIds: string[];
+  /** 推荐使用的业务消息字段。 */
+  message?: PlaymeshJson;
+  /** 与 `message` 等价的兼容字段；新代码优先使用 `message`。 */
+  payload?: PlaymeshJson;
+}
+
+/** Binary Channel 的转发方式。`authority` 先由 Authority 审核，`relay` 直接转发。 */
+type PlaymeshBinaryChannelMode = "authority" | "relay";
+
+/** 创建 Binary Channel 的配置。只有 Authority 可以创建。 */
+interface PlaymeshBinaryChannelOptions {
+  mode: PlaymeshBinaryChannelMode;
+}
+
+/** Binary Channel 实际送达消息的可信上下文。 */
+interface PlaymeshBinaryMessageContext {
+  senderPlayerId: string;
+  delivery: "queued" | "latest";
+}
+
+/** Authority 审核 Binary Channel 消息时的上下文。 */
+interface PlaymeshBinaryForwardContext extends PlaymeshBinaryMessageContext {
+  targetPlayerIds: string[];
+}
+
+/**
+ * Authority Binary Channel 审核器。
+ * 返回 `void` 原样通过，返回 `Uint8Array` 替换数据后通过，抛出错误则取消发送。
+ */
+type PlaymeshBinaryForwardHandler = (
+  data: Uint8Array,
+  context: PlaymeshBinaryForwardContext,
+) => void | Uint8Array | Promise<void | Uint8Array>;
+
+/** 一条复用平台 Binary WebSocket 的逻辑透明字节通道。 */
+interface PlaymeshBinaryChannel {
+  readonly id: string;
+  readonly mode: PlaymeshBinaryChannelMode;
+  /** 向当前 Channel 内除自己外的全部在线成员可靠广播。 */
+  send(data: Uint8Array): Promise<void>;
+  /** 按调用顺序向一个指定玩家发送一帧；Authority mode 会先经过 Authority 审核。 */
+  send(targetPlayerId: string, data: Uint8Array): Promise<void>;
+  /** 用一个上行帧向多个指定玩家发送相同数据，再由 Core 扇出。 */
+  send(targetPlayerIds: readonly string[], data: Uint8Array): Promise<void>;
+  /** 同一 Channel、发送者和单个目标尚未发出的旧帧会被最新帧替换。 */
+  sendLatest(targetPlayerId: string, data: Uint8Array): Promise<void>;
+  /** 多目标最新帧只上传一次，并按每个接收者分别替换尚未发送的旧帧。 */
+  sendLatest(targetPlayerIds: readonly string[], data: Uint8Array): Promise<void>;
+  /** 向除自己外的全部在线成员广播，只保留每个接收者尚未发送的最新帧。 */
+  sendLatest(data: Uint8Array): Promise<void>;
+  /** 订阅已经实际送达当前玩家的字节帧。 */
+  onMessage(callback: (data: Uint8Array, context: PlaymeshBinaryMessageContext) => void): PlaymeshUnsubscribe;
+  /** 注册 Authority 审核器；只有 Authority mode 的 Authority 页面可以调用。 */
+  onForward(handler: PlaymeshBinaryForwardHandler): PlaymeshUnsubscribe;
+  /** 关闭整个 Channel；只有 Authority 可以调用。 */
+  close(): Promise<void>;
+}
+
+/** `playmesh.sync` 发布的完整权威状态快照。 */
+interface PlaymeshSyncSnapshot<T = PlaymeshJson> {
+  protocolVersion: 1;
+  stateType: string;
+  full: true;
+  revision: number;
+  sequence: number;
+  timestamp: number;
+  sourceTick: number;
+  state: T;
+  [key: string]: unknown;
+}
+
+/** `onInput` 收到的可信输入上下文。 */
+interface PlaymeshSyncInputContext<T> {
+  senderPlayerId: string;
+  session: PlaymeshSessionSnapshot;
+  members: PlaymeshPlayer[];
+  state: T;
+  inputId: string;
+  inputType: "action" | "state";
+  key: string | null;
+  receivedAt: number;
+}
+
+/** Authority 定时更新回调的参数。 */
+interface PlaymeshSyncTickContext<T> {
+  state: T;
+  inputs: Record<string, Record<string, { value: PlaymeshJson; inputId: string; receivedAt: number }>>;
+  tick: number;
+  /** 距离上一 tick 的秒数，范围被限制在 0～1。 */
+  dt: number;
+  now: number;
+  session: PlaymeshSessionSnapshot;
+  members: PlaymeshPlayer[];
+}
+
+/** 启动 Authority 状态同步的配置。只能在 `session.isAuthority()` 为 true 时调用。 */
+interface PlaymeshSyncAuthorityOptions<T> {
+  /** 首个完整权威状态，必须可 JSON 序列化。 */
+  initialState: T;
+  /** 状态类型标识，默认 `game`。 */
+  stateType?: string;
+  /** 每秒 tick 次数，必须是 1～20 的整数，默认 10。 */
+  tickRate?: number;
+  /** 收到一次性动作或合并状态输入时更新权威状态；返回 `void` 表示保持原状态。 */
+  onInput?: (input: PlaymeshJson, context: PlaymeshSyncInputContext<T>) => T | void | Promise<T | void>;
+  /** 每个 Authority tick 更新状态；返回 `void` 表示保持原状态。 */
+  onTick?: (context: PlaymeshSyncTickContext<T>) => T | void | Promise<T | void>;
+}
+
+/** Authority 状态同步控制器。 */
+interface PlaymeshSyncAuthorityController<T = PlaymeshJson> {
+  /** 返回当前权威状态的 JSON 副本。 */
+  getState(): T;
+  /** 替换权威状态；`publish` 缺省为 true。 */
+  setState(state: T, publish?: boolean): Promise<PlaymeshSyncSnapshot<T> | null>;
+  /** 立即发布完整快照；省略目标时发送给全部非 Authority 玩家。 */
+  publish(targetPlayerIds?: string[]): Promise<PlaymeshSyncSnapshot<T> | null>;
+  /** 停止 tick 和同步；停止后需要重新调用 `startAuthority`。 */
+  stop(): void;
+}
+
+/** 游戏生命周期事件。 */
+interface PlaymeshLifecycleEvent {
+  state: "ready" | "pause" | "resume" | "exit" | "closed" | "error";
+  error?: string;
+  [key: string]: unknown;
+}
+
+/** App 自动注入的持久身份。普通浏览器中不可用。 */
+interface PlaymeshAppIdentity {
+  userId: string;
+  nickname: string;
+  source: string;
+}
+
+/** 加速度计或陀螺仪的一次采样。 */
+interface PlaymeshCapabilityMethodDefinition {
+  name: string;
+  description: string;
+  requiresUserActivation?: boolean;
+  argumentsSchema: { [key: string]: PlaymeshJson };
+  resultSchema: { [key: string]: PlaymeshJson };
+}
+
+interface PlaymeshCapabilityEventDefinition {
+  name: string;
+  description: string;
+  dataSchema: { [key: string]: PlaymeshJson };
+}
+
+/** 全平台注册表中的能力插件元数据。 */
+interface PlaymeshCapabilityDefinition {
+  code: string;
+  name: string;
+  description: string;
+  apiVersion: string;
+  appSupported: boolean;
+  htmlSupported: boolean;
+  optionsSchema: { [key: string]: PlaymeshJson };
+  methods: PlaymeshCapabilityMethodDefinition[];
+  events: PlaymeshCapabilityEventDefinition[];
+}
+
+/** 由 `playmesh.app.capabilities.create()` 创建的有状态能力实例。 */
+interface PlaymeshCapabilityHandle {
+  readonly id: string;
+  readonly code: string;
+  readonly apiVersion: string;
+  invoke<T = PlaymeshJson>(method: string, args?: { [key: string]: PlaymeshJson }): Promise<T>;
+  on(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): PlaymeshUnsubscribe;
+  onError(callback: (error: Error) => void): PlaymeshUnsubscribe;
+  dispose(): Promise<void>;
+}
+
+/** `playmesh.storage.getBucket()` 返回的 Authority 主机存储分区。 */
+interface PlaymeshStorageBucket {
+  /** 读取 key；不存在时返回 `null`。key 长度 1～128，只允许字母、数字、点、下划线和连字符。 */
+  getData<T = PlaymeshJson>(key: string): Promise<T | null>;
+  /** 写入 JSON 值；单值序列化后不能超过宿主限制。 */
+  setData(key: string, value: PlaymeshJson): Promise<void>;
+  /** 删除一个 key。 */
+  removeData(key: string): Promise<void>;
+  /** 清空当前 Bucket，不影响其他 Bucket。 */
+  clearData(): Promise<void>;
+  /** 上传二进制文件；平台以毫秒时间戳重命名并保留安全后缀，返回同源 `/bucket/...` 地址。 */
+  upload(file: File): Promise<string>;
+}
+
+/** App Bridge 能力。App WebView 自动注入；普通浏览器保留安全空实现。 */
+interface PlaymeshAppApi {
+  /** 当前 App Bridge SDK 版本。 */
+  readonly version: "2.2.0";
+  /** App Bridge 完成身份和能力插件注册表注入后 resolve。 */
+  readonly ready: Promise<unknown>;
+  /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
+  isAvailable(): boolean;
+  /** 打开 App 的“二维码与链接”界面；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.openSharePanel */
+  openSharePanel(): Promise<void>;
+  /** 显示并聚焦 App 游戏工具栏。 @playmesh-completion playmesh.app.showToolDock */
+  showToolDock(): Promise<void>;
+  /** 隐藏 App 游戏工具栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideToolDock */
+  hideToolDock(): Promise<void>;
+  /** 请求 App 结束当前游戏并返回上一页。 @playmesh-completion playmesh.app.exitGame */
+  exitGame(): Promise<void>;
+  readonly identity: {
+    /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
+    getCurrent(): PlaymeshAppIdentity | null;
+  };
+  readonly capabilities: {
+    /** 返回全平台注册表。 @playmesh-completion playmesh.app.capabilities.getRegistry */
+    getRegistry(): PlaymeshCapabilityDefinition[];
+    /** 返回当前宿主实际可用且已由项目声明的能力 code。 @playmesh-completion playmesh.app.capabilities.getAvailable */
+    getAvailable(): string[];
+    /** 返回当前页面角色在 `capabilities.json` 中声明的能力 code。 @playmesh-completion playmesh.app.capabilities.getDeclared */
+    getDeclared(): string[];
+    /** 创建一个有状态能力实例。 @playmesh-completion playmesh.app.capabilities.create */
+    create(code: string, options?: { [key: string]: PlaymeshJson }): Promise<PlaymeshCapabilityHandle>;
+  };
+  readonly device: {
+    /** 返回宿主平台名称，例如 `android` 或 `windows`；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.device.getPlatform */
+    getPlatform(): string | null;
+    /** 请求 App WebView 进入或退出全屏；进入时可同时锁定横屏或竖屏。 @playmesh-completion playmesh.app.device.setFullscreen */
+    setFullscreen(enabled: boolean, orientation?: PlaymeshOrientation): Promise<unknown>;
+    /** 订阅 App 统一输入事件。 @returns 取消订阅函数。 @playmesh-completion playmesh.app.device.onInput */
+    onInput(callback: (input: unknown) => void): PlaymeshUnsubscribe;
+  };
+}
+
+/** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
+interface PlaymeshApi {
+  /** 当前 Game SDK 版本。 */
+  readonly version: "__PLAYMESH_SDK_VERSION__";
+  /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
+  readonly ready: Promise<PlaymeshBootstrap>;
+  /** 当前设备的 App Bridge 能力；普通浏览器中 `isAvailable()` 为 false。 */
+  readonly app: PlaymeshAppApi;
+  /** 当前游戏页面的只读运行环境信息；不包含平台 UI 词典。 */
+  readonly runtime: {
+    /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.runtime.getLocale */
+    getLocale(): string;
+  };
+  /** 对局状态、Authority 身份和玩家成员事件。 */
+  readonly session: {
+    /** 订阅会话快照；注册后若已就绪会立即回调。 @returns 取消订阅函数。 @playmesh-completion playmesh.session.onStateChange */
+    onStateChange(callback: (session: PlaymeshSessionSnapshot | null) => void): PlaymeshUnsubscribe;
+    /** 玩家第一次加入时回调。重连不会重复触发本事件。 @playmesh-completion playmesh.session.onPlayerJoin */
+    onPlayerJoin(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
+    /** 玩家连接断开时回调；成员可能仍留在会话中。 @playmesh-completion playmesh.session.onPlayerLeave */
+    onPlayerLeave(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
+    /** 离线玩家使用相同 ID 恢复连接时回调。 @playmesh-completion playmesh.session.onPlayerReconnect */
+    onPlayerReconnect(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
+    /** 当前页面是否是固定 Authority Client。不要根据 `players[0]` 推断。 @playmesh-completion playmesh.session.isAuthority */
+    isAuthority(): boolean;
+    /** 返回最近会话快照；单机分享页或尚未就绪时返回 `null`。 @playmesh-completion playmesh.session.getCurrent */
+    getCurrent(): PlaymeshSessionSnapshot | null;
+    /** 仅请求 Core 切换为运行状态；准备、倒计时和玩法条件由游戏 Authority 判断。 @playmesh-completion playmesh.session.start */
+    start(): Promise<PlaymeshSessionSnapshot>;
+    /** 仅在游戏规则确认结束后请求 Core 停止会话并清理离线成员；SDK 不判断胜负。 @playmesh-completion playmesh.session.finish */
+    finish(): Promise<PlaymeshSessionSnapshot>;
+  };
+  /** 当前参与玩家资料。 */
+  readonly player: {
+    /** 返回当前玩家；公共 Authority 主屏和单机分享页返回 `null`。 @playmesh-completion playmesh.player.getCurrent */
+    getCurrent(): PlaymeshPlayer | null;
+    /** 修改当前玩家昵称，去除首尾空白后必须为 1～32 个字符。 @playmesh-completion playmesh.player.setNickname */
+    setNickname(nickname: string): Promise<PlaymeshPlayer>;
+  };
+  /** 自定义低层游戏消息。普通多人游戏优先使用 `playmesh.sync`。 */
+  readonly game: {
+    /** 向 Authority 提交 JSON 业务动作；发送者身份由平台附加。 @playmesh-completion playmesh.game.submitAction */
+    submitAction(action: PlaymeshJson): Promise<unknown>;
+    /** 订阅 Authority 发给当前客户端的 JSON 消息。 @playmesh-completion playmesh.game.onMessage */
+    onMessage(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
+    /** `onMessage` 的兼容别名；新代码优先使用 `onMessage`。 @playmesh-completion playmesh.game.onEvent */
+    onEvent(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
+  };
+  /** 自定义 Authority 动作处理。只有 Authority Client 可以注册。 */
+  readonly authority: {
+    /**
+     * 注册权威动作处理器。规则、分数和胜负应在这里决定，不能信任动作中自报的身份。
+     * @returns 取消注册函数。
+     * @playmesh-completion playmesh.authority.onService
+     */
+    onService(handler: (action: PlaymeshJson, context: PlaymeshAuthorityContext) => PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined | Promise<PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined>): PlaymeshUnsubscribe;
+  };
+  /** 多人会话内的透明二进制分发。SDK 按需维护一条受平台管控的 Binary WebSocket。 */
+  readonly binary: {
+    /** Authority 在所有 Binary Channel 中使用的固定玩家 ID。 */
+    readonly authorityPlayerId: "authority";
+    /** 创建逻辑 Channel；只有 Authority 可以调用。 @playmesh-completion playmesh.binary.createChannel */
+    createChannel(options: PlaymeshBinaryChannelOptions): Promise<PlaymeshBinaryChannel>;
+    /** 使用 Authority 分享的 Channel ID 加入逻辑 Channel。 @playmesh-completion playmesh.binary.joinChannel */
+    joinChannel(channelId: string): Promise<PlaymeshBinaryChannel>;
+  };
+  /** 完整权威状态同步、输入限频与快照订阅。 */
+  readonly sync: {
+    /** 仅 Authority 启动状态同步；同一页面同时只能有一个同步 runtime。 @playmesh-completion playmesh.sync.startAuthority */
+    startAuthority<T = PlaymeshJson>(options: PlaymeshSyncAuthorityOptions<T>): PlaymeshSyncAuthorityController<T>;
+    /** 提交一次性语义输入，返回生成的 input ID。 @playmesh-completion playmesh.sync.submitAction */
+    submitAction(payload: PlaymeshJson): Promise<string>;
+    /** 同一 key 只保留最新连续输入；`rateHz` 必须为 1～20。 @playmesh-completion playmesh.sync.submitState */
+    submitState(key: string, value: PlaymeshJson, options?: { rateHz?: number }): Promise<null>;
+    /** 请求 Authority 立即向当前玩家发送最新完整快照。 @playmesh-completion playmesh.sync.requestSnapshot */
+    requestSnapshot(): Promise<string>;
+    /** 返回最近完整快照；尚未收到时返回 `null`。 @playmesh-completion playmesh.sync.getSnapshot */
+    getSnapshot<T = PlaymeshJson>(): PlaymeshSyncSnapshot<T> | null;
+    /** 订阅完整快照；已有快照时注册后立即回调。 @playmesh-completion playmesh.sync.observe */
+    observe<T = PlaymeshJson>(callback: (snapshot: PlaymeshSyncSnapshot<T>) => void): PlaymeshUnsubscribe;
+  };
+  /** WebView 暂停、恢复、退出和错误事件。 */
+  readonly lifecycle: {
+    /** 订阅全部生命周期事件。 @playmesh-completion playmesh.lifecycle.onChange */
+    onChange(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
+    /** 仅订阅暂停事件。 @playmesh-completion playmesh.lifecycle.onPause */
+    onPause(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
+    /** 仅订阅恢复事件。 @playmesh-completion playmesh.lifecycle.onResume */
+    onResume(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
+    /** 订阅退出事件；允许返回 Promise，宿主只会有限等待。 @playmesh-completion playmesh.lifecycle.onExit */
+    onExit(callback: (event: PlaymeshLifecycleEvent) => void | Promise<void>): PlaymeshUnsubscribe;
+  };
+  /** 游戏上报的 FPS、自动测量的多人 RTT 与 SDK 性能浮层。 */
+  readonly performance: {
+    /** 返回最近 FPS；尚未形成统计窗口时返回 `null`。 @playmesh-completion playmesh.performance.getFps */
+    getFps(): number | null;
+    /** 订阅 FPS；注册后立即回调当前值。 @playmesh-completion playmesh.performance.onFps */
+    onFps(callback: (fps: number | null) => void): PlaymeshUnsubscribe;
+    /** 返回最近平滑 RTT 毫秒数；单机或 Authority 不在线时返回 `null`。 @playmesh-completion playmesh.performance.getLatency */
+    getLatency(): number | null;
+    /** 返回最近延迟探测诊断数据；游戏规则不得依赖该数据判定胜负。 @playmesh-completion playmesh.performance.getLatencyDiagnostics */
+    getLatencyDiagnostics(): Record<string, unknown> | null;
+    /** 订阅延迟毫秒数。 @playmesh-completion playmesh.performance.onLatency */
+    onLatency(callback: (latency: number | null) => void): PlaymeshUnsubscribe;
+    /** 显示或隐藏 SDK 性能浮层。 @playmesh-completion playmesh.performance.setVisible */
+    setVisible(visible: boolean): void;
+    /** 在真实画面完成后报告一帧；返回最近 FPS。SDK 不会自行启动 RAF。 @playmesh-completion playmesh.performance.reportFrame */
+    reportFrame(timestamp?: number): number | null;
+  };
+  /** Authority 主机上的持久 JSON Bucket。浏览器和加入设备不建立独立副本。 */
+  readonly storage: {
+    /** 获取 Bucket；名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。 @playmesh-completion playmesh.storage.getBucket */
+    getBucket(bucket: string): PlaymeshStorageBucket;
+  };
+}
+
+/** 游戏页面使用的全局 Playmesh SDK。 */
+declare const playmesh: PlaymeshApi;
+interface Window { playmesh: PlaymeshApi; }
+`;
+
+(function (global) {
+  "use strict";
+
+  const PLAYMESH_SDK_VERSION = "2.4.0";
+
+  let sequence = 0;
+  let bootstrap = null;
+  let authorityService = null;
+  let browserSocket = null;
+  let browserCredential = null;
+  let browserConnectionConfig = null;
+  let browserReconnectOperation = null;
+  let binaryTransportConfig = null;
+  let binarySocket = null;
+  let binaryConnectOperation = null;
+  let binaryReconnectWanted = false;
+  let runtimeExited = false;
+  let binaryRequestSequence = 0;
+  let binaryQueueHead = 0;
+  let binaryFlushTimer = null;
+  const binaryQueue = [];
+  const binaryLatestQueue = new Map();
+  const binaryPending = new Map();
+  const binaryChannels = new Map();
+  let browserNicknameUi = null;
+  let capabilityConsentUi = null;
+  let transportSequence = 0;
+  const pending = new Map();
+  const browserStoragePending = new Map();
+  let browserStorageSequence = 0;
+  const sessionListeners = new Set();
+  const playerJoinListeners = new Set();
+  const playerLeaveListeners = new Set();
+  const playerReconnectListeners = new Set();
+  const previouslyConnectedPlayerIds = new Set();
+  const messageListeners = new Set();
+  const lifecycleListeners = new Set();
+  const pauseListeners = new Set();
+  const resumeListeners = new Set();
+  const exitListeners = new Set();
+  const fpsListeners = new Set();
+  const latencyListeners = new Set();
+  const syncListeners = new Set();
+  const browserNicknameStorageKey = "playmesh.nickname.v1";
+  const browserPlayerIdStorageKey = "playmesh.player-id.v1";
+  let currentFps = null;
+  let fpsFrameCount = 0;
+  let fpsWindowStartedAt = null;
+  let currentLatency = null;
+  let latencyDiagnostics = null;
+  let latencyTimer = null;
+  let latencyProbeSequence = 0;
+  let performanceVisible = false;
+  let performanceUi = null;
+  let syncAuthorityRuntime = null;
+  let currentSyncSnapshot = null;
+  let syncInputSequence = 0;
+  const pendingStateInputs = new Map();
+  const BINARY_PROTOCOL_VERSION = 1;
+  const BINARY_OP_CREATE = 0x01;
+  const BINARY_OP_JOIN = 0x02;
+  const BINARY_OP_CLOSE = 0x03;
+  const BINARY_OP_SEND = 0x04;
+  const BINARY_OP_DECISION = 0x05;
+  const BINARY_OP_RESPONSE = 0x81;
+  const BINARY_OP_DELIVERY = 0x82;
+  const BINARY_OP_REVIEW = 0x83;
+  const BINARY_OP_CLOSED = 0x84;
+  const BINARY_MODE_AUTHORITY = 1;
+  const BINARY_MODE_RELAY = 2;
+  const BINARY_FLAG_LATEST = 1;
+  const BINARY_FLAG_MULTIPLE_TARGETS = 2;
+  const BINARY_FLAG_BROADCAST = 4;
+  const BINARY_DECISION_PASS = 1;
+  const BINARY_DECISION_REPLACE = 2;
+  const BINARY_DECISION_REJECT = 3;
+  const BINARY_STATUS_OK = 0;
+  const BINARY_STATUS_ERROR = 1;
+  const BINARY_STATUS_SUPERSEDED = 2;
+  const BINARY_CHANNEL_ID_BYTES = 16;
+  const BINARY_MAX_TARGETS = 1024;
+  const BINARY_MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+  const BINARY_REQUEST_TIMEOUT_MS = 15000;
+  const RECONNECT_BASE_DELAY_MS = 250;
+  const RECONNECT_MAX_DELAY_MS = 5000;
+  function post(command, payload, extra) {
+    const requestId = `sdk-${Date.now()}-${++sequence}`;
+    const message = JSON.stringify({
+      command,
+      requestId,
+      sdkVersion: PLAYMESH_SDK_VERSION,
+      payload,
+      ...extra,
+    });
+    if (global.__PLAYMESH_BROWSER__ &&
+        (command === "game.submitAction" ||
+          command === "performance.ping" ||
+          command === "performance.latency")) {
+      return sendBrowserTransport(command, payload);
+    }
+    const send = global.PlaymeshBridge && global.PlaymeshBridge.postMessage
+      ? (value) => global.PlaymeshBridge.postMessage(value)
+      : global.chrome && global.chrome.webview
+        ? (value) => global.chrome.webview.postMessage(value)
+        : null;
+    if (!send) {
+      return Promise.reject(new Error("Playmesh 传输通道不可用"));
+    }
+    return new Promise((resolve, reject) => {
+      const timer = global.setTimeout(() => {
+        pending.delete(requestId);
+        reject(new Error(`Playmesh Bridge 请求超时: ${command}`));
+      }, 15000);
+      pending.set(requestId, { resolve, reject, timer });
+      try {
+        send(message);
+      } catch (error) {
+        global.clearTimeout(timer);
+        pending.delete(requestId);
+        reject(error);
+      }
+    });
+  }
+
+  function reconnectDelay(attempt) {
+    if (attempt <= 1) return 0;
+    return Math.min(
+      RECONNECT_BASE_DELAY_MS * (2 ** Math.min(attempt - 2, 5)),
+      RECONNECT_MAX_DELAY_MS,
+    );
+  }
+
+  async function waitForReconnect(attempt) {
+    const delay = reconnectDelay(attempt);
+    if (delay > 0) {
+      await new Promise((resolve) => global.setTimeout(resolve, delay));
+    }
+    if (runtimeExited) throw new Error("游戏页面已退出");
+  }
+
+  async function sendBrowserTransport(command, payload) {
+    let socket = browserSocket;
+    if (!socket || socket.readyState !== global.WebSocket.OPEN) {
+      if (!browserReconnectOperation) {
+        throw new Error("主会话 WebSocket 当前不可用");
+      }
+      await browserReconnectOperation;
+      socket = browserSocket;
+    }
+    if (!socket || socket.readyState !== global.WebSocket.OPEN) {
+      throw new Error("主会话 WebSocket 重连尚未完成");
+    }
+    const type = command === "game.submitAction"
+      ? "game.action"
+      : command === "performance.latency"
+        ? "performance.latency"
+        : "session.ping";
+    socket.send(JSON.stringify({
+      type,
+      sequence: ++transportSequence,
+      payload,
+    }));
+    return null;
+  }
+
+  function subscribe(listeners, callback) {
+    listeners.add(callback);
+    return function unsubscribe() {
+      listeners.delete(callback);
+    };
+  }
+
+  function emit(listeners, value) {
+    for (const listener of listeners) {
+      listener(value);
+    }
+  }
+
+  function binaryModeCode(mode) {
+    if (mode === "authority") return BINARY_MODE_AUTHORITY;
+    if (mode === "relay") return BINARY_MODE_RELAY;
+    throw new Error('Binary Channel mode 必须是 "authority" 或 "relay"');
+  }
+
+  function binaryModeName(mode) {
+    if (mode === BINARY_MODE_AUTHORITY) return "authority";
+    if (mode === BINARY_MODE_RELAY) return "relay";
+    throw new Error("主机返回了无效的 Binary Channel mode");
+  }
+
+  function binaryChannelIdFromBytes(bytes) {
+    let raw = "";
+    for (const value of bytes) raw += String.fromCharCode(value);
+    return global.btoa(raw)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  function binaryChannelIdToBytes(value) {
+    if (typeof value !== "string" || !value) {
+      throw new Error("Binary Channel ID 必须是非空字符串");
+    }
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+    let raw;
+    try {
+      raw = global.atob(padded);
+    } catch (_) {
+      throw new Error("Binary Channel ID 无效");
+    }
+    if (raw.length !== BINARY_CHANNEL_ID_BYTES) {
+      throw new Error("Binary Channel ID 无效");
+    }
+    return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+  }
+
+  function normalizeBinaryData(data) {
+    if (!(data instanceof Uint8Array)) {
+      throw new Error("Binary Channel 数据必须是 Uint8Array");
+    }
+    return new Uint8Array(data);
+  }
+
+  function normalizeBinaryTargets(target) {
+    const values = Array.isArray(target) ? target : [target];
+    if (!values.length || values.length > BINARY_MAX_TARGETS) {
+      throw new Error(`Binary Channel 目标数量必须为 1 至 ${BINARY_MAX_TARGETS}`);
+    }
+    const result = [];
+    const seen = new Set();
+    for (const playerId of values) {
+      if (typeof playerId !== "string" || !playerId) {
+        throw new Error("Binary Channel 目标玩家 ID 必须是非空字符串");
+      }
+      if (seen.has(playerId)) continue;
+      seen.add(playerId);
+      result.push(playerId);
+    }
+    return result;
+  }
+
+  function encodeBinaryCreate(requestId, mode) {
+    const data = new Uint8Array(7);
+    const view = new DataView(data.buffer);
+    data[0] = BINARY_PROTOCOL_VERSION;
+    data[1] = BINARY_OP_CREATE;
+    view.setUint32(2, requestId);
+    data[6] = mode;
+    return data;
+  }
+
+  function encodeBinaryChannelOperation(operation, requestId, channelId) {
+    const channelBytes = binaryChannelIdToBytes(channelId);
+    const data = new Uint8Array(22);
+    const view = new DataView(data.buffer);
+    data[0] = BINARY_PROTOCOL_VERSION;
+    data[1] = operation;
+    view.setUint32(2, requestId);
+    data.set(channelBytes, 6);
+    return data;
+  }
+
+  function encodeBinarySend(requestId, channelId, flags, targetPlayerIds, payload, broadcast) {
+    const encodedTargets = broadcast
+      ? []
+      : targetPlayerIds.map((playerId) => {
+          const encoded = new TextEncoder().encode(playerId);
+          if (encoded.length > 0xffff) {
+            throw new Error("Binary Channel 目标玩家 ID 过长");
+          }
+          return encoded;
+        });
+    if (broadcast) flags |= BINARY_FLAG_BROADCAST;
+    if (encodedTargets.length > 1) flags |= BINARY_FLAG_MULTIPLE_TARGETS;
+    const channelBytes = binaryChannelIdToBytes(channelId);
+    const targetsLength = encodedTargets.reduce(
+      (total, target) => total + target.length + (encodedTargets.length > 1 ? 2 : 0),
+      0,
+    );
+    const data = new Uint8Array(25 + targetsLength + payload.length);
+    const view = new DataView(data.buffer);
+    data[0] = BINARY_PROTOCOL_VERSION;
+    data[1] = BINARY_OP_SEND;
+    view.setUint32(2, requestId);
+    data.set(channelBytes, 6);
+    data[22] = flags;
+    view.setUint16(23, broadcast ? 0 : encodedTargets.length > 1
+      ? encodedTargets.length
+      : encodedTargets[0].length);
+    let offset = 25;
+    for (const target of encodedTargets) {
+      if (encodedTargets.length > 1) {
+        view.setUint16(offset, target.length);
+        offset += 2;
+      }
+      data.set(target, offset);
+      offset += target.length;
+    }
+    data.set(payload, offset);
+    return data;
+  }
+
+  function encodeBinaryDecision(reviewId, decision, payload) {
+    const data = new Uint8Array(11 + payload.length);
+    data[0] = BINARY_PROTOCOL_VERSION;
+    data[1] = BINARY_OP_DECISION;
+    data.set(reviewId, 2);
+    data[10] = decision;
+    data.set(payload, 11);
+    return data;
+  }
+
+  function nextBinaryRequestId() {
+    binaryRequestSequence = (binaryRequestSequence + 1) >>> 0;
+    if (binaryRequestSequence === 0) binaryRequestSequence = 1;
+    return binaryRequestSequence;
+  }
+
+  async function ensureBinarySocket() {
+    if (!bootstrap?.session || !binaryTransportConfig?.url) {
+      throw new Error("当前游戏没有可用的多人二进制传输");
+    }
+    if (runtimeExited) throw new Error("游戏页面已退出");
+    binaryReconnectWanted = true;
+    if (binarySocket?.readyState === global.WebSocket.OPEN) {
+      return binarySocket;
+    }
+    if (binaryConnectOperation) return binaryConnectOperation;
+    binaryConnectOperation = connectBinaryWithRetry()
+      .finally(() => {
+        binaryConnectOperation = null;
+        if (!runtimeExited &&
+            binaryReconnectWanted &&
+            binarySocket?.readyState !== global.WebSocket.OPEN) {
+          void ensureBinarySocket().catch(() => {});
+        }
+      });
+    return binaryConnectOperation;
+  }
+
+  async function connectBinaryWithRetry() {
+    let attempt = 0;
+    while (!runtimeExited && binaryReconnectWanted) {
+      attempt += 1;
+      await waitForReconnect(attempt);
+      if (global.__PLAYMESH_BROWSER__?.mode !== "solo" &&
+          browserConnectionConfig &&
+          browserSocket?.readyState !== global.WebSocket.OPEN) {
+        global.console?.info?.("Playmesh Binary WebSocket 等待主会话重连", { attempt });
+        if (browserReconnectOperation) {
+          await browserReconnectOperation.catch(() => {});
+        }
+        continue;
+      }
+      if (attempt > 1) {
+        global.console?.info?.("Playmesh Binary WebSocket 正在重连", { attempt });
+      }
+      try {
+        const socket = await openBinarySocket();
+        await restoreBinaryChannels();
+        if (attempt > 1) {
+          global.console?.info?.("Playmesh Binary WebSocket 重连成功", { attempt });
+        } else {
+          global.console?.info?.("Playmesh Binary WebSocket 已连接");
+        }
+        scheduleBinaryFlush();
+        return socket;
+      } catch (error) {
+        if (runtimeExited || !binaryReconnectWanted) break;
+        const failedSocket = binarySocket;
+        binarySocket = null;
+        if (failedSocket && failedSocket.readyState < global.WebSocket.CLOSING) {
+          failedSocket.close();
+        }
+        global.console?.warn?.("Playmesh Binary WebSocket 重连失败，将继续重试", {
+          attempt,
+          error: error?.message || String(error),
+          retryInMs: reconnectDelay(attempt + 1),
+        });
+      }
+    }
+    throw new Error("游戏页面已退出，停止 Binary WebSocket 重连");
+  }
+
+  function openBinarySocket() {
+    return new Promise((resolve, reject) => {
+      const socket = new global.WebSocket(binaryTransportConfig.url);
+      socket.binaryType = "arraybuffer";
+      binarySocket = socket;
+      let opened = false;
+      const fail = () => {
+        if (!opened) reject(new Error("无法连接主机 Binary WebSocket"));
+      };
+      socket.addEventListener("open", () => {
+        opened = true;
+        socket.removeEventListener?.("error", fail);
+        resolve(socket);
+      }, { once: true });
+      socket.addEventListener("error", fail, { once: true });
+      socket.addEventListener("message", (event) => {
+        void receiveBinarySocketMessage(event.data);
+      });
+      socket.addEventListener("close", (event) => {
+        if (binarySocket !== socket) return;
+        binarySocket = null;
+        if (!opened) {
+          reject(new Error("Binary WebSocket 在连接完成前关闭"));
+          return;
+        }
+        handleBinaryDisconnect(event);
+      });
+    });
+  }
+
+  function handleBinaryDisconnect(event) {
+    const error = new Error("Binary WebSocket 已掉线");
+    global.console?.warn?.("Playmesh Binary WebSocket 已掉线", {
+      code: event?.code,
+      reason: event?.reason || "",
+    });
+    failBinaryTransport(error, false);
+    if (!runtimeExited && binaryReconnectWanted) {
+      void ensureBinarySocket().catch(() => {});
+    }
+  }
+
+  async function restoreBinaryChannels() {
+    for (const state of [...binaryChannels.values()]) {
+      if (state.closed) continue;
+      try {
+        await binaryRequest(
+          (requestId) => encodeBinaryChannelOperation(BINARY_OP_JOIN, requestId, state.id),
+          { expectsChannel: true },
+        );
+        global.console?.info?.("Playmesh Binary Channel 已恢复", { channelId: state.id });
+      } catch (error) {
+        state.closed = true;
+        binaryChannels.delete(state.id);
+        global.console?.error?.("Playmesh Binary Channel 恢复失败，Channel 已关闭", {
+          channelId: state.id,
+          error: error?.message || String(error),
+        });
+      }
+    }
+  }
+
+  function failBinaryTransport(error, closeChannels = true) {
+    if (binaryFlushTimer) global.clearTimeout(binaryFlushTimer);
+    binaryFlushTimer = null;
+    for (let index = binaryQueueHead; index < binaryQueue.length; index += 1) {
+      const item = binaryQueue[index];
+      if (item?.latestKey && binaryLatestQueue.get(item.latestKey) === item) {
+        binaryLatestQueue.delete(item.latestKey);
+      }
+    }
+    binaryQueue.length = 0;
+    binaryQueueHead = 0;
+    for (const request of binaryPending.values()) {
+      global.clearTimeout(request.timer);
+      request.reject(error);
+    }
+    binaryPending.clear();
+    if (closeChannels) {
+      for (const state of binaryChannels.values()) {
+        state.closed = true;
+      }
+      binaryChannels.clear();
+    }
+  }
+
+  function closeBinaryTransport(reason = "游戏运行时已退出", permanent = false) {
+    if (permanent) binaryReconnectWanted = false;
+    const socket = binarySocket;
+    binarySocket = null;
+    if (socket && socket.readyState < global.WebSocket.CLOSING) {
+      socket.close(1000, reason);
+    }
+    failBinaryTransport(new Error(reason), permanent);
+    if (!permanent && !runtimeExited && binaryReconnectWanted) {
+      void ensureBinarySocket().catch(() => {});
+    }
+  }
+
+  function queueBinaryFrame(data, options = {}) {
+    const item = {
+      data,
+      latestKey: options.latestKey || null,
+      requestId: options.requestId || 0,
+      superseded: false,
+    };
+    if (item.latestKey) {
+      const previous = binaryLatestQueue.get(item.latestKey);
+      if (previous && !previous.sent) {
+        previous.superseded = true;
+        settleBinaryRequest(previous.requestId, BINARY_STATUS_SUPERSEDED);
+      }
+      binaryLatestQueue.set(item.latestKey, item);
+    }
+    binaryQueue.push(item);
+    scheduleBinaryFlush();
+  }
+
+  function scheduleBinaryFlush() {
+    if (binaryFlushTimer) return;
+    binaryFlushTimer = global.setTimeout(flushBinaryQueue, 0);
+  }
+
+  function flushBinaryQueue() {
+    binaryFlushTimer = null;
+    const socket = binarySocket;
+    if (!socket || socket.readyState !== global.WebSocket.OPEN) return;
+    while (binaryQueueHead < binaryQueue.length &&
+           socket.bufferedAmount < BINARY_MAX_BUFFERED_BYTES) {
+      const item = binaryQueue[binaryQueueHead++];
+      if (item.superseded) continue;
+      item.sent = true;
+      if (item.latestKey && binaryLatestQueue.get(item.latestKey) === item) {
+        binaryLatestQueue.delete(item.latestKey);
+      }
+      try {
+        socket.send(item.data);
+      } catch (error) {
+        settleBinaryRequest(item.requestId, BINARY_STATUS_ERROR, error);
+      }
+    }
+    if (binaryQueueHead >= binaryQueue.length) {
+      binaryQueue.length = 0;
+      binaryQueueHead = 0;
+      return;
+    }
+    binaryFlushTimer = global.setTimeout(flushBinaryQueue, 4);
+  }
+
+  async function binaryRequest(frameFactory, options = {}) {
+    await ensureBinarySocket();
+    const requestId = nextBinaryRequestId();
+    const frame = frameFactory(requestId);
+    return new Promise((resolve, reject) => {
+      const timer = global.setTimeout(() => {
+        binaryPending.delete(requestId);
+        reject(new Error("Binary Channel 请求超时"));
+      }, BINARY_REQUEST_TIMEOUT_MS);
+      binaryPending.set(requestId, {
+        resolve, reject, timer,
+        expectsChannel: options.expectsChannel === true,
+      });
+      queueBinaryFrame(frame, {
+        requestId,
+        latestKey: options.latestKey,
+      });
+    });
+  }
+
+  function settleBinaryRequest(requestId, status, error, result) {
+    if (!requestId) return;
+    const request = binaryPending.get(requestId);
+    if (!request) return;
+    global.clearTimeout(request.timer);
+    binaryPending.delete(requestId);
+    if (status === BINARY_STATUS_ERROR) {
+      request.reject(error instanceof Error ? error : new Error(String(error || "Binary Channel 请求失败")));
+    } else {
+      request.resolve(result);
+    }
+  }
+
+  async function receiveBinarySocketMessage(raw) {
+    let data;
+    if (raw instanceof ArrayBuffer) {
+      data = new Uint8Array(raw);
+    } else if (raw instanceof Uint8Array) {
+      data = raw;
+    } else if (raw?.arrayBuffer) {
+      data = new Uint8Array(await raw.arrayBuffer());
+    } else {
+      closeBinaryTransport("主机返回了无效的二进制帧");
+      return;
+    }
+    if (data.length < 2 || data[0] !== BINARY_PROTOCOL_VERSION) {
+      closeBinaryTransport("主机返回了不兼容的二进制协议");
+      return;
+    }
+    switch (data[1]) {
+    case BINARY_OP_RESPONSE:
+      receiveBinaryResponse(data);
+      break;
+    case BINARY_OP_DELIVERY:
+      receiveBinaryDelivery(data);
+      break;
+    case BINARY_OP_REVIEW:
+      void receiveBinaryReview(data);
+      break;
+    case BINARY_OP_CLOSED:
+      receiveBinaryClosed(data);
+      break;
+    default:
+      closeBinaryTransport("主机返回了未知的二进制操作");
+    }
+  }
+
+  function receiveBinaryResponse(data) {
+    if (data.length < 7) {
+      closeBinaryTransport("Binary Channel 响应格式无效");
+      return;
+    }
+    const requestId = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(2);
+    const status = data[6];
+    if (status === BINARY_STATUS_ERROR) {
+      settleBinaryRequest(
+        requestId,
+        status,
+        new Error(new TextDecoder().decode(data.subarray(7)) || "Binary Channel 请求失败"),
+      );
+      return;
+    }
+    let result;
+    if (status === BINARY_STATUS_OK && data.length === 24) {
+      result = {
+        mode: binaryModeName(data[7]),
+        id: binaryChannelIdFromBytes(data.subarray(8, 24)),
+      };
+    }
+    settleBinaryRequest(requestId, status, null, result);
+  }
+
+  function receiveBinaryDelivery(data) {
+    if (data.length < 21) {
+      closeBinaryTransport("Binary Channel 消息格式无效");
+      return;
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const senderLength = view.getUint16(19);
+    if (!senderLength || data.length < 21 + senderLength) {
+      closeBinaryTransport("Binary Channel 发送者格式无效");
+      return;
+    }
+    const channelId = binaryChannelIdFromBytes(data.subarray(2, 18));
+    const state = binaryChannels.get(channelId);
+    if (!state || state.closed) return;
+    const senderPlayerId = new TextDecoder().decode(data.subarray(21, 21 + senderLength));
+    const payload = data.slice(21 + senderLength);
+    const context = {
+      senderPlayerId,
+      delivery: data[18] & BINARY_FLAG_LATEST ? "latest" : "queued",
+    };
+    for (const listener of [...state.listeners]) {
+      listener(payload, context);
+    }
+  }
+
+  async function receiveBinaryReview(data) {
+    if (data.length < 31) {
+      closeBinaryTransport("Binary Channel Authority 审核帧格式无效");
+      return;
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const reviewId = data.slice(2, 10);
+    const channelId = binaryChannelIdFromBytes(data.subarray(10, 26));
+    const senderLength = view.getUint16(27);
+    const targetField = view.getUint16(29);
+    if (!senderLength || !targetField || data.length < 31 + senderLength) {
+      closeBinaryTransport("Binary Channel Authority 审核上下文无效");
+      return;
+    }
+    let offset = 31;
+    const senderPlayerId = new TextDecoder().decode(data.subarray(offset, offset + senderLength));
+    offset += senderLength;
+    const targetPlayerIds = [];
+    if (data[26] & BINARY_FLAG_MULTIPLE_TARGETS) {
+      if (targetField > BINARY_MAX_TARGETS) {
+        closeBinaryTransport("Binary Channel Authority 审核目标过多");
+        return;
+      }
+      for (let index = 0; index < targetField; index += 1) {
+        if (data.length < offset + 2) {
+          closeBinaryTransport("Binary Channel Authority 审核目标格式无效");
+          return;
+        }
+        const targetLength = view.getUint16(offset);
+        offset += 2;
+        if (!targetLength || data.length < offset + targetLength) {
+          closeBinaryTransport("Binary Channel Authority 审核目标格式无效");
+          return;
+        }
+        targetPlayerIds.push(
+          new TextDecoder().decode(data.subarray(offset, offset + targetLength)),
+        );
+        offset += targetLength;
+      }
+    } else {
+      if (data.length < offset + targetField) {
+        closeBinaryTransport("Binary Channel Authority 审核目标格式无效");
+        return;
+      }
+      targetPlayerIds.push(
+        new TextDecoder().decode(data.subarray(offset, offset + targetField)),
+      );
+      offset += targetField;
+    }
+    const payload = data.slice(offset);
+    const state = binaryChannels.get(channelId);
+    if (!state || state.closed || state.mode !== "authority" || !state.forwardHandler) {
+      queueBinaryFrame(encodeBinaryDecision(
+        reviewId,
+        BINARY_DECISION_REJECT,
+        new TextEncoder().encode("Authority 未注册 Binary Channel 审核器"),
+      ));
+      return;
+    }
+    try {
+      const replacement = await state.forwardHandler(payload, {
+        senderPlayerId,
+        targetPlayerIds,
+        delivery: data[26] & BINARY_FLAG_LATEST ? "latest" : "queued",
+      });
+      if (replacement === undefined) {
+        queueBinaryFrame(encodeBinaryDecision(reviewId, BINARY_DECISION_PASS, new Uint8Array()));
+      } else if (replacement instanceof Uint8Array) {
+        queueBinaryFrame(encodeBinaryDecision(
+          reviewId,
+          BINARY_DECISION_REPLACE,
+          new Uint8Array(replacement),
+        ));
+      } else {
+        throw new Error("Binary Channel Authority 审核器只能返回 void 或 Uint8Array");
+      }
+    } catch (error) {
+      queueBinaryFrame(encodeBinaryDecision(
+        reviewId,
+        BINARY_DECISION_REJECT,
+        new TextEncoder().encode(error?.message || String(error)),
+      ));
+    }
+  }
+
+  function receiveBinaryClosed(data) {
+    if (data.length < 18) {
+      closeBinaryTransport("Binary Channel 关闭帧格式无效");
+      return;
+    }
+    const channelId = binaryChannelIdFromBytes(data.subarray(2, 18));
+    const state = binaryChannels.get(channelId);
+    if (!state) return;
+    state.closed = true;
+    binaryChannels.delete(channelId);
+  }
+
+  function createBinaryChannelHandle(id, mode) {
+    const existing = binaryChannels.get(id);
+    if (existing && !existing.closed) return existing.handle;
+    const state = {
+      id,
+      mode,
+      listeners: new Set(),
+      forwardHandler: null,
+      closed: false,
+      handle: null,
+    };
+    const sendToTargets = (target, data, latest) => {
+      if (state.closed) return Promise.reject(new Error("Binary Channel 已关闭"));
+      const targetPlayerIds = normalizeBinaryTargets(target);
+      const payload = normalizeBinaryData(data);
+      const latestKey = latest
+        ? `${id}\u0000${JSON.stringify([...targetPlayerIds].sort())}`
+        : null;
+      return binaryRequest(
+        (requestId) => encodeBinarySend(
+          requestId,
+          id,
+          latest ? BINARY_FLAG_LATEST : 0,
+          targetPlayerIds,
+          payload,
+          false,
+        ),
+        { latestKey },
+      );
+    };
+    const broadcast = (data, latest) => {
+      if (state.closed) return Promise.reject(new Error("Binary Channel 已关闭"));
+      const payload = normalizeBinaryData(data);
+      return binaryRequest(
+        (requestId) => encodeBinarySend(
+          requestId,
+          id,
+          latest ? BINARY_FLAG_LATEST : 0,
+          [],
+          payload,
+          true,
+        ),
+        { latestKey: latest ? `${id}\u0000broadcast` : null },
+      );
+    };
+    state.handle = Object.freeze({
+      id,
+      mode,
+      send(targetOrData, data) {
+        if (data === undefined && targetOrData instanceof Uint8Array) {
+          return broadcast(targetOrData, false);
+        }
+        return sendToTargets(targetOrData, data, false);
+      },
+      sendLatest(targetOrData, data) {
+        if (data === undefined && targetOrData instanceof Uint8Array) {
+          return broadcast(targetOrData, true);
+        }
+        return sendToTargets(targetOrData, data, true);
+      },
+      onMessage(callback) {
+        if (typeof callback !== "function") throw new Error("Binary Channel onMessage 需要函数");
+        state.listeners.add(callback);
+        return () => state.listeners.delete(callback);
+      },
+      onForward(handler) {
+        if (!playmesh.session.isAuthority() || mode !== "authority") {
+          throw new Error("只有 Authority mode 的 Authority 可以注册 Binary Channel 审核器");
+        }
+        if (typeof handler !== "function") throw new Error("Binary Channel onForward 需要函数");
+        state.forwardHandler = handler;
+        return () => {
+          if (state.forwardHandler === handler) state.forwardHandler = null;
+        };
+      },
+      async close() {
+        if (!playmesh.session.isAuthority()) {
+          throw new Error("只有 Authority 可以关闭 Binary Channel");
+        }
+        if (state.closed) return;
+        await binaryRequest(
+          (requestId) => encodeBinaryChannelOperation(BINARY_OP_CLOSE, requestId, id),
+        );
+        state.closed = true;
+        binaryChannels.delete(id);
+      },
+    });
+    binaryChannels.set(id, state);
+    return state.handle;
+  }
+
+  function publicPlayer(player) {
+    if (!player || typeof player !== "object") return null;
+    return {
+      id: player.id,
+      nickname: player.nickname,
+      avatar: typeof player.avatar === "string" ? player.avatar : null,
+      role: player.role,
+      connected: Boolean(player.connected),
+    };
+  }
+
+  function publicSession(session) {
+    if (!session || typeof session !== "object") return null;
+    return {
+      ...session,
+      players: Array.isArray(session.players)
+        ? session.players.map(publicPlayer)
+        : [],
+    };
+  }
+
+  function seedPlayerConnections(session) {
+    previouslyConnectedPlayerIds.clear();
+    for (const player of session?.players || []) {
+      if (player.connected) previouslyConnectedPlayerIds.add(player.id);
+    }
+  }
+
+  function sessionConnectionLogContext(session, player) {
+    const players = session?.players || [];
+    return {
+      sessionId: session?.id || null,
+      gameId: session?.gameId || null,
+      roomType: session?.displayMode || "unknown",
+      sessionState: session?.state || "unknown",
+      onlinePlayers: players.filter((member) => member.connected).length,
+      roomPlayers: players.length,
+      minPlayers: session?.minPlayers ?? null,
+      maxPlayers: session?.maxPlayers ?? null,
+      playerId: player?.id || null,
+      nickname: player?.nickname || null,
+      playerRole: player?.role || null,
+      isCurrentPlayer: player?.id === bootstrap?.player?.id,
+      isAuthority: player?.id === session?.authorityClientId,
+    };
+  }
+
+  function emitPlayerConnectionChanges(previousSession, nextSession) {
+    if (previousSession?.id !== nextSession?.id) {
+      seedPlayerConnections(previousSession?.id === nextSession?.id ? previousSession : null);
+    }
+    const previousPlayers = new Map((previousSession?.players || []).map((player) => [player.id, player]));
+    const nextPlayers = new Map((nextSession?.players || []).map((player) => [player.id, player]));
+    for (const player of nextPlayers.values()) {
+      const previous = previousPlayers.get(player.id);
+      if (player.connected && !previous?.connected) {
+        const reconnecting = previouslyConnectedPlayerIds.has(player.id);
+        previouslyConnectedPlayerIds.add(player.id);
+        global.console?.info?.(
+          reconnecting
+            ? "Playmesh 玩家已重连"
+            : "Playmesh 新玩家已加入房间",
+          sessionConnectionLogContext(nextSession, player),
+        );
+        emit(reconnecting ? playerReconnectListeners : playerJoinListeners, {
+          player,
+          session: nextSession,
+          isCurrentPlayer: player.id === bootstrap?.player?.id,
+        });
+      } else if (!player.connected && previous?.connected) {
+        global.console?.warn?.(
+          "Playmesh 玩家已掉线或退出房间",
+          sessionConnectionLogContext(nextSession, player),
+        );
+        emit(playerLeaveListeners, {
+          player,
+          session: nextSession,
+          isCurrentPlayer: player.id === bootstrap?.player?.id,
+        });
+      }
+    }
+    for (const player of previousPlayers.values()) {
+      if (player.connected && !nextPlayers.has(player.id)) {
+        global.console?.warn?.(
+          "Playmesh 玩家已退出房间",
+          sessionConnectionLogContext(nextSession, player),
+        );
+        emit(playerLeaveListeners, {
+          player: { ...player, connected: false },
+          session: nextSession,
+          isCurrentPlayer: player.id === bootstrap?.player?.id,
+        });
+      }
+    }
+  }
+
+  async function dispatchAuthorityAction(transportMessage) {
+    if (await dispatchSyncAuthorityAction(transportMessage)) return;
+    if (!authorityService) {
+      return;
+    }
+    const context = {
+      senderPlayerId: transportMessage.senderPlayerId,
+      session: transportMessage.session,
+      members: transportMessage.session.players,
+    };
+    const output = await authorityService(transportMessage.payload, context);
+    const results = Array.isArray(output) ? output : [output];
+    for (const result of results) {
+      if (!result || !Array.isArray(result.targetPlayerIds) || !result.message) {
+        continue;
+      }
+      await post("authority.result", result.message, {
+        targetPlayerIds: result.targetPlayerIds,
+      });
+    }
+  }
+
+  function cloneJson(value, label) {
+    let encoded;
+    try {
+      encoded = JSON.stringify(value);
+    } catch (error) {
+      throw new Error(`${label} 必须可 JSON 序列化: ${error.message || error}`);
+    }
+    if (encoded === undefined) throw new Error(`${label} 不能是 undefined`);
+    return JSON.parse(encoded);
+  }
+
+  function syncTargetIds(session) {
+    return [...new Set([
+      session.authorityClientId,
+      ...session.players.map((player) => player.id),
+    ].filter(Boolean))];
+  }
+
+  function applySyncState(runtime, nextState) {
+    if (nextState === undefined) return false;
+    const normalized = cloneJson(nextState, "权威状态");
+    if (JSON.stringify(normalized) === JSON.stringify(runtime.state)) return false;
+    runtime.state = normalized;
+    runtime.revision += 1;
+    return true;
+  }
+
+  function continuousInputs(runtime) {
+    const result = {};
+    for (const [compoundKey, entry] of runtime.inputs) {
+      const separator = compoundKey.indexOf(":");
+      const playerId = compoundKey.substring(0, separator);
+      const key = compoundKey.substring(separator + 1);
+      result[playerId] ??= {};
+      result[playerId][key] = cloneJson(entry, "连续输入");
+    }
+    return result;
+  }
+
+  async function publishSyncSnapshot(runtime, targetPlayerIds) {
+    if (runtime.stopped) return null;
+    const session = bootstrap?.session;
+    if (!session) return null;
+    const snapshot = {
+      protocolVersion: 1,
+      stateType: runtime.stateType,
+      full: true,
+      revision: runtime.revision,
+      sequence: ++runtime.snapshotSequence,
+      timestamp: Date.now(),
+      sourceTick: runtime.tick,
+      state: cloneJson(runtime.state, "权威状态"),
+    };
+    applySyncSnapshot(snapshot);
+    await post("authority.result", { __playmeshSyncSnapshot: snapshot }, {
+      targetPlayerIds: targetPlayerIds || syncTargetIds(session),
+    });
+    return snapshot;
+  }
+
+  async function runSyncTick(runtime) {
+    if (runtime.stopped || runtime.tickRunning) return;
+    runtime.tickRunning = true;
+    try {
+      const now = Date.now();
+      const dt = Math.min(1, Math.max(0, (now - runtime.lastTickAt) / 1000));
+      runtime.lastTickAt = now;
+      runtime.tick += 1;
+      if (runtime.onTick) {
+        const next = await runtime.onTick({
+          state: cloneJson(runtime.state, "权威状态"),
+          inputs: continuousInputs(runtime),
+          tick: runtime.tick,
+          dt,
+          now,
+          session: bootstrap.session,
+          members: bootstrap.session.players,
+        });
+        applySyncState(runtime, next);
+      }
+      await publishSyncSnapshot(runtime);
+    } catch (error) {
+      emit(lifecycleListeners, { state: "error", error: String(error) });
+    } finally {
+      runtime.tickRunning = false;
+    }
+  }
+
+  async function dispatchSyncAuthorityAction(transportMessage) {
+    const envelope = transportMessage.payload?.__playmeshSync;
+    if (!envelope) return false;
+    const runtime = syncAuthorityRuntime;
+    if (!runtime) return true;
+    if (envelope.type === "snapshot.request") {
+      await publishSyncSnapshot(runtime, [transportMessage.senderPlayerId]);
+      return true;
+    }
+    if (envelope.type !== "input.action" && envelope.type !== "input.state") {
+      return true;
+    }
+    const input = cloneJson(envelope.payload, "同步输入");
+    const context = {
+      senderPlayerId: transportMessage.senderPlayerId,
+      session: transportMessage.session,
+      members: transportMessage.session.players,
+      state: cloneJson(runtime.state, "权威状态"),
+      inputId: envelope.inputId,
+      inputType: envelope.type === "input.state" ? "state" : "action",
+      key: envelope.key || null,
+      receivedAt: Date.now(),
+    };
+    if (envelope.type === "input.state") {
+      runtime.inputs.set(`${context.senderPlayerId}:${envelope.key}`, {
+        value: input,
+        inputId: envelope.inputId,
+        receivedAt: context.receivedAt,
+      });
+    }
+    if (runtime.onInput) {
+      applySyncState(runtime, await runtime.onInput(input, context));
+    }
+    return true;
+  }
+
+  function applySyncSnapshot(snapshot) {
+    if (!snapshot || snapshot.protocolVersion !== 1 || snapshot.full !== true) return;
+    if (typeof snapshot.revision !== "number" || typeof snapshot.sequence !== "number") return;
+    if (currentSyncSnapshot && snapshot.sequence <= currentSyncSnapshot.sequence &&
+        snapshot.timestamp <= currentSyncSnapshot.timestamp) return;
+    currentSyncSnapshot = cloneJson(snapshot, "同步快照");
+    emit(syncListeners, currentSyncSnapshot);
+  }
+
+  function submitSyncEnvelope(type, payload, extra = {}) {
+    if (!bootstrap?.session) return Promise.reject(new Error("当前游戏没有多人会话"));
+    const inputId = `input-${Date.now()}-${++syncInputSequence}`;
+    return post("game.submitAction", {
+      __playmeshSync: {
+        type,
+        inputId,
+        payload: cloneJson(payload, "同步输入"),
+        clientTime: Date.now(),
+        ...extra,
+      },
+    }).then(() => inputId);
+  }
+
+  function submitStateInput(key, value, options = {}) {
+    if (typeof key !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(key)) {
+      return Promise.reject(new Error("连续输入 key 无效"));
+    }
+    const rateHz = options.rateHz ?? 20;
+    if (!Number.isFinite(rateHz) || rateHz < 1 || rateHz > 20) {
+      return Promise.reject(new Error("连续输入 rateHz 必须在 1 至 20 之间"));
+    }
+    const existing = pendingStateInputs.get(key) || { lastSentAt: 0, timer: null };
+    existing.value = cloneJson(value, "连续输入");
+    existing.rateHz = rateHz;
+    pendingStateInputs.set(key, existing);
+    const wait = Math.max(0, (1000 / rateHz) - (Date.now() - existing.lastSentAt));
+    if (!existing.timer) {
+      existing.timer = global.setTimeout(() => {
+        existing.timer = null;
+        existing.lastSentAt = Date.now();
+        void submitSyncEnvelope("input.state", existing.value, { key }).catch(() => {});
+      }, wait);
+      existing.timer?.unref?.();
+    }
+    return Promise.resolve(null);
+  }
+
+  function startSyncAuthority(options) {
+    if (!playmesh.session.isAuthority()) {
+      throw new Error("只有 Authority Client 可以启动状态同步");
+    }
+    if (syncAuthorityRuntime) throw new Error("权威状态同步已经启动");
+    if (!options || !("initialState" in options)) {
+      throw new Error("initialState 为必填项");
+    }
+    const tickRate = options.tickRate ?? 10;
+    if (!Number.isInteger(tickRate) || tickRate < 1 || tickRate > 20) {
+      throw new Error("tickRate 必须是 1 至 20 的整数");
+    }
+    const runtime = {
+      state: cloneJson(options.initialState, "initialState"),
+      stateType: typeof options.stateType === "string" && options.stateType
+        ? options.stateType : "game",
+      onInput: typeof options.onInput === "function" ? options.onInput : null,
+      onTick: typeof options.onTick === "function" ? options.onTick : null,
+      revision: 0,
+      snapshotSequence: 0,
+      tick: 0,
+      inputs: new Map(),
+      lastTickAt: Date.now(),
+      tickRunning: false,
+      stopped: false,
+      timer: null,
+    };
+    syncAuthorityRuntime = runtime;
+    runtime.timer = global.setInterval(() => { void runSyncTick(runtime); }, 1000 / tickRate);
+    runtime.timer?.unref?.();
+    void publishSyncSnapshot(runtime);
+    return {
+      getState: () => cloneJson(runtime.state, "权威状态"),
+      setState(nextState, publish = true) {
+        applySyncState(runtime, nextState);
+        return publish ? publishSyncSnapshot(runtime) : Promise.resolve(null);
+      },
+      publish: (targetPlayerIds) => publishSyncSnapshot(runtime, targetPlayerIds),
+      stop() {
+        if (runtime.stopped) return;
+        runtime.stopped = true;
+        global.clearInterval(runtime.timer);
+        if (syncAuthorityRuntime === runtime) syncAuthorityRuntime = null;
+      },
+    };
+  }
+
+  function setLatency(value, diagnostics = null) {
+    currentLatency = typeof value === "number" && Number.isFinite(value)
+      ? Math.max(0, Math.round(value))
+      : null;
+    latencyDiagnostics = diagnostics;
+    emit(latencyListeners, currentLatency);
+    void renderPerformanceUi();
+    post("performance.latency", {
+      latencyMs: currentLatency,
+      diagnostics: latencyDiagnostics,
+    }).catch(() => {});
+  }
+
+  function sendLatencyProbe() {
+    if (!bootstrap?.session) return;
+    const clientSentAt = Date.now();
+    post("performance.ping", {
+      probeId: `latency-${clientSentAt}-${++latencyProbeSequence}`,
+      clientSentAt,
+    }).catch(() => {});
+  }
+
+  function startLatencyProbes() {
+    if (!bootstrap?.session) return;
+    if (latencyTimer) return;
+    sendLatencyProbe();
+    latencyTimer = global.setInterval(sendLatencyProbe, 3000);
+    latencyTimer?.unref?.();
+  }
+
+  function stopLatencyProbes() {
+    if (latencyTimer) global.clearInterval(latencyTimer);
+    latencyTimer = null;
+  }
+
+  function handleLatencyPong(payload) {
+    const receivedAt = Date.now();
+    const sentAt = Number(payload?.clientSentAt);
+    if (!Number.isFinite(sentAt) || sentAt > receivedAt) return;
+    if (payload.authorityAvailable !== true) {
+      setLatency(null, {
+        probeId: payload.probeId || null,
+        clientSentAt: sentAt,
+        serverReceivedAt: payload.serverReceivedAt || null,
+        serverSentAt: payload.serverSentAt || null,
+        receivedAt,
+        authorityAvailable: false,
+      });
+      return;
+    }
+    const rtt = Math.max(0, receivedAt - sentAt);
+    const smoothed = currentLatency == null ? rtt : (currentLatency * 0.75) + (rtt * 0.25);
+    setLatency(smoothed, {
+      probeId: payload.probeId || null,
+      clientSentAt: sentAt,
+      serverReceivedAt: payload.serverReceivedAt || null,
+      serverSentAt: payload.serverSentAt || null,
+      receivedAt,
+      authorityAvailable: true,
+      rawRttMs: rtt,
+    });
+  }
+
+  async function ensurePerformanceUi() {
+    if (global.__PLAYMESH_BROWSER__ && !appSdk.isAvailable()) {
+      return ensureBrowserNicknameUi();
+    }
+    if (performanceUi) return performanceUi;
+    if (!global.document) return null;
+    if (!global.document.body) {
+      await new Promise((resolve) => global.document.addEventListener("DOMContentLoaded", resolve, { once: true }));
+    }
+    if (typeof global.document.createElement !== "function") return null;
+    const host = global.document.createElement("div");
+    host.id = "playmesh-performance";
+    host.setAttribute?.("data-theme", platformUiTheme);
+    const root = host.attachShadow({ mode: "closed" });
+    root.innerHTML = `<style>
+      :host{all:initial;--pm-performance-border:#ffffff30;--pm-performance-surface:#111827e8;--pm-performance-text:#f9fafb;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;color-scheme:dark}
+      :host([data-theme="light"]){--pm-performance-border:#8795a6;--pm-performance-surface:#fffffff2;--pm-performance-text:#17202b;color-scheme:light}
+      .panel{position:fixed;right:12px;top:12px;z-index:2147483646;display:flex;gap:10px;padding:7px 9px;border:1px solid var(--pm-performance-border);border-radius:7px;background:var(--pm-performance-surface);color:var(--pm-performance-text);box-shadow:0 3px 12px #0004;font-size:12px;font-weight:700;line-height:1}
+      .panel[hidden],.latency[hidden]{display:none}
+    </style><div class="panel"><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
+    global.document.body.appendChild(host);
+    performanceUi = {
+      host,
+      panel: root.querySelector(".panel"),
+      fps: root.querySelector(".fps"),
+      latency: root.querySelector(".latency"),
+    };
+    refreshPerformancePlatformUi(performanceUi);
+    return performanceUi;
+  }
+
+  function refreshPerformancePlatformUi(ui) {
+    ui?.host?.setAttribute?.("data-theme", platformUiTheme);
+  }
+
+  async function renderPerformanceUi() {
+    const ui = await ensurePerformanceUi();
+    if (!ui) return;
+    ui.panel.hidden = !performanceVisible;
+    ui.fps.textContent = currentFps == null ? "-- FPS" : `${currentFps} FPS`;
+    const multiplayer = Boolean(bootstrap?.session);
+    ui.latency.hidden = !multiplayer;
+    ui.latency.textContent = currentLatency == null ? "-- ms" : `${currentLatency} ms`;
+    if (ui.performanceButton) {
+      ui.performanceButton.classList.toggle("active", performanceVisible);
+      ui.performanceButton.setAttribute("aria-pressed", String(performanceVisible));
+    }
+  }
+
+  function receive(rawMessage) {
+    const message = typeof rawMessage === "string" ? JSON.parse(rawMessage) : rawMessage;
+    if (!message || typeof message !== "object") return;
+    if (message.type === "platform.ui.restoreGameFocus") {
+      appSdk.__restoreGameContentFocus?.();
+      return;
+    }
+    if (message.type === "platform.ui.configure") {
+      try {
+        configurePlatformUi(
+          message.configuration,
+          runtimeLocaleUsesBrowserSystem
+            ? browserRuntimeLocale
+            : message.configuration?.locale,
+        );
+      } catch (error) {
+        global.console?.error?.("Playmesh platform UI localization update failed", error);
+      }
+      return;
+    }
+    if (message.type === "performance.visibility") {
+      performanceVisible = message.visible !== false;
+      void renderPerformanceUi();
+      return;
+    }
+    if (message.type === "sdk.bootstrap") {
+      const previousSessionId = bootstrap?.session?.id;
+      const publicBootstrap = {
+        ...message,
+        player: publicPlayer(message.player),
+        session: publicSession(message.session),
+      };
+      if (message.binaryTransport?.url) {
+        binaryTransportConfig = { url: String(message.binaryTransport.url) };
+      }
+      delete publicBootstrap.binaryTransport;
+      bootstrap = publicBootstrap;
+      seedPlayerConnections(bootstrap.session);
+      if (previousSessionId !== bootstrap.session?.id) currentSyncSnapshot = null;
+      emit(sessionListeners, bootstrap.session);
+      emit(lifecycleListeners, { state: "ready" });
+      const request = pending.get(message.requestId);
+      if (request) global.clearTimeout(request.timer);
+      request?.resolve(publicBootstrap);
+      pending.delete(message.requestId);
+      global.console?.info?.("Playmesh Game SDK 就绪", {
+        mode: bootstrap.session ? "multiplayer" : "solo",
+      });
+      void renderPerformanceUi();
+      startLatencyProbes();
+      if (bootstrap.session && !bootstrap.isAuthority) {
+        void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
+      }
+      return;
+    }
+    if (message.type === "command.result" || message.type === "command.error") {
+      const request = pending.get(message.requestId);
+      if (request) {
+        global.clearTimeout(request.timer);
+        if (message.type === "command.result") {
+          request.resolve(message.result);
+        } else {
+          const error = new Error(message.error);
+          error.code = message.code;
+          request.reject(error);
+        }
+        pending.delete(message.requestId);
+      }
+      return;
+    }
+    if (message.type === "transport.error" || message.type === "transport.closed") {
+      global.console?.warn?.("Playmesh 主会话 WebSocket 已掉线", {
+        state: message.type === "transport.closed" ? "closed" : "error",
+        error: message.error,
+      });
+      closeBinaryTransport("主会话连接已关闭");
+      stopLatencyProbes();
+      setLatency(null);
+      emit(lifecycleListeners, {
+        state: message.type === "transport.closed" ? "closed" : "error",
+        error: message.error,
+      });
+      if (browserConnectionConfig && !runtimeExited) {
+        scheduleBrowserReconnect();
+      }
+      return;
+    }
+    if (message.type === "lifecycle.event") {
+      const event = { state: message.event };
+      emit(lifecycleListeners, event);
+      const listeners = message.event === "pause"
+        ? pauseListeners
+        : message.event === "resume"
+          ? resumeListeners
+          : exitListeners;
+      Promise.allSettled([...listeners].map((handler) => handler(event)))
+        .then(() => {
+          if (message.event === "exit") {
+            markRuntimeExited("游戏运行时已退出");
+          }
+          if (!global.__PLAYMESH_BROWSER__) {
+            return post("lifecycle.complete", {
+              lifecycleRequestId: message.requestId,
+            });
+          }
+        });
+      return;
+    }
+    if (message.type !== "transport.message") {
+      return;
+    }
+    const transport = message.message?.session
+      ? {
+          ...message.message,
+          session: publicSession(message.message.session),
+        }
+      : message.message;
+    if (transport.type === "transport.status") {
+      const details = {
+        attempt: transport.attempt,
+        error: transport.error,
+      };
+      if (transport.state === "reconnected") {
+        global.console?.info?.("Playmesh 主会话 WebSocket 重连成功", details);
+      } else if (transport.state === "reconnecting") {
+        global.console?.info?.("Playmesh 主会话 WebSocket 正在重连", details);
+      } else {
+        global.console?.warn?.("Playmesh 主会话 WebSocket 已掉线", details);
+      }
+    } else if (transport.type === "session.state") {
+      emitPlayerConnectionChanges(bootstrap.session, transport.session);
+      bootstrap.session = transport.session;
+      emit(sessionListeners, transport.session);
+      void renderPerformanceUi();
+      startLatencyProbes();
+    } else if (transport.type === "game.message") {
+      const storageResponse = transport.payload?.__playmeshStorageResponse;
+      if (storageResponse) {
+        settleBrowserStorage(storageResponse);
+      } else {
+        const snapshot = transport.payload?.__playmeshSyncSnapshot;
+        if (snapshot) applySyncSnapshot(snapshot);
+        else emit(messageListeners, transport.payload);
+      }
+    } else if (transport.type === "session.pong") {
+      handleLatencyPong(transport.payload);
+    } else if (transport.type === "authority.ping") {
+      post("performance.pong", transport.payload, {
+        targetPlayerId: transport.senderPlayerId,
+      }).catch(() => {});
+    } else if (transport.type === "authority.action") {
+      dispatchAuthorityAction(transport).catch((error) => {
+        emit(lifecycleListeners, { state: "error", error: String(error) });
+      });
+    }
+  }
+
+  async function connectBrowser(config) {
+    if (config.mode === "solo") {
+      bootstrap = {
+        type: "sdk.bootstrap",
+        sdkVersion: PLAYMESH_SDK_VERSION,
+        isAuthority: false,
+        player: null,
+        session: null,
+      };
+      emit(lifecycleListeners, { state: "ready" });
+      void renderPerformanceUi();
+      return bootstrap;
+    }
+    const appIdentity = appSdk.isAvailable()
+      ? appSdk.identity.getCurrent()
+      : null;
+    const preferredNickname = appIdentity?.nickname || config.nickname;
+    const nickname = preferredNickname
+      ? validateNickname(preferredNickname, false)
+      : await resolveBrowserNickname();
+    if (!appIdentity && config.nickname) writeBrowserNickname(nickname);
+    const playerId = appIdentity?.userId || resolveBrowserPlayerId();
+    browserConnectionConfig = {
+      ...config,
+      nickname,
+      playerId,
+    };
+    const joined = await joinBrowserWithRetry(browserConnectionConfig);
+    applyBrowserJoin(config, joined);
+    try {
+      await connectBrowserSocket(config, joined);
+      if (appSdk.isAvailable() && typeof appSdk.__syncAvatar === "function") {
+        appSdk.__syncAvatar(joined.session.id, joined.credential.token).catch((error) => {
+          global.console?.warn?.("Playmesh App 头像同步失败，游戏将继续", error);
+        });
+      }
+    } catch (error) {
+      global.console?.warn?.("Playmesh 主会话 WebSocket 首次连接失败，将开始重连", {
+        error: error?.message || String(error),
+      });
+      browserReconnectOperation = reconnectBrowserSocket()
+        .finally(() => {
+          browserReconnectOperation = null;
+          if (!runtimeExited &&
+              browserConnectionConfig &&
+              browserSocket?.readyState !== global.WebSocket.OPEN) {
+            scheduleBrowserReconnect();
+          }
+        });
+      await browserReconnectOperation;
+    }
+    emit(sessionListeners, bootstrap.session);
+    emit(lifecycleListeners, { state: "ready" });
+    mountBrowserNicknameControl().catch(() => {});
+    void renderPerformanceUi();
+    startLatencyProbes();
+    void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
+    return bootstrap;
+  }
+
+  function applyBrowserJoin(config, joined) {
+    browserCredential = joined.credential;
+    const core = new URL(config.coreBase);
+    const binarySocketUrl = new URL(joined.binaryWebSocketPath, core);
+    binarySocketUrl.protocol = core.protocol === "https:" ? "wss:" : "ws:";
+    binarySocketUrl.searchParams.set("token", joined.credential.token);
+    binaryTransportConfig = { url: binarySocketUrl.toString() };
+    if (joined.credential.reconnected) {
+      previouslyConnectedPlayerIds.add(joined.credential.player.id);
+    }
+    // The Core may publish the connected snapshot as soon as the socket opens.
+    // Seed bootstrap first so that an early session.state can update it safely.
+    bootstrap = {
+      type: "sdk.bootstrap",
+      sdkVersion: PLAYMESH_SDK_VERSION,
+      isAuthority: false,
+      player: publicPlayer(joined.credential.player),
+      session: publicSession(joined.session),
+    };
+  }
+
+  async function joinBrowserWithRetry(config) {
+    const attempts = 30;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await joinBrowser(config);
+      } catch (error) {
+        if (!["session_full", "player_connected"].includes(error.code) || attempt === attempts) throw error;
+        await new Promise((resolve) => global.setTimeout(resolve, 200));
+      }
+    }
+  }
+
+  async function joinBrowser(config) {
+    const response = await fetch(new URL("v1/sessions/join", config.coreBase), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        joinCode: config.joinCode,
+        nickname: config.nickname,
+        shareToken: config.shareToken,
+        playerId: config.playerId,
+        source: config.playerSource || (appSdk.isAvailable() ? "lan_app" : "lan_html"),
+      }),
+    });
+    const joined = await response.json();
+    if (!response.ok) {
+      const error = new Error(joined.error?.message || "加入对局失败");
+      error.code = joined.error?.code;
+      throw error;
+    }
+    return joined;
+  }
+
+  async function connectBrowserSocket(config, joined) {
+    const core = new URL(config.coreBase);
+    const socketUrl = new URL(joined.webSocketPath, core);
+    socketUrl.protocol = core.protocol === "https:" ? "wss:" : "ws:";
+    socketUrl.searchParams.set("token", joined.credential.token);
+    const socket = new WebSocket(socketUrl);
+    browserSocket = socket;
+    let opened = false;
+    // Subscribe before awaiting open so the initial connected snapshot cannot
+    // pass between the open event and listener registration.
+    socket.addEventListener("message", (event) => {
+      receive({ type: "transport.message", message: JSON.parse(event.data) });
+    });
+    socket.addEventListener("close", (event) => {
+      if (browserSocket !== socket) return;
+      browserSocket = null;
+      if (opened) {
+        receive({
+          type: "transport.closed",
+          error: event?.reason || (event?.code ? `close code ${event.code}` : undefined),
+        });
+      }
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", () => {
+          opened = true;
+          resolve();
+        }, { once: true });
+        socket.addEventListener(
+          "error",
+          () => reject(new Error("无法连接主机会话")),
+          { once: true },
+        );
+        socket.addEventListener(
+          "close",
+          () => {
+            if (!opened) reject(new Error("主会话 WebSocket 在连接完成前关闭"));
+          },
+          { once: true },
+        );
+      });
+    } catch (error) {
+      if (browserSocket === socket) browserSocket = null;
+      if (socket.readyState < global.WebSocket.CLOSING) socket.close();
+      throw error;
+    }
+  }
+
+  function scheduleBrowserReconnect() {
+    if (runtimeExited || !browserConnectionConfig || browserReconnectOperation) return;
+    browserReconnectOperation = reconnectBrowserSocket()
+      .finally(() => {
+        browserReconnectOperation = null;
+        if (!runtimeExited &&
+            browserConnectionConfig &&
+            browserSocket?.readyState !== global.WebSocket.OPEN) {
+          scheduleBrowserReconnect();
+        }
+      });
+    void browserReconnectOperation.catch(() => {});
+  }
+
+  async function reconnectBrowserSocket() {
+    let attempt = 0;
+    while (!runtimeExited && browserConnectionConfig) {
+      attempt += 1;
+      await waitForReconnect(attempt);
+      global.console?.info?.("Playmesh 主会话 WebSocket 正在重连", { attempt });
+      try {
+        const previousSession = bootstrap?.session;
+        const joined = await joinBrowser(browserConnectionConfig);
+        applyBrowserJoin(browserConnectionConfig, joined);
+        await connectBrowserSocket(browserConnectionConfig, joined);
+        if (appSdk.isAvailable() && typeof appSdk.__syncAvatar === "function") {
+          void appSdk.__syncAvatar(
+            joined.session.id,
+            joined.credential.token,
+          ).catch(() => {});
+        }
+        emitPlayerConnectionChanges(previousSession, bootstrap.session);
+        emit(sessionListeners, bootstrap.session);
+        startLatencyProbes();
+        global.console?.info?.("Playmesh 主会话 WebSocket 重连成功", { attempt });
+        if (binaryReconnectWanted) {
+          void ensureBinarySocket().catch(() => {});
+        }
+        if (!bootstrap.isAuthority) {
+          void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
+        }
+        return browserSocket;
+      } catch (error) {
+        if (runtimeExited) break;
+        global.console?.warn?.("Playmesh 主会话 WebSocket 重连失败，将继续重试", {
+          attempt,
+          error: error?.message || String(error),
+          retryInMs: reconnectDelay(attempt + 1),
+        });
+      }
+    }
+    throw new Error("游戏页面已退出，停止主会话 WebSocket 重连");
+  }
+
+  const emptyAppSdk = {
+    version: "2.2.0",
+    ready: Promise.resolve({
+      available: false,
+      identity: null,
+      device: { platform: "browser", capabilities: [] },
+    }),
+    isAvailable() { return false; },
+    openSharePanel() {
+      return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主"));
+    },
+    showToolDock() {
+      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏工具宿主"));
+    },
+    hideToolDock() {
+      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏工具宿主"));
+    },
+    exitGame() {
+      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主"));
+    },
+    __restoreGameContentFocus() {},
+    __requestExit() { return Promise.resolve(); },
+    __confirmCapabilities() { return Promise.resolve(); },
+    identity: { getCurrent() { return null; } },
+    capabilities: {
+      getRegistry() { return []; },
+      getAvailable() { return []; },
+      getDeclared() { return []; },
+      create() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 能力插件宿主")); },
+    },
+    device: {
+      getPlatform() { return "browser"; },
+      setFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
+      onInput() { return function unsubscribe() {}; },
+    },
+  };
+  const appSdk = global.playmeshApp || emptyAppSdk;
+  const appPlatformUiConfigurationKey =
+    typeof Symbol === "function" && typeof Symbol.for === "function"
+      ? Symbol.for("playmesh.platform-ui.configuration")
+      : "__PLAYMESH_PLATFORM_UI_CONFIGURATION__";
+  function takeAppPlatformUiConfiguration() {
+    const configuration = global[appPlatformUiConfigurationKey] || null;
+    try {
+      delete global[appPlatformUiConfigurationKey];
+    } catch (_) {
+      // The host-owned value is still never copied into a public SDK result.
+    }
+    return configuration;
+  }
+  let browserPlatformUiCatalog =
+    global.__PLAYMESH_BROWSER__?._playmeshPlatformUi || null;
+  if (global.__PLAYMESH_BROWSER__ &&
+      typeof global.__PLAYMESH_BROWSER__ === "object") {
+    delete global.__PLAYMESH_BROWSER__._playmeshPlatformUi;
+  }
+  let platformUiLocale = null;
+  let runtimeLocale = null;
+  let browserRuntimeLocale = null;
+  let runtimeLocaleUsesBrowserSystem = false;
+  let platformUiMessages = Object.freeze({});
+  let platformUiThemeMode = "system";
+  let platformUiTheme = "dark";
+  const platformUiDarkModeQuery =
+    global.matchMedia?.("(prefers-color-scheme: dark)") || null;
+  const BROWSER_RUNTIME_LOCALE_FALLBACK = "zh";
+  const BROWSER_PLATFORM_UI_FALLBACK_LOCALE = "zh-CN";
+
+  function effectivePlatformUiTheme(mode) {
+    if (mode === "light" || mode === "dark") return mode;
+    return platformUiDarkModeQuery?.matches === false ? "light" : "dark";
+  }
+
+  function normalizePlatformUiLocaleId(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim();
+    return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(normalized)
+      ? normalized
+      : null;
+  }
+
+  function browserLocalePreferences() {
+    try {
+      const navigatorObject = global.navigator;
+      const rawValues = [];
+      if (Array.isArray(navigatorObject?.languages)) {
+        rawValues.push(...navigatorObject.languages);
+      }
+      rawValues.push(navigatorObject?.language);
+      const seen = new Set();
+      const locales = [];
+      for (const value of rawValues) {
+        const locale = normalizePlatformUiLocaleId(value);
+        if (!locale) continue;
+        const normalized = locale.toLowerCase();
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        locales.push(locale);
+      }
+      return locales;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function resolveBrowserPlatformUiConfiguration(catalog, preferences) {
+    const rawConfigurations = Array.isArray(catalog?.locales)
+      ? catalog.locales
+      : [];
+    const configurations = rawConfigurations.filter((configuration) => {
+      const locale = normalizePlatformUiLocaleId(configuration?.locale);
+      const messages = configuration?.messages;
+      return Boolean(
+        locale &&
+        messages &&
+        typeof messages === "object" &&
+        !Array.isArray(messages) &&
+        Object.keys(messages).length > 0,
+      );
+    });
+    const fallback = configurations.find(
+      (configuration) =>
+        configuration.locale.toLowerCase() ===
+          BROWSER_PLATFORM_UI_FALLBACK_LOCALE.toLowerCase(),
+    );
+    if (!fallback) {
+      throw new Error(
+        `Browser platform UI ${BROWSER_PLATFORM_UI_FALLBACK_LOCALE} fallback is unavailable`,
+      );
+    }
+    for (const preference of preferences) {
+      const exact = configurations.find(
+        (configuration) =>
+          configuration.locale.toLowerCase() === preference.toLowerCase(),
+      );
+      if (exact) return exact;
+    }
+    for (const preference of preferences) {
+      const language = preference.split("-")[0].toLowerCase();
+      const languageMatch = configurations.find(
+        (configuration) =>
+          configuration.locale.split("-")[0].toLowerCase() === language,
+      );
+      if (languageMatch) return languageMatch;
+    }
+    return fallback;
+  }
+
+  function takeBrowserPlatformUiConfiguration() {
+    const catalog = browserPlatformUiCatalog;
+    browserPlatformUiCatalog = null;
+    const preferences = browserLocalePreferences();
+    browserRuntimeLocale =
+      preferences[0] || BROWSER_RUNTIME_LOCALE_FALLBACK;
+    return resolveBrowserPlatformUiConfiguration(catalog, preferences);
+  }
+
+  function configurePlatformUi(configuration, exposedLocale) {
+    const locale = normalizePlatformUiLocaleId(configuration?.locale);
+    const normalizedExposedLocale = normalizePlatformUiLocaleId(
+      exposedLocale || locale,
+    );
+    const messages = configuration?.messages;
+    const themeMode = configuration?.theme || "system";
+    if (!locale ||
+        !normalizedExposedLocale ||
+        !["system", "light", "dark"].includes(themeMode) ||
+        !messages ||
+        typeof messages !== "object" ||
+        Array.isArray(messages)) {
+      throw new Error("Platform UI localization configuration is invalid");
+    }
+    const entries = Object.entries(messages);
+    if (entries.length === 0) {
+      throw new Error("Platform UI localization messages are empty");
+    }
+    for (const [key, value] of entries) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(key) ||
+          typeof value !== "string") {
+        throw new Error("Platform UI localization messages must be strings");
+      }
+    }
+    platformUiLocale = locale;
+    runtimeLocale = normalizedExposedLocale;
+    platformUiMessages = Object.freeze({ ...messages });
+    platformUiThemeMode = themeMode;
+    platformUiTheme = effectivePlatformUiTheme(themeMode);
+    refreshCapabilityConsentUi(capabilityConsentUi);
+    refreshBrowserPlatformUi(browserNicknameUi);
+    refreshPerformancePlatformUi(performanceUi);
+  }
+
+  function platformUiSystemThemeChanged() {
+    if (platformUiThemeMode !== "system") return;
+    platformUiTheme = effectivePlatformUiTheme("system");
+    refreshCapabilityConsentUi(capabilityConsentUi);
+    refreshBrowserPlatformUi(browserNicknameUi);
+    refreshPerformancePlatformUi(performanceUi);
+  }
+  platformUiDarkModeQuery?.addEventListener?.(
+    "change",
+    platformUiSystemThemeChanged,
+  );
+
+  function platformText(key, argumentsMap = {}) {
+    const template = platformUiMessages[key];
+    if (typeof template !== "string") {
+      throw new Error(`Platform UI localization message is unavailable: ${key}`);
+    }
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, (_, name) =>
+      String(argumentsMap[name] ?? ""));
+  }
+
+  function platformHtml(key, argumentsMap = {}) {
+    return escapeCapabilityHtml(platformText(key, argumentsMap));
+  }
+
+  function isPlatformUiEditableTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable === true) return true;
+    const tagName = String(target.tagName || "").toLowerCase();
+    return tagName === "input" || tagName === "textarea" || tagName === "select";
+  }
+
+  function platformUiEventKey(event) {
+    if (typeof event?.key === "string" && event.key.length > 0) {
+      return event.key;
+    }
+    return {
+      8: "Backspace",
+      9: "Tab",
+      13: "Enter",
+      27: "Escape",
+      32: " ",
+      35: "End",
+      36: "Home",
+      37: "ArrowLeft",
+      38: "ArrowUp",
+      39: "ArrowRight",
+      40: "ArrowDown",
+    }[event?.keyCode] || "";
+  }
+
+  function isPlatformUiBackEvent(event) {
+    const key = platformUiEventKey(event);
+    if (key === "Escape" ||
+        key === "Esc" ||
+        key === "Back" ||
+        key === "BrowserBack" ||
+        key === "GoBack" ||
+        key === "XF86Back" ||
+        event?.keyCode === 4 ||
+        event?.keyCode === 461 ||
+        event?.keyCode === 10009) {
+      return true;
+    }
+    return key === "Backspace" && !isPlatformUiEditableTarget(event?.target);
+  }
+
+  function platformUiControls(value) {
+    const raw = typeof value === "function" ? value() : value;
+    return Array.from(raw || []).filter(
+      (control) =>
+        control &&
+        !control.hidden &&
+        !control.disabled &&
+        control.getAttribute?.("aria-hidden") !== "true",
+    );
+  }
+
+  function focusPlatformUiControl(control) {
+    if (!control || control.hidden || control.disabled ||
+        typeof control.focus !== "function") {
+      return false;
+    }
+    try {
+      control.focus({ preventScroll: true });
+    } catch (_) {
+      control.focus();
+    }
+    return true;
+  }
+
+  function setPlatformUiRovingTabStop(controls, activeControl) {
+    const available = platformUiControls(controls);
+    const active = available.includes(activeControl)
+      ? activeControl
+      : available[0] || null;
+    for (const control of available) {
+      control.setAttribute?.("tabindex", control === active ? "0" : "-1");
+    }
+    return active;
+  }
+
+  function consumePlatformUiKey(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+  }
+
+  function activatePlatformUiControl(control) {
+    if (!control || control.disabled) return;
+    if (typeof control.click === "function") {
+      control.click();
+      return;
+    }
+    control.onclick?.({
+      currentTarget: control,
+      target: control,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+  }
+
+  function installPlatformUiKeyboardNavigation(
+    container,
+    controls,
+    { roving = false, trap = false, onBack = null } = {},
+  ) {
+    if (!container?.addEventListener) return;
+    if (roving) setPlatformUiRovingTabStop(controls, null);
+    container.addEventListener("keydown", (event) => {
+      if (isPlatformUiBackEvent(event)) {
+        consumePlatformUiKey(event);
+        onBack?.();
+        return;
+      }
+      const available = platformUiControls(controls);
+      if (available.length === 0) return;
+      const currentIndex = available.indexOf(event.target);
+      const key = platformUiEventKey(event);
+      if (trap && key === "Tab") {
+        consumePlatformUiKey(event);
+        const nextIndex = event.shiftKey
+          ? (currentIndex <= 0 ? available.length - 1 : currentIndex - 1)
+          : (currentIndex < 0 || currentIndex === available.length - 1
+              ? 0
+              : currentIndex + 1);
+        focusPlatformUiControl(available[nextIndex]);
+        return;
+      }
+      if (isPlatformUiEditableTarget(event.target)) return;
+      if ((key === "Enter" || key === " " ||
+          key === "Spacebar") && currentIndex >= 0) {
+        consumePlatformUiKey(event);
+        activatePlatformUiControl(available[currentIndex]);
+        return;
+      }
+      let nextIndex = null;
+      if (key === "Home") {
+        nextIndex = 0;
+      } else if (key === "End") {
+        nextIndex = available.length - 1;
+      } else if (key === "ArrowRight" || key === "ArrowDown") {
+        nextIndex = currentIndex < 0
+          ? 0
+          : (currentIndex + 1) % available.length;
+      } else if (key === "ArrowLeft" || key === "ArrowUp") {
+        nextIndex = currentIndex <= 0
+          ? available.length - 1
+          : currentIndex - 1;
+      }
+      if (nextIndex == null) return;
+      consumePlatformUiKey(event);
+      const next = available[nextIndex];
+      if (roving) setPlatformUiRovingTabStop(available, next);
+      focusPlatformUiControl(next);
+    });
+  }
+
+  function openPlatformUiLayer(layer, initialFocus, returnFocus = null) {
+    if (!layer) return;
+    layer.__playmeshReturnFocus =
+      returnFocus ||
+      layer.getRootNode?.().activeElement ||
+      global.document?.activeElement ||
+      null;
+    layer.hidden = false;
+    global.setTimeout(() => focusPlatformUiControl(initialFocus), 0);
+  }
+
+  function closePlatformUiLayer(layer, fallbackFocus = null) {
+    if (!layer) return;
+    const returnFocus = layer.__playmeshReturnFocus || fallbackFocus;
+    layer.__playmeshReturnFocus = null;
+    layer.hidden = true;
+    global.setTimeout(
+      () => focusPlatformUiControl(returnFocus || fallbackFocus),
+      0,
+    );
+  }
+
+  function normalizeCapabilityList(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.filter((item) => typeof item === "string" && item.length > 0))];
+  }
+
+  function capabilityConsentContext(appBootstrap) {
+    const browserConfig = global.__PLAYMESH_BROWSER__;
+    const declaredForCurrentPage = browserConfig
+      ? browserConfig.requiredCapabilities
+      : appSdk.isAvailable()
+        ? appSdk.capabilities.getDeclared?.()
+        : appBootstrap?.device?.declaredCapabilities ??
+          appBootstrap?.game?.requiredCapabilities;
+    const required = normalizeCapabilityList(declaredForCurrentPage);
+    const available = normalizeCapabilityList(
+      appSdk.isAvailable()
+        ? appBootstrap?.device?.capabilities || appSdk.capabilities.getAvailable()
+        : browserConfig?.availableCapabilities,
+    );
+    const definitions = Array.isArray(browserConfig?.capabilityRegistry)
+      ? browserConfig.capabilityRegistry
+      : Array.isArray(appBootstrap?.capabilityRegistry)
+        ? appBootstrap.capabilityRegistry
+        : [];
+    return {
+      gameName: browserConfig?.gameName ||
+        appBootstrap?.game?.name ||
+        platformText("capability.current_game"),
+      required,
+      available: new Set(available),
+      definitions: new Map(definitions.map((definition) => [definition.code, definition])),
+    };
+  }
+
+  const platformCapabilityMessageRoots = new Map([
+    ["sensor.accelerometer", "capability.sensor.accelerometer"],
+    ["sensor.gyroscope", "capability.sensor.gyroscope"],
+    ["device.vibration", "capability.device.vibration"],
+  ]);
+
+  function capabilityDisplayText(capability, definition) {
+    const messageRoot = platformCapabilityMessageRoots.get(capability);
+    if (messageRoot) {
+      return {
+        name: platformText(`${messageRoot}.name`),
+        description: platformText(`${messageRoot}.description`),
+      };
+    }
+    return {
+      name: definition?.name || capability,
+      description: definition?.description || "",
+    };
+  }
+
+  async function requestCapabilityConsent(appBootstrap) {
+    const context = capabilityConsentContext(appBootstrap);
+    if (context.required.length === 0) return;
+    const document = global.document;
+    if (!document) throw new Error("当前页面无法显示游戏能力确认");
+    if (!document.body) {
+      await new Promise((resolve) => document.addEventListener("DOMContentLoaded", resolve, { once: true }));
+    }
+    capabilityConsentUi?.host.remove();
+    const returnFocus = document.activeElement || null;
+    const host = document.createElement("div");
+    host.id = "playmesh-capability-consent";
+    host.setAttribute("data-theme", platformUiTheme);
+    const root = host.attachShadow({ mode: "closed" });
+    const rows = context.required.map((capability) => {
+      const definition = context.definitions.get(capability);
+      const displayText = capabilityDisplayText(capability, definition);
+      const label = displayText.name;
+      const descriptionText = displayText.description;
+      const description = descriptionText
+        ? `<em class="capability-description">${escapeCapabilityHtml(descriptionText)}</em>`
+        : "";
+      const unsupported = context.available.has(capability)
+        ? ""
+        : `<span class="unsupported">${platformHtml("capability.unsupported")}</span>`;
+      return `<li data-capability="${escapeCapabilityHtml(capability)}"><span><strong class="capability-name">${escapeCapabilityHtml(label)}</strong>${description}<small>${escapeCapabilityHtml(capability)}</small></span>${unsupported}</li>`;
+    }).join("");
+    root.innerHTML = `<style>
+      :host{all:initial;--pm-overlay:#050b12e8;--pm-surface:#18201d;--pm-text:#f8fafc;--pm-muted:#cbd5e1;--pm-border:#ffffff24;--pm-row:#ffffff0a;--pm-row-border:#ffffff18;--pm-secondary-bg:#ffffff0b;--pm-secondary-border:#ffffff30;--pm-secondary-text:#e2e8f0;--pm-focus:#78a6ff;--pm-warning:#fbbf24;font-family:system-ui,"Microsoft YaHei",sans-serif;letter-spacing:0;color-scheme:dark}
+      :host([data-theme="light"]){--pm-overlay:#e8edf4d9;--pm-surface:#ffffff;--pm-text:#17202b;--pm-muted:#526071;--pm-border:#9aa8b8;--pm-row:#f3f6f9;--pm-row-border:#d5dde6;--pm-secondary-bg:#f5f7fa;--pm-secondary-border:#98a6b6;--pm-secondary-text:#1f2937;--pm-focus:#075dce;--pm-warning:#8a4b00;color-scheme:light}
+      .overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;box-sizing:border-box;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));background:var(--pm-overlay);color:var(--pm-text)}
+      .card{box-sizing:border-box;display:flex;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);width:min(100%,460px);padding:26px;flex-direction:column;overflow:hidden;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface);box-shadow:0 20px 56px #0005}
+      .content{min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch}
+      h2{margin:0;font-size:25px;line-height:1.3}p{margin:10px 0 18px;color:var(--pm-muted);font-size:14px;line-height:1.7}
+      ul{display:grid;gap:10px;margin:0;padding:0;list-style:none}li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 14px;border:1px solid var(--pm-row-border);border-radius:8px;background:var(--pm-row)}
+      strong{display:block;font-size:15px}em{display:block;margin-top:4px;color:var(--pm-muted);font:normal 12px/1.5 system-ui}small{display:block;margin-top:4px;color:var(--pm-muted);font-size:11px}.unsupported{flex:none;color:var(--pm-warning);font-size:12px}
+      .actions{display:flex;flex:none;gap:10px;margin-top:18px}.actions button{min-height:46px;flex:1;border-radius:8px;font:700 14px/1 system-ui;cursor:pointer;touch-action:manipulation}.actions button:focus-visible{outline:3px solid var(--pm-focus);outline-offset:2px}
+      .deny{border:1px solid var(--pm-secondary-border);background:var(--pm-secondary-bg);color:var(--pm-secondary-text)}.allow{border:0;background:#087f6d;color:#fff}
+      @media (max-height:440px),(max-width:420px){.overlay{padding:10px}.card{max-height:calc(100vh - 20px);max-height:calc(100dvh - 20px);padding:16px;border-radius:8px}h2{font-size:20px}p{margin:6px 0 10px;line-height:1.45}ul{gap:7px}li{padding:9px 10px}.actions{margin-top:10px}.actions button{min-height:42px}}
+    </style><div class="overlay" role="dialog" aria-modal="true" aria-labelledby="capability-title"><div class="card"><div class="content"><h2 class="capability-title" id="capability-title">${platformHtml("capability.title", { gameName: context.gameName })}</h2><p class="capability-copy">${platformHtml("capability.description")}</p><ul>${rows}</ul></div><div class="actions"><button class="deny" type="button" aria-label="${platformHtml("capability.deny")}">${platformHtml("capability.deny")}</button><button class="allow" type="button" aria-label="${platformHtml("capability.allow")}">${platformHtml("capability.allow")}</button></div></div></div>`;
+    document.body.appendChild(host);
+    capabilityConsentUi = { host, root, context, denied: false };
+    const deny = root.querySelector(".deny");
+    const allow = root.querySelector(".allow");
+    const decision = await new Promise((resolve) => {
+      allow.addEventListener("click", () => resolve("allow"), { once: true });
+      deny.addEventListener("click", () => resolve("deny"), { once: true });
+      installPlatformUiKeyboardNavigation(
+        root,
+        () => [deny, allow],
+        {
+          trap: true,
+          onBack: () => resolve("back"),
+        },
+      );
+      global.setTimeout(() => focusPlatformUiControl(deny), 0);
+    });
+    if (decision === "allow") {
+      if (appSdk.isAvailable() && typeof appSdk.__confirmCapabilities === "function") {
+        await appSdk.__confirmCapabilities();
+      }
+      host.remove();
+      capabilityConsentUi = null;
+      focusPlatformUiControl(returnFocus);
+      return;
+    }
+    if (decision === "deny") {
+      root.querySelector(".actions").remove();
+      capabilityConsentUi.denied = true;
+      root.querySelector(".capability-copy").textContent =
+        platformText("capability.denied");
+    }
+    const error = new Error("用户拒绝了当前游戏的能力请求");
+    error.code = "capability_denied";
+    if (appSdk.isAvailable() && typeof appSdk.__requestExit === "function") {
+      await appSdk.__requestExit().catch(() => {});
+    } else if (global.history?.length > 1) {
+      global.setTimeout(() => global.history.back(), 0);
+    }
+    if (decision === "back") {
+      host.remove();
+      capabilityConsentUi = null;
+      focusPlatformUiControl(returnFocus);
+    }
+    throw error;
+  }
+
+  function refreshCapabilityConsentUi(ui) {
+    if (!ui?.root) return;
+    ui.host?.setAttribute?.("data-theme", platformUiTheme);
+    const title = ui.root.querySelector?.(".capability-title");
+    if (title) {
+      title.textContent = platformText("capability.title", {
+        gameName: ui.context.gameName,
+      });
+    }
+    const copy = ui.root.querySelector?.(".capability-copy");
+    if (copy) {
+      copy.textContent = platformText(
+        ui.denied ? "capability.denied" : "capability.description",
+      );
+    }
+    const deny = ui.root.querySelector?.(".deny");
+    if (deny) {
+      deny.textContent = platformText("capability.deny");
+      deny.setAttribute?.("aria-label", platformText("capability.deny"));
+    }
+    const allow = ui.root.querySelector?.(".allow");
+    if (allow) {
+      allow.textContent = platformText("capability.allow");
+      allow.setAttribute?.("aria-label", platformText("capability.allow"));
+    }
+    for (const element of ui.root.querySelectorAll?.(".unsupported") || []) {
+      element.textContent = platformText("capability.unsupported");
+    }
+    for (const row of ui.root.querySelectorAll?.("[data-capability]") || []) {
+      const capability = row.getAttribute?.("data-capability");
+      if (!capability) continue;
+      const definition = ui.context.definitions.get(capability);
+      const displayText = capabilityDisplayText(capability, definition);
+      const name = row.querySelector?.(".capability-name");
+      const description = row.querySelector?.(".capability-description");
+      if (name) {
+        name.textContent = displayText.name;
+      }
+      if (description) {
+        description.textContent = displayText.description;
+      }
+    }
+  }
+
+  function escapeCapabilityHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  const browserConsoleLogs = [];
+  const BROWSER_CONSOLE_LOG_LIMIT = 500;
+  let browserConsoleCaptureInstalled = false;
+  const playmesh = {
+    version: PLAYMESH_SDK_VERSION,
+    ready: null,
+    app: appSdk,
+    runtime: Object.freeze({
+      getLocale() {
+        if (!runtimeLocale) {
+          throw new Error("playmesh.runtime.getLocale requires await playmesh.ready");
+        }
+        return runtimeLocale;
+      },
+    }),
+    session: {
+      onStateChange(callback) {
+        const unsubscribe = subscribe(sessionListeners, callback);
+        if (bootstrap) callback(bootstrap.session);
+        return unsubscribe;
+      },
+      onPlayerJoin(callback) {
+        return subscribe(playerJoinListeners, callback);
+      },
+      onPlayerLeave(callback) {
+        return subscribe(playerLeaveListeners, callback);
+      },
+      onPlayerReconnect(callback) {
+        return subscribe(playerReconnectListeners, callback);
+      },
+      isAuthority() {
+        return Boolean(bootstrap && bootstrap.isAuthority);
+      },
+      getCurrent() {
+        return bootstrap && bootstrap.session;
+      },
+      start() {
+        return post("session.start", {}).then(publicSession);
+      },
+      finish() {
+        return post("session.finish", {}).then(publicSession);
+      },
+    },
+    player: {
+      getCurrent() {
+        return bootstrap && bootstrap.player;
+      },
+      setNickname(nickname) {
+        if (!global.__PLAYMESH_BROWSER__ || appSdk.isAvailable()) {
+          return Promise.reject(new Error("修改昵称仅适用于浏览器玩家"));
+        }
+        if (global.__PLAYMESH_BROWSER__.mode === "solo") {
+          return Promise.reject(new Error("单机分享没有玩家昵称"));
+        }
+        return updateBrowserNickname(nickname);
+      },
+    },
+    game: {
+      submitAction(action) {
+        return post("game.submitAction", action);
+      },
+      onMessage(callback) {
+        return subscribe(messageListeners, callback);
+      },
+      onEvent(callback) {
+        return subscribe(messageListeners, callback);
+      },
+    },
+    authority: {
+      onService(handler) {
+        if (!playmesh.session.isAuthority()) {
+          throw new Error("只有 Authority Client 可以注册权威服务");
+        }
+        authorityService = handler;
+        return function unregister() {
+          if (authorityService === handler) authorityService = null;
+        };
+      },
+    },
+    binary: {
+      authorityPlayerId: "authority",
+      async createChannel(options) {
+        await playmesh.ready;
+        if (!playmesh.session.isAuthority()) {
+          throw new Error("只有 Authority 可以创建 Binary Channel");
+        }
+        const mode = binaryModeCode(options?.mode);
+        const result = await binaryRequest(
+          (requestId) => encodeBinaryCreate(requestId, mode),
+          { expectsChannel: true },
+        );
+        return createBinaryChannelHandle(result.id, result.mode);
+      },
+      async joinChannel(channelId) {
+        await playmesh.ready;
+        const normalized = binaryChannelIdFromBytes(binaryChannelIdToBytes(channelId));
+        const existing = binaryChannels.get(normalized);
+        if (existing && !existing.closed) return existing.handle;
+        const result = await binaryRequest(
+          (requestId) => encodeBinaryChannelOperation(BINARY_OP_JOIN, requestId, normalized),
+          { expectsChannel: true },
+        );
+        return createBinaryChannelHandle(result.id, result.mode);
+      },
+    },
+    sync: {
+      startAuthority: startSyncAuthority,
+      submitAction(payload) {
+        return submitSyncEnvelope("input.action", payload);
+      },
+      submitState: submitStateInput,
+      requestSnapshot() {
+        return submitSyncEnvelope("snapshot.request", {});
+      },
+      getSnapshot() {
+        return currentSyncSnapshot && cloneJson(currentSyncSnapshot, "同步快照");
+      },
+      observe(callback) {
+        const unsubscribe = subscribe(syncListeners, callback);
+        if (currentSyncSnapshot) callback(cloneJson(currentSyncSnapshot, "同步快照"));
+        return unsubscribe;
+      },
+    },
+    lifecycle: {
+      onChange(callback) {
+        return subscribe(lifecycleListeners, callback);
+      },
+      onPause(callback) {
+        return subscribe(pauseListeners, callback);
+      },
+      onResume(callback) {
+        return subscribe(resumeListeners, callback);
+      },
+      onExit(callback) {
+        return subscribe(exitListeners, callback);
+      },
+    },
+    performance: {
+      getFps() {
+        return currentFps;
+      },
+      onFps(callback) {
+        const unsubscribe = subscribe(fpsListeners, callback);
+        callback(currentFps);
+        return unsubscribe;
+      },
+      getLatency() {
+        return currentLatency;
+      },
+      getLatencyDiagnostics() {
+        return latencyDiagnostics && cloneJson(latencyDiagnostics, "延迟诊断");
+      },
+      onLatency(callback) {
+        const unsubscribe = subscribe(latencyListeners, callback);
+        callback(currentLatency);
+        return unsubscribe;
+      },
+      setVisible(visible) {
+        performanceVisible = visible !== false;
+        void renderPerformanceUi();
+      },
+      reportFrame(timestamp = global.performance?.now?.() || Date.now()) {
+        if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+          throw new Error("无效的帧时间");
+        }
+        fpsFrameCount += 1;
+        fpsWindowStartedAt ??= timestamp;
+        const elapsed = timestamp - fpsWindowStartedAt;
+        if (elapsed < 1000) return currentFps;
+        currentFps = Math.round((fpsFrameCount * 1000) / elapsed);
+        fpsFrameCount = 0;
+        fpsWindowStartedAt = timestamp;
+        emit(fpsListeners, currentFps);
+        void renderPerformanceUi();
+        if (!global.__PLAYMESH_BROWSER__) {
+          post("performance.fps", { fps: currentFps }).catch(() => {});
+        }
+        return currentFps;
+      },
+    },
+    storage: {
+      getBucket(bucket) {
+        validateStorageName(bucket, "bucket");
+        return {
+          getData(key) {
+            validateStorageName(key, "key");
+            return storageCall("storage.get", bucket, key);
+          },
+          setData(key, value) {
+            validateStorageName(key, "key");
+            JSON.stringify(value);
+            return storageCall("storage.set", bucket, key, value);
+          },
+          removeData(key) {
+            validateStorageName(key, "key");
+            return storageCall("storage.remove", bucket, key);
+          },
+          clearData() {
+            return storageCall("storage.clear", bucket);
+          },
+          upload(file) {
+            return storageUpload(bucket, file);
+          },
+        };
+      },
+    },
+    __receive: receive,
+  };
+
+  installBrowserConsoleCapture();
+  global.playmesh = playmesh;
+  global.console?.info?.("Playmesh Game SDK 注入成功", {
+    version: PLAYMESH_SDK_VERSION,
+  });
+  if (global.chrome && global.chrome.webview) {
+    global.chrome.webview.addEventListener("message", (event) => receive(event.data));
+  }
+  global.addEventListener?.("pagehide", () => markRuntimeExited("游戏页面已退出"));
+  playmesh.ready = appSdk.ready.then(async (appBootstrap) => {
+    const appPlatformUiConfiguration = takeAppPlatformUiConfiguration();
+    const platformUiConfiguration = appPlatformUiConfiguration ||
+      takeBrowserPlatformUiConfiguration();
+    if (appPlatformUiConfiguration) browserPlatformUiCatalog = null;
+    runtimeLocaleUsesBrowserSystem = !appPlatformUiConfiguration;
+    configurePlatformUi(
+      platformUiConfiguration,
+      appPlatformUiConfiguration?.locale || browserRuntimeLocale,
+    );
+    global.console?.info?.("Playmesh Game SDK 等待能力确认");
+    await requestCapabilityConsent(appBootstrap);
+    global.console?.info?.("Playmesh Game SDK 请求宿主就绪");
+    return global.__PLAYMESH_BROWSER__
+      ? connectBrowserFullscreen({
+          ...global.__PLAYMESH_BROWSER__,
+          ...(appBootstrap?.runtime?.coreBase
+            ? { coreBase: appBootstrap.runtime.coreBase }
+            : {}),
+          ...(appBootstrap?.runtime?.playerSource
+            ? { playerSource: appBootstrap.runtime.playerSource }
+            : {}),
+        })
+      : post("sdk.ready", {});
+  });
+
+  async function connectBrowserFullscreen(config) {
+    if (appSdk.isAvailable() && typeof appSdk.device?.setFullscreen === "function") {
+      try {
+        await appSdk.device.setFullscreen(true, config.orientation);
+        global.console?.info?.("Playmesh 扫码加入页面已自动进入全屏");
+      } catch (error) {
+        global.console?.warn?.("Playmesh 扫码加入页面自动全屏失败，游戏将继续", error);
+      }
+    } else {
+      void requestBrowserFullscreen(config.orientation).catch((error) => {
+        global.console?.info?.(
+          "浏览器未允许自动全屏，可通过悬浮工具栏手动进入",
+          error,
+        );
+      });
+    }
+    return connectBrowser(config);
+  }
+
+  function markRuntimeExited(reason) {
+    if (runtimeExited) return;
+    runtimeExited = true;
+    browserConnectionConfig = null;
+    const socket = browserSocket;
+    browserSocket = null;
+    if (socket && socket.readyState < global.WebSocket.CLOSING) {
+      socket.close(1000, reason);
+    }
+    closeBinaryTransport(reason, true);
+    global.console?.info?.("Playmesh 游戏页面已退出，停止 WebSocket 重连", { reason });
+  }
+
+  async function lockBrowserOrientation(orientation) {
+    if (orientation !== "landscape" && orientation !== "portrait") return;
+    const lock = global.screen?.orientation?.lock;
+    if (typeof lock !== "function") {
+      throw new Error("当前浏览器不支持锁定屏幕方向");
+    }
+    await lock.call(global.screen.orientation, orientation);
+  }
+
+  async function requestBrowserFullscreen(orientation) {
+    const target = global.document?.documentElement;
+    if (!target || typeof target.requestFullscreen !== "function") {
+      throw new Error("当前浏览器不支持全屏");
+    }
+    await target.requestFullscreen();
+    await lockBrowserOrientation(orientation);
+  }
+
+  async function storageCall(command, bucket, key, value) {
+    if (!global.__PLAYMESH_BROWSER__) {
+      return post(command, { bucket, key, value });
+    }
+    await playmesh.ready;
+    const requestId = `browser-storage-${Date.now()}-${++browserStorageSequence}`;
+    return new Promise((resolve, reject) => {
+      const timer = global.setTimeout(() => {
+        browserStoragePending.delete(requestId);
+        reject(new Error(`Authority 存储请求超时: ${command}`));
+      }, 15000);
+      browserStoragePending.set(requestId, { resolve, reject, timer });
+      sendBrowserTransport("game.submitAction", {
+        __playmeshStorageRequest: {
+          requestId,
+          command,
+          bucket,
+          ...(key === undefined ? {} : { key }),
+          ...(value === undefined ? {} : { value }),
+        },
+      }).catch((error) => {
+        global.clearTimeout(timer);
+        browserStoragePending.delete(requestId);
+        reject(error);
+      });
+    });
+  }
+
+  function settleBrowserStorage(response) {
+    const operation = browserStoragePending.get(response?.requestId);
+    if (!operation) return;
+    browserStoragePending.delete(response.requestId);
+    global.clearTimeout(operation.timer);
+    if (response.error != null) operation.reject(new Error(String(response.error)));
+    else operation.resolve(response.result);
+  }
+
+  async function storageUpload(bucket, file) {
+    await playmesh.ready;
+    if (!file || typeof file.name !== "string" || typeof file.size !== "number") {
+      throw new Error("upload(file) 需要浏览器 File");
+    }
+    if (file.size > 256 * 1024 * 1024) {
+      throw new Error("上传文件不能超过 256 MiB");
+    }
+    const config = global.__PLAYMESH_BROWSER__;
+    const base = config?.bucketEndpoint || "/bucket";
+    const url = `${base}/${encodeURIComponent(bucket)}?name=${encodeURIComponent(file.name)}`;
+    const headers = {};
+    if (config?.shareToken) {
+      headers["X-Playmesh-Share-Token"] = config.shareToken;
+    }
+    const response = await global.fetch(url, {
+      method: "POST",
+      headers,
+      body: file,
+    });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (_) {
+      // 网关异常返回也统一转换成 SDK Error。
+    }
+    if (!response.ok || typeof payload?.url !== "string") {
+      throw new Error(payload?.error || "文件上传失败");
+    }
+    return payload.url;
+  }
+
+  async function resolveBrowserNickname() {
+    const cached = readBrowserNickname();
+    if (cached) return cached;
+    return openBrowserNicknameDialog({
+      required: true,
+      current: "",
+      submit(nickname) {
+        writeBrowserNickname(nickname);
+      },
+    });
+  }
+
+  function readBrowserNickname() {
+    try {
+      const cached = global.localStorage?.getItem(browserNicknameStorageKey);
+      return validateNickname(cached, false);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeBrowserNickname(nickname) {
+    try {
+      global.localStorage?.setItem(browserNicknameStorageKey, nickname);
+    } catch (_) {
+      // Private browsing may reject storage; the current session can still continue.
+    }
+  }
+
+  function resolveBrowserPlayerId() {
+    try {
+      const cached = global.localStorage?.getItem(browserPlayerIdStorageKey);
+      if (/^p_[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(cached || "")) return cached;
+    } catch (_) {
+      // Continue with an in-memory identity when persistent storage is unavailable.
+    }
+    const bytes = new Uint8Array(16);
+    if (global.crypto?.getRandomValues) {
+      global.crypto.getRandomValues(bytes);
+    } else {
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Math.floor(Math.random() * 256);
+      }
+    }
+    const playerId = `p_${[...bytes].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+    try {
+      global.localStorage?.setItem(browserPlayerIdStorageKey, playerId);
+    } catch (_) {
+      // The current page can still join, but refresh cannot restore this identity.
+    }
+    return playerId;
+  }
+
+  async function updateBrowserNickname(value) {
+    const nickname = validateNickname(value, true);
+    await playmesh.ready;
+    const config = global.__PLAYMESH_BROWSER__;
+    const response = await fetch(new URL(
+      `v1/sessions/${encodeURIComponent(bootstrap.session.id)}/players/me`,
+      config.coreBase,
+    ), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${browserCredential.token}`,
+      },
+      body: JSON.stringify({
+        nickname,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error?.message || payload.error || "修改昵称失败");
+    }
+    bootstrap.session = publicSession(payload.session);
+    bootstrap.player = publicPlayer(payload.player);
+    writeBrowserNickname(nickname);
+    emit(sessionListeners, bootstrap.session);
+    return bootstrap.player;
+  }
+
+  function validateNickname(value, throws) {
+    const nickname = typeof value === "string" ? value.trim() : "";
+    if (nickname && [...nickname].length <= 32) return nickname;
+    if (throws) throw new Error("昵称必须为 1 至 32 个字符");
+    return null;
+  }
+
+  async function mountBrowserNicknameControl() {
+    if (appSdk.isAvailable()) return;
+    const ui = await ensureBrowserNicknameUi();
+    if (!ui) return;
+    ui.button.hidden = false;
+    ui.button.onclick = () => {
+      closePlatformUiLayer(ui.infoOverlay, ui.info);
+      return openBrowserNicknameDialog({
+        required: false,
+        current: bootstrap?.player?.nickname || readBrowserNickname() || "",
+        returnFocus: ui.info,
+        submit: updateBrowserNickname,
+      });
+    };
+  }
+
+  async function openBrowserNicknameDialog(options) {
+    const ui = await ensureBrowserNicknameUi();
+    if (!ui) throw new Error("浏览器昵称界面不可用");
+    ui.nicknameRequired = options.required === true;
+    ui.title.textContent = platformText(
+      ui.nicknameRequired ? "nickname.set_title" : "nickname.edit_title",
+    );
+    ui.input.value = options.current;
+    ui.error.textContent = "";
+    ui.close.hidden = options.required;
+    openPlatformUiLayer(
+      ui.overlay,
+      ui.input,
+      options.returnFocus || (options.required ? null : ui.more),
+    );
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (value, error = null) => {
+        if (settled) return;
+        settled = true;
+        ui.onNicknameBack = null;
+        closePlatformUiLayer(ui.overlay, options.returnFocus || ui.more);
+        if (error) reject(error);
+        else resolve(value);
+      };
+      ui.onNicknameBack = () => {
+        if (ui.submit.disabled) return;
+        if (!ui.nicknameRequired) {
+          finish(null);
+          return;
+        }
+        const error = new Error("Browser nickname setup was cancelled");
+        error.name = "AbortError";
+        finish(null, error);
+      };
+      ui.close.onclick = () => finish(null);
+      ui.form.onsubmit = async (event) => {
+        event.preventDefault();
+        ui.error.textContent = "";
+        ui.submit.disabled = true;
+        try {
+          const nickname = validateNickname(ui.input.value, false);
+          if (!nickname) {
+            ui.error.textContent = platformText("nickname.invalid");
+            return;
+          }
+          await options.submit(nickname);
+          finish(nickname);
+        } catch (error) {
+          global.console?.warn?.("Playmesh browser nickname update failed", error);
+          ui.error.textContent = platformText("nickname.update_failed");
+        } finally {
+          ui.submit.disabled = false;
+        }
+      };
+    });
+  }
+
+  function formatBrowserConsoleValue(value) {
+    if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
+    if (typeof value === "string") return value;
+    if (typeof value === "bigint") return value.toString();
+    try {
+      const encoded = JSON.stringify(value);
+      return encoded === undefined ? String(value) : encoded;
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  function recordBrowserConsole(level, args, eventType = "console") {
+    browserConsoleLogs.push({
+      timestamp: Date.now(),
+      level,
+      eventType,
+      message: args.map(formatBrowserConsoleValue).join(" "),
+    });
+    if (browserConsoleLogs.length > BROWSER_CONSOLE_LOG_LIMIT) {
+      browserConsoleLogs.splice(0, browserConsoleLogs.length - BROWSER_CONSOLE_LOG_LIMIT);
+    }
+    if (browserNicknameUi?.logsOverlay && !browserNicknameUi.logsOverlay.hidden) {
+      renderBrowserConsoleLogs(browserNicknameUi);
+    }
+  }
+
+  function installBrowserConsoleCapture() {
+    if (!global.__PLAYMESH_BROWSER__ ||
+        appSdk.isAvailable() ||
+        browserConsoleCaptureInstalled ||
+        !global.console) {
+      return;
+    }
+    browserConsoleCaptureInstalled = true;
+    for (const level of ["log", "info", "warn", "error", "debug"]) {
+      const nativeMethod = typeof global.console[level] === "function"
+        ? global.console[level].bind(global.console)
+        : null;
+      if (!nativeMethod) continue;
+      global.console[level] = (...args) => {
+        nativeMethod(...args);
+        recordBrowserConsole(level, args);
+      };
+    }
+    global.addEventListener?.("error", (event) => {
+      const resource = event.target && event.target !== global
+        ? event.target.currentSrc || event.target.src || event.target.href
+        : null;
+      const error = event.error instanceof Error ? event.error : null;
+      recordBrowserConsole(
+        "error",
+        [resource ? `Resource load failed: ${resource}` : error || event.message],
+        resource ? "resource.error" : "uncaught.error",
+      );
+    }, true);
+    global.addEventListener?.("unhandledrejection", (event) => {
+      recordBrowserConsole("error", [event.reason], "unhandled.rejection");
+    });
+  }
+
+  function formatBrowserConsoleTimestamp(timestamp) {
+    const value = new Date(timestamp);
+    try {
+      return new Intl.DateTimeFormat(platformUiLocale || undefined, {
+        dateStyle: "short",
+        timeStyle: "medium",
+      }).format(value);
+    } catch (_) {
+      // Older WebViews keep the deterministic fallback below.
+    }
+    const pad = (part) => String(part).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ` +
+      `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  }
+
+  function renderBrowserConsoleLogs(ui) {
+    if (!ui?.logsOutput) return;
+    ui.logsOutput.textContent = browserConsoleLogs.length
+      ? browserConsoleLogs.map((entry) => {
+          const eventType = entry.eventType === "console" ? "" : ` [${entry.eventType}]`;
+          return `[${formatBrowserConsoleTimestamp(entry.timestamp)}] [${entry.level}]${eventType} ${entry.message}`;
+        }).join("\n")
+      : platformText("logs.empty");
+    ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
+  }
+
+  function installBrowserDockDrag(ui) {
+    const dock = ui?.dock;
+    if (!dock?.addEventListener) return;
+    let drag = null;
+    let suppressClick = false;
+    const clampPosition = (left, top, rect) => ({
+      left: Math.max(4, Math.min(left, Math.max(4, (global.innerWidth || 0) - rect.width - 4))),
+      top: Math.max(4, Math.min(top, Math.max(4, (global.innerHeight || 0) - rect.height - 4))),
+    });
+    const moveDock = (left, top, rect) => {
+      const position = clampPosition(left, top, rect);
+      dock.style.left = `${position.left}px`;
+      dock.style.top = `${position.top}px`;
+      dock.style.right = "auto";
+      dock.style.bottom = "auto";
+    };
+    dock.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary === false || (event.button != null && event.button !== 0)) return;
+      const rect = dock.getBoundingClientRect();
+      drag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        moved: false,
+      };
+      dock.setPointerCapture?.(event.pointerId);
+    });
+    dock.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const deltaX = event.clientX - drag.startX;
+      const deltaY = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(deltaX, deltaY) < 6) return;
+      drag.moved = true;
+      event.preventDefault?.();
+      ui.menu.hidden = true;
+      moveDock(drag.left + deltaX, drag.top + deltaY, drag);
+    });
+    const finishDrag = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      suppressClick = drag.moved;
+      dock.releasePointerCapture?.(event.pointerId);
+      drag = null;
+    };
+    dock.addEventListener("pointerup", finishDrag);
+    dock.addEventListener("pointercancel", finishDrag);
+    dock.addEventListener("click", (event) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+    }, true);
+    global.addEventListener?.("resize", () => {
+      if (!dock.style.left) return;
+      const rect = dock.getBoundingClientRect();
+      moveDock(rect.left, rect.top, rect);
+    });
+  }
+
+  async function ensureBrowserNicknameUi() {
+    if (browserNicknameUi) return browserNicknameUi;
+    if (!global.document) return null;
+    if (!global.document.body) {
+      await new Promise((resolve) => global.document.addEventListener("DOMContentLoaded", resolve, { once: true }));
+    }
+    const pageReturnFocus = global.document.activeElement || null;
+    const host = global.document.createElement("div");
+    host.id = "playmesh-browser-profile";
+    host.setAttribute?.("lang", platformUiLocale);
+    host.setAttribute?.("data-theme", platformUiTheme);
+    const root = host.attachShadow({ mode: "closed" });
+    root.innerHTML = `<style>
+      :host{all:initial;--pm-surface:#121720eb;--pm-surface-solid:#20242b;--pm-surface-hover:#343b46;--pm-text:#f4f7fb;--pm-muted:#d5dbe4;--pm-border:#596272;--pm-soft-border:#ffffff35;--pm-divider:#ffffff18;--pm-overlay:#0008;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#0b0f15;--pm-log-text:#dbe5f0;--pm-focus:#78a6ff;--pm-error:#fda4af;font-family:system-ui,"Microsoft YaHei",sans-serif;letter-spacing:0;color-scheme:dark}
+      :host([data-theme="light"]){--pm-surface:#fffffff2;--pm-surface-solid:#ffffff;--pm-surface-hover:#e8edf3;--pm-text:#18212c;--pm-muted:#526071;--pm-border:#91a0b0;--pm-soft-border:#aab5c2;--pm-divider:#d5dde6;--pm-overlay:#dce3ecd9;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#f4f7fa;--pm-log-text:#1f2937;--pm-focus:#075dce;--pm-error:#a1122f;color-scheme:light}
+      button,input{box-sizing:border-box;font:inherit;letter-spacing:0}
+      .dock{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483646;display:flex;align-items:flex-end;flex-direction:column;color:var(--pm-text);filter:drop-shadow(0 8px 20px #0006);touch-action:none;user-select:none}
+      .tools{display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface)}
+      .tool,.expand{display:grid;place-items:center;width:48px;height:48px;padding:0;border:0;border-bottom:1px solid var(--pm-divider);background:transparent;color:var(--pm-text);font:800 21px/1 system-ui;cursor:pointer}
+      .tool:last-child{border-bottom:0}.tool:hover,.expand:hover{background:var(--pm-surface-hover)}.tool:focus-visible,.expand:focus-visible,.menu button:focus-visible,.actions button:focus-visible,.logs-head button:focus-visible,.logs-output:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}.tool.active{color:#087f6d}
+      .expand{border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface)}
+      .panel{display:flex;align-items:center;gap:10px;margin-top:8px;padding:8px 10px;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);font:700 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
+      .menu{position:absolute;right:56px;top:0;width:190px;overflow:hidden;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 12px 30px #0005}
+      .menu button{display:flex;align-items:center;width:100%;height:48px;padding:0 15px;border:0;border-bottom:1px solid var(--pm-divider);background:var(--pm-surface-solid);color:var(--pm-text);font:700 14px/1 system-ui,"Microsoft YaHei",sans-serif;cursor:pointer}.menu button:last-child{border-bottom:0}.menu button:hover{background:var(--pm-surface-hover)}
+      .overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}
+      .overlay[hidden],.panel[hidden],.menu[hidden],.expand[hidden],.tools[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden],.logs-overlay[hidden]{display:none}
+      form,.info-card{box-sizing:border-box;width:min(100%,380px);max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}
+      h2{margin:0 0 16px;font-size:20px;line-height:1.3;letter-spacing:0}
+      label{display:block;margin-bottom:6px;font-size:14px;font-weight:700}
+      input{width:100%;height:44px;padding:8px 10px;border:1px solid var(--pm-border);border-radius:6px;color:var(--pm-field-text);background:var(--pm-field-bg)}
+      .error{min-height:20px;margin:6px 0;color:var(--pm-error);font-size:13px}
+      .actions{display:flex;justify-content:flex-end;gap:8px}
+      .actions button{height:40px;padding:0 14px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}
+      .actions .save{border-color:#10b981;background:#0f766e;color:#fff;font-weight:700}
+      .info-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}.info-card p{margin:8px 0;color:var(--pm-muted);line-height:1.6}.info-card strong{color:var(--pm-text)}.info-card .actions{margin-top:18px}
+      .logs-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:14px;background:var(--pm-overlay)}.logs-card{box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,760px);height:min(78vh,620px);height:min(78dvh,620px);padding:16px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}.logs-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}.logs-head h2{flex:1;margin:0}.logs-head button{height:36px;padding:0 12px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}.logs-output{min-width:0;min-height:0;margin:0;padding:10px;overflow:auto;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-log-bg);color:var(--pm-log-text);white-space:pre-wrap;word-break:break-word;user-select:text;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.logs-card .actions{margin-top:10px}
+      button:disabled{cursor:wait;opacity:.65}
+      @media (max-height:360px) and (min-width:500px){.tools{flex-direction:row}.tool{border-right:1px solid #ffffff18;border-bottom:0}.tool:last-child{border-right:0}.panel{position:absolute;right:0;top:56px;margin:0}.menu{right:0;top:56px}}
+    </style>
+    <div class="dock">
+      <button class="expand" type="button" title="${platformHtml("toolbar.expand")}" aria-label="${platformHtml("toolbar.expand")}" aria-expanded="false" aria-controls="playmesh-browser-tools" tabindex="0">🎮</button>
+      <div class="tools" id="playmesh-browser-tools" role="toolbar" hidden>
+        <button class="tool collapse" type="button" title="${platformHtml("toolbar.collapse")}" aria-label="${platformHtml("toolbar.collapse")}" tabindex="0">⌃</button>
+        <button class="tool reload" type="button" title="${platformHtml("toolbar.restart")}" aria-label="${platformHtml("toolbar.restart")}" tabindex="-1">↻</button>
+        <button class="tool logs" type="button" title="${platformHtml("toolbar.logs")}" aria-label="${platformHtml("toolbar.logs")}" tabindex="-1">≡</button>
+        <button class="tool enter-fullscreen" type="button" title="${platformHtml("toolbar.enter_fullscreen")}" aria-label="${platformHtml("toolbar.enter_fullscreen")}" tabindex="-1">⛶</button>
+        <button class="tool exit-fullscreen" type="button" title="${platformHtml("toolbar.exit_fullscreen")}" aria-label="${platformHtml("toolbar.exit_fullscreen")}" tabindex="-1">⊡</button>
+        <button class="tool more" type="button" title="${platformHtml("toolbar.more")}" aria-label="${platformHtml("toolbar.more")}" aria-expanded="false" aria-controls="playmesh-browser-menu" tabindex="-1">⋮</button>
+      </div>
+      <div class="panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>
+      <div class="menu" id="playmesh-browser-menu" role="menu" hidden><button class="info" role="menuitem" type="button" aria-label="${platformHtml("menu.info")}" tabindex="0">${platformHtml("menu.info")}</button><button class="performance" role="menuitem" type="button" aria-label="${platformHtml("menu.performance")}" aria-pressed="false" tabindex="-1">${platformHtml("menu.performance")}</button></div>
+    </div>
+    <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-nickname-title" hidden>
+      <form><h2 id="playmesh-nickname-title"></h2><label class="nickname-label" for="nickname">${platformHtml("nickname.label")}</label>
+      <input id="nickname" maxlength="32" autocomplete="nickname" required>
+      <div class="error" role="alert"></div><div class="actions">
+      <button class="close" type="button" aria-label="${platformHtml("common.cancel")}">${platformHtml("common.cancel")}</button><button class="save" type="submit" aria-label="${platformHtml("common.save")}">${platformHtml("common.save")}</button>
+      </div></form>
+    </div>
+    <div class="info-overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-info-title" hidden><div class="info-card"><h2 class="info-title" id="playmesh-info-title">${platformHtml("info.title")}</h2><p class="game-name"></p><p class="session-info"></p><div class="actions"><button class="edit" type="button" aria-label="${platformHtml("nickname.edit_action")}" hidden>${platformHtml("nickname.edit_action")}</button><button class="info-close" type="button" aria-label="${platformHtml("common.close")}">${platformHtml("common.close")}</button></div></div></div>
+    <div class="logs-overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-logs-title" hidden><div class="logs-card"><div class="logs-head"><h2 class="logs-title" id="playmesh-logs-title">${platformHtml("logs.title")}</h2><button class="logs-clear" type="button" aria-label="${platformHtml("common.clear")}">${platformHtml("common.clear")}</button></div><pre class="logs-output" tabindex="0" aria-live="polite">${platformHtml("logs.empty")}</pre><div class="actions"><button class="logs-close" type="button" aria-label="${platformHtml("common.close")}">${platformHtml("common.close")}</button></div></div></div>`;
+    global.document.body.appendChild(host);
+    browserNicknameUi = {
+      host,
+      pageReturnFocus,
+      dock: root.querySelector(".dock"),
+      panel: root.querySelector(".panel"),
+      fps: root.querySelector(".fps"),
+      latency: root.querySelector(".latency"),
+      performanceButton: root.querySelector(".performance"),
+      button: root.querySelector(".edit"),
+      overlay: root.querySelector(".overlay"),
+      form: root.querySelector("form"),
+      title: root.querySelector("h2"),
+      nicknameLabel: root.querySelector(".nickname-label"),
+      input: root.querySelector("input"),
+      error: root.querySelector(".error"),
+      close: root.querySelector(".close"),
+      submit: root.querySelector(".save"),
+      expand: root.querySelector(".expand"),
+      tools: root.querySelector(".tools"),
+      collapse: root.querySelector(".collapse"),
+      reload: root.querySelector(".reload"),
+      enterFullscreen: root.querySelector(".enter-fullscreen"),
+      exitFullscreen: root.querySelector(".exit-fullscreen"),
+      more: root.querySelector(".more"),
+      menu: root.querySelector(".menu"),
+      info: root.querySelector(".info"),
+      logs: root.querySelector(".logs"),
+      infoOverlay: root.querySelector(".info-overlay"),
+      infoClose: root.querySelector(".info-close"),
+      infoTitle: root.querySelector(".info-title"),
+      gameName: root.querySelector(".game-name"),
+      sessionInfo: root.querySelector(".session-info"),
+      logsOverlay: root.querySelector(".logs-overlay"),
+      logsOutput: root.querySelector(".logs-output"),
+      logsTitle: root.querySelector(".logs-title"),
+      logsClear: root.querySelector(".logs-clear"),
+      logsClose: root.querySelector(".logs-close"),
+    };
+    const ui = browserNicknameUi;
+    global.document.addEventListener?.("focusin", (event) => {
+      if (event.target && event.target !== host) {
+        ui.pageReturnFocus = event.target;
+      }
+    }, true);
+    const toolbarControls = () => [
+      ui.collapse,
+      ui.reload,
+      ui.logs,
+      ui.enterFullscreen,
+      ui.exitFullscreen,
+      ui.more,
+    ];
+    const menuControls = () => [ui.info, ui.performanceButton];
+    const closeBrowserMenu = (restoreFocus = true) => {
+      ui.menu.hidden = true;
+      ui.more.setAttribute?.("aria-expanded", "false");
+      if (restoreFocus) focusPlatformUiControl(ui.more);
+    };
+    const openBrowserMenu = () => {
+      ui.menu.hidden = false;
+      ui.more.setAttribute?.("aria-expanded", "true");
+      const first = setPlatformUiRovingTabStop(menuControls(), ui.info);
+      focusPlatformUiControl(first);
+    };
+    ui.collapse.onclick = () => {
+      ui.tools.hidden = true;
+      ui.expand.hidden = false;
+      ui.expand.setAttribute?.("aria-expanded", "false");
+      closeBrowserMenu(false);
+      focusPlatformUiControl(ui.expand);
+    };
+    ui.expand.onclick = () => {
+      ui.tools.hidden = false;
+      ui.expand.hidden = true;
+      ui.expand.setAttribute?.("aria-expanded", "true");
+      const first = setPlatformUiRovingTabStop(
+        toolbarControls(),
+        ui.collapse,
+      );
+      focusPlatformUiControl(first);
+    };
+    ui.reload.onclick = () => global.location?.reload?.();
+    ui.performanceButton.onclick = () => {
+      performanceVisible = !performanceVisible;
+      void renderPerformanceUi();
+      closeBrowserMenu();
+    };
+    ui.enterFullscreen.onclick = async () => {
+      try {
+        await requestBrowserFullscreen(browserConnectionConfig?.orientation);
+      } catch (error) {
+        global.console?.warn?.("浏览器全屏或方向锁定不可用，请手动调整", error);
+      }
+    };
+    ui.exitFullscreen.onclick = () => {
+      if (global.document.fullscreenElement) {
+        Promise.resolve(global.document.exitFullscreen?.()).catch(() => {});
+      }
+    };
+    ui.more.onclick = () => {
+      if (ui.menu.hidden) openBrowserMenu();
+      else closeBrowserMenu();
+    };
+    ui.info.onclick = () => {
+      const config = global.__PLAYMESH_BROWSER__ || {};
+      ui.infoTitle.textContent = platformText("info.title");
+      ui.gameName.textContent =
+        config.gameName || platformText("info.default_game");
+      ui.sessionInfo.textContent = bootstrap?.session?.joinCode
+        ? platformText("info.join_code", {
+            joinCode: bootstrap.session.joinCode,
+          })
+        : platformText("info.solo_share");
+      closeBrowserMenu(false);
+      openPlatformUiLayer(ui.infoOverlay, ui.infoClose, ui.more);
+    };
+    ui.logs.onclick = () => {
+      renderBrowserConsoleLogs(ui);
+      closeBrowserMenu(false);
+      openPlatformUiLayer(ui.logsOverlay, ui.logsClose, ui.logs);
+    };
+    ui.infoClose.onclick = () => {
+      closePlatformUiLayer(ui.infoOverlay, ui.more);
+    };
+    ui.logsClear.onclick = () => {
+      browserConsoleLogs.length = 0;
+      renderBrowserConsoleLogs(ui);
+    };
+    ui.logsClose.onclick = () => {
+      closePlatformUiLayer(ui.logsOverlay, ui.logs);
+    };
+    installPlatformUiKeyboardNavigation(
+      ui.expand,
+      () => [ui.expand],
+      {
+        onBack: () => focusPlatformUiControl(ui.pageReturnFocus),
+      },
+    );
+    installPlatformUiKeyboardNavigation(
+      ui.tools,
+      toolbarControls,
+      {
+        roving: true,
+        onBack: () => {
+          if (!ui.menu.hidden) closeBrowserMenu();
+          else ui.collapse.onclick();
+        },
+      },
+    );
+    installPlatformUiKeyboardNavigation(
+      ui.menu,
+      menuControls,
+      {
+        roving: true,
+        onBack: () => closeBrowserMenu(),
+      },
+    );
+    installPlatformUiKeyboardNavigation(
+      ui.overlay,
+      () => [ui.input, ui.close, ui.submit],
+      {
+        trap: true,
+        onBack: () => ui.onNicknameBack?.(),
+      },
+    );
+    installPlatformUiKeyboardNavigation(
+      ui.infoOverlay,
+      () => [ui.button, ui.infoClose],
+      {
+        trap: true,
+        onBack: () => ui.infoClose.onclick(),
+      },
+    );
+    installPlatformUiKeyboardNavigation(
+      ui.logsOverlay,
+      () => [ui.logsClear, ui.logsOutput, ui.logsClose],
+      {
+        trap: true,
+        onBack: () => ui.logsClose.onclick(),
+      },
+    );
+    installBrowserDockDrag(ui);
+    refreshBrowserPlatformUi(ui);
+    performanceUi = browserNicknameUi;
+    return browserNicknameUi;
+  }
+
+  function setPlatformControlLabel(element, key, { visible = false } = {}) {
+    if (!element) return;
+    const label = platformText(key);
+    element.setAttribute?.("aria-label", label);
+    element.setAttribute?.("title", label);
+    if (visible) element.textContent = label;
+  }
+
+  function refreshBrowserPlatformUi(ui) {
+    if (!ui) return;
+    ui.dock?.getRootNode?.()?.host?.setAttribute?.("lang", platformUiLocale);
+    ui.host?.setAttribute?.("data-theme", platformUiTheme);
+    setPlatformControlLabel(ui.expand, "toolbar.expand");
+    setPlatformControlLabel(ui.collapse, "toolbar.collapse");
+    setPlatformControlLabel(ui.reload, "toolbar.restart");
+    setPlatformControlLabel(ui.logs, "toolbar.logs");
+    setPlatformControlLabel(ui.enterFullscreen, "toolbar.enter_fullscreen");
+    setPlatformControlLabel(ui.exitFullscreen, "toolbar.exit_fullscreen");
+    setPlatformControlLabel(ui.more, "toolbar.more");
+    setPlatformControlLabel(ui.info, "menu.info", { visible: true });
+    setPlatformControlLabel(ui.performanceButton, "menu.performance", {
+      visible: true,
+    });
+    setPlatformControlLabel(ui.button, "nickname.edit_action", {
+      visible: true,
+    });
+    if (ui.nicknameLabel) {
+      ui.nicknameLabel.textContent = platformText("nickname.label");
+    }
+    if (ui.title && !ui.overlay.hidden) {
+      ui.title.textContent = platformText(
+        ui.nicknameRequired ? "nickname.set_title" : "nickname.edit_title",
+      );
+    }
+    setPlatformControlLabel(ui.close, "common.cancel", { visible: true });
+    setPlatformControlLabel(ui.submit, "common.save", { visible: true });
+    if (ui.infoTitle) ui.infoTitle.textContent = platformText("info.title");
+    setPlatformControlLabel(ui.infoClose, "common.close", { visible: true });
+    if (ui.logsTitle) ui.logsTitle.textContent = platformText("logs.title");
+    setPlatformControlLabel(ui.logsClear, "common.clear", { visible: true });
+    setPlatformControlLabel(ui.logsClose, "common.close", { visible: true });
+    const config = global.__PLAYMESH_BROWSER__ || {};
+    if (ui.gameName) {
+      ui.gameName.textContent =
+        config.gameName || platformText("info.default_game");
+    }
+    if (ui.sessionInfo) {
+      ui.sessionInfo.textContent = bootstrap?.session?.joinCode
+        ? platformText("info.join_code", {
+            joinCode: bootstrap.session.joinCode,
+          })
+        : platformText("info.solo_share");
+    }
+    if (!ui.logsOverlay.hidden) renderBrowserConsoleLogs(ui);
+  }
+
+  function validateStorageName(value, field) {
+    const max = field === "bucket" ? 64 : 128;
+    const pattern = field === "bucket"
+      ? /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+      : /^[A-Za-z0-9._-]+$/;
+    if (typeof value !== "string" || value.length < 1 || value.length > max || !pattern.test(value)) {
+      throw new Error(`无效的 ${field}`);
+    }
+  }
+})(window);

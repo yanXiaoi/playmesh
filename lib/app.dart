@@ -439,7 +439,8 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
           games: _gameLibrary.cachedGames,
           onRefresh: _gameLibrary.refresh,
           onImport: _importGame,
-          onQuery: (search) => _gameLibrary.query(search: search),
+          onQuery: (search, {required offset, required limit}) =>
+              _gameLibrary.query(search: search, offset: offset, limit: limit),
           onCheckUpdates: widget.games == null
               ? _catalogController.checkUpdates
               : null,

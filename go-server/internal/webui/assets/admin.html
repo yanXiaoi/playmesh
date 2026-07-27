@@ -8,12 +8,8 @@
     (() => {
       const root = document.documentElement;
       root.dataset.uiBooting = "true";
-      let mode = "system";
-      try { mode = localStorage.getItem("playmesh.theme") || "system"; } catch (_) {}
-      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-      const theme = mode === "light" || mode === "dark" ? mode : (dark ? "dark" : "light");
-      root.dataset.theme = theme;
-      root.style.colorScheme = theme;
+      root.dataset.theme = "light";
+      root.style.colorScheme = "light";
       try {
         const saved = localStorage.getItem("playmesh.locale");
         const locale = saved || (Array.isArray(navigator.languages) ? navigator.languages[0] : "") || navigator.language;
@@ -26,7 +22,10 @@
       window.__playmeshRevealTimer = setTimeout(window.__playmeshRevealUI, 4000);
     })();
   </script>
+  <link rel="stylesheet" href="{{ADMIN_ASSET_BASE}}/gocaptcha.global.css">
   <link rel="stylesheet" href="{{ADMIN_ASSET_BASE}}/style.css">
+  <script defer src="{{ADMIN_ASSET_BASE}}/gocaptcha.global.js"></script>
+  <script defer src="{{ADMIN_ASSET_BASE}}/captcha.js"></script>
   <script defer src="{{ADMIN_ASSET_BASE}}/admin.js"></script>
 </head>
 <body>
@@ -37,40 +36,39 @@
       <form id="login-form" class="stack">
         <label data-i18n-label="admin.login.username"><input name="username" required autocomplete="username"></label>
         <label data-i18n-label="admin.login.password"><input name="password" type="password" required autocomplete="current-password"></label>
-        <div>
-          <div id="captcha-prompt" class="muted" data-i18n="admin.captcha.loading"></div>
-          <img id="captcha-prompt-image" class="captcha-prompt-image hidden" alt="" data-i18n-alt="admin.captcha.prompt_alt">
-          <div id="captcha-canvas" class="captcha-canvas">
-            <img id="captcha-image" alt="" tabindex="0" data-i18n-alt="admin.captcha.image_alt"
-                 role="application"
-                 aria-label="" data-i18n-aria="admin.captcha.keyboard_help">
-            <div id="captcha-markers" class="captcha-markers"></div>
-          </div>
-          <input id="captcha-answer" placeholder="" autocomplete="off" data-i18n-placeholder="admin.captcha.answer">
-          <button id="refresh-captcha" type="button" class="secondary" data-i18n="admin.captcha.refresh"></button>
-        </div>
         <button type="submit" data-i18n="admin.login.submit"></button>
-        <div id="login-notice" class="notice"></div>
       </form>
     </article>
   </section>
 
-  <main id="admin-view" class="shell hidden">
+  <main id="admin-view" class="shell admin-shell hidden">
     <div class="admin-layout">
       <aside class="panel sidebar">
-        <div class="brand"><span class="brand-mark">P</span> Playmesh</div>
-        <div class="nav">
+        <div class="sidebar-head">
+          <div class="brand">
+            <span class="brand-mark">P</span>
+            <span class="brand-name">Playmesh</span>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Admin sections">
           <button class="active" data-section="overview" data-i18n="admin.nav.overview"></button>
           <button data-section="games" data-i18n="admin.nav.games"></button>
           <button data-section="settings" data-i18n="admin.nav.settings"></button>
           <button data-section="config" data-i18n="admin.nav.config"></button>
-          <a id="public-page-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" data-i18n="admin.nav.public"></a>
+        </nav>
+        <div class="sidebar-tools">
           <select id="admin-locale" class="hidden" aria-label="" data-i18n-aria="settings.language"></select>
-          <button id="admin-theme" type="button" class="secondary" data-i18n="theme.switch"></button>
-          <button id="logout" class="danger" data-i18n="nav.logout"></button>
+          <a id="public-page-link" class="button secondary sidebar-tool" href="#" target="_blank" rel="noopener noreferrer" data-i18n-aria="admin.nav.public">
+            <span class="sidebar-tool-icon" aria-hidden="true">↗</span>
+            <span class="sidebar-tool-text" data-i18n="admin.nav.public"></span>
+          </a>
+          <button id="logout" class="danger sidebar-tool" data-i18n-aria="nav.logout">
+            <span class="sidebar-tool-icon" aria-hidden="true">↪</span>
+            <span class="sidebar-tool-text" data-i18n="nav.logout"></span>
+          </button>
         </div>
       </aside>
-      <section>
+      <section class="admin-content">
         <div id="overview-section" class="admin-section">
           <div class="section-head"><div><div class="eyebrow" data-i18n="admin.overview.eyebrow"></div><h2 data-i18n="admin.overview.title"></h2></div><span id="stats-time" class="muted"></span></div>
           <div id="stats" class="stats"></div>
@@ -121,7 +119,11 @@
               <label class="choice-field wide"><input name="showPublicSourceQRCode" type="checkbox"><span data-i18n="admin.config.show_qr"></span></label>
               <label class="choice-field wide"><input name="allowUserRegistration" type="checkbox"><span data-i18n="admin.config.allow_registration"></span></label>
               <label class="choice-field wide"><input name="requireEmailVerification" type="checkbox"><span data-i18n="admin.config.require_verification"></span></label>
-              <label data-i18n-label="admin.config.captcha_mode"><select name="captchaMode"><option value="math" data-i18n="admin.config.captcha_math"></option><option value="text" data-i18n="admin.config.captcha_text"></option></select></label>
+              <label data-i18n-label="admin.config.captcha_mode"><select name="captchaMode"><option value="text" data-i18n="admin.config.captcha_text"></option><option value="slide" data-i18n="admin.config.captcha_slide"></option><option value="rotate" data-i18n="admin.config.captcha_rotate"></option></select></label>
+              <label data-i18n-label="admin.config.captcha_image_source"><select name="captchaImageSource"><option value="local" data-i18n="admin.config.captcha_source_local"></option><option value="remote" data-i18n="admin.config.captcha_source_remote"></option></select></label>
+              <label class="wide" data-i18n-label="admin.config.captcha_image_directory"><input name="captchaImageDirectory"></label>
+              <label class="wide" data-i18n-label="admin.config.captcha_image_url"><input name="captchaImageURL" type="url" placeholder="https://example.com/random-image"></label>
+              <label data-i18n-label="admin.config.captcha_cache_size"><input name="captchaImageCacheSize" type="number" min="0" max="128"></label>
               <label data-i18n-label="admin.config.session_minutes"><input name="sessionTTL" type="number" min="1"></label>
               <label data-i18n-label="admin.config.login_rate_ms"><input name="loginInterval" type="number" min="100"></label>
               <label data-i18n-label="admin.config.captcha_rate_ms"><input name="captchaInterval" type="number" min="100"></label>
@@ -175,6 +177,10 @@
   <dialog id="detail-dialog">
     <div class="section-head"><h2 data-i18n="admin.detail.title"></h2><button id="close-dialog" class="secondary" data-i18n="common.close"></button></div>
     <pre id="detail-content"></pre>
+  </dialog>
+
+  <dialog id="admin-captcha-dialog" class="captcha-dialog" aria-label="" data-i18n-aria="auth.captcha_title">
+    <div id="admin-captcha-widget" class="captcha-host"></div>
   </dialog>
 </body>
 </html>

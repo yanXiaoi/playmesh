@@ -1,64 +1,80 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
+	captchamodule "go-server/internal/captcha"
 	"go-server/internal/config"
 	"go-server/internal/middleware"
 	"go-server/internal/store"
 )
 
 type AuthHandler struct {
-	config   config.Config
-	store    *store.Store
-	mutex    sync.Mutex
-	captchas map[string]captchaRecord
+	config  config.Config
+	store   *store.Store
+	captcha *captchamodule.Service
 }
 
-const maxPendingCaptchas = 10000
+const adminLoginCaptchaScope = "admin-login"
 
 func NewAuthHandler(cfg config.Config, database *store.Store) *AuthHandler {
+	service, _ := captchamodule.New(
+		context.Background(),
+		captchaOptions(cfg),
+		nil,
+	)
+	return NewAuthHandlerWithCaptchaService(cfg, database, service)
+}
+
+func NewAuthHandlerWithCaptchaService(
+	cfg config.Config,
+	database *store.Store,
+	service *captchamodule.Service,
+) *AuthHandler {
 	return &AuthHandler{
-		config: cfg, store: database, captchas: make(map[string]captchaRecord),
+		config:  cfg,
+		store:   database,
+		captcha: service,
 	}
 }
 
 func (h *AuthHandler) Captcha(c *gin.Context) {
-	generated, err := generateCaptcha(h.config.Admin.CaptchaMode)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "captcha_failed"})
+	if h.captcha == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "captcha_failed",
+			"message": "验证码模块未初始化",
+		})
 		return
 	}
-	h.mutex.Lock()
-	h.cleanupCaptchasLocked()
-	if len(h.captchas) >= maxPendingCaptchas {
-		h.mutex.Unlock()
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "captcha_capacity"})
+	h.captcha.Challenge(c, adminLoginCaptchaScope)
+}
+
+func (h *AuthHandler) VerifyCaptcha(c *gin.Context) {
+	if h.captcha == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "captcha_failed",
+			"message": "验证码模块未初始化",
+		})
 		return
 	}
-	h.captchas[generated.response.ID] = generated.record
-	h.mutex.Unlock()
-	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
-	c.Header("Pragma", "no-cache")
-	c.JSON(http.StatusOK, generated.response)
+	h.captcha.Verify(c, adminLoginCaptchaScope)
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
 	var body struct {
-		Username      string `json:"username"`
-		Password      string `json:"password"`
-		CaptchaID     string `json:"captchaId"`
-		CaptchaAnswer string `json:"captchaAnswer"`
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		CaptchaToken string `json:"captchaToken"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -66,14 +82,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		})
 		return
 	}
-	if len(body.Username) > 128 ||
-		len(body.CaptchaID) > 128 || len(body.CaptchaAnswer) > 1024 {
+	if len(body.Username) > 128 || len(body.CaptchaToken) > 128 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid_request", "message": "登录参数过长",
 		})
 		return
 	}
-	if !h.ValidateCaptcha(body.CaptchaID, body.CaptchaAnswer) {
+	if h.captcha == nil ||
+		!h.captcha.ConsumeVerification(body.CaptchaToken, adminLoginCaptchaScope) {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "captcha_invalid", "message": "验证码错误或已过期",
 		})
@@ -137,30 +153,6 @@ func (h *AuthHandler) RequireSession() gin.HandlerFunc {
 	}
 }
 
-func (h *AuthHandler) ValidateCaptcha(id, answer string) bool {
-	h.mutex.Lock()
-	record, ok := h.captchas[id]
-	delete(h.captchas, id)
-	h.mutex.Unlock()
-	if !ok || time.Now().After(record.expiresAt) {
-		return false
-	}
-	if record.mode == "text" {
-		return validateClickCaptcha(record.points, answer)
-	}
-	actual := captchaHash(id, strings.TrimSpace(answer))
-	return middleware.SecureBytesEqual(actual[:], record.answerHash[:])
-}
-
-func (h *AuthHandler) cleanupCaptchasLocked() {
-	now := time.Now()
-	for id, record := range h.captchas {
-		if now.After(record.expiresAt) {
-			delete(h.captchas, id)
-		}
-	}
-}
-
 func passwordMatches(provided, configured string) bool {
 	if strings.HasPrefix(configured, "$2a$") ||
 		strings.HasPrefix(configured, "$2b$") ||
@@ -177,6 +169,12 @@ func hashToken(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func captchaHash(id, answer string) [32]byte {
-	return sha256.Sum256([]byte(id + "\x00" + strings.ToLower(strings.TrimSpace(answer))))
+func captchaOptions(cfg config.Config) captchamodule.Options {
+	return captchamodule.Options{
+		Mode:                 cfg.Admin.CaptchaMode,
+		ImageSource:          cfg.Admin.CaptchaImageSource,
+		LocalImageDirectory:  cfg.Admin.CaptchaImageDirectory,
+		RemoteImageURL:       cfg.Admin.CaptchaImageURL,
+		RemoteImageCacheSize: cfg.Admin.CaptchaImageCacheSize,
+	}
 }

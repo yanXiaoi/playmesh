@@ -127,13 +127,13 @@ abstract final class PlaymeshTheme {
       fontFamily: 'Noto Sans SC',
       fontFamilyFallback: const ['Segoe UI Variable', 'Segoe UI', 'sans-serif'],
     );
-    final focusBorder = BorderSide(color: primary, width: 2);
+    final focusBorder = BorderSide(color: primary, width: 3);
     return base.copyWith(
       scaffoldBackgroundColor: background,
       canvasColor: surface,
-      focusColor: primary.withAlpha(46),
-      hoverColor: primary.withAlpha(20),
-      highlightColor: primary.withAlpha(31),
+      focusColor: primary.withAlpha(92),
+      hoverColor: primary.withAlpha(41),
+      highlightColor: primary.withAlpha(56),
       textTheme: base.textTheme
           .apply(bodyColor: foreground, displayColor: foreground)
           .copyWith(
@@ -190,9 +190,25 @@ abstract final class PlaymeshTheme {
           ),
           side: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.focused)
-                ? BorderSide(color: onPrimary, width: 2)
+                ? BorderSide(color: onPrimary, width: 3)
                 : BorderSide.none,
           ),
+          overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) {
+              return onPrimary.withAlpha(54);
+            }
+            if (states.contains(WidgetState.focused)) {
+              return onPrimary.withAlpha(82);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return onPrimary.withAlpha(38);
+            }
+            return null;
+          }),
+          elevation: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.focused) ? 6 : 0,
+          ),
+          shadowColor: WidgetStatePropertyAll(primary.withAlpha(110)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -209,6 +225,13 @@ abstract final class PlaymeshTheme {
                 ? focusBorder
                 : BorderSide(color: outline),
           ),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.focused)) return primaryContainer;
+            if (states.contains(WidgetState.hovered)) {
+              return primary.withAlpha(28);
+            }
+            return null;
+          }),
           textStyle: const WidgetStatePropertyAll(
             TextStyle(fontWeight: FontWeight.w700),
           ),
@@ -224,6 +247,13 @@ abstract final class PlaymeshTheme {
             (states) =>
                 states.contains(WidgetState.focused) ? focusBorder : null,
           ),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.focused)) return primaryContainer;
+            if (states.contains(WidgetState.hovered)) {
+              return primary.withAlpha(28);
+            }
+            return null;
+          }),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
@@ -236,6 +266,13 @@ abstract final class PlaymeshTheme {
             (states) =>
                 states.contains(WidgetState.focused) ? focusBorder : null,
           ),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.focused)) return primaryContainer;
+            if (states.contains(WidgetState.hovered)) {
+              return primary.withAlpha(28);
+            }
+            return null;
+          }),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -515,18 +552,30 @@ class _PlaymeshPageTransitionsBuilder extends PageTransitionsBuilder {
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
-    final opacity = Tween<double>(begin: 0.96, end: 1).animate(curve);
-    final position = Tween<Offset>(
+    final enterOpacity = Tween<double>(begin: 0.96, end: 1).animate(curve);
+    final enterPosition = Tween<Offset>(
       begin: const Offset(0.012, 0),
+      end: Offset.zero,
+    ).animate(curve);
+    // On pop, move the outgoing route all the way off screen. The previous
+    // 1.2% movement kept it covering the previous route for almost the whole
+    // animation, which looked like a frozen frame followed by a hard switch.
+    // A compositor-only slide also avoids full-screen opacity blending.
+    final exitPosition = Tween<Offset>(
+      begin: const Offset(1, 0),
       end: Offset.zero,
     ).animate(curve);
     return AnimatedBuilder(
       animation: animation,
       child: RepaintBoundary(child: child),
       builder: (context, child) {
-        final translated = SlideTransition(position: position, child: child);
-        if (animation.status == AnimationStatus.reverse) return translated;
-        return FadeTransition(opacity: opacity, child: translated);
+        if (animation.status == AnimationStatus.reverse) {
+          return SlideTransition(position: exitPosition, child: child);
+        }
+        return FadeTransition(
+          opacity: enterOpacity,
+          child: SlideTransition(position: enterPosition, child: child),
+        );
       },
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/game_package/game_package_icon.dart';
@@ -24,6 +25,7 @@ class HomePage extends StatelessWidget {
   });
 
   static const profileHeroKey = Key('home-profile-hero');
+  static const profileIdentityKey = Key('home-profile-identity');
   static const scanJoinKey = Key('home-scan-join');
 
   static Key gameQuickLaunchKey(String gameId) =>
@@ -64,6 +66,11 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compactAppBar = MediaQuery.sizeOf(context).width < 360;
+    final scannerSupported =
+        kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS;
     void openProfile() =>
         Navigator.of(context).pushNamed(ProfilePage.routeName);
     void openLibrary() =>
@@ -72,10 +79,12 @@ class HomePage extends StatelessWidget {
         Navigator.of(context).pushNamed(GamePage.routeName, arguments: game);
     void scanAndJoin() => Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => JoinGamePage(
+        settings: const RouteSettings(
+          name: GameInvitationScannerPage.routeName,
+        ),
+        builder: (_) => GameInvitationScannerPage(
           initialUserId: user.userId,
           initialNickname: user.nickname,
-          autoScan: true,
         ),
       ),
     );
@@ -115,7 +124,7 @@ class HomePage extends StatelessWidget {
           IconButton(
             key: scanJoinKey,
             tooltip: context.tr('join.scan'),
-            onPressed: scanAndJoin,
+            onPressed: scannerSupported ? scanAndJoin : null,
             icon: const Icon(Icons.qr_code_scanner_rounded),
           ),
           IconButton(
@@ -187,7 +196,6 @@ class _ProfileHero extends StatelessWidget {
     return Semantics(
       key: HomePage.profileHeroKey,
       container: true,
-      button: true,
       label: context.tr('home.profile'),
       child: Material(
         color: Colors.transparent,
@@ -205,97 +213,108 @@ class _ProfileHero extends StatelessWidget {
               ],
             ),
           ),
-          child: InkWell(
-            autofocus: true,
-            onTap: onPressed,
-            child: Stack(
-              children: [
-                PositionedDirectional(
-                  end: -34,
-                  top: -42,
-                  child: Container(
-                    width: 180,
-                    height: 180,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withAlpha(16),
+          child: Stack(
+            children: [
+              PositionedDirectional(
+                end: -34,
+                top: -42,
+                child: Container(
+                  width: 180,
+                  height: 180,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withAlpha(16),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: EdgeInsets.all(compact ? 22 : 30),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(context.tr('home.hero_title'), style: titleStyle),
+                    const SizedBox(height: 10),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 620),
+                      child: Text(
+                        context.tr('home.hero_subtitle'),
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Colors.white.withAlpha(212),
+                          height: 1.45,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                Padding(
-                  padding: EdgeInsets.all(compact ? 22 : 30),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(context.tr('home.hero_title'), style: titleStyle),
-                      const SizedBox(height: 10),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 620),
-                        child: Text(
-                          context.tr('home.hero_subtitle'),
-                          style: Theme.of(context).textTheme.bodyLarge
-                              ?.copyWith(
-                                color: Colors.white.withAlpha(212),
-                                height: 1.45,
-                              ),
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      Container(
-                        constraints: const BoxConstraints(maxWidth: 280),
-                        padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withAlpha(30),
+                    const SizedBox(height: 22),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 280),
+                      child: Material(
+                        key: HomePage.profileIdentityKey,
+                        color: Colors.white.withAlpha(30),
+                        shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withAlpha(42)),
+                          side: BorderSide(color: Colors.white.withAlpha(42)),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _UserAvatar(
-                              user: user,
-                              radius: compact ? 22 : 25,
-                              onHero: true,
-                            ),
-                            const SizedBox(width: 12),
-                            Flexible(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    user.nickname,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(color: Colors.white),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          autofocus: true,
+                          onTap: onPressed,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _UserAvatar(
+                                  user: user,
+                                  radius: compact ? 22 : 25,
+                                  onHero: true,
+                                ),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        user.nickname,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(color: Colors.white),
+                                      ),
+                                      Text(
+                                        context.tr('home.profile_hint'),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Colors.white.withAlpha(
+                                                190,
+                                              ),
+                                            ),
+                                      ),
+                                    ],
                                   ),
-                                  Text(
-                                    context.tr('home.profile_hint'),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: Colors.white.withAlpha(190),
-                                        ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: Colors.white,
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            const Icon(
-                              Icons.chevron_right_rounded,
-                              color: Colors.white,
-                            ),
-                          ],
+                          ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

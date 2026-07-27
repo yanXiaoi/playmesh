@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/features/game/game_controls.dart';
+import 'package:playmesh/ui/playmesh_ui.dart';
 
 import '../../support/localized_test_app.dart';
 
@@ -443,6 +444,55 @@ void main() {
     expect(find.textContaining(rawMessage), findsOneWidget);
     expect(find.textContaining('RawStack: developer-value'), findsOneWidget);
   });
+
+  testWidgets('日间主题运行日志文字保持可读对比度', (tester) async {
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: Theme(
+          data: PlaymeshTheme.light(),
+          child: GameRuntimeLogOverlay(
+            logs: const [
+              {'level': 'error', 'message': 'ERROR_LOG'},
+              {'level': 'warn', 'message': 'WARN_LOG'},
+              {'level': 'debug', 'message': 'DEBUG_LOG'},
+              {'level': 'info', 'message': 'INFO_LOG'},
+            ],
+            onClear: _noop,
+            onClose: _noop,
+          ),
+        ),
+      ),
+    );
+
+    final surface = PlaymeshTheme.light().colorScheme.surface;
+    for (final marker in const [
+      'ERROR_LOG',
+      'WARN_LOG',
+      'DEBUG_LOG',
+      'INFO_LOG',
+    ]) {
+      final text = tester.widget<SelectableText>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is SelectableText && (widget.data ?? '').contains(marker),
+        ),
+      );
+      expect(
+        _contrastRatio(text.style!.color!, surface),
+        greaterThanOrEqualTo(4.5),
+        reason: '$marker 在日间主题下需要满足正文文字对比度。',
+      );
+    }
+  });
 }
 
 void _noop() {}
+
+double _contrastRatio(Color foreground, Color background) {
+  final lighter = foreground.computeLuminance() > background.computeLuminance()
+      ? foreground
+      : background;
+  final darker = identical(lighter, foreground) ? background : foreground;
+  return (lighter.computeLuminance() + 0.05) /
+      (darker.computeLuminance() + 0.05);
+}

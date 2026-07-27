@@ -135,6 +135,8 @@ class GameDetailPage extends StatelessWidget {
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(20, 8, 20, 20),
         child: FilledButton.icon(
+          key: const ValueKey('game-detail-start'),
+          autofocus: true,
           onPressed: game.manifestError == null
               ? () => Navigator.of(
                   context,

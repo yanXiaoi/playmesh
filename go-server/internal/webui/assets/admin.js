@@ -3,11 +3,9 @@ const adminBase = window.location.pathname.replace(/\/+$/, "");
 const adminURL = (path) => `${adminBase}${path}`;
 let token = sessionStorage.getItem(tokenKey) || "";
 let captchaId = "";
-let selectedCaptcha = "";
-let captchaMode = "";
-let captchaRequiredClicks = 0;
-let captchaClicks = [];
-let captchaCursor = { x: 0, y: 0 };
+let pendingAdminLogin = null;
+let adminCaptcha;
+let adminCaptchaRefreshTimer = null;
 const adminState = { page: 1, size: 20, total: 0, games: [] };
 let adminMessages = {};
 const at = (key, fallback, variables = {}) => {
@@ -61,26 +59,6 @@ const localizedAdminError = (result = {}) =>
     `error.${result.code || result.error || "generic"}`,
     result.message || at("error.generic")
   );
-const adminColorScheme = matchMedia("(prefers-color-scheme: dark)");
-
-function applyAdminTheme(mode) {
-  const normalized = ["system", "light", "dark"].includes(mode) ? mode : "system";
-  document.documentElement.dataset.theme =
-    normalized === "system" ? (adminColorScheme.matches ? "dark" : "light") : normalized;
-  const button = document.querySelector("#admin-theme");
-  button.dataset.mode = normalized;
-  button.textContent = {
-    system: at("theme.system"),
-    light: at("theme.light"),
-    dark: at("theme.dark")
-  }[normalized];
-}
-
-adminColorScheme.addEventListener("change", () => {
-  if (document.querySelector("#admin-theme").dataset.mode === "system") {
-    applyAdminTheme("system");
-  }
-});
 
 function resolveAdminLocale(preferences, available, fallback) {
   for (const preference of preferences) {
@@ -100,7 +78,9 @@ function resolveAdminLocale(preferences, available, fallback) {
 }
 
 async function loadAdminLocalization(localeOverride) {
-  const manifest = await fetch(adminURL("/i18n/manifest")).then((response) => response.json());
+  const manifest = await fetch(
+    adminURL("/i18n/manifest"), { cache: "no-store" }
+  ).then((response) => response.json());
   const available = manifest.locales.map((locale) => locale.id);
   const locale = resolveAdminLocale([
     localeOverride,
@@ -108,7 +88,9 @@ async function loadAdminLocalization(localeOverride) {
     ...(Array.isArray(navigator.languages) ? navigator.languages : []),
     navigator.language
   ], available, manifest.defaultLocale);
-  adminMessages = await fetch(adminURL(`/i18n/${encodeURIComponent(locale)}`))
+  adminMessages = await fetch(
+    adminURL(`/i18n/${encodeURIComponent(locale)}`), { cache: "no-store" }
+  )
     .then((response) => response.json());
   document.documentElement.lang = locale;
   localizeAdminDocument();
@@ -119,8 +101,6 @@ async function loadAdminLocalization(localeOverride) {
     return option;
   }));
   select.classList.toggle("hidden", !manifest.allowLocaleSwitch);
-  document.querySelector("#admin-theme").classList.toggle("hidden", !manifest.allowThemeSwitch);
-  applyAdminTheme(localStorage.getItem("playmesh.theme") || manifest.defaultThemeMode);
 }
 document.querySelector("#admin-locale").addEventListener("change", async (event) => {
   localStorage.setItem("playmesh.locale", event.target.value);
@@ -128,158 +108,138 @@ document.querySelector("#admin-locale").addEventListener("change", async (event)
   if (token) {
     loadStats();
     loadAdminGames();
-  } else if (captchaMode === "text") {
-    document.querySelector("#captcha-prompt").textContent =
-      at("admin.captcha.select_prompt", "", { count: captchaRequiredClicks });
-  } else if (captchaMode === "math") {
-    document.querySelector("#captcha-prompt").textContent = at("admin.captcha.math_prompt");
+  } else if (document.querySelector("#admin-captcha-dialog").open) {
+    adminCaptcha.relocalize();
   }
 });
-document.querySelector("#admin-theme").addEventListener("click", () => {
-  const modes = ["system", "light", "dark"];
-  const current = document.querySelector("#admin-theme").dataset.mode || "system";
-  const next = modes[(modes.indexOf(current) + 1) % modes.length];
-  localStorage.setItem("playmesh.theme", next);
-  applyAdminTheme(next);
-});
-applyAdminTheme(localStorage.getItem("playmesh.theme") || "system");
 
-async function loadCaptcha(delay = 0) {
+async function loadCaptcha(delay = 0, preserveNotice = false) {
+  clearTimeout(adminCaptchaRefreshTimer);
+  adminCaptchaRefreshTimer = null;
+  captchaId = "";
+  adminCaptcha.setLoading();
   if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-  const response = await fetch(adminURL("/api/auth/captcha"));
-  const notice = document.querySelector("#login-notice");
+  let response;
+  try {
+    response = await fetch(adminURL("/api/auth/captcha"));
+  } catch {
+    const message = at("admin.captcha.failed");
+    adminCaptcha.setError(message);
+    if (!preserveNotice) window.PlaymeshMessage.error(message);
+    return;
+  }
   if (!response.ok) {
-    notice.textContent = response.status === 429
+    const message = response.status === 429
       ? at("admin.captcha.rate_limited") : at("admin.captcha.failed");
+    adminCaptcha.setError(message);
+    if (!preserveNotice) window.PlaymeshMessage.error(message);
+    if (response.status === 429) {
+      const seconds = Number(response.headers.get("Retry-After")) || 1;
+      adminCaptchaRefreshTimer = setTimeout(() => {
+        if (document.querySelector("#admin-captcha-dialog").open) {
+          loadCaptcha(0, preserveNotice);
+        }
+      }, Math.min(60, Math.max(1, seconds)) * 1000);
+    }
     return;
   }
   const result = await response.json();
   captchaId = result.id;
-  captchaMode = result.mode;
-  captchaRequiredClicks = result.requiredClicks || 0;
-  captchaClicks = [];
-  captchaCursor = { x: 0, y: 0 };
-  selectedCaptcha = "";
-  const prompt = document.querySelector("#captcha-prompt");
-  const input = document.querySelector("#captcha-answer");
-  const image = document.querySelector("#captcha-image");
-  const promptImage = document.querySelector("#captcha-prompt-image");
-  document.querySelector("#captcha-markers").replaceChildren();
-  image.src = result.image;
-  input.value = "";
-  input.classList.toggle("hidden", result.mode === "text");
-  if (result.mode === "text") {
-    prompt.textContent = at("admin.captcha.select_prompt", "", {
-      count: captchaRequiredClicks
-    });
-    promptImage.src = result.promptImage;
-    promptImage.classList.remove("hidden");
-  } else {
-    prompt.textContent = at("admin.captcha.math_prompt");
-    promptImage.removeAttribute("src");
-    promptImage.classList.add("hidden");
-  }
+  adminCaptcha.load(result);
 }
 
-function selectCaptchaPoint(image, x, y) {
-  const bounds = image.getBoundingClientRect();
-  if (!bounds.width || !bounds.height) return;
-  if (captchaClicks.length >= captchaRequiredClicks) {
-    captchaClicks = [];
-    document.querySelector("#captcha-markers").replaceChildren();
-  }
-  captchaClicks.push([x, y]);
-  selectedCaptcha = `click:${captchaClicks.map(([pointX, pointY]) => `${pointX},${pointY}`).join("|")}`;
-  const marker = document.createElement("span");
-  marker.className = "captcha-marker";
-  marker.textContent = String(captchaClicks.length);
-  marker.style.left = `${x * bounds.width / image.naturalWidth}px`;
-  marker.style.top = `${y * bounds.height / image.naturalHeight}px`;
-  document.querySelector("#captcha-markers").appendChild(marker);
-  document.querySelector("#captcha-prompt").textContent =
-    captchaClicks.length === captchaRequiredClicks
-      ? at("admin.captcha.selection_complete")
-      : at("admin.captcha.selection_remaining", "", {
-        count: captchaRequiredClicks - captchaClicks.length
-      });
+function closeAdminCaptcha(cancelPending = true) {
+  clearTimeout(adminCaptchaRefreshTimer);
+  adminCaptchaRefreshTimer = null;
+  captchaId = "";
+  adminCaptcha.clear();
+  const dialog = document.querySelector("#admin-captcha-dialog");
+  if (dialog.open) dialog.close();
+  if (cancelPending) pendingAdminLogin = null;
 }
 
-function renderCaptchaCursor(image) {
-  const bounds = image.getBoundingClientRect();
-  if (!bounds.width || !bounds.height || !image.naturalWidth || !image.naturalHeight) return;
-  let marker = document.querySelector(".captcha-cursor");
-  if (!marker) {
-    marker = document.createElement("span");
-    marker.className = "captcha-marker captcha-cursor";
-    marker.setAttribute("aria-hidden", "true");
-    document.querySelector("#captcha-markers").appendChild(marker);
+adminCaptcha = new window.PlaymeshCaptcha(
+  document.querySelector("#admin-captcha-widget"),
+  at,
+  {
+    refresh: () => loadCaptcha(1050),
+    close: () => closeAdminCaptcha(),
+    confirm: (answer, reset) => verifyAdminCaptcha(answer, reset)
   }
-  marker.style.left = `${captchaCursor.x * bounds.width / image.naturalWidth}px`;
-  marker.style.top = `${captchaCursor.y * bounds.height / image.naturalHeight}px`;
-}
-
-document.querySelector("#captcha-image").addEventListener("click", (event) => {
-  if (captchaMode !== "text") return;
-  const image = event.currentTarget;
-  const bounds = image.getBoundingClientRect();
-  const x = Math.floor((event.clientX - bounds.left) * image.naturalWidth / bounds.width);
-  const y = Math.floor((event.clientY - bounds.top) * image.naturalHeight / bounds.height);
-  selectCaptchaPoint(image, x, y);
-});
-
-document.querySelector("#captcha-image").addEventListener("keydown", (event) => {
-  if (captchaMode !== "text") return;
-  const image = event.currentTarget;
-  if (!captchaCursor.x && !captchaCursor.y) {
-    captchaCursor = {
-      x: Math.floor(image.naturalWidth / 2),
-      y: Math.floor(image.naturalHeight / 2)
-    };
-  }
-  const step = event.shiftKey ? 2 : 10;
-  if (event.key === "ArrowLeft") captchaCursor.x -= step;
-  else if (event.key === "ArrowRight") captchaCursor.x += step;
-  else if (event.key === "ArrowUp") captchaCursor.y -= step;
-  else if (event.key === "ArrowDown") captchaCursor.y += step;
-  else if (event.key === "Enter" || event.key === " ") {
-    selectCaptchaPoint(image, captchaCursor.x, captchaCursor.y);
-  } else {
-    return;
-  }
-  event.preventDefault();
-  captchaCursor.x = Math.max(0, Math.min(image.naturalWidth - 1, captchaCursor.x));
-  captchaCursor.y = Math.max(0, Math.min(image.naturalHeight - 1, captchaCursor.y));
-  renderCaptchaCursor(image);
-});
-
-document.querySelector("#refresh-captcha").addEventListener("click", () => loadCaptcha(1050));
+);
 
 document.querySelector("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  const notice = document.querySelector("#login-notice");
-  const response = await fetch(adminURL("/api/auth/login"), {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username: form.get("username"), password: form.get("password"),
-      captchaId, captchaAnswer: selectedCaptcha || document.querySelector("#captcha-answer").value
-    })
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    notice.className = "notice error";
-    notice.textContent = localizedAdminError(result);
-    await loadCaptcha(1050);
+  pendingAdminLogin = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const dialog = document.querySelector("#admin-captcha-dialog");
+  if (!dialog.open) dialog.showModal();
+  await loadCaptcha();
+});
+
+document.querySelector("#admin-captcha-dialog").addEventListener("cancel", () => {
+  closeAdminCaptcha();
+});
+
+async function verifyAdminCaptcha(answer, reset) {
+  if (!pendingAdminLogin || !captchaId) return;
+  let verified;
+  try {
+    const verifyResponse = await fetch(adminURL("/api/auth/captcha/verify"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: captchaId,
+        answer
+      })
+    });
+    verified = await verifyResponse.json().catch(() => ({}));
+    if (!verifyResponse.ok) {
+      throw Object.assign(new Error("captcha_verification_failed"), {
+        response: verifyResponse,
+        result: verified
+      });
+    }
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedAdminError(error.result));
+    reset?.();
+    const response = error.response;
+    const rateLimited = response?.status === 429;
+    const seconds = rateLimited
+      ? Number(response.headers.get("Retry-After")) || 1 : 0;
+    await loadCaptcha(
+      rateLimited ? Math.min(60, Math.max(1, seconds)) * 1000 : 1050,
+      true
+    );
     return;
   }
-  token = result.token; sessionStorage.setItem(tokenKey, token);
-  showAdmin();
-});
+
+  closeAdminCaptcha(false);
+  try {
+    const response = await fetch(adminURL("/api/auth/login"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: pendingAdminLogin.username,
+        password: pendingAdminLogin.password,
+        captchaToken: verified.captchaToken
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw Object.assign(new Error("admin_login_failed"), { result });
+    }
+    token = result.token;
+    sessionStorage.setItem(tokenKey, token);
+    pendingAdminLogin = null;
+    showAdmin();
+    window.PlaymeshMessage.success(at("admin.login.success"));
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedAdminError(error.result), 4200);
+    pendingAdminLogin = null;
+  }
+}
 
 function showLogin() {
   document.querySelector("#login-view").classList.remove("hidden");
   document.querySelector("#admin-view").classList.add("hidden");
-  loadCaptcha();
 }
 function showAdmin() {
   document.querySelector("#login-view").classList.add("hidden");
@@ -443,6 +403,10 @@ async function loadRuntimeConfig() {
   form.allowUserRegistration.checked = value.allowUserRegistration;
   form.requireEmailVerification.checked = value.requireEmailVerification;
   form.captchaMode.value = value.admin.captchaMode;
+  form.captchaImageSource.value = value.admin.captchaImageSource;
+  form.captchaImageDirectory.value = value.admin.captchaImageDirectory;
+  form.captchaImageURL.value = value.admin.captchaImageUrl;
+  form.captchaImageCacheSize.value = value.admin.captchaImageCacheSize;
   form.sessionTTL.value = value.admin.sessionTtlMinutes;
   form.loginInterval.value = value.admin.loginIntervalMilliseconds;
   form.captchaInterval.value = value.admin.captchaIntervalMilliseconds;
@@ -505,6 +469,10 @@ document.querySelector("#config-form").addEventListener("submit", async (event) 
     authWhitelist: whitelist,
     admin: {
       listen: form.adminListen.value, captchaMode: form.captchaMode.value,
+      captchaImageSource: form.captchaImageSource.value,
+      captchaImageDirectory: form.captchaImageDirectory.value,
+      captchaImageUrl: form.captchaImageURL.value,
+      captchaImageCacheSize: numeric(form, "captchaImageCacheSize"),
       sessionTtlMinutes: numeric(form, "sessionTTL"),
       loginIntervalMilliseconds: numeric(form, "loginInterval"),
       captchaIntervalMilliseconds: numeric(form, "captchaInterval")

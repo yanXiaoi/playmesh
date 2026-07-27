@@ -64,3 +64,40 @@ func TestValidateRelayPublicBaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCaptchaImageSources(t *testing.T) {
+	t.Run("local directory", func(t *testing.T) {
+		cfg := Default()
+		cfg.Admin.CaptchaMode = "slide"
+		cfg.Admin.CaptchaImageSource = "local"
+		cfg.Admin.CaptchaImageDirectory = "data/captcha-images"
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("remote random URL", func(t *testing.T) {
+		cfg := Default()
+		cfg.Admin.CaptchaMode = "rotate"
+		cfg.Admin.CaptchaImageSource = "remote"
+		cfg.Admin.CaptchaImageURL = "https://images.example.com/random"
+		cfg.Admin.CaptchaImageCacheSize = 12
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("remote requires URL", func(t *testing.T) {
+		cfg := Default()
+		cfg.Admin.CaptchaImageSource = "remote"
+		cfg.Admin.CaptchaImageURL = ""
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("remote CAPTCHA image source accepted an empty URL")
+		}
+	})
+	t.Run("local requires directory", func(t *testing.T) {
+		cfg := Default()
+		cfg.Admin.CaptchaImageDirectory = ""
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("local CAPTCHA image source accepted an empty directory")
+		}
+	})
+}

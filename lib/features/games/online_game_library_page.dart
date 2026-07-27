@@ -205,6 +205,7 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
             child: _SourceHomeSection(
               key: ValueKey('catalog-home-${source.id}'),
               source: source,
+              autofocus: index == 0,
               request: request,
               loadIcon: widget.controller.loadOfferIcon,
               onRetry: () => _retryHomeSource(source.id),
@@ -692,6 +693,7 @@ class _SourceHomeSection extends StatefulWidget {
   const _SourceHomeSection({
     super.key,
     required this.source,
+    required this.autofocus,
     required this.request,
     required this.loadIcon,
     required this.onRetry,
@@ -700,6 +702,7 @@ class _SourceHomeSection extends StatefulWidget {
   });
 
   final OnlineGameSource source;
+  final bool autofocus;
   final Future<SourceSectionResult> request;
   final Future<List<int>?> Function(OnlineCatalogGame offer) loadIcon;
   final VoidCallback onRetry;
@@ -866,10 +869,11 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (final offer in section.offers) ...[
+                for (final (index, offer) in section.offers.indexed) ...[
                   _OfferTile(
                     key: ValueKey('catalog-home-offer-${offer.downloadKey}'),
                     offer: offer,
+                    autofocus: widget.autofocus && index == 0,
                     focusNode: _focusNodeFor(_offerFocusId(offer)),
                     loadIcon: loadIcon,
                     onDownload: () => onDownload(offer),
@@ -918,12 +922,14 @@ class _OfferTile extends StatelessWidget {
   const _OfferTile({
     super.key,
     required this.offer,
+    required this.autofocus,
     required this.focusNode,
     required this.loadIcon,
     required this.onDownload,
   });
 
   final OnlineCatalogGame offer;
+  final bool autofocus;
   final FocusNode focusNode;
   final Future<List<int>?> Function(OnlineCatalogGame offer) loadIcon;
   final VoidCallback onDownload;
@@ -975,6 +981,7 @@ class _OfferTile extends StatelessWidget {
             IconButton.filledTonal(
               key: ValueKey('catalog-home-offer-action-${offer.downloadKey}'),
               focusNode: focusNode,
+              autofocus: autofocus,
               tooltip: context.tr(
                 'online.download_from_source',
                 arguments: {'source': offer.source.name},

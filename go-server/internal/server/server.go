@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-server/internal/admin"
+	captchamodule "go-server/internal/captcha"
 	"go-server/internal/catalog"
 	"go-server/internal/config"
 	"go-server/internal/mailer"
@@ -64,12 +65,30 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		middleware.NewIPLimiter(cfg.Relay.MaxConnectionsPerIP),
 		logger,
 	)
-	authHandler := admin.NewAuthHandler(cfg, database)
-	userAuthConfig := cfg
-	userAuthConfig.Admin.CaptchaMode = "math"
-	userCaptchaHandler := admin.NewAuthHandler(userAuthConfig, database)
+	captchaContext, cancelCaptcha := context.WithTimeout(
+		context.Background(), 15*time.Second,
+	)
+	captchaService, err := captchamodule.New(
+		captchaContext,
+		captchamodule.Options{
+			Mode:                 cfg.Admin.CaptchaMode,
+			ImageSource:          cfg.Admin.CaptchaImageSource,
+			LocalImageDirectory:  cfg.Admin.CaptchaImageDirectory,
+			RemoteImageURL:       cfg.Admin.CaptchaImageURL,
+			RemoteImageCacheSize: cfg.Admin.CaptchaImageCacheSize,
+		},
+		logger,
+	)
+	cancelCaptcha()
+	if err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+	authHandler := admin.NewAuthHandlerWithCaptchaService(
+		cfg, database, captchaService,
+	)
 	userHandler := user.New(
-		cfg, database, packageService, mailService, userCaptchaHandler,
+		cfg, database, packageService, mailService, captchaService,
 	)
 	adminHandler := admin.NewHandler(
 		cfg, database, packageService, mailService, manager,
@@ -91,6 +110,8 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	external.Use(middleware.SecurityHeaders())
 	external.Use(middleware.CORS())
 	external.GET("/", ui.User)
+	external.GET("/games", ui.User)
+	external.GET("/my", ui.User)
 	external.GET("/login", ui.User)
 	external.GET("/register", ui.User)
 	external.GET("/assets/:name", ui.UserAsset)
@@ -150,7 +171,13 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	external.GET(
 		"/api/user/auth/captcha",
 		middleware.RateLimit(userCaptchaLimiter, "user-captcha"),
-		userCaptchaHandler.Captcha,
+		userHandler.Captcha,
+	)
+	external.POST(
+		"/api/user/auth/captcha/verify",
+		middleware.RateLimit(userLoginLimiter, "user-captcha-verify"),
+		limitRequestBody(64<<10),
+		userHandler.VerifyCaptcha,
 	)
 	external.POST(
 		"/api/user/auth/register",
@@ -302,6 +329,12 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		cfg.AdminPath+"/api/auth/captcha",
 		middleware.RateLimit(captchaLimiter, "captcha"),
 		authHandler.Captcha,
+	)
+	management.POST(
+		cfg.AdminPath+"/api/auth/captcha/verify",
+		middleware.RateLimit(loginLimiter, "captcha-verify"),
+		limitRequestBody(64<<10),
+		authHandler.VerifyCaptcha,
 	)
 	management.POST(
 		cfg.AdminPath+"/api/auth/login",

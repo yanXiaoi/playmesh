@@ -23,13 +23,19 @@ type Handler struct {
 }
 
 var userAssets = map[string]struct{}{
-	"style.css": {},
-	"user.js":   {},
+	"captcha.js":           {},
+	"gocaptcha.global.css": {},
+	"gocaptcha.global.js":  {},
+	"style.css":            {},
+	"user.js":              {},
 }
 
 var adminAssets = map[string]struct{}{
-	"admin.js":  {},
-	"style.css": {},
+	"admin.js":             {},
+	"captcha.js":           {},
+	"gocaptcha.global.css": {},
+	"gocaptcha.global.js":  {},
+	"style.css":            {},
 }
 
 func New(webUI config.WebUI) *Handler {
@@ -55,12 +61,12 @@ func (h *Handler) LocalizationManifest(c *gin.Context) {
 			locales = append(locales, localeOption{ID: locale.ID, Label: locale.Label})
 		}
 	}
-	c.Header("Cache-Control", "public, max-age=300")
+	c.Header("Cache-Control", "no-cache")
 	c.JSON(http.StatusOK, gin.H{
 		"defaultLocale":     h.webUI.DefaultLocale,
 		"allowLocaleSwitch": h.webUI.AllowLocaleSwitch,
-		"defaultThemeMode":  h.webUI.DefaultThemeMode,
-		"allowThemeSwitch":  h.webUI.AllowThemeSwitch,
+		"defaultThemeMode":  "light",
+		"allowThemeSwitch":  false,
 		"locales":           locales,
 	})
 }
@@ -84,7 +90,7 @@ func (h *Handler) LocalizationBundle(c *gin.Context) {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	c.Header("Cache-Control", "public, max-age=300")
+	c.Header("Cache-Control", "no-cache")
 	c.JSON(http.StatusOK, messages)
 }
 

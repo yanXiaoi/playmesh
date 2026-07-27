@@ -107,6 +107,16 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(
+      find.ancestor(
+        of: find.byElementPredicate(
+          (element) =>
+              identical(element, FocusManager.instance.primaryFocus?.context),
+        ),
+        matching: find.byKey(const ValueKey('game-detail-start')),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('损坏清单使用 App 文案且保留非空动态简介', (tester) async {

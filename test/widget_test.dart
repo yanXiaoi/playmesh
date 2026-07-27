@@ -164,7 +164,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(HomePage.profileHeroKey));
+    await tester.tap(find.byKey(HomePage.profileIdentityKey));
     await tester.pumpAndSettle();
 
     expect(find.text('唯一 ID'), findsOneWidget);
@@ -580,13 +580,17 @@ void main() {
             indexedGames = await refreshResult.future;
             return indexedGames;
           },
-          onQuery: (_) => GameLibraryQueryResult(
-            games: indexedGames,
-            total: indexedGames.length,
-            offset: 0,
-            revision: refreshCalls,
-            refreshedAt: null,
-          ),
+          onQuery: (_, {required offset, required limit}) {
+            final start = offset.clamp(0, indexedGames.length);
+            final end = (offset + limit).clamp(start, indexedGames.length);
+            return GameLibraryQueryResult(
+              games: indexedGames.sublist(start, end),
+              total: indexedGames.length,
+              offset: start,
+              revision: refreshCalls,
+              refreshedAt: null,
+            );
+          },
         ),
       ),
     );

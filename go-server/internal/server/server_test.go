@@ -244,6 +244,70 @@ func TestUserDataRoutesRequireSession(t *testing.T) {
 	}
 }
 
+func TestCaptchaChallengeAndVerificationEndpointsAreRateLimited(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Admin.CaptchaIntervalMilliseconds = 60_000
+	cfg.Admin.LoginIntervalMilliseconds = 60_000
+	app, err := New(cfg, DiscardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+
+	assertSecondRequestLimited := func(
+		engine http.Handler,
+		method string,
+		path string,
+		body string,
+	) {
+		t.Helper()
+		for attempt := 0; attempt < 2; attempt++ {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(method, path, strings.NewReader(body))
+			if body != "" {
+				request.Header.Set("Content-Type", "application/json")
+			}
+			engine.ServeHTTP(recorder, request)
+			if attempt == 0 && recorder.Code == http.StatusTooManyRequests {
+				t.Fatalf("%s %s 首次请求意外被限流", method, path)
+			}
+			if attempt == 1 && recorder.Code != http.StatusTooManyRequests {
+				t.Fatalf(
+					"%s %s 第二次请求状态 = %d, want 429",
+					method,
+					path,
+					recorder.Code,
+				)
+			}
+		}
+	}
+
+	assertSecondRequestLimited(
+		app.Engine,
+		http.MethodGet,
+		"/api/user/auth/captcha?purpose=login",
+		"",
+	)
+	assertSecondRequestLimited(
+		app.Engine,
+		http.MethodPost,
+		"/api/user/auth/captcha/verify?purpose=login",
+		`{"id":"missing","answer":"slide:0,0"}`,
+	)
+	assertSecondRequestLimited(
+		app.AdminEngine,
+		http.MethodGet,
+		cfg.AdminPath+"/api/auth/captcha",
+		"",
+	)
+	assertSecondRequestLimited(
+		app.AdminEngine,
+		http.MethodPost,
+		cfg.AdminPath+"/api/auth/captcha/verify",
+		`{"id":"missing","answer":"slide:0,0"}`,
+	)
+}
+
 func TestRelayPairsOpaqueBidirectionalStreams(t *testing.T) {
 	cfg := testConfig(t)
 	app, err := New(cfg, DiscardLogger())

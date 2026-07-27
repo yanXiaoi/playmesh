@@ -22,7 +22,7 @@
   <select id="projects" data-i18n-aria-label="workspace.current_project" hidden></select>
   <button id="projectPicker" class="project-picker" data-i18n-title="workspace.manage_projects" aria-haspopup="menu" aria-expanded="false"><svg class="lucide project-kind-icon" aria-hidden="true"><use href="#folder-kanban"></use></svg><span id="projectPickerLabel" data-i18n="workspace.select_project"></span><svg class="lucide project-chevron" aria-hidden="true"><use href="#chevron-down"></use></svg></button>
   <button id="save" data-i18n-title="workspace.save_current_file"><span class="toolbar-wide" data-i18n="workspace.save"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#save"></use></svg></button>
-  <button id="run" class="run" data-i18n-title="workspace.run_project"><span class="toolbar-wide" data-i18n="workspace.run"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#play"></use></svg></button>
+  <button id="run" class="run" data-i18n-title="workspace.run_project"><span id="toolbarRunLabel" class="toolbar-wide" data-i18n="workspace.run"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#play"></use></svg></button>
   <button id="publish" class="publish" data-i18n-title="workspace.publish_to_sources"><span class="toolbar-wide" data-i18n="workspace.publish"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#upload"></use></svg></button>
   <button id="aiPanel" class="ai-action" data-i18n-title="workspace.open_ai_development"><span class="toolbar-wide" data-i18n="workspace.ai"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#sparkles"></use></svg></button>
   <div class="toolbar-menu-wrap"><button id="moreActions" class="more-actions" data-i18n-title="workspace.more_actions" aria-haspopup="menu" aria-expanded="false"><span class="toolbar-wide" data-i18n="workspace.more"></span><svg class="lucide" aria-hidden="true"><use href="#ellipsis"></use></svg></button></div>
@@ -37,6 +37,11 @@
   <aside class="run-pane">
     <div class="pane-title" data-i18n="workspace.run"></div>
     <div class="run-state"><span id="runDot" class="dot"></span><span id="runText" aria-live="polite" data-i18n="workspace.not_running"></span></div>
+    <div class="run-controls">
+      <button id="runPaneRun" class="primary" type="button" data-i18n-title="workspace.run_project"><svg class="lucide" aria-hidden="true"><use href="#play"></use></svg><span data-i18n="workspace.run"></span></button>
+      <button id="restart" type="button" data-i18n-title="workspace.restart_game_title" disabled><svg class="lucide" aria-hidden="true"><use href="#rotate-ccw"></use></svg><span data-i18n="workspace.restart_game"></span></button>
+      <button id="stop" type="button" data-i18n-title="workspace.stop_game_title" disabled><svg class="lucide" aria-hidden="true"><use href="#square"></use></svg><span data-i18n="workspace.stop_game"></span></button>
+    </div>
     <div id="joinCode" class="join-code"></div>
     <img id="qr" class="qr" width="180" height="180" data-i18n-alt="workspace.join_qr">
     <div id="links" class="links"></div>
@@ -50,17 +55,14 @@
 
 <div id="toolbarMenu" class="toolbar-menu anchored-menu" role="menu">
   <button id="publishFromMenu" class="mobile-only" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#upload"></use></svg><span data-i18n="workspace.publish"></span></button>
-  <button id="workspacePreferences" role="menuitem" data-i18n="workspace.preferences"></button>
   <button id="quickPanel" role="menuitem" data-i18n="workspace.conversation_console"></button>
   <button id="webviewJavaScriptPanel" role="menuitem" data-i18n-title="workspace.webview_console_title" data-i18n="workspace.webview_console"></button>
-  <button id="restart" role="menuitem" data-i18n-title="workspace.restart_game_title" disabled><svg class="lucide" aria-hidden="true"><use href="#rotate-ccw"></use></svg><span data-i18n="workspace.restart_game"></span></button>
-  <button id="stop" role="menuitem" data-i18n-title="workspace.stop_game_title" disabled><svg class="lucide" aria-hidden="true"><use href="#square"></use></svg><span data-i18n="workspace.stop_game"></span></button>
   <button id="validate" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#check"></use></svg><span data-i18n="workspace.validate_project"></span></button>
   <button id="capabilityTests" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#circle-dot"></use></svg><span data-i18n="workspace.capability_tests"></span></button>
   <button id="diff" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#file-diff"></use></svg><span data-i18n="workspace.file_diff"></span></button>
-  <button id="delete" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#trash-2"></use></svg><span data-i18n="workspace.delete_current_file"></span></button>
   <button id="clearGameData" class="danger-action" role="menuitem" data-i18n-title="workspace.clear_game_data_title" data-i18n="workspace.clear_game_data"></button>
 </div>
+<span id="delete" hidden aria-hidden="true"></span>
 
 <div id="projectPickerMenu" class="project-menu anchored-menu" role="menu">
   <div class="project-menu-actions">
@@ -112,10 +114,7 @@
   <div class="dialog-head"><strong data-i18n="workspace.project_settings"></strong><span id="manifestState" aria-live="polite"></span><button data-close="manifestModal" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
   <form id="manifestForm" class="manifest-form">
     <section><h3 translate="no">main.json</h3><div class="manifest-grid">
-      <label><span data-i18n="workspace.project_id"></span><input id="manifestId" name="manifestId" readonly data-i18n-title="workspace.project_id_readonly"></label>
       <label><span data-i18n="workspace.name"></span><input id="manifestName" name="manifestName" data-initial-focus required maxlength="80" autocomplete="off"></label>
-      <label><span data-i18n="workspace.publisher"></span><input id="manifestAuthor" name="manifestAuthor" readonly data-i18n-title="workspace.publisher_managed"></label>
-      <label><span data-i18n="workspace.last_upload"></span><input id="manifestLastModifiedAt" name="manifestLastModifiedAt" readonly data-i18n-title="workspace.local_timezone_hint"></label>
       <label class="wide"><span data-i18n="workspace.description"></span><textarea id="manifestRemarks" name="manifestRemarks" maxlength="500" rows="3" autocomplete="off"></textarea></label>
       <label><span data-i18n="workspace.game_version"></span><input id="manifestVersion" name="manifestVersion" required pattern="\d+\.\d+\.\d+" autocomplete="off"></label>
       <label><span data-i18n="workspace.sdk_version"></span><input id="manifestSdkVersion" name="manifestSdkVersion" required pattern="\d+\.\d+\.\d+" autocomplete="off"></label>
@@ -132,7 +131,7 @@
     </div>
     <div class="manifest-tags-field"><span data-i18n="workspace.tags"></span><div id="manifestTags" class="manifest-tags"></div><div class="input-action"><input id="manifestTagInput" name="manifestTagInput" maxlength="64" data-i18n-placeholder="workspace.tag_placeholder" autocomplete="off"><button id="manifestTagAdd" type="button" data-i18n="workspace.add"></button></div></div>
     </section>
-    <section><h3 translate="no">capabilities.json</h3><p class="manifest-help" data-i18n="workspace.capability_manifest_help"></p><strong data-i18n="workspace.main_capabilities"></strong><div id="capabilityOptions" class="capability-options"></div><div id="controllerCapabilitySection" hidden><strong data-i18n="workspace.controller_capabilities"></strong><div id="controllerCapabilityOptions" class="capability-options"></div></div></section>
+    <section class="manifest-capability-section"><h3 translate="no">capabilities.json</h3><p class="manifest-help" data-i18n="workspace.capability_manifest_help"></p><strong data-i18n="workspace.main_capabilities"></strong><div id="capabilityOptions" class="capability-picker"></div><div id="controllerCapabilitySection" hidden><strong data-i18n="workspace.controller_capabilities"></strong><div id="controllerCapabilityOptions" class="capability-picker"></div></div></section>
     <div id="manifestError" class="form-error" aria-live="polite"></div>
     <div class="manifest-actions"><button type="button" data-close="manifestModal" data-i18n="workspace.cancel"></button><button type="submit" class="primary" data-i18n="workspace.save_project_settings"></button></div>
   </form>
@@ -169,17 +168,29 @@
 </div></div>
 
 <div id="treeMenu" class="context-menu" role="menu">
-  <button type="button" data-tree-action="new-file" data-i18n="workspace.new_file"></button>
-  <button type="button" data-tree-action="new-directory" data-i18n="workspace.new_directory"></button>
-  <button type="button" data-tree-action="upload" data-i18n="workspace.upload_file"></button>
+  <button id="treeNewFile" type="button" data-tree-action="new-file" data-i18n="workspace.new_file"></button>
+  <button id="treeNewDirectory" type="button" data-tree-action="new-directory" data-i18n="workspace.new_directory"></button>
+  <button id="treeUpload" type="button" data-tree-action="upload" data-i18n="workspace.upload_file"></button>
   <button id="treeCopy" type="button" data-tree-action="copy" hidden data-i18n="workspace.copy"></button>
   <button id="treeCut" type="button" data-tree-action="cut" hidden data-i18n="workspace.cut"></button>
   <button id="treePaste" type="button" data-tree-action="paste" hidden data-i18n="workspace.paste_here"></button>
-  <button id="treeExtract" type="button" data-tree-action="extract" hidden data-i18n="workspace.extract_zip_here"></button>
+  <button id="treeExtract" type="button" data-tree-action="extract" hidden data-i18n="workspace.extract_zip"></button>
   <button type="button" data-tree-action="history" data-i18n="workspace.local_history_replace"></button>
   <button id="treeDelete" type="button" class="danger" data-tree-action="delete" hidden data-i18n="workspace.delete"></button>
 </div>
 <input id="fileUpload" name="fileUpload" type="file" multiple hidden>
+
+<div id="extractModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="extractTitle"><div class="dialog extract-dialog">
+  <div class="dialog-head"><strong id="extractTitle" data-i18n="workspace.extract_zip_title"></strong><button type="button" data-close="extractModal" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
+  <form id="extractForm" class="extract-form">
+    <label><span data-i18n="workspace.zip_archive"></span><input id="extractArchivePath" name="extractArchivePath" type="text" readonly></label>
+    <label><span data-i18n="workspace.extract_destination"></span><div class="extract-path-input"><span aria-hidden="true">/</span><input id="extractDestination" name="extractDestination" type="text" list="extractDestinationOptions" data-initial-focus required autocomplete="off" spellcheck="false" data-i18n-placeholder="workspace.extract_destination_placeholder"></div></label>
+    <datalist id="extractDestinationOptions"></datalist>
+    <p class="extract-help" data-i18n="workspace.extract_destination_help"></p>
+    <div id="extractError" class="form-error" aria-live="polite"></div>
+    <div class="extract-actions"><button type="button" data-close="extractModal" data-i18n="workspace.cancel"></button><button id="extractSubmit" type="submit" class="primary" data-i18n="workspace.extract_zip"></button></div>
+  </form>
+</div></div>
 
 <div id="historyModal" class="modal" role="dialog" aria-modal="true" data-i18n-aria-label="workspace.local_history"><div class="dialog history-dialog">
   <div class="dialog-head"><strong id="historyTitle" data-i18n="workspace.local_history"></strong><button id="restoreBefore" disabled data-i18n="workspace.restore_before"></button><button id="restoreAfter" disabled data-i18n="workspace.restore_after"></button><button data-close="historyModal" data-initial-focus data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
@@ -214,11 +225,6 @@
   <div class="dialog-head"><strong data-i18n="workspace.get_current_project_prompt"></strong><div class="prompt-kind-tabs"><button id="previewChatPrompt" class="active" data-initial-focus data-i18n="workspace.chat_prompt"></button><button id="previewAgentPrompt" data-i18n="workspace.agent_prompt"></button></div><button id="copyPromptPreview" data-i18n-title="workspace.copy_prompt_title" data-i18n="workspace.copy"></button><button id="downloadPromptPreview" data-i18n-title="workspace.download_prompt_title" data-i18n="workspace.download"></button><button data-close="promptPreviewModal" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
   <div id="agentBaseUrlPanel" class="agent-base-url-panel" hidden><label for="agentBaseUrl"><strong data-i18n="workspace.agent_connection_address"></strong><select id="agentBaseUrl" name="agentBaseUrl" data-i18n-aria-label="workspace.agent_base_url"></select></label><span data-i18n="workspace.agent_base_url_help"></span></div>
   <pre id="promptPreviewContent"></pre>
-</div></div>
-
-<div id="workspacePreferencesModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="workspacePreferencesTitle"><div class="dialog workspace-preferences-dialog">
-  <div class="dialog-head"><strong id="workspacePreferencesTitle" data-i18n="workspace.preferences"></strong><button id="closeWorkspacePreferences" type="button" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
-  <div class="workspace-preferences-body"><label><span data-i18n="workspace.language"></span><select id="workspaceLocale" name="workspaceLocale" data-initial-focus></select></label><label><span data-i18n="workspace.theme"></span><select id="workspaceTheme" name="workspaceTheme"><option value="system" data-i18n="workspace.theme.system"></option><option value="light" data-i18n="workspace.theme.light"></option><option value="dark" data-i18n="workspace.theme.dark"></option></select></label></div>
 </div></div>
 
 <div id="aiApprovalModal" class="modal ai-approval-modal" role="dialog" aria-modal="true" aria-labelledby="aiApprovalMessage"><div class="ai-approval-dialog">

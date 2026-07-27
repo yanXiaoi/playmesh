@@ -15,7 +15,6 @@ import '../../core/services/go_core_runtime.dart';
 import '../../core/services/go_core_status_service.dart';
 import '../../ui/playmesh_ui.dart';
 import '../developer/developer_workspace_page.dart';
-import '../games/online_game_library_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -103,13 +102,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   if (widget.catalogController case final catalog?) ...[
                     EntranceAnimation(
                       delay: const Duration(milliseconds: 40),
-                      child: _GameSourceManagementSection(controller: catalog),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-                  if (widget.catalogController case final catalog?) ...[
-                    EntranceAnimation(
-                      delay: const Duration(milliseconds: 60),
                       child: _CatalogShareSection(controller: catalog),
                     ),
                     const SizedBox(height: 14),
@@ -302,30 +294,6 @@ class _SettingsPageState extends State<SettingsPage> {
       Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
           builder: (_) => DeveloperWorkspacePage(workspaceUri: localUri),
-        ),
-      ),
-    );
-  }
-}
-
-class _GameSourceManagementSection extends StatelessWidget {
-  const _GameSourceManagementSection({required this.controller});
-
-  final GameCatalogController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        minVerticalPadding: 10,
-        leading: const GradientIcon(icon: Icons.hub_outlined),
-        title: Text(context.tr('settings.game_sources')),
-        subtitle: Text(context.tr('settings.game_sources_description')),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => CatalogSourcesPage(controller: controller),
-          ),
         ),
       ),
     );
