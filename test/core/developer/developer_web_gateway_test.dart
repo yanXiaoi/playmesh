@@ -138,14 +138,10 @@ void main() {
     expect(workspace.body, contains('id="copyProjectFromPicker"'));
     expect(workspace.body, contains('id="deleteProjectFromPicker"'));
     expect(workspace.body, contains('id="manifestForm"'));
-    expect(
-      workspace.body,
-      contains('id="manifestId" name="manifestId" readonly'),
-    );
+    expect(workspace.body, isNot(contains('id="manifestId"')));
+    expect(workspace.body, isNot(contains('id="manifestAuthor"')));
     expect(workspace.body, isNot(contains('id="manifestIcon"')));
     expect(workspace.body, isNot(contains('id="manifestPermissions"')));
-    expect(workspace.body, contains('id="manifestAuthor"'));
-    expect(workspace.body, contains('data-i18n="workspace.publisher"'));
     expect(workspace.body, contains('id="publishModal"'));
     expect(workspace.body, contains('id="publishForm"'));
     expect(workspace.body, contains('id="publishSources"'));
@@ -472,7 +468,7 @@ void main() {
       jsonDecode(capabilityTestRun.body) as Map,
     );
     expect(capabilityTestResult['total'], 1);
-    final unavailableCapabilityInstance = await http.post(
+    final createdCapabilityInstance = await http.post(
       base.resolve(
         '/dev/api/capability-tests/instances?token=custom-dev-token',
       ),
@@ -482,11 +478,11 @@ void main() {
         'options': <String, Object?>{},
       }),
     );
-    expect(unavailableCapabilityInstance.statusCode, HttpStatus.conflict);
-    expect(
-      jsonDecode(unavailableCapabilityInstance.body)['error']['code'],
-      'capability_unavailable',
-    );
+    expect(createdCapabilityInstance.statusCode, HttpStatus.created);
+    final createdCapabilityJson =
+        jsonDecode(createdCapabilityInstance.body) as Map<String, dynamic>;
+    expect(createdCapabilityJson['code'], 'device.midi');
+    expect(createdCapabilityJson['instanceId'], isNotEmpty);
     expect(capabilityTestResult['results'], isA<List>());
     final editorHint = await http.get(
       base.resolve(

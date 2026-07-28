@@ -32,6 +32,7 @@ PLAYMESH API AGENT 游戏开发提示
 - 非敏感能力直接使用标准 Web API，例如加速度计、陀螺仪和设备方向；用户主动触发的 `<input type="file">` 不声明能力。`capabilities.json` 只按需声明敏感 WebView 权限（`media.camera`、`media.microphone`、`device.midi`）和多平台适配能力（例如 `device.vibration`），且每个页面只使用自身角色声明的能力。
 - 摄像头、麦克风采集和 MIDI 声明后直接使用 `getUserMedia()` 或 `requestMIDIAccess({sysex:true})`；原生短语音识别按实时注册表创建 `media.microphone`，调用 `toText({localeId,listenFor,pauseFor})` 并监听 `textOnSoundLevelChange`、`textOnResult`。只有描述符公开了方法或事件的能力才使用 `playmesh.app.capabilities.create()`，不得臆造 SDK 方法。
 - `device.vibration` 使用 `vibration` 插件适配；创建实例后，`vibrate` 可传 `duration/pattern/repeat/intensities/amplitude/sharpness/preset` 全部参数，持续或重复震动必须用 `cancel` 停止。
+- `playmesh.app.ui` 提供平台统一的居中游戏菜单、分享、日志、全屏、信息、性能与退出能力。游戏自己的菜单按钮只能调用 `showGameSidebar()` 打开统一菜单；该兼容方法名不表示菜单仍位于侧边。不要调用不存在的 `hideGameSidebar()` 或 `onMenuRequest`；只有游戏完整实现替代 UI 时才使用 `configure({fallbackUi:false})` 关闭平台兜底。
 - SDK 不判断玩法业务。准备、倒计时、开局、回合、胜负和结束条件由游戏 Authority 决定；`session.start/finish` 只是通过 SDK 请求 Core 切换基础会话状态。
 
 【交付检查】

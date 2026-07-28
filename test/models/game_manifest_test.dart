@@ -95,7 +95,7 @@ void main() {
   });
 
   test('拒绝不兼容的 SDK 主版本', () {
-    final json = validManifest()..['sdkVersion'] = '3.0.0';
+    final json = validManifest()..['sdkVersion'] = '4.0.0';
 
     expect(() => GameManifest.fromJson(json), throwsFormatException);
   });
@@ -108,7 +108,7 @@ void main() {
   });
 
   test('拒绝不兼容的 App SDK 主版本', () {
-    final json = validManifest()..['appSdkVersion'] = '3.0.0';
+    final json = validManifest()..['appSdkVersion'] = '4.0.0';
 
     expect(() => GameManifest.fromJson(json), throwsFormatException);
   });

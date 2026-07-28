@@ -57,7 +57,7 @@ console.log(playmesh.version); // "3.0.0"
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若当前页面角色在 `capabilities.json` 中对应的能力列表非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
 
-Game SDK 会把当前页面的方向传给 App Bridge；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过游戏侧边栏的全屏操作再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
+Game SDK 会把当前页面的方向传给 App Bridge；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过居中游戏菜单的全屏操作再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
 
 ## 游戏声明
 
@@ -254,7 +254,7 @@ Authority 上下文或 Sync 上下文。游戏如需观察当前页面的联机�
 await playmesh.player.setNickname("新昵称");
 ```
 
-浏览器版 SDK 会在游戏侧边栏的“游戏信息”弹窗中提供昵称修改入口，游戏不需要再制作昵称设置界面。昵称去除首尾空白后长度必须为 1 至 32 个字符。
+浏览器版 SDK 会在游戏菜单的“游戏信息”弹窗中提供昵称修改入口，游戏不需要再制作昵称设置界面。昵称去除首尾空白后长度必须为 1 至 32 个字符。
 
 ## 游戏消息
 
@@ -325,7 +325,7 @@ const off = playmesh.sync.observe((snapshot) => render(snapshot.state));
 
 统一菜单与兜底覆盖层能力位于 `playmesh.app.ui`。App WebView 与普通浏览器都会
 注入 `playmesh-app.js`；`playmesh.app.isAvailable()` 只表示原生 App Bridge 是否
-可用，不影响浏览器使用 SDK 侧边栏。
+可用，不影响浏览器使用 SDK 游戏菜单。
 
 ### `playmesh.app.ui.openSharePanel()`
 
@@ -348,19 +348,19 @@ SDK 会在发出命令前同步记录当前游戏 DOM 的焦点元素。分享�
 普通浏览器再回退到游戏文档。这个私有过程不会把分享 Token、链接、二维码
 或 App 本地化词典暴露给游戏。
 
-### 游戏侧边栏
+### 居中游戏菜单
 
 ```js
 await playmesh.app.ui.showGameSidebar();
 await playmesh.app.ui.exitGame();
 ```
 
-`showGameSidebar()` 手动打开 SDK 在当前 WebView/HTML 中创建的侧边栏，并把焦点移到
-“继续游戏”。侧边栏自身负责关闭和恢复游戏 DOM 焦点，因此不公开
-`hideGameSidebar()`；也不提供 `onMenuRequest` 或原生按键转发。侧边栏打开或关闭
+`showGameSidebar()` 手动打开 SDK 在当前 WebView/HTML 中创建的居中游戏菜单，并把焦点移到
+“继续游戏”。菜单自身负责关闭和恢复游戏 DOM 焦点，因此不公开
+`hideGameSidebar()`；也不提供 `onMenuRequest` 或原生按键转发。游戏菜单打开或关闭
 只改变 SDK UI，不发送 `pause` / `resume` 生命周期事件。
 `exitGame()` 请求 App 正常结束当前游戏、执行退出清理并返回上一 App 页面；不需要
-先打开侧边栏。
+先打开游戏菜单。`showGameSidebar()` 的名称为兼容既有公开契约而保留，不代表菜单仍位于侧边。
 
 游戏可以在 SDK 就绪前关闭统一兜底 UI：
 
@@ -368,8 +368,8 @@ await playmesh.app.ui.exitGame();
 playmesh.app.ui.configure({ fallbackUi: false });
 ```
 
-此时 SDK 不创建侧边栏、悬浮球、信息层或日志层，也不消费菜单/返回按键。普通浏览器
-若仍想使用 SDK 侧边栏、但由游戏自己的按钮负责打开，可以调用：
+此时 SDK 不创建游戏菜单、悬浮球、信息层或日志层，也不消费菜单/返回按键。普通浏览器
+若仍想使用 SDK 游戏菜单、但由游戏自己的按钮负责打开，可以调用：
 
 ```js
 playmesh.app.ui.initializeBrowser(); // 浏览器返回 true；App WebView 返回 false
@@ -553,16 +553,16 @@ const off = playmesh.performance.onLatency((value) => console.log(value));
 
 `getLatency()` 在尚无有效样本或 Authority 不在线时返回 `null`。诊断对象包含客户端发送/接收时间、Core 接收/发送时间、Authority 可用状态和原始 RTT，供开发诊断使用；游戏规则不得依赖延迟数值决定胜负。
 
-FPS、联机延迟、侧边栏、信息和日志覆盖层都由 `playmesh-app.js` 在网页内创建，并使用
-Shadow DOM 与游戏样式隔离。新开、刷新或重连后侧边栏、性能层、信息层和日志层默认
-关闭；普通浏览器默认显示可拖动悬浮入口，App WebView 不显示悬浮入口。侧边栏打开或
+FPS、联机延迟、居中游戏菜单、信息和日志覆盖层都由 `playmesh-app.js` 在网页内创建，并使用
+Shadow DOM 与游戏样式隔离。新开、刷新或重连后游戏菜单、性能层、信息层和日志层默认
+关闭；普通浏览器默认显示可拖动悬浮入口，App WebView 不显示悬浮入口。游戏菜单打开或
 关闭不改变游戏生命周期。
 
 ## 浏览器行为
 
 - 当前页面角色对应的 `required` 或 `controllerRequired` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；空数组是有效声明，绝不回退到另一角色。不支持项只做标注，不阻止同意后进入。
-- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 侧边栏保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
-- `playmesh-app.js` 在捕获阶段监听 `Escape`、浏览器返回键、Android Menu keyCode 和菜单键，第一次按下即可打开或关闭 SDK 侧边栏；原生层不注入、不转发这些按键。
+- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 游戏菜单保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
+- `playmesh-app.js` 在捕获阶段监听 `Escape`、浏览器返回键、Android Menu keyCode 和菜单键，第一次按下即可打开或关闭 SDK 游戏菜单；原生层不注入、不转发这些按键。
 - 普通浏览器加载 Authority 主机提供的默认 App SDK；默认菜单至少提供继续、刷新、游戏信息、运行日志和退出游戏，且只有普通浏览器显示可拖动悬浮入口。
 - 普通多人多屏分享加载 `main.json.entries.game`（默认 `app/index.html`），浏览器玩家加入 Session 并建立 WebSocket；只有单屏多人分享才加载 `entries.controller`（默认 `app/controller/index.html`）。
 - 单机分享加载 `entries.game`，不加入多人 Session，也不建立会话 WebSocket；浏览器 Console 只保留在当前浏览器；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
@@ -570,7 +570,7 @@ Shadow DOM 与游戏样式隔离。新开、刷新或重连后侧边栏、性能
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
 - 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。
 - 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线后，同 ID 重连可由游戏恢复准备状态和临时玩家状态。
-- SDK 在普通浏览器页面上提供隔离于游戏样式的侧边栏和随系统明暗模式切换的二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境复用同一个 `playmesh-app.js` 菜单实现。
+- SDK 在普通浏览器页面上提供隔离于游戏样式的居中游戏菜单和随系统明暗模式切换的二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境复用同一个 `playmesh-app.js` 菜单实现。
 - 旧浏览器连接断开后，其玩家从会话成员集合移除并释放人数名额；短暂的刷新竞态由 SDK 对 `session_full` 做有限重试。
 - 刷新继续使用本局分享 token；退出游戏、会话关闭、App/Core 重启后旧 token 失效。
 - 关闭分享面板和刷新游戏不会使 token 失效。

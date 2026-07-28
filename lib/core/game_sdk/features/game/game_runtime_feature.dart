@@ -180,7 +180,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       emit(lifecycleListeners, { state: "ready" });
       if (!appSdk.isAvailable()) {
         void ensureBrowserNicknameUi().catch((error) => {
-          global.console?.warn?.("Playmesh 浏览器游戏侧边栏初始化失败", error);
+          global.console?.warn?.("Playmesh 浏览器游戏菜单初始化失败", error);
         });
       }
       void renderPerformanceUi();

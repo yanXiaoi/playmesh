@@ -1478,7 +1478,7 @@
       emit(lifecycleListeners, { state: "ready" });
       if (!appSdk.isAvailable()) {
         void ensureBrowserNicknameUi().catch((error) => {
-          global.console?.warn?.("Playmesh 浏览器游戏侧边栏初始化失败", error);
+          global.console?.warn?.("Playmesh 浏览器游戏菜单初始化失败", error);
         });
       }
       void renderPerformanceUi();
@@ -2567,7 +2567,7 @@
     } else {
       void requestBrowserFullscreen(config.orientation).catch((error) => {
         global.console?.info?.(
-          "浏览器未允许自动全屏，可通过游戏侧边栏手动进入",
+          "浏览器未允许自动全屏，可通过游戏菜单手动进入",
           error,
         );
       });
@@ -2974,7 +2974,7 @@
   function exitBrowserGameFromSidebar(ui) {
     browserBackExitRequested = true;
     ui.closeSidebar(false);
-    markRuntimeExited("用户从游戏侧边栏退出");
+    markRuntimeExited("用户从游戏菜单退出");
     try {
       if (browserBackInterceptionInstalled && global.history.length > 2) {
         global.history.go(-2);

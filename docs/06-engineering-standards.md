@@ -175,15 +175,15 @@ Game Package
 | Playmesh App | `3.0.0+23` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
-| Game SDK | `2.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
-| App Bridge SDK | `2.1.1` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
-| Developer API / OpenAPI | `2.2.0` | Developer Gateway 契约 |
+| Game SDK | `3.0.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
+| App Bridge SDK | `3.0.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
+| Developer API / OpenAPI | `2.3.0` | Developer Gateway 契约 |
 | Developer CLI | `1.4.0` | `dev-cli/`、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `2.0.0` | `/apps/info`、latest-only 列表、版本化下载、图标与上传声明 |
 | Relay 协议 | `2.0.0` | App 端点加密邀请与 Go Server 中转协议 |
 
-该矩阵描述当前代码与生成契约，不等同于已经完成发行构建或真机验收；发布状态和
-历史版本见 `docs/version/README.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+该矩阵描述当前代码与生成契约；发布状态和历史版本见
+`docs/version/README.md` 与 `docs/version/3.0.0.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `push/dev` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段，禁止手工声明与待上传 SDK 不一致的版本。CLI 本地 `app/`、`playmesh/` 必须分别镜像运行时 `/app/`、`/playmesh/`；上传只包含 `main.json`、可选根 `icon.png`、`capabilities.json` 和 `app/`。CLI `get` 与开发者项目列表是损坏项目的自救通道：只要求 `main.json` 能解析出非空 `id`，不得先执行 Manifest、能力、入口或运行校验，缺少 `app/` 时也要拉取现有内容；远端缺少有效 `icon.png` 时必须删除本地陈旧图标。`push/dev`、运行、正式导入仍严格校验。CLI 交互式创建不得复制项目创建逻辑：选项从统一能力注册表读取，最终调用 Developer Gateway 的现有项目创建接口，并复用项目包与 SDK 下载链路写入当前空目录。所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖 `main.json`、可选 `icon.png`、`capabilities.json` 与 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。

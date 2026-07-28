@@ -50,3 +50,11 @@ app.*.map.json
 
 # Local development environment and signing details
 /docs/04-dev-env.md
+
+# Local Codex/runtime artifacts
+/.agents/
+/.codex-remote-attachments/
+/outputs/
+/skills-lock.json
+/dev-cli/playmesh-cli.exe~
+/x.name.includes('webview_flutter')

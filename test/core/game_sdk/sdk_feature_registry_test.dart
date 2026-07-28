@@ -8,6 +8,7 @@ void main() {
       'game.submitAction',
       'authority.result',
       'session.start',
+      'session.reset',
       'session.finish',
       'storage.get',
       'storage.set',

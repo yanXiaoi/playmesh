@@ -289,18 +289,18 @@ interface PlaymeshStorageBucket {
 }
 
 interface PlaymeshAppUiOptions {
-  /** 是否由 SDK 渲染兜底侧边栏、信息和日志覆盖层；默认 `true`。 */
+  /** 是否由 SDK 渲染兜底游戏菜单、信息和日志覆盖层；默认 `true`。 */
   fallbackUi?: boolean;
   /** 普通浏览器是否显示可拖动的悬浮菜单按钮；默认 `true`。 */
   floatingButton?: boolean;
 }
 
 interface PlaymeshAppUiApi {
-  /** 浏览器专用初始化：启用兜底侧边栏但不创建悬浮球；App WebView 中返回 `false`。 @playmesh-completion playmesh.app.ui.initializeBrowser */
+  /** 浏览器专用初始化：启用兜底游戏菜单但不创建悬浮球；App WebView 中返回 `false`。 @playmesh-completion playmesh.app.ui.initializeBrowser */
   initializeBrowser(): boolean;
   /** 配置 SDK 兜底 UI；应在等待 `playmesh.app.ready` 前调用。 @playmesh-completion playmesh.app.ui.configure */
   configure(options: PlaymeshAppUiOptions): PlaymeshAppUiOptions;
-  /** 手动打开 SDK 兜底游戏侧边栏；禁用兜底 UI 时返回 `false`。 @playmesh-completion playmesh.app.ui.showGameSidebar */
+  /** 手动打开 SDK 居中游戏菜单；方法名为兼容公开契约保留，禁用兜底 UI 时返回 `false`。 @playmesh-completion playmesh.app.ui.showGameSidebar */
   showGameSidebar(): Promise<boolean>;
   /** 重新加载当前游戏文档。 @playmesh-completion playmesh.app.ui.restartGame */
   restartGame(): void;
@@ -352,7 +352,7 @@ interface PlaymeshAppApi {
     /** 订阅 App 统一输入事件。 @returns 取消订阅函数。 @playmesh-completion playmesh.app.device.onInput */
     onInput(callback: (input: unknown) => void): PlaymeshUnsubscribe;
   };
-  /** 统一侧边栏及其全部菜单动作。 */
+  /** 统一居中游戏菜单及其全部动作。 */
   readonly ui: PlaymeshAppUiApi;
 }
 
