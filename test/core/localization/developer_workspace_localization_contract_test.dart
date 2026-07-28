@@ -241,6 +241,50 @@ void main() {
     expect(script, contains('diagnosticLocalizationKeys=Object.freeze'));
     expect(script, contains('historySummaryLocalizationKeys=Object.freeze'));
     expect(script, contains('promptTemplateLocalizationKeys=Object.freeze'));
+    expect(script, contains('window.showWorkspaceError=showWorkspaceError'));
+    expect(
+      script,
+      isNot(contains("q('projectSearch').focus()")),
+      reason: 'Opening project actions must not force focus into search.',
+    );
+    expect(
+      script,
+      isNot(contains("q('projectSearch').select()")),
+      reason: 'Opening project actions must not select search text.',
+    );
+    expect(
+      script,
+      contains(
+        "function openProjectPicker(){toolbarMenu.classList.remove('open');"
+        "q('moreActions').setAttribute('aria-expanded','false');"
+        "renderProjectList();updateProjectPickerRequirement();"
+        "projectPickerMenu.classList.add('open');"
+        "projectPicker.setAttribute('aria-expanded','true');"
+        "positionAnchoredMenu(projectPickerMenu,projectPicker)}",
+      ),
+      reason: 'Opening project actions must not move focus automatically.',
+    );
+    expect(
+      script,
+      contains("showWorkspaceError(error);throw error}if(!response.ok)"),
+      reason: 'Developer API failures must use the centered error message.',
+    );
+    expect(
+      script,
+      contains(
+        "catch(error){q('promptPreviewContent').textContent=error.message;"
+        "throw error}finally",
+      ),
+      reason: 'Prompt failures must replace the stale generating state.',
+    );
+    expect(
+      html,
+      contains(
+        'if(window.showWorkspaceError){window.showWorkspaceError(error);return}',
+      ),
+      reason: 'Unhandled Workspace errors must use the centered error message.',
+    );
+    expect(css, contains('.workspace-message.error {'));
     expect(
       script,
       contains("return key?tr(key):String(definition?.[field]??'')"),

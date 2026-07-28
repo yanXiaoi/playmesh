@@ -19,6 +19,16 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         return runtimeLocale;
       },
     }),
+    gameInfo: Object.freeze({
+      getCurrent() {
+        const info = bootstrap?.gameInfo;
+        if (!info) return null;
+        return {
+          ...info,
+          requiredCapabilities: [...(info.requiredCapabilities || [])],
+        };
+      },
+    }),
     session: {
       onStateChange(callback) {
         const unsubscribe = subscribe(sessionListeners, callback);
@@ -213,8 +223,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     __receive: receive,
   };
 
-  installBrowserConsoleCapture();
-  global[Symbol.for("playmesh.platform-ui.back")] = handlePlatformBackIntent;
+  registerAppPlatformUiRuntime();
   global.playmesh = playmesh;
   global.console?.info?.("Playmesh Game SDK 注入成功", {
     version: PLAYMESH_SDK_VERSION,
@@ -223,7 +232,17 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
   }
   global.addEventListener?.("pagehide", () => markRuntimeExited("游戏页面已退出"));
-  playmesh.ready = appSdk.ready.then(async (appBootstrap) => {
+  playmesh.ready = appSdk.ready.then(async (initialAppBootstrap) => {
+    let appBootstrap = initialAppBootstrap;
+    const runtimeGameDeclaration = global.__PLAYMESH_BROWSER__;
+    if (runtimeGameDeclaration &&
+        appSdk.isAvailable() &&
+        typeof appSdk.__configureRuntimeGame === "function") {
+      appBootstrap = await appSdk.__configureRuntimeGame({
+        requiredCapabilities:
+          runtimeGameDeclaration.requiredCapabilities || [],
+      });
+    }
     const appPlatformUiConfiguration = takeAppPlatformUiConfiguration();
     const platformUiConfiguration = appPlatformUiConfiguration ||
       takeBrowserPlatformUiConfiguration();
@@ -620,78 +639,48 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
   }
 
-  function handlePlatformBackIntent() {
-    if (appSdk.isAvailable() && typeof appSdk.showGameSidebar === "function") {
-      void appSdk.showGameSidebar().catch((error) => {
-        global.console?.warn?.("Playmesh App 游戏侧边栏未能打开", error);
-      });
-      return true;
-    }
-    if (!global.__PLAYMESH_BROWSER__ || !global.document) return false;
-    const handleUi = (ui) => {
-      if (!ui) return;
-      if (!ui.overlay.hidden) {
-        ui.onNicknameBack?.();
-      } else if (!ui.logsOverlay.hidden) {
-        ui.logsClose.onclick();
-      } else if (!ui.infoOverlay.hidden) {
-        ui.infoClose.onclick();
-      } else if (!ui.sidebarLayer.hidden) {
-        ui.closeSidebar();
-      } else {
-        ui.openSidebar();
-      }
-    };
-    if (browserNicknameUi) {
-      handleUi(browserNicknameUi);
-    } else {
-      void ensureBrowserNicknameUi().then(handleUi).catch((error) => {
-        global.console?.warn?.("Playmesh 浏览器游戏侧边栏未能打开", error);
-      });
-    }
-    return true;
-  }
-
-  function installBrowserBackInterception(ui) {
-    if (appSdk.isAvailable() ||
-        browserBackInterceptionInstalled ||
-        !global.history?.pushState ||
-        !global.history?.replaceState) {
-      return;
-    }
-    try {
-      browserBackGuardUrl = global.location?.href || null;
-      const currentState =
-        global.history.state && typeof global.history.state === "object"
-          ? global.history.state
-          : {};
-      global.history.replaceState(
-        { ...currentState, __playmeshBackBase: true },
-        "",
-        browserBackGuardUrl,
-      );
-      global.history.pushState(
-        { __playmeshBackGuard: true },
-        "",
-        browserBackGuardUrl,
-      );
-      browserBackInterceptionInstalled = true;
-      global.addEventListener?.("popstate", () => {
-        if (browserBackExitRequested) return;
-        handlePlatformBackIntent();
-        try {
-          global.history.pushState(
-            { __playmeshBackGuard: true },
-            "",
-            browserBackGuardUrl,
-          );
-        } catch (error) {
-          global.console?.warn?.("Playmesh 浏览器返回守卫恢复失败", error);
+  function registerAppPlatformUiRuntime() {
+    if (typeof appSdk.__registerRuntimeUi !== "function") return;
+    appSdk.__registerRuntimeUi({
+      async reload() {
+        if (playmesh.session.isAuthority()) {
+          await post("session.reset", {});
         }
-      });
-    } catch (error) {
-      global.console?.warn?.("Playmesh 浏览器无法安装返回守卫", error);
-    }
+        global.location?.reload?.();
+      },
+      async getInfo() {
+        await playmesh.ready;
+        const gameInfo = playmesh.gameInfo.getCurrent();
+        if (!gameInfo) return null;
+        const session = playmesh.session.getCurrent();
+        const player = playmesh.player.getCurrent();
+        return {
+          gameId: gameInfo.id,
+          gameName: gameInfo.name,
+          requiredCapabilities: [...gameInfo.requiredCapabilities],
+          joinCode: session?.joinCode || null,
+          multiplayer: gameInfo.multiplayer,
+          isAuthority: playmesh.session.isAuthority(),
+          playerName: player?.nickname || null,
+          playerCount: Array.isArray(session?.players)
+            ? session.players.length
+            : null,
+          gameSdkVersion: playmesh.version,
+          appSdkVersion: appSdk.version,
+          platform: playmesh.app.device.getPlatform() || "browser",
+        };
+      },
+      getPerformance() {
+        return {
+          fps: currentFps,
+          latency: currentLatency,
+          multiplayer: Boolean(bootstrap?.session),
+        };
+      },
+      setPerformanceVisible(visible) {
+        performanceVisible = visible === true;
+      },
+    });
   }
 
   function exitBrowserGameFromSidebar(ui) {
@@ -940,7 +929,6 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         onBack: () => ui.logsClose.onclick(),
       },
     );
-    installBrowserBackInterception(ui);
     refreshBrowserPlatformUi(ui);
     performanceUi = browserNicknameUi;
     return browserNicknameUi;

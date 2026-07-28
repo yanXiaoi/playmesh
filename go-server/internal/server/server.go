@@ -224,6 +224,11 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		userHandler.PutUploadKey,
 	)
 	external.GET(
+		"/api/user/upload-key",
+		userHandler.RequireSession(false),
+		userHandler.GetUploadKey,
+	)
+	external.GET(
 		"/api/user/games",
 		userHandler.RequireSession(false),
 		userHandler.Games,

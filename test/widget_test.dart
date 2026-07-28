@@ -11,7 +11,6 @@ import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
 import 'package:playmesh/features/game/game_launcher.dart';
-import 'package:playmesh/features/game/game_controls.dart';
 import 'package:playmesh/features/game/game_orientation_controller.dart';
 import 'package:playmesh/features/game/game_page.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
@@ -62,6 +61,31 @@ Widget _gamePreview(GameSummary game) => Text('Fake WebView: ${game.id}');
 
 void main() {
   setUpAll(initializeLocalizedTestApp);
+
+  testWidgets('shows home while the local game library is still scanning', (
+    WidgetTester tester,
+  ) async {
+    final scanResult = Completer<List<GameSummary>>();
+
+    await tester.pumpWidget(
+      PlaymeshApp(
+        goCoreStatusProvider: const _FakeStatusProvider(),
+        uiBootstrap: localizedTestUiBootstrap(),
+        gameLibraryScan: () => scanResult.future,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byKey(HomePage.profileHeroKey), findsOneWidget);
+    expect(find.byKey(HomePage.gameLibraryLoadingKey), findsOneWidget);
+
+    scanResult.complete(_games);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(HomePage.gameLibraryLoadingKey), findsNothing);
+    expect(find.text(_primaryGame.name), findsOneWidget);
+  });
 
   testWidgets('join action works without an installed game', (
     WidgetTester tester,
@@ -224,66 +248,37 @@ void main() {
     );
     expect(find.byKey(GamePage.gameSurfaceKey), findsOneWidget);
     expect(find.byKey(GamePage.runtimeKey(0)), findsOneWidget);
+    final gamePage = tester.widget<GamePage>(find.byType(GamePage));
+    expect(gamePage.localProfile, isNotNull);
+    expect(gamePage.localProfile!.userId, gamePage.localUserId);
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
     expect(find.text('-- FPS'), findsNothing);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-
-    expect(find.text('返回上一页'), findsOneWidget);
-    expect(find.text('刷新游戏'), findsOneWidget);
-    expect(find.text('二维码与链接'), findsOneWidget);
-    expect(find.text('运行日志'), findsOneWidget);
-    expect(find.text('显示性能信息'), findsOneWidget);
-
-    await tester.tap(find.text('运行日志'));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('关闭运行日志'), findsOneWidget);
-    await tester.tap(find.byTooltip('关闭运行日志'));
-    await tester.pumpAndSettle();
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('显示性能信息'));
-    await tester.pumpAndSettle();
-    expect(find.text('-- FPS'), findsNothing);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('隐藏性能信息'));
-    await tester.pumpAndSettle();
-    expect(find.text('-- FPS'), findsNothing);
-
-    developerEventHub.emit({
-      'type': 'runtime.log',
-      'message': 'current game log',
-    });
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('刷新游戏'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
     expect(
-      developerEventHub.recentLogs.where(
-        (event) => event['message'] == 'current game log',
-      ),
-      isEmpty,
+      find.byKey(GamePage.gameSurfaceKey),
+      findsNothing,
+      reason: 'App SDK 接管前，原生 Esc 必须可以直接退出加载中的游戏',
     );
-    expect(find.byKey(GamePage.runtimeKey(0)), findsNothing);
-    expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
-    expect(find.text('游戏内容已刷新。'), findsOneWidget);
-    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
+    expect(find.byKey(const Key('game-sidebar')), findsNothing);
 
-    final exitControl = tester.widget<InkWell>(
-      find.descendant(
-        of: find.byKey(const Key('game-sidebar-exit')),
-        matching: find.byType(InkWell),
-      ),
-    );
-    exitControl.onTap!();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
+    expect(find.byKey(GamePage.gameSurfaceKey), findsNothing);
 
-    expect(find.text('游戏详情'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '开始游戏'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(GamePage.gameSurfaceKey), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(GamePage.gameSurfaceKey),
+      findsNothing,
+      reason: 'App SDK 接管前，Android 系统返回必须由原生直接退出游戏',
+    );
   });
 
   testWidgets('developer game route returns to the existing workspace route', (
@@ -348,12 +343,12 @@ void main() {
     expect(find.byType(AppBar), findsNothing);
     expect(find.byKey(GamePage.runtimeKey(0)), findsOneWidget);
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
-    expect(find.byType(GameSidebar), findsOneWidget);
+    expect(find.byKey(const Key('game-sidebar')), findsNothing);
     expect(find.text('-- FPS'), findsNothing);
     expect(find.text('Fake WebView: test-game/app/index.html'), findsOneWidget);
   });
 
-  testWidgets('game runtime always starts with performance tools disabled', (
+  testWidgets('native game page does not intercept SDK menu shortcuts', (
     WidgetTester tester,
   ) async {
     final visibilityChanges = <bool>[];
@@ -374,18 +369,9 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
     await tester.pumpAndSettle();
-    expect(find.text('显示性能信息'), findsOneWidget);
+    expect(find.text('显示性能信息'), findsNothing);
+    expect(find.byKey(const Key('game-sidebar')), findsNothing);
     expect(visibilityChanges, isEmpty);
-
-    await tester.tap(find.text('显示性能信息'));
-    await tester.pump();
-    expect(visibilityChanges, [true]);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('刷新游戏'));
-    await tester.pumpAndSettle();
-    expect(visibilityChanges, [true, false]);
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
   });
 
@@ -403,28 +389,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('显示性能信息'),
-      120,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const Key('game-sidebar')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    await tester.tap(find.text('显示性能信息'));
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('运行日志'));
-    await tester.pump();
-    expect(find.byTooltip('关闭运行日志'), findsOneWidget);
 
     await tester.pumpWidget(
       localizedTestApp(
@@ -446,10 +410,8 @@ void main() {
     );
     expect(find.byTooltip('关闭运行日志'), findsNothing);
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-    expect(find.text('显示性能信息'), findsOneWidget);
+    expect(find.byKey(const Key('game-sidebar')), findsNothing);
+    expect(find.text('显示性能信息'), findsNothing);
   });
 
   testWidgets('single-screen authority display receives only required', (
@@ -502,7 +464,7 @@ void main() {
     expect(webView.declaredCapabilities, isEmpty);
   });
 
-  testWidgets('landscape game sidebar stays inside a short screen', (
+  testWidgets('landscape game page does not mount a native sidebar', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(640, 320);
@@ -520,28 +482,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-
-    final sidebarRect = tester.getRect(find.byKey(const Key('game-sidebar')));
-    expect(sidebarRect.left, greaterThanOrEqualTo(0));
-    expect(sidebarRect.right, lessThanOrEqualTo(640));
-    expect(sidebarRect.top, greaterThanOrEqualTo(0));
-    expect(sidebarRect.bottom, lessThanOrEqualTo(320));
-    expect(find.text('继续游戏'), findsOneWidget);
-    expect(find.text('刷新游戏'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('游戏信息'),
-      80,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const Key('game-sidebar')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
+    expect(find.byKey(const Key('game-sidebar')), findsNothing);
+    expect(find.byKey(const Key('game-sidebar')), findsNothing);
+    expect(find.byKey(GamePage.runtimeKey(0)), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(GamePage.gameSurfaceKey)),
+      const Size(640, 320),
     );
-    expect(find.text('游戏信息'), findsOneWidget);
   });
 
   testWidgets('refreshes the game library without restarting the app', (

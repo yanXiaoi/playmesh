@@ -3178,6 +3178,12 @@ body :where(input[type="checkbox"], input[type="radio"]),
   transform: translateY(0);
 }
 
+.workspace-message.error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--line));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+}
+
 .workspace-message .lucide {
   width: 17px;
   height: 17px;

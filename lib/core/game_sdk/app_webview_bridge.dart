@@ -18,7 +18,6 @@ class AppWebViewBridge {
   AppWebViewBridge({
     required this.userId,
     required this.nickname,
-    this.gameName = 'Playmesh 游戏',
     this.declaredCapabilities = const [],
     this.acceptRuntimeGameDeclaration = false,
     this.coreBaseUri,
@@ -28,12 +27,13 @@ class AppWebViewBridge {
     VibrationDriver? vibrationDriver,
     CapabilityRegistry? capabilityRegistry,
     this.onOpenSharePanel,
-    this.onShowGameSidebar,
-    this.onHideGameSidebar,
+    bool? showShareAction,
+    this.onInputTakeover,
     this.onExitRequested,
   }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
          platformUiConfiguration,
        ),
+       showShareAction = showShareAction ?? onOpenSharePanel != null,
        capabilityRegistry =
            capabilityRegistry ??
            createDefaultCapabilityRegistry(vibrationDriver: vibrationDriver) {
@@ -45,20 +45,18 @@ class AppWebViewBridge {
 
   final String userId;
   final String nickname;
-  final String gameName;
   final List<String> declaredCapabilities;
   final bool acceptRuntimeGameDeclaration;
   final Uri? coreBaseUri;
   final String playerSource;
   final AppDeviceService deviceService;
   final Future<void> Function()? onOpenSharePanel;
-  final Future<void> Function()? onShowGameSidebar;
-  final Future<void> Function()? onHideGameSidebar;
+  final bool showShareAction;
+  final void Function()? onInputTakeover;
   final Future<void> Function()? onExitRequested;
   final CapabilityRegistry capabilityRegistry;
   Map<String, Object?>? _platformUiConfiguration;
   late CapabilityRuntime _capabilityRuntime;
-  late String _runtimeGameName = gameName;
   late List<String> _runtimeDeclaredCapabilities = List.unmodifiable(
     declaredCapabilities,
   );
@@ -85,13 +83,14 @@ class AppWebViewBridge {
       final result = await SdkFeatureRegistry.dispatchApp(
         AppSdkCommandContext(
           bootstrap: _bootstrap,
+          configureRuntimeGame: _configureRuntimeGame,
           confirmCapabilities: _confirmCapabilities,
           capabilityRuntime: _capabilityRuntime,
           sendCapabilityEvent: (message) => send(jsonEncode(message)),
           disposeCapability: _disposeCapability,
           setFullscreen: _fullscreen,
           openSharePanel: _openSharePanel,
-          setGameSidebarVisible: _setGameSidebarVisible,
+          takeOverInput: _takeOverInput,
           requestExit: _requestExit,
           syncAvatar: _syncAvatar,
         ),
@@ -121,46 +120,25 @@ class AppWebViewBridge {
     }
   }
 
-  Future<void> sendInput(
-    Map<String, Object?> input,
-    Future<void> Function(String message) send,
-  ) {
-    return send(jsonEncode({'type': 'app.device.input', 'input': input}));
-  }
-
   Future<Map<String, Object?>> _bootstrap(
-    Map<String, Object?> payload,
+    Map<String, Object?> _,
     String sdkVersion,
   ) async {
-    if (acceptRuntimeGameDeclaration) {
-      final runtimeGameName = payload['gameName'];
-      final runtimeCapabilities = payload['declaredCapabilities'];
-      if (runtimeGameName is! String || runtimeGameName.trim().isEmpty) {
-        throw const FormatException('gameName 必须是非空字符串');
-      }
-      if (runtimeCapabilities is! List ||
-          runtimeCapabilities.any((value) => value is! String)) {
-        throw const FormatException('declaredCapabilities 必须是字符串数组');
-      }
-      final normalizedCapabilities = List<String>.unmodifiable(
-        runtimeCapabilities.cast<String>().toSet(),
-      );
-      if (_runtimeGameName != runtimeGameName.trim() ||
-          !_sameCapabilities(
-            _runtimeDeclaredCapabilities,
-            normalizedCapabilities,
-          )) {
-        await _capabilityRuntime.reset();
-        _runtimeGameName = runtimeGameName.trim();
-        _runtimeDeclaredCapabilities = normalizedCapabilities;
-        _capabilityRuntime = CapabilityRuntime(
-          registry: capabilityRegistry,
-          declaredCapabilities: _runtimeDeclaredCapabilities,
-        );
-      }
-    }
     return {
-      '_playmeshPlatformUi': _platformUiConfiguration,
+      '_playmeshPlatformUi': _platformUiConfiguration == null
+          ? null
+          : {
+              ..._platformUiConfiguration!,
+              'actions': {
+                'share': showShareAction,
+                'restart': true,
+                'logs': true,
+                'fullscreen': true,
+                'info': true,
+                'performance': true,
+                'exit': true,
+              },
+            },
       'available': true,
       'sdkVersion': sdkVersion,
       'identity': {
@@ -168,14 +146,47 @@ class AppWebViewBridge {
         'nickname': nickname,
         'source': 'playmesh_app',
       },
-      'game': {
-        'name': _runtimeGameName,
-        'requiredCapabilities': _runtimeDeclaredCapabilities,
-      },
       'runtime': {
         if (coreBaseUri != null) 'coreBase': coreBaseUri.toString(),
         'playerSource': playerSource,
       },
+      'capabilityRegistry': capabilityRegistry.descriptors
+          .map((definition) => definition.toJson())
+          .toList(),
+      'device': {
+        'platform': deviceService.platform,
+        'capabilities': _capabilityRuntime.availableDeclaredCodes.toList(),
+        'declaredCapabilities': _runtimeDeclaredCapabilities,
+      },
+    };
+  }
+
+  Future<Map<String, Object?>> _configureRuntimeGame(
+    Map<String, Object?> payload,
+  ) async {
+    if (!acceptRuntimeGameDeclaration) {
+      throw const FormatException('当前入口不接受运行时游戏声明');
+    }
+    final runtimeCapabilities = payload['declaredCapabilities'];
+    if (runtimeCapabilities is! List ||
+        runtimeCapabilities.any((value) => value is! String)) {
+      throw const FormatException('declaredCapabilities 必须是字符串数组');
+    }
+    final normalizedCapabilities = List<String>.unmodifiable(
+      runtimeCapabilities.cast<String>().toSet(),
+    );
+    if (!_sameCapabilities(
+      _runtimeDeclaredCapabilities,
+      normalizedCapabilities,
+    )) {
+      await _capabilityRuntime.reset();
+      _runtimeDeclaredCapabilities = normalizedCapabilities;
+      _capabilityRuntime = CapabilityRuntime(
+        registry: capabilityRegistry,
+        declaredCapabilities: _runtimeDeclaredCapabilities,
+      );
+    }
+    return {
       'capabilityRegistry': capabilityRegistry.descriptors
           .map((definition) => definition.toJson())
           .toList(),
@@ -228,12 +239,8 @@ class AppWebViewBridge {
     return null;
   }
 
-  Future<Object?> _setGameSidebarVisible(bool visible) async {
-    final callback = visible ? onShowGameSidebar : onHideGameSidebar;
-    if (callback == null) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    await callback();
+  Object? _takeOverInput() {
+    onInputTakeover?.call();
     return null;
   }
 

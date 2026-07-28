@@ -10,6 +10,8 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     required this.gameId,
     required this.userId,
     required this.nickname,
+    this.gameName = 'Playmesh 游戏',
+    this.requiredCapabilities = const <String>[],
   });
 
   factory StandaloneGameRuntimeBridge.withStorage({
@@ -17,15 +19,21 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     required String userId,
     required String nickname,
     required GameStorageService storage,
+    String gameName = 'Playmesh 游戏',
+    List<String> requiredCapabilities = const <String>[],
   }) {
     return StandaloneGameRuntimeBridge(
       gameId: gameId,
       userId: userId,
       nickname: nickname,
+      gameName: gameName,
+      requiredCapabilities: requiredCapabilities,
     ).._storage = storage;
   }
 
   final String gameId;
+  final String gameName;
+  final List<String> requiredCapabilities;
   GameStorageService? _storage;
   Future<GameStorageService>? _storageOperation;
   final String userId;
@@ -62,6 +70,13 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
       }
       final execution = await SdkFeatureRegistry.dispatchGame(
         GameSdkCommandContext(
+          gameInfo: {
+            'id': gameId,
+            'name': gameName,
+            'multiplayer': false,
+            'displayMode': 'solo',
+            'requiredCapabilities': requiredCapabilities,
+          },
           standalonePlayer: {
             'id': userId,
             'nickname': nickname,

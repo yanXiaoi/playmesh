@@ -16,9 +16,8 @@ class GameLauncher extends StatefulWidget {
     this.bridge,
     this.controllerRole = false,
     this.onOpenSharePanel,
-    this.onShowGameSidebar,
-    this.onHideGameSidebar,
     this.onExitRequested,
+    this.onSystemBackHandlerChanged,
     this.onJavaScriptExecutorChanged,
   });
 
@@ -28,9 +27,8 @@ class GameLauncher extends StatefulWidget {
   final GameSdkBridge? bridge;
   final bool controllerRole;
   final Future<void> Function()? onOpenSharePanel;
-  final Future<void> Function()? onShowGameSidebar;
-  final Future<void> Function()? onHideGameSidebar;
   final Future<void> Function()? onExitRequested;
+  final ValueChanged<VoidCallback?>? onSystemBackHandlerChanged;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
 
@@ -101,9 +99,8 @@ class _GameLauncherState extends State<GameLauncher> {
               .requiredForRole(controller: widget.controllerRole)
               .toList(),
           onOpenSharePanel: widget.onOpenSharePanel,
-          onShowGameSidebar: widget.onShowGameSidebar,
-          onHideGameSidebar: widget.onHideGameSidebar,
           onExitRequested: widget.onExitRequested,
+          onSystemBackHandlerChanged: widget.onSystemBackHandlerChanged,
           onJavaScriptExecutorChanged: widget.onJavaScriptExecutorChanged,
         );
       },

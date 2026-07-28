@@ -95,6 +95,7 @@ document.querySelector("#locale-select").addEventListener("change", async (event
   if (state.view === "my") {
     await loadRegistrationState();
     if (state.user) {
+      await loadUploadCredential();
       await loadMyGames();
       await loadNotifications();
     }
@@ -323,6 +324,11 @@ async function showAccount() {
   document.querySelector("#profile-email").value = user.email;
   document.querySelector("#profile-form").elements.displayName.value = user.displayName;
   try {
+    await loadUploadCredential();
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
+  try {
     await loadMyGames();
   } catch (error) {
     window.PlaymeshMessage.error(localizedError(error));
@@ -378,13 +384,41 @@ async function saveUploadKey(generate) {
   const result = await jsonRequest("/api/user/upload-key", {
     method: "PUT", body: JSON.stringify({ key: form.elements.key.value, generate })
   });
-  document.querySelector("#created-key").value = result.uploadKey;
-  const sourceQRCode = document.querySelector("#private-source-qr");
-  sourceQRCode.src = result.sourceQRCode;
-  sourceQRCode.classList.remove("hidden");
-  document.querySelector("#private-source-qr-empty").classList.add("hidden");
-  form.elements.key.value = "";
+  applyUploadCredential({
+    ...result, configured: true, recoverable: true
+  });
   window.PlaymeshMessage.success(t("uploads.key_saved"));
+}
+
+function applyUploadCredential(result) {
+  const key = result.recoverable ? result.uploadKey || "" : "";
+  document.querySelector("#current-upload-key").value = key;
+  document.querySelector("#created-key").value = key;
+  document.querySelector("#key-form").elements.key.value = key;
+  const sourceQRCode = document.querySelector("#private-source-qr");
+  const empty = document.querySelector("#private-source-qr-empty");
+  const status = document.querySelector("#private-source-status");
+  if (result.recoverable && result.sourceQRCode) {
+    sourceQRCode.src = result.sourceQRCode;
+    sourceQRCode.classList.remove("hidden");
+    empty.classList.add("hidden");
+    status.textContent = t("user.my.source_ready");
+    return;
+  }
+  sourceQRCode.removeAttribute("src");
+  sourceQRCode.classList.add("hidden");
+  empty.classList.remove("hidden");
+  if (result.configured) {
+    empty.textContent = t("user.my.source_key_legacy");
+    status.textContent = t("user.my.source_key_legacy_description");
+  } else {
+    empty.textContent = t("user.my.source_key_required");
+    status.textContent = t("user.my.source_description");
+  }
+}
+
+async function loadUploadCredential() {
+  applyUploadCredential(await jsonRequest("/api/user/upload-key"));
 }
 document.querySelector("#key-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -488,6 +522,7 @@ document.querySelector("#logout").addEventListener("click", async () => {
     await jsonRequest("/api/user/auth/logout", { method: "POST" });
     state.user = null; state.csrfToken = "";
     state.captcha = { id: "", kind: "" };
+    applyUploadCredential({ configured: false, recoverable: false });
     document.querySelectorAll(".my-dialog[open]").forEach((dialog) => dialog.close());
     await showSignedOut("login");
     window.PlaymeshMessage.success(t("auth.logout_success"));

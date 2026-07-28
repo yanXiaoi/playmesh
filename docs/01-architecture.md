@@ -212,7 +212,7 @@ Android 主 Activity 声明接收 `ACTION_VIEW` 和 `ACTION_SEND`。原生层取
 
 工具区默认收纳，展开后显示图标命令，并允许拖到不影响游戏内容的位置；只保留返回，不再提供与返回语义重复的独立“退出游戏”按钮。二级菜单、游戏信息和运行日志显式使用固定高对比度配色，不继承游戏颜色；不应使用固定的大型工具栏占据游戏区域。按钮必须保持稳定尺寸，并提供无障碍语义和悬停/长按提示。FPS 默认显示在左上角，工具区提供开关；未收到游戏帧上报时显示 `-- FPS`。
 
-FPS 和联机延迟展示都属于 Game SDK 的网页能力，由 SDK 在当前游戏网页内部自动创建性能悬浮层并渲染，不由 Flutter App 原生层直接绘制。App 运行时的悬浮工具区只提供显示/隐藏开关和相关设置入口，并通过 SDK 控制网页悬浮层；普通浏览器由 SDK 创建对应的可收纳功能区，提供刷新、性能、全屏、信息和昵称修改，不模拟 App 返回、退出游戏或分享能力。App 扫码加入时由原生共用工具区接管操作，SDK 不重复创建浏览器功能区。
+FPS 和联机延迟由 Game SDK 统计并公开，展示层由 `playmesh-app.js` 在当前游戏网页内创建，不由 Flutter 原生层绘制。App WebView 和普通浏览器复用同一套居中菜单、信息、日志与性能覆盖层；普通浏览器额外显示可拖动入口。覆盖层只读取 Game SDK 公共数据，不维护独立的游戏状态。
 
 FPS 由 Game SDK 统计游戏主动上报的真实渲染帧：DOM/CSS 游戏可以在自己的视觉更新循环上报，Canvas/WebGL 游戏应在实际 `draw`/present 完成后调用 `playmesh.performance.reportFrame()`。SDK 提供 `getFps()` 和 `onFps()`；平台不得额外启动独立的 `requestAnimationFrame` 并把显示器刷新回调次数冒充游戏 FPS。SDK 性能层负责网页内显示，游戏代码不负责创建 FPS 或延迟组件。
 
@@ -333,7 +333,7 @@ window.playmesh.performance
 window.playmesh.app
 ```
 
-`playmesh.js` 是权威主机运行时 SDK，负责会话、消息、生命周期和 Authority 主机存储。`playmesh-app.js` 是 App 本机桥接层，只由 App WebView 自动注入，负责 App 身份与本机设备能力，不属于权威主机 SDK。Console 日志由各设备的页面宿主在底层捕获，只进入本设备的运行日志流。普通浏览器不加载 App SDK，但主 SDK 会提供 `playmesh.app` 安全空实现。当前 v1 的完整接口见 `docs/game/sdk-v1.md`；App SDK 已通过插件提供摄像头、麦克风、MIDI 权限声明和原生震动。加速度计、陀螺仪和设备方向由游戏直接使用标准 Web API。
+`playmesh.js` 是所有平台一致的公共 Game SDK，负责游戏声明、会话、玩家、消息、生命周期、性能和 Authority 主机存储。`playmesh-app.js` 是当前终端 SDK，负责 Windows/Android/浏览器环境、App 身份、本机设备能力、权限、输入、Console 日志和平台覆盖层。两者都由平台注入；普通浏览器的 App 原生能力不可用，但网页覆盖层仍由 App SDK 渲染。App SDK 只能引用 Game SDK 公共数据，不能从 bootstrap 或页面配置复制游戏状态。当前完整接口见 `docs/game/sdk-v1.md`。
 
 禁止 HTML 游戏直接接触：
 
@@ -481,7 +481,7 @@ const url = await profile.upload(file); // /bucket/profile/{timestamp}.ext
 - Authority 主屏 WebView 通过 Flutter Bridge 直接访问主机 `GameStorageService`。
 - 普通浏览器和其他 App 玩家都由 Authority Game SDK 通过当前受控 Session WebSocket 发起存储 RPC；分享网关不再增加 `/api/storage` 等业务 HTTP 接口。
 - 加入设备不得在自己的 `packages/{gameId}/data/` 创建分叉副本；所有请求最终调用同一个主机内存缓存与延迟落盘服务。
-- App 客户端本地提供的 `playmesh-app.js` 只负责本机身份、昵称和能力，不拥有游戏全局数据。
+- 当前终端的 `playmesh-app.js` 只负责平台环境、身份、能力、权限、输入、本机日志和覆盖层，不拥有游戏全局数据。
 
 存储范围只自动绑定当前 `gameId` 和当前游戏库。平台不创建、推断或强制 `{userId}` 子目录；如游戏需要多用户存档，应由开发者在 Bucket 名称、key 或 JSON 内容中自行设计。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，即首字符为字母或数字，其余只能使用字母、数字、下划线和连字符，最长 64 个字符；SDK 与宿主存储层必须分别校验。SDK 还必须限制 key 格式、单值大小、单文件大小、总容量和 JSON 类型；写入采用临时文件加原子替换，异常时不能破坏已有数据。游戏数据与 `main.json`、游戏包文件、其他游戏数据和 App 用户资料隔离。
 
@@ -573,9 +573,10 @@ SDK 无法替代的受控底层连接能力，例如当前游戏的 WebSocket Up
 `/api/join`、`/api/storage`、`/api/player/nickname`、
 `/api/app-capabilities` 或通用 `/v1/sessions/**` HTTP 代理。
 
-权威 `playmesh.js`、游戏资源和全局数据始终来自主机；只有
-`playmesh-app.js` 由加入方 App 在独立的 `127.0.0.1` 静态入口本地提供，
-用于本机 ID、昵称和能力；透明传输网关不解析或替换 HTTP 资源。
+权威 `playmesh.js`、游戏资源和全局数据始终来自主机。加入方 App 在独立的
+`127.0.0.1` 静态入口提供本机 `playmesh-app.js`，普通浏览器由主机网关注入同版
+App SDK；两者都只负责当前终端环境、日志与覆盖层，原生身份和能力仅在 App 中可用。
+透明传输网关不解析或替换其他 HTTP 资源。
 
 ### 统一开发者工作区中新建和编辑游戏
 

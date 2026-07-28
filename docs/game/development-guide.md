@@ -119,7 +119,7 @@ const session = playmesh.session.getCurrent();
 const player = playmesh.player.getCurrent();
 ```
 
-游戏只显式引入 `playmesh.js`。Playmesh App 会自动在它之前注入本机桥接 `playmesh-app.js`，普通浏览器不会加载该文件；两种环境都可通过 `playmesh.app.isAvailable()` 做能力判断。主机 SDK 负责会话、联机和游戏存储，本机 App SDK 只负责 App 持久化身份与已声明的硬件能力；Console 由当前页面的宿主在本设备捕获，游戏不得手动设置玩家 ID。
+游戏只显式引入 `playmesh.js`，平台会在 App WebView 和普通浏览器中先注入 `playmesh-app.js`。`playmesh.js` 在所有平台提供一致的游戏声明、会话、玩家、角色、联机、性能和存储 API，共享结果来自 Authority；`playmesh-app.js` 只提供当前终端的平台环境、身份、设备能力、权限、输入、本机 Console 日志和覆盖层。普通浏览器的 `playmesh.app.isAvailable()` 为 `false`，但统一网页覆盖层仍可使用。App SDK 不复制游戏状态，游戏也不得手动设置玩家 ID。
 
 大屏公共显示端的 `player` 为 `null`。页面必须允许该值为空，不能把 Authority 自动加入玩家集合。
 

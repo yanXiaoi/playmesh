@@ -22,6 +22,7 @@ void main() {
     final gateway = await startGameWebGateway(
       gameRootAssetPath:
           'assets/playmesh-library/public/developer/templates/default-game/package',
+      gameId: 'com.playmesh.test-game',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
@@ -64,6 +65,17 @@ void main() {
     );
     expect(controller.statusCode, HttpStatus.ok);
     expect(controller.body, contains('window.__PLAYMESH_BROWSER__'));
+    expect(
+      controller.body.indexOf(
+        '<script src="/playmesh/sdk/v1/playmesh-app.js"></script>',
+      ),
+      lessThan(
+        controller.body.indexOf(
+          '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
+        ),
+      ),
+    );
+    expect(controller.body, contains('"gameId":"com.playmesh.test-game"'));
     expect(controller.body, contains('"gameName"'));
     expect(controller.body, contains('"_playmeshPlatformUi"'));
     expect(controller.body, contains('"fallbackLocale":"zh-CN"'));
@@ -79,8 +91,8 @@ void main() {
     expect(controller.body, contains('"availableCapabilities":[]'));
     expect(controller.body, contains('/playmesh/sdk/v1/playmesh.js'));
     expect(
-      controller.body,
-      isNot(contains('/playmesh/sdk/v1/playmesh-app.js')),
+      controller.body.indexOf('/playmesh/sdk/v1/playmesh-app.js'),
+      lessThan(controller.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
     );
     expect(controller.body, isNot(contains('joinEndpoint')));
     expect(controller.body, isNot(contains('storageEndpoint')));
@@ -198,6 +210,7 @@ void main() {
     final gateway = await startGameWebGateway(
       gameRootAssetPath:
           'assets/playmesh-library/public/developer/templates/default-game/package',
+      gameId: 'com.playmesh.core-tunnel',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
@@ -255,6 +268,7 @@ void main() {
     final gateway = await startGameWebGateway(
       gameRootAssetPath: 'unused-for-file-package',
       gameRootFilePath: root.path,
+      gameId: 'com.example.multi-screen',
       multiplayer: true,
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
@@ -276,6 +290,10 @@ void main() {
     expect(response.body, isNot(contains('CONTROLLER_ENTRY')));
     expect(response.body, contains('<base href="/app/">'));
     expect(response.body, contains('window.__PLAYMESH_BROWSER__'));
+    expect(
+      response.body,
+      contains('<script src="/playmesh/sdk/v1/playmesh-app.js"></script>'),
+    );
   });
 
   test('单机分享加载主 index 且不注入会话和 WebSocket 配置', () async {
@@ -293,6 +311,7 @@ void main() {
     final gateway = await startGameWebGateway(
       gameRootAssetPath: 'unused-for-file-package',
       gameRootFilePath: root.path,
+      gameId: 'com.example.solo',
       multiplayer: false,
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
@@ -318,6 +337,10 @@ void main() {
     expect(response.body, contains('SOLO_ENTRY'));
     expect(response.body, contains('<base href="/app/">'));
     expect(response.body, contains('"mode":"solo"'));
+    expect(
+      response.body,
+      contains('<script src="/playmesh/sdk/v1/playmesh-app.js"></script>'),
+    );
     expect(response.body, isNot(contains('joinEndpoint')));
     expect(response.body, isNot(contains('coreBase')));
     expect(response.body, isNot(contains('storageEndpoint')));
@@ -333,6 +356,7 @@ void main() {
     final gateway = await startGameWebGateway(
       gameRootAssetPath:
           'assets/playmesh-library/public/developer/templates/default-game/package',
+      gameId: 'com.playmesh.test-game',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
@@ -392,6 +416,7 @@ void main() {
     final gateway = await startGameWebGateway(
       gameRootAssetPath: 'unused-for-file-package',
       gameRootFilePath: root.path,
+      gameId: 'com.example.custom-entry',
       multiplayer: false,
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,

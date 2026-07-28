@@ -41,6 +41,44 @@
       ],
       "description": "Locale identifier returned by playmesh.runtime.getLocale(); no platform message dictionary is exposed."
     },
+    "GameInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "multiplayer",
+        "displayMode",
+        "requiredCapabilities"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "multiplayer": {
+          "type": "boolean"
+        },
+        "displayMode": {
+          "enum": [
+            "solo",
+            "multi_screen",
+            "single_screen_multiplayer"
+          ]
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
     "Player": {
       "type": "object",
       "additionalProperties": false,
@@ -433,6 +471,7 @@
       "type": "object",
       "required": [
         "sdkVersion",
+        "gameInfo",
         "isAuthority",
         "player",
         "session"
@@ -440,6 +479,9 @@
       "properties": {
         "sdkVersion": {
           "const": "3.0.0"
+        },
+        "gameInfo": {
+          "$ref": "#/$defs/GameInfo"
         },
         "isAuthority": {
           "type": "boolean"

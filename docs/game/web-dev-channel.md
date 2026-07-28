@@ -90,7 +90,7 @@ Android 开启开发者模式时必须启动 `specialUse` Foreground Service，�
 - WebView JS 操作台复用 JavaScript CodeMirror 编辑器，执行按钮调用 `POST /dev/api/projects/{projectId}/webview/javascript`，下方原样显示结构化求值结果或错误。历史记录按项目保存在工作区浏览器的 `localStorage`，最多保留最近 30 次代码、返回和时间，可重新载入；它不是游戏 Bucket 或服务端项目历史。
 - 游戏运行状态、分享二维码和可复制链接。普通多人多屏与单机分享加载 `entries.game`（默认 `app/index.html`），单屏多人分享加载 `entries.controller`（默认 `app/controller/index.html`）；单机分享不加入 Session、不创建玩家且不建立 WebSocket。
 - 运行状态使用 `run.status` SSE 即时同步；内置 WebView 从游戏页返回后必须重新确认当前状态，不能继续显示已经退出的游戏仍在运行。
-- 由工作区启动的游戏在侧边栏中提供按需开启的调试日志面板。日志由 App WebView 宿主层捕获，只包含当前设备页面的 `console` 输出，不通过 Game SDK 或游戏网关转发其他设备日志；普通浏览器可在侧边栏或自身开发者工具查看本机 Console。
+- 由工作区启动的游戏在菜单中提供按需开启的调试日志面板。日志由当前页面的 `playmesh-app.js` 拦截，只包含当前终端的 `console` 输出，不通过 Game SDK、Session 或游戏网关转发其他设备日志；普通浏览器也可使用自身开发者工具查看本机 Console。
 - App 不依赖日志面板是否打开，始终在内存中缓存最近 500 条本机 WebView 日志。工作区与游戏内日志层均提供一键复制最近日志。非流式 AI 可通过 `GET /dev/api/logs?limit=50` 按时间顺序读取最近最多 50 条，无需消费 SSE。
 - SDK API、角色语义、参数、返回值、错误和数据类型 Schema 面板。
 - 纯聊天 AI 提示词固定导出为 UTF-8 BOM TXT，并按当前 `main.json.modes/displayModes` 只包含相关 SDK 函数契约、拓扑、强制文件和源码。能力上下文只附带当前 `capabilities.json.required` 已勾选能力的完整插件声明，不暴露未勾选的平台注册能力；普通多屏不得混入控制器，单机不得混入 Authority，单屏多人必须包含控制器与 Authority 数据链。项目校验结果不混入提示词，校验弹窗可独立复制包含诊断码、路径行列、消息和修复建议的详情。
@@ -242,7 +242,7 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用 `/app/...` 路径或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `3.0.0` 与 App Bridge SDK `3.0.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和 App 自动注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL，但响应内容由按游戏清单版本选择的 Dart 兼容发行即时组装；普通浏览器中的 `playmesh.app` 仍是不可用的安全空实现。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 读取标记。Game SDK `3.0.0` 与 App Bridge SDK `3.0.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时仍以 `/playmesh/sdk/v1/playmesh.js` 和平台预先注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL，但响应内容由按游戏清单版本选择的 Dart 兼容发行即时组装；普通浏览器中的 App SDK 负责网页覆盖层，原生终端能力 `isAvailable()` 为 `false`。
 
 > **AI 上下文最小披露原则：提示词只暴露游戏代码可调用的公开 SDK、当前项目声明与完成任务所必需的约束。回环代理、内部路由、中转鉴权、密钥协商和加密通道等平台实现不得进入游戏 AI 上下文。**
 

@@ -686,7 +686,7 @@ func TestAdminUserLifecycleAndNotifications(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesSchemaV3ToV4(t *testing.T) {
+func TestOpenMigratesSchemaV3ToCurrent(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "server.db")
 	storage := testStorage(root, databasePath)
@@ -704,6 +704,17 @@ func TestOpenMigratesSchemaV3ToV4(t *testing.T) {
 	if _, err := raw.Exec(`
 		DROP TABLE user_notifications;
 		DROP TABLE disabled_users;
+		ALTER TABLE upload_credentials RENAME TO upload_credentials_v5;
+		CREATE TABLE upload_credentials (
+			user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			key_hmac TEXT NOT NULL UNIQUE,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+		INSERT INTO upload_credentials(user_id, key_hmac, created_at, updated_at)
+		SELECT user_id, key_hmac, created_at, updated_at
+		FROM upload_credentials_v5;
+		DROP TABLE upload_credentials_v5;
 		PRAGMA user_version = 3;
 	`); err != nil {
 		_ = raw.Close()
@@ -723,6 +734,28 @@ func TestOpenMigratesSchemaV3ToV4(t *testing.T) {
 	}
 	if version != SchemaVersion {
 		t.Fatalf("迁移后 schema 版本 = %d", version)
+	}
+	var ciphertextColumn int
+	rows, err := migrated.db.Query("PRAGMA table_info(upload_credentials)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(
+			&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if name == "key_ciphertext" {
+			ciphertextColumn++
+		}
+	}
+	if ciphertextColumn != 1 {
+		t.Fatalf("迁移后 key_ciphertext 字段数 = %d", ciphertextColumn)
 	}
 }
 

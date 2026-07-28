@@ -4,6 +4,7 @@ type PlaymeshUnsubscribe = () => void;
 /** SDK 可以跨 Bridge、HTTP 或 WebSocket 传输的 JSON 值。不能包含函数、循环引用或类实例。 */
 type PlaymeshJson = null | boolean | number | string | PlaymeshJson[] | { [key: string]: PlaymeshJson };
 type PlaymeshOrientation = "landscape" | "portrait";
+type PlaymeshDisplayMode = "solo" | "multi_screen" | "single_screen_multiplayer";
 
 /** 当前会话中的玩家。 */
 interface PlaymeshPlayer {
@@ -38,6 +39,20 @@ interface PlaymeshSessionSnapshot {
   [key: string]: unknown;
 }
 
+/** 当前页面对应的游戏声明，由 Game SDK 在初始化时统一提供。 */
+interface PlaymeshGameInfo {
+  /** 稳定的游戏包 ID。 */
+  id: string;
+  /** 面向玩家显示的游戏名称。 */
+  name: string;
+  /** 当前页面是否属于多人游戏。 */
+  multiplayer: boolean;
+  /** 游戏声明的显示模式；单机为 `solo`。 */
+  displayMode: PlaymeshDisplayMode;
+  /** 当前页面角色声明的能力 code。 */
+  requiredCapabilities: string[];
+}
+
 /** 玩家连接状态发生变化时的稳定事件载荷。 */
 interface PlaymeshPlayerConnectionEvent {
   /** 发生连接变化的玩家。 */
@@ -52,6 +67,8 @@ interface PlaymeshPlayerConnectionEvent {
 interface PlaymeshBootstrap {
   /** 当前 Game SDK 版本。 */
   sdkVersion: string;
+  /** 当前游戏声明。 */
+  gameInfo: PlaymeshGameInfo;
   /** 当前页面是否是固定 Authority Client。 */
   isAuthority: boolean;
   /** 当前参与玩家；公共主屏和单机分享页为 `null`。 */
@@ -263,7 +280,41 @@ interface PlaymeshStorageBucket {
   upload(file: File): Promise<string>;
 }
 
-/** App Bridge 能力。App WebView 自动注入；普通浏览器保留安全空实现。 */
+interface PlaymeshAppUiOptions {
+  /** 是否由 SDK 渲染兜底侧边栏、信息和日志覆盖层；默认 `true`。 */
+  fallbackUi?: boolean;
+  /** 普通浏览器是否显示可拖动的悬浮菜单按钮；默认 `true`。 */
+  floatingButton?: boolean;
+}
+
+interface PlaymeshAppUiApi {
+  /** 浏览器专用初始化：启用兜底侧边栏但不创建悬浮球；App WebView 中返回 `false`。 @playmesh-completion playmesh.app.ui.initializeBrowser */
+  initializeBrowser(): boolean;
+  /** 配置 SDK 兜底 UI；应在等待 `playmesh.app.ready` 前调用。 @playmesh-completion playmesh.app.ui.configure */
+  configure(options: PlaymeshAppUiOptions): PlaymeshAppUiOptions;
+  /** 手动打开 SDK 兜底游戏侧边栏；禁用兜底 UI 时返回 `false`。 @playmesh-completion playmesh.app.ui.showGameSidebar */
+  showGameSidebar(): Promise<boolean>;
+  /** 重新加载当前游戏文档。 @playmesh-completion playmesh.app.ui.restartGame */
+  restartGame(): void;
+  /** 打开“分享/邀请”；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.ui.openSharePanel */
+  openSharePanel(): Promise<void>;
+  /** 打开 SDK 运行日志覆盖层。 @playmesh-completion playmesh.app.ui.openRuntimeLogs */
+  openRuntimeLogs(): Promise<boolean>;
+  /** 进入全屏。 @playmesh-completion playmesh.app.ui.enterFullscreen */
+  enterFullscreen(orientation?: PlaymeshOrientation): Promise<unknown>;
+  /** 退出全屏。 @playmesh-completion playmesh.app.ui.exitFullscreen */
+  exitFullscreen(): Promise<unknown>;
+  /** 打开 SDK 游戏信息覆盖层。 @playmesh-completion playmesh.app.ui.openGameInfo */
+  openGameInfo(): Promise<boolean>;
+  /** 显示或隐藏 SDK 性能浮层。 @playmesh-completion playmesh.app.ui.setPerformanceVisible */
+  setPerformanceVisible(visible: boolean): boolean;
+  /** 切换 SDK 性能浮层。 @playmesh-completion playmesh.app.ui.togglePerformance */
+  togglePerformance(): boolean;
+  /** 结束当前游戏。 @playmesh-completion playmesh.app.ui.exitGame */
+  exitGame(): Promise<void>;
+}
+
+/** App Bridge 与统一平台 UI 能力。App WebView 和普通浏览器都会注入。 */
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
   readonly version: "3.0.0";
@@ -271,14 +322,6 @@ interface PlaymeshAppApi {
   readonly ready: Promise<unknown>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
   isAvailable(): boolean;
-  /** 打开 App 的“二维码与链接”界面；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.openSharePanel */
-  openSharePanel(): Promise<void>;
-  /** 显示并聚焦 App 游戏侧边栏。 @playmesh-completion playmesh.app.showGameSidebar */
-  showGameSidebar(): Promise<void>;
-  /** 隐藏 App 游戏侧边栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideGameSidebar */
-  hideGameSidebar(): Promise<void>;
-  /** 请求 App 正常结束当前游戏并返回上一页面。 @playmesh-completion playmesh.app.exitGame */
-  exitGame(): Promise<void>;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
     getCurrent(): PlaymeshAppIdentity | null;
@@ -301,6 +344,8 @@ interface PlaymeshAppApi {
     /** 订阅 App 统一输入事件。 @returns 取消订阅函数。 @playmesh-completion playmesh.app.device.onInput */
     onInput(callback: (input: unknown) => void): PlaymeshUnsubscribe;
   };
+  /** 统一侧边栏及其全部菜单动作。 */
+  readonly ui: PlaymeshAppUiApi;
 }
 
 /** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
@@ -315,6 +360,11 @@ interface PlaymeshApi {
   readonly runtime: {
     /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.runtime.getLocale */
     getLocale(): string;
+  };
+  /** 当前页面对应的游戏声明。 */
+  readonly gameInfo: {
+    /** 返回 Game SDK 初始化后的只读游戏信息；尚未就绪时返回 `null`。 @playmesh-completion playmesh.gameInfo.getCurrent */
+    getCurrent(): PlaymeshGameInfo | null;
   };
   /** 对局状态、Authority 身份和玩家成员事件。 */
   readonly session: {

@@ -173,12 +173,14 @@ class GameSdkCommandContext {
     required this.emitLatency,
     required this.completeLifecycle,
     required this.routeRemoteStorage,
+    this.gameInfo = const <String, Object?>{},
     this.connection,
     this.standalonePlayer,
   });
 
   final GameSessionConnection? connection;
   final Map<String, Object?>? standalonePlayer;
+  final Map<String, Object?> gameInfo;
   final Future<GameStorageService> Function() ensureStorage;
   final void Function(double value) emitFps;
   final void Function(double? value) emitLatency;
@@ -196,13 +198,14 @@ class GameSdkCommandContext {
 class AppSdkCommandContext {
   AppSdkCommandContext({
     required this.bootstrap,
+    required this.configureRuntimeGame,
     required this.confirmCapabilities,
     required this.capabilityRuntime,
     required this.sendCapabilityEvent,
     required this.disposeCapability,
     required this.setFullscreen,
     required this.openSharePanel,
-    required this.setGameSidebarVisible,
+    required this.takeOverInput,
     required this.requestExit,
     required this.syncAvatar,
   });
@@ -212,6 +215,8 @@ class AppSdkCommandContext {
     String sdkVersion,
   )
   bootstrap;
+  final Future<Map<String, Object?>> Function(Map<String, Object?> payload)
+  configureRuntimeGame;
   final Object? Function() confirmCapabilities;
   final CapabilityRuntime capabilityRuntime;
   final Future<void> Function(Map<String, Object?> message) sendCapabilityEvent;
@@ -219,7 +224,7 @@ class AppSdkCommandContext {
   disposeCapability;
   final Future<Object?> Function(Map<String, Object?> payload) setFullscreen;
   final Future<Object?> Function() openSharePanel;
-  final Future<Object?> Function(bool visible) setGameSidebarVisible;
+  final Object? Function() takeOverInput;
   final Object? Function() requestExit;
   final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
 }

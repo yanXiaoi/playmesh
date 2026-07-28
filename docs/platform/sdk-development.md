@@ -46,6 +46,21 @@ assets/playmesh-library/public/sdk/v1/
 
 Bridge 只负责消息解析、上下文构造、统一分发和响应，不重新维护命令 `switch`。
 
+## Game SDK 与 App SDK 的实现边界
+
+`playmesh.js` 是公共游戏运行时，`playmesh-app.js` 是当前终端运行时。新增字段或功能前必须先判断所有权：
+
+| 数据或行为 | 唯一所有者 | 规则 |
+| --- | --- | --- |
+| 游戏声明、`gameId`、会话、玩家、Authority 角色、同步、生命周期、FPS/延迟、Bucket | `playmesh.js` | 所有平台使用相同 API；共享结果由 Authority 主机或受控 Game SDK Bridge 提供 |
+| 平台、App 身份、能力注册表、设备可用性、权限、全屏、终端输入 | `playmesh-app.js` | 由当前 Windows/Android/浏览器终端注入，允许每个玩家结果不同 |
+| Console 日志拦截、日志缓存和日志覆盖层 | `playmesh-app.js` | 只保留当前页面、当前终端日志，不进入 Game SDK、Session 或 Authority |
+| 菜单、信息、日志和性能覆盖层的 DOM | `playmesh-app.js` | 可读取 Game SDK 数据，但只负责展示和终端交互 |
+
+禁止在 App bootstrap、App Bridge、URL 配置或页面全局变量中复制 `gameInfo`、Session、Player、Authority 或性能数据。App 覆盖层需要公共数据时，只能由 `playmesh.js` 通过私有运行时适配器单向提供。远程 App 的能力声明也由 Game SDK 读取权威页面声明后，通过内部 `app.game.configure` 同步给当前终端能力宿主；App SDK 不自行解析第二条游戏声明链路。反方向同样禁止：Game SDK 不生成设备能力、权限、当前终端身份或本机日志的兼容值。
+
+App WebView 从当前终端的本机回环入口加载 App SDK；普通浏览器由 Authority 分享网关注入主机默认 App SDK。默认浏览器 App SDK 必须包含居中菜单、游戏信息、运行日志、继续、刷新、退出游戏，以及仅普通浏览器显示的可拖动悬浮入口。菜单 DOM 可以因终端布局自适应，但其游戏信息和性能数据仍只能读取 `playmesh.js`。
+
 ## 当前公开 SDK 方法
 
 当前 Game SDK 为 `3.0.0`，App Bridge SDK 为 `3.0.0`。下表是当前公开面；
@@ -55,11 +70,13 @@ Bridge 只负责消息解析、上下文构造、统一分发和响应，不重�
 | 命名空间或句柄 | 当前公开成员 |
 | --- | --- |
 | `playmesh` | `version`、`ready` |
-| `playmesh.app` | `version`、`ready`、`isAvailable()`、`openSharePanel()`、`showGameSidebar()`、`hideGameSidebar()`、`exitGame()` |
+| `playmesh.gameInfo` | `getCurrent()` |
+| `playmesh.app` | `version`、`ready`、`isAvailable()` |
 | `playmesh.app.identity` | `getCurrent()` |
 | `playmesh.app.capabilities` | `getRegistry()`、`getAvailable()`、`getDeclared()`、`create()` |
 | `CapabilityHandle` | `id`、`code`、`apiVersion`、`invoke()`、`on()`、`onError()`、`dispose()` |
 | `playmesh.app.device` | `getPlatform()`、`setFullscreen()`、`onInput()` |
+| `playmesh.app.ui` | `configure()`、`initializeBrowser()`、`showGameSidebar()`、`restartGame()`、`openSharePanel()`、`openRuntimeLogs()`、`enterFullscreen()`、`exitFullscreen()`、`openGameInfo()`、`setPerformanceVisible()`、`togglePerformance()`、`exitGame()` |
 | `playmesh.runtime` | `getLocale()` |
 | `playmesh.session` | `getCurrent()`、`onStateChange()`、`onPlayerJoin()`、`onPlayerLeave()`、`onPlayerReconnect()`、`isAuthority()`、`start()`、`finish()` |
 | `playmesh.player` | `getCurrent()`、`setNickname()` |
@@ -318,8 +335,9 @@ requestedVersion
 
 ## WebView 平台 UI 国际化
 
-Game SDK 提供的能力确认、浏览器工具栏、昵称、信息和日志界面是平台 UI，不是游戏
-内容。它们的唯一文案源是 App locale 对应 `app.json` 中的 `platform.game.*`；
+Game SDK 提供能力确认与浏览器昵称层；App SDK 提供菜单、信息、日志和性能覆盖层。
+这些界面都是平台 UI，不是游戏内容。它们的唯一文案源是 App locale 对应
+`app.json` 中的 `platform.game.*`；
 SDK Feature、生成的 JavaScript 和浏览器配置不得包含语言表、`zh/en` 分支或另一套
 可见 fallback。
 

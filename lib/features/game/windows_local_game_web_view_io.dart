@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
@@ -19,7 +20,9 @@ class WindowsLocalGameWebView extends StatefulWidget {
     required this.title,
     this.bridge,
     this.appBridge,
+    this.appSdkInputTakenOver = true,
     this.declaredCapabilities = const [],
+    this.onNavigationStarted,
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
   });
@@ -29,7 +32,9 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final String title;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
+  final bool appSdkInputTakenOver;
   final List<String> declaredCapabilities;
+  final VoidCallback? onNavigationStarted;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;
@@ -43,15 +48,33 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   final WebviewController _controller = WebviewController();
   Object? _loadError;
   bool _ready = false;
+  bool _navigationCompleted = false;
+  bool _initialFocusScheduled = false;
+  bool _initialFocusGranted = false;
+  int _initialFocusAttempts = 0;
+  Timer? _initialFocusRetryTimer;
   StreamSubscription<dynamic>? _webMessageSubscription;
   StreamSubscription<WebErrorStatus>? _loadErrorSubscription;
   StreamSubscription<LoadingState>? _loadingStateSubscription;
+  StreamSubscription<bool>? _focusChangedSubscription;
   StreamSubscription<String>? _bridgeSubscription;
 
   @override
   void initState() {
     super.initState();
     unawaited(_initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant WindowsLocalGameWebView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.appSdkInputTakenOver == widget.appSdkInputTakenOver) return;
+    if (widget.appSdkInputTakenOver) {
+      _scheduleInitialFocus();
+    } else {
+      _resetInitialFocus();
+      unawaited(WebviewController.releaseFocus());
+    }
   }
 
   Future<void> _initialize() async {
@@ -62,11 +85,26 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       }
 
       await _controller.initialize();
+      _focusChangedSubscription = _controller.onFocusChanged.listen((focused) {
+        if (!focused || !widget.appSdkInputTakenOver) return;
+        _initialFocusGranted = true;
+        _initialFocusAttempts = 0;
+        _initialFocusRetryTimer?.cancel();
+        _initialFocusRetryTimer = null;
+      });
+      if (!widget.appSdkInputTakenOver) {
+        await WebviewController.releaseFocus();
+      }
       _loadingStateSubscription = _controller.loadingState.listen((state) {
         if (state == LoadingState.loading) {
+          _navigationCompleted = false;
+          _resetInitialFocus();
+          widget.onNavigationStarted?.call();
           widget.onEvaluateJavaScriptReady?.call(null);
         } else if (state == LoadingState.navigationCompleted) {
+          _navigationCompleted = true;
           widget.onEvaluateJavaScriptReady?.call(_controller.executeScript);
+          _scheduleInitialFocus();
         }
       });
       _loadErrorSubscription = _controller.onLoadError.listen((error) {
@@ -117,6 +155,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
 
       if (mounted) {
         setState(() => _ready = true);
+        _scheduleInitialFocus();
       }
     } on Object catch (error) {
       recordLocalWebViewConsole(
@@ -135,10 +174,95 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   }
 
   Future<void> _sendToWebView(String message) async {
+    if (_restoresGameContentFocus(message)) {
+      try {
+        await _focusNativeWebView();
+      } on Object catch (error) {
+        debugPrint('Windows 游戏 WebView 焦点恢复失败: $error');
+      }
+    }
     try {
       await _controller.executeScript(gameSdkReceiveScript(message));
     } on Object catch (error) {
       debugPrint('向 Windows 游戏 WebView 发送 SDK 消息失败: $error');
+    }
+  }
+
+  void _scheduleInitialFocus() {
+    if (!mounted ||
+        !widget.appSdkInputTakenOver ||
+        !_navigationCompleted ||
+        _initialFocusScheduled ||
+        _initialFocusGranted) {
+      return;
+    }
+    _initialFocusScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _initialFocusScheduled = false;
+      if (!mounted ||
+          !_ready ||
+          !widget.appSdkInputTakenOver ||
+          !_navigationCompleted ||
+          _initialFocusGranted) {
+        return;
+      }
+      try {
+        _initialFocusAttempts += 1;
+        await _focusNativeWebView();
+        if (_controller.hasNativeFocus) {
+          _initialFocusGranted = true;
+          _initialFocusAttempts = 0;
+        } else {
+          _scheduleInitialFocusRetry();
+        }
+      } on Object catch (error) {
+        debugPrint('Windows 游戏 WebView 初始聚焦失败: $error');
+        _scheduleInitialFocusRetry();
+      }
+    });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  void _scheduleInitialFocusRetry() {
+    if (!mounted ||
+        _initialFocusGranted ||
+        _initialFocusAttempts >= 6 ||
+        !widget.appSdkInputTakenOver ||
+        !_navigationCompleted) {
+      return;
+    }
+    _initialFocusRetryTimer?.cancel();
+    final delay = switch (_initialFocusAttempts) {
+      <= 1 => const Duration(milliseconds: 40),
+      2 => const Duration(milliseconds: 80),
+      3 => const Duration(milliseconds: 140),
+      _ => const Duration(milliseconds: 240),
+    };
+    _initialFocusRetryTimer = Timer(delay, () {
+      _initialFocusRetryTimer = null;
+      _scheduleInitialFocus();
+    });
+  }
+
+  void _resetInitialFocus() {
+    _initialFocusGranted = false;
+    _initialFocusAttempts = 0;
+    _initialFocusRetryTimer?.cancel();
+    _initialFocusRetryTimer = null;
+  }
+
+  Future<void> _focusNativeWebView() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await _controller.focus();
+  }
+
+  bool _restoresGameContentFocus(String message) {
+    try {
+      final decoded = jsonDecode(message);
+      return decoded is Map &&
+          decoded['type'] == 'platform.ui.restoreGameFocus';
+    } on FormatException {
+      return false;
     }
   }
 
@@ -169,9 +293,11 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   @override
   void dispose() {
     widget.onEvaluateJavaScriptReady?.call(null);
+    _initialFocusRetryTimer?.cancel();
     unawaited(_webMessageSubscription?.cancel());
     unawaited(_loadErrorSubscription?.cancel());
     unawaited(_loadingStateSubscription?.cancel());
+    unawaited(_focusChangedSubscription?.cancel());
     unawaited(_bridgeSubscription?.cancel());
     unawaited(_controller.dispose());
     super.dispose();

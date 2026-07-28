@@ -22,7 +22,7 @@ const (
 	StatusApproved = "approved"
 	StatusRejected = "rejected"
 	StatusDeleting = "deleting"
-	SchemaVersion  = 4
+	SchemaVersion  = 5
 )
 
 var (
@@ -102,8 +102,9 @@ type User struct {
 }
 
 type UploadCredential struct {
-	UserID  int64
-	KeyHMAC string
+	UserID        int64
+	KeyHMAC       string
+	KeyCiphertext string
 }
 
 type AdminUser struct {
@@ -248,7 +249,14 @@ func Open(cfg config.Storage, defaults Settings) (*Store, error) {
 				_ = db.Close()
 				return nil, err
 			}
-			schemaVersion = SchemaVersion
+			schemaVersion = 4
+		}
+		if schemaVersion == 4 {
+			if err := result.migrateV4ToV5(); err != nil {
+				_ = db.Close()
+				return nil, err
+			}
+			schemaVersion = 5
 		}
 		if schemaVersion != SchemaVersion {
 			_ = db.Close()
@@ -329,6 +337,7 @@ func (s *Store) createSchema() error {
 		CREATE TABLE upload_credentials (
 			user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 			key_hmac TEXT NOT NULL UNIQUE,
+			key_ciphertext TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		);
@@ -449,6 +458,24 @@ func (s *Store) migrateV3ToV4() error {
 	return tx.Commit()
 }
 
+func (s *Store) migrateV4ToV5() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		ALTER TABLE upload_credentials
+		ADD COLUMN key_ciphertext TEXT NOT NULL DEFAULT '';
+	`); err != nil {
+		return fmt.Errorf("升级 SQLite schema v4 到 v5: %w", err)
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 5"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) verifySchema() error {
 	required := []string{
 		"users", "user_sessions", "email_verification_tokens", "upload_credentials",
@@ -463,9 +490,34 @@ func (s *Store) verifySchema() error {
 			return fmt.Errorf("SQLite schema 缺少目标表 %s", table)
 		}
 	}
+	var uploadKeyCiphertextColumn int
+	rows, err := s.db.Query("PRAGMA table_info(upload_credentials)")
+	if err != nil {
+		return fmt.Errorf("检查上传凭证字段: %w", err)
+	}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(
+			&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey,
+		); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("检查上传凭证字段: %w", err)
+		}
+		if name == "key_ciphertext" {
+			uploadKeyCiphertextColumn++
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("检查上传凭证字段: %w", err)
+	}
+	if uploadKeyCiphertextColumn != 1 {
+		return errors.New("SQLite schema 缺少 upload_credentials.key_ciphertext")
+	}
 	var duplicatePackage, duplicateVersion string
 	var duplicateCount int
-	err := s.db.QueryRow(`
+	err = s.db.QueryRow(`
 		SELECT package_id, version, COUNT(*)
 		FROM games GROUP BY package_id, version HAVING COUNT(*) > 1 LIMIT 1
 	`).Scan(&duplicatePackage, &duplicateVersion, &duplicateCount)
@@ -1027,14 +1079,46 @@ func (s *Store) PutUploadCredential(
 	userID int64,
 	keyHMAC string,
 ) error {
+	return s.PutUploadCredentialEncrypted(ctx, userID, keyHMAC, "")
+}
+
+func (s *Store) PutUploadCredentialEncrypted(
+	ctx context.Context,
+	userID int64,
+	keyHMAC string,
+	keyCiphertext string,
+) error {
 	now := time.Now().UnixMilli()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO upload_credentials(user_id, key_hmac, created_at, updated_at)
-		VALUES(?, ?, ?, ?)
+		INSERT INTO upload_credentials(
+			user_id, key_hmac, key_ciphertext, created_at, updated_at
+		)
+		VALUES(?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
-			key_hmac = excluded.key_hmac, updated_at = excluded.updated_at
-	`, userID, keyHMAC, now, now)
+			key_hmac = excluded.key_hmac,
+			key_ciphertext = excluded.key_ciphertext,
+			updated_at = excluded.updated_at
+	`, userID, keyHMAC, keyCiphertext, now, now)
 	return err
+}
+
+func (s *Store) UploadCredentialForUser(
+	ctx context.Context,
+	userID int64,
+) (UploadCredential, error) {
+	var credential UploadCredential
+	err := s.db.QueryRowContext(ctx, `
+		SELECT user_id, key_hmac, key_ciphertext
+		FROM upload_credentials WHERE user_id = ?
+	`, userID).Scan(
+		&credential.UserID,
+		&credential.KeyHMAC,
+		&credential.KeyCiphertext,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UploadCredential{}, ErrNotFound
+	}
+	return credential, err
 }
 
 func (s *Store) UserByUploadCredential(

@@ -45,7 +45,7 @@ Game Package
   Go、原生桥接或任意端口。浏览器标准 API 可以直接使用；仅在 WebView 权限回调覆盖
   的敏感权限和 Playmesh 多平台适配能力需要写入 `capabilities.json`。
 - 游戏分享运行时采用严格的最小公开面，只允许提供 `/app/**`、`/bucket/**`、`/playmesh/**`，以及 SDK 在浏览器沙箱内确实无法替代的受控底层连接能力（例如当前游戏受控的 WebSocket Upgrade）。该清单是完整公开边界而非接口示例。新增平台功能时必须遵循“SDK 优先”原则，优先修改 Game SDK 或 App Bridge SDK，不得为接入便利新增分享 HTTP 业务接口；只有确属连接或传输层的能力才可增加底层入口，且必须固定绑定当前游戏和会话、在建连前鉴权、禁止任意目标地址，并同步补齐协议文档与回归测试。
-- SDK 分为权威主机运行时 `playmesh.js` 与 App 本机桥接 `playmesh-app.js`。前者负责会话、联机和主机存储；后者只负责当前 App 的身份与本机能力，由 App 自动注入，不得持久化游戏能力授权。Console 必须由 WebView/浏览器宿主在底层捕获并只保留在当前设备，禁止经 SDK 或游戏网关跨设备转发。普通浏览器不得加载 App SDK，主 SDK 必须提供安全的 `playmesh.app` 空实现。
+- SDK 分为公共游戏运行时 `playmesh.js` 与当前终端运行时 `playmesh-app.js`。前者在所有平台提供一致 API，游戏声明、会话、玩家、Authority、同步、性能和主机存储只来自 Authority 主机或受控 Game SDK Bridge；后者负责当前 Windows/Android/浏览器终端的平台环境、App 身份、设备能力、权限、全屏、输入、本机 Console 日志和平台覆盖层。App SDK 可以读取 Game SDK 公共数据用于展示，但禁止通过 App bootstrap、原生桥、URL 或全局变量复制游戏状态；Game SDK 也禁止伪造终端能力和本机日志。App WebView 与普通浏览器都由平台在主 SDK 前自动注入 App SDK，普通浏览器的原生能力 `isAvailable()` 为 false。日志只保留在当前设备，禁止经 Session 或游戏网关跨设备转发。
 - 游戏可以自带引擎或工具库，但必须放在自己的游戏包内并通过包校验流程管理；不得因为使用第三方引擎而绕过 SDK 的身份、存储和联机边界。
 - SDK 不额外设计启动回调，页面脚本执行就是启动；必须提供 `onPause`、`onResume` 和由 App 主动触发的 `onExit` 生命周期接口。
 - `onExit` 只作为退出前的最佳努力通知，必须幂等、有超时，不能作为唯一的数据持久化时机；重要数据应在状态变化后及时保存。

@@ -103,6 +103,7 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       }
       final capabilities = GameCapabilities.fromJson(
         Map<String, Object?>.from(raw),
+        requireKnownCapabilities: false,
       );
       requiredCapabilities = capabilities.required.toList()..sort();
       controllerCapabilities = capabilities.controllerRequired.toList()..sort();

@@ -1,28 +1,32 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'game_session.dart';
 
 typedef SessionChannelFactory = WebSocketChannel Function(Uri endpoint);
+typedef SessionLogSink = void Function(Map<String, Object?> record);
 
 class GoCoreSessionClient {
   GoCoreSessionClient({
     required Uri baseUri,
     http.Client? httpClient,
     SessionChannelFactory? channelFactory,
+    SessionLogSink? logSink,
   }) : baseUri = baseUri.replace(path: '/', query: null, fragment: null),
        _httpClient = httpClient ?? http.Client(),
        _ownsHttpClient = httpClient == null,
-       _channelFactory = channelFactory ?? WebSocketChannel.connect;
+       _channelFactory = channelFactory ?? WebSocketChannel.connect,
+       _logSink = logSink ?? _defaultSessionLogSink;
 
   final Uri baseUri;
   final http.Client _httpClient;
   final bool _ownsHttpClient;
   final SessionChannelFactory _channelFactory;
+  final SessionLogSink _logSink;
 
   Future<GameSessionConnection> create({
     required String gameId,
@@ -47,14 +51,51 @@ class GoCoreSessionClient {
     String? shareToken,
     String? playerId,
     String source = 'lan_app',
+    Uint8List? avatarBytes,
+    String? avatarSha256,
   }) async {
-    final bootstrap = await _post('v1/sessions/join', {
+    var bootstrap = await _post('v1/sessions/join', {
       'joinCode': joinCode,
       'nickname': nickname,
       'shareToken': ?shareToken,
       'playerId': ?playerId,
       'source': source,
     });
+    if (avatarBytes != null && avatarSha256 != null) {
+      try {
+        final session = await uploadAvatar(
+          sessionId: bootstrap.session.id,
+          token: bootstrap.credential.token,
+          pngBytes: avatarBytes,
+          sha256: avatarSha256,
+          playerId: bootstrap.credential.player.id,
+          nickname: bootstrap.credential.player.nickname,
+        );
+        bootstrap = bootstrap.withSession(session);
+      } on Object catch (error) {
+        _logAvatar(
+          level: 'WARNING',
+          event: 'session.avatar_upload_failed_continue',
+          message: 'Playmesh 头像上传失败，继续建立游戏连接',
+          sessionId: bootstrap.session.id,
+          playerId: bootstrap.credential.player.id,
+          nickname: bootstrap.credential.player.nickname,
+          sha256: avatarSha256,
+          extra: {'error': error.toString()},
+        );
+      }
+    } else if (avatarBytes != null || avatarSha256 != null) {
+      _logAvatar(
+        level: 'WARNING',
+        event: 'session.avatar_upload_skipped_incomplete',
+        message: 'Playmesh 头像资料不完整，跳过上传并继续建立游戏连接',
+        sessionId: bootstrap.session.id,
+        playerId: bootstrap.credential.player.id,
+        nickname: bootstrap.credential.player.nickname,
+        sha256: avatarSha256,
+        extra: {'hasAvatarBytes': avatarBytes != null},
+      );
+    }
     return _connect(bootstrap);
   }
 
@@ -135,27 +176,101 @@ class GoCoreSessionClient {
     }
   }
 
-  Future<void> uploadAvatar({
+  Future<GameSessionSnapshot> uploadAvatar({
     required String sessionId,
     required String token,
     required Uint8List pngBytes,
     required String sha256,
+    String? playerId,
+    String? nickname,
   }) async {
-    final response = await _httpClient.put(
-      baseUri.resolve('v1/sessions/$sessionId/avatar'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'image/png',
-        'X-Playmesh-Avatar-Sha256': sha256,
-      },
-      body: pngBytes,
+    _logAvatar(
+      level: 'INFO',
+      event: 'session.avatar_upload_started',
+      message: 'Playmesh 开始上传玩家头像',
+      sessionId: sessionId,
+      playerId: playerId,
+      nickname: nickname,
+      sha256: sha256,
+      extra: {'avatarBytes': pngBytes.length},
     );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw GameSessionException.fromPayload(
-        response.statusCode,
-        _decodeResponse(response),
+    try {
+      final response = await _httpClient.put(
+        baseUri.resolve('v1/sessions/$sessionId/avatar?wait=commit'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'image/png',
+          'X-Playmesh-Avatar-Sha256': sha256,
+        },
+        body: pngBytes,
       );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw GameSessionException.fromPayload(
+          response.statusCode,
+          _decodeResponse(response),
+        );
+      }
+      final payload = _decodeResponse(response);
+      final session = GameSessionSnapshot.fromJson(
+        Map<String, Object?>.from(payload['session']! as Map),
+      );
+      final committedPlayer = session.players
+          .where((player) => player.id == playerId)
+          .firstOrNull;
+      _logAvatar(
+        level: 'INFO',
+        event: 'session.avatar_upload_succeeded',
+        message: 'Playmesh 玩家头像上传并提交成功',
+        sessionId: sessionId,
+        playerId: playerId,
+        nickname: nickname,
+        sha256: sha256,
+        extra: {'avatar': committedPlayer?.avatar},
+      );
+      return session;
+    } on Object catch (error) {
+      _logAvatar(
+        level: 'WARNING',
+        event: 'session.avatar_upload_failed',
+        message: 'Playmesh 玩家头像上传失败',
+        sessionId: sessionId,
+        playerId: playerId,
+        nickname: nickname,
+        sha256: sha256,
+        extra: {
+          'error': error.toString(),
+          if (error is GameSessionException) ...{
+            'statusCode': error.statusCode,
+            'errorCode': error.code,
+          },
+        },
+      );
+      rethrow;
     }
+  }
+
+  void _logAvatar({
+    required String level,
+    required String event,
+    required String message,
+    required String sessionId,
+    String? playerId,
+    String? nickname,
+    String? sha256,
+    Map<String, Object?> extra = const {},
+  }) {
+    _logSink({
+      'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
+      'level': level,
+      'component': 'go-core-session-client',
+      'event': event,
+      'message': message,
+      'sessionId': sessionId,
+      'playerId': ?playerId,
+      'nickname': ?nickname,
+      'avatarSha256': ?sha256,
+      ...extra,
+    });
   }
 
   Future<GameSessionConnection> _connect(GameSessionBootstrap bootstrap) async {
@@ -216,7 +331,14 @@ class GameSessionConnection {
   late GameSessionSnapshot snapshot = bootstrap.session;
 
   Stream<Map<String, Object?>> get messages => _messages.stream;
-  GameSessionPlayer get currentPlayer => bootstrap.credential.player;
+  GameSessionPlayer get currentPlayer {
+    final playerId = bootstrap.credential.player.id;
+    for (final player in snapshot.players) {
+      if (player.id == playerId) return player;
+    }
+    return bootstrap.credential.player;
+  }
+
   bool get isAuthority => currentPlayer.id == snapshot.authorityClientId;
 
   void submitAction(Map<String, Object?> action) {
@@ -279,12 +401,14 @@ class GameSessionConnection {
     return _client.closeShare(snapshot.id, bootstrap.credential.token);
   }
 
-  Future<void> syncAvatar(Uint8List pngBytes, String sha256) {
-    return _client.uploadAvatar(
+  Future<void> syncAvatar(Uint8List pngBytes, String sha256) async {
+    snapshot = await _client.uploadAvatar(
       sessionId: snapshot.id,
       token: bootstrap.credential.token,
       pngBytes: pngBytes,
       sha256: sha256,
+      playerId: currentPlayer.id,
+      nickname: currentPlayer.nickname,
     );
   }
 
@@ -483,4 +607,8 @@ Map<String, Object?> _decodeResponse(http.Response response) {
     throw const FormatException('Go Core 会话响应根节点必须是对象');
   }
   return Map<String, Object?>.from(decoded);
+}
+
+void _defaultSessionLogSink(Map<String, Object?> record) {
+  debugPrint('[${record['level']}] ${record['message']} ${jsonEncode(record)}');
 }

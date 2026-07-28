@@ -23,13 +23,13 @@
 
 ## 游戏侧边栏与返回意图
 
-- 删除进入游戏后常驻的悬浮球和二级“更多”菜单，App WebView 与普通浏览器统一使用右侧侧边栏；横竖屏按可用空间自适应，所有操作同时显示图标与文字。
+- App WebView 与普通浏览器统一由 `playmesh-app.js` 在 Shadow DOM 中创建右侧侧边栏；原生 Flutter 页面不再创建或控制侧边栏。
 - 侧边栏默认关闭且不显示进入提示。“继续游戏”和点击遮罩都会关闭侧边栏、恢复游戏内容焦点；打开、关闭侧边栏均不发送 `pause` / `resume` 生命周期事件。
-- WebView 的系统返回与键盘返回先交给网页私有返回处理器；浏览器可使用 History API 时安装同页返回守卫。网页无法处理时由原生宿主打开侧边栏兜底。侧边栏已打开时返回只关闭侧边栏；侧边栏退出和显式调用 `playmesh.app.exitGame()` 都可以离开游戏。
-- Game SDK 和 App Bridge SDK 升级到 `3.0.0`。公开接口将 `showToolDock()` / `hideToolDock()` 替换为 `showGameSidebar()` / `hideGameSidebar()`，并保留直接退出游戏的 `exitGame()`。
-- 调用链：`PopScope / 硬件返回 -> window[Symbol.for("playmesh.platform-ui.back")] -> playmesh.app.showGameSidebar() -> app.ui.gameSidebar.show -> AppWebViewBridge -> GameSidebarController`；网页执行器缺失、异常或返回 `false` 时直接由 `GameSidebarController` 打开。普通浏览器走 `popstate -> 私有返回处理器 -> 浏览器侧边栏`；直接退出走 `playmesh.app.exitGame() -> app.game.exit -> AppWebViewBridge -> 页面退出清理`。
-- 验证覆盖 Flutter 侧栏行为、横竖屏尺寸、退出边界、App Bridge/注册表/本地化/网关契约，以及浏览器返回守卫、遮罩关闭、焦点恢复和“侧栏开关不触发 pause”；最新版 SDK 静态产物由注册表重新生成。
-- 回滚点是本节涉及的 `GameSidebar`、返回处理器和 Game/App SDK `3.0.0` 发行边界，必须整体回滚，不能只恢复旧 SDK 名称或只恢复悬浮 UI。浏览器 History/关闭窗口受浏览器策略限制，因此拦截与离开都保持尽力而为；App WebView 始终保留原生返回兜底。
+- `playmesh-app.js` 在捕获阶段直接监听 `Escape`、Menu、ContextMenu、BrowserBack、GoBack、XF86Back 及对应 Android/遥控器 keyCode；原生层不监听、不注入、不转发菜单意图，也不提供 `onMenuRequest`。
+- 菜单 API 统一位于 `playmesh.app.ui`：保留 `showGameSidebar()` 供开发者手动打开，不公开 `hideGameSidebar()`；刷新、分享、日志、全屏、信息、性能和退出同样由该命名空间暴露。
+- `playmesh.app.ui.configure({fallbackUi:false})` 可彻底关闭统一兜底 UI 与按键消费；`playmesh.app.ui.initializeBrowser()` 是浏览器专用入口，启用侧边栏但不创建悬浮球，由游戏自己的按钮调用 `showGameSidebar()`。
+- 默认浏览器模式创建可拖动悬浮球；App WebView 不创建悬浮球。Windows WebView 的第一次 `Escape` 在 App bootstrap 完成前也由 SDK 监听，不再需要第二次按键。
+- 验证覆盖首次按键、Android Menu keyCode、浏览器悬浮球拖动、无悬浮球浏览器初始化、焦点恢复、App Bridge/注册表/本地化/网关注入顺序，以及原生页面不挂载侧边栏。
 
 ## 3.0.0 破坏边界
 
@@ -179,9 +179,9 @@
   未注册或格式错误的版本请求直接失败。
 - Game SDK 新增 `Player.avatar`、只读 `runtime.getLocale()`，并把 App 级分享、
   游戏工具能力统一声明在 `playmesh.app`。
-- App Bridge SDK 提供 `openSharePanel()`、`showGameSidebar()`、`hideGameSidebar()`
-  和 `exitGame()`。SDK 拉起侧边栏时自动聚焦“继续游戏”，关闭时把焦点还给游戏；
-  游戏也可以通过 `exitGame()` 直接执行正常退出清理。现有已注册游戏包继续按清单版本运行，旧
+- App 平台功能统一收敛到 `playmesh.app.ui`：保留 `showGameSidebar()` 供游戏手动
+  打开，不公开 `hideGameSidebar()` 或 `onMenuRequest`；`exitGame()` 仍执行正常退出
+  清理。现有已注册游戏包继续按清单版本运行，旧
   `playmesh.authority.openSharePanel()` 不再保留。
 
 ## 游戏源声明与 Catalog API 2.0.0
@@ -229,8 +229,12 @@
 - 普通浏览器扫码加入页在当前页面本地拦截 `console.log/info/warn/error/debug`、资源错误、
   未捕获异常和 Promise rejection；最近 500 条可从侧边栏“运行日志”查看和清空，
   不上传到 App、Developer Gateway、Core 或中转服务，刷新页面后清空。
-- 普通浏览器的游戏侧边栏支持横竖屏响应式布局、键盘焦点循环、遮罩关闭和返回意图
-  拦截。App WebView 使用原生宿主侧边栏，不启用浏览器本地实现。
+- App WebView 与普通浏览器的游戏侧边栏都由 `playmesh-app.js` 在当前 HTML 中创建；
+  SDK 直接消费 Esc、菜单键和可进入 DOM 的返回键，Flutter 游戏路由拒绝隐式返回，
+  只有 SDK 的显式退出命令可以离开游戏。普通浏览器默认显示可拖动悬浮按钮；
+  `initializeBrowser()` 可保留 SDK 侧边栏但不创建悬浮按钮。
+- console 参数在 App SDK 写入日志时统一安全序列化并拼成字符串，再同时进入 SDK
+  日志层和宿主/开发者工作台日志；对象与数组不再显示为 `[object Object]`。
 
 ## 角色化能力声明
 

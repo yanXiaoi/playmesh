@@ -312,7 +312,7 @@ func TestAppPlayerUsesPersistentIDAndRejoinReplacesCredential(t *testing.T) {
 	}
 }
 
-func TestFinishAndResetPruneOnlyDisconnectedPlayers(t *testing.T) {
+func TestResetPrunesDisconnectedPlayers(t *testing.T) {
 	store := NewStore()
 	snapshot, host, err := store.Create(CreateInput{
 		GameID: "retention", DisplayMode: "single_screen_multiplayer",
@@ -339,9 +339,9 @@ func TestFinishAndResetPruneOnlyDisconnectedPlayers(t *testing.T) {
 	if len(disconnected.Players) != 1 || disconnected.Players[0].Connected {
 		t.Fatalf("running disconnect was not retained: %#v", disconnected.Players)
 	}
-	finished, err := store.Finish(snapshot.ID, host.Token)
-	if err != nil || finished.State != StateStopped || len(finished.Players) != 0 {
-		t.Fatalf("Finish() = %#v, %v", finished, err)
+	reset, err := store.Reset(snapshot.ID, host.Token)
+	if err != nil || reset.State != StateLobby || len(reset.Players) != 0 {
+		t.Fatalf("Reset() = %#v, %v", reset, err)
 	}
 }
 

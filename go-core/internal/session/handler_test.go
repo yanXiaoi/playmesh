@@ -3,7 +3,11 @@ package session
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"log/slog"
 	"net"
@@ -15,6 +19,98 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+func TestAvatarUploadCanWaitForAuthorityCommit(t *testing.T) {
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuffer, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "avatar-wait", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	hostConnection := dial(t, server.URL, host)
+	defer hostConnection.CloseNow()
+	guest := postSession(t, server.URL+"/v1/sessions/join", map[string]any{
+		"joinCode": host.Session.JoinCode,
+		"nickname": "App 玩家",
+		"playerId": "u_avatar_wait",
+	})
+
+	var avatar bytes.Buffer
+	if err := png.Encode(&avatar, image.NewRGBA(image.Rect(0, 0, 256, 256))); err != nil {
+		t.Fatal(err)
+	}
+	digestBytes := sha256.Sum256(avatar.Bytes())
+	digest := hex.EncodeToString(digestBytes[:])
+	type uploadResult struct {
+		response *http.Response
+		err      error
+	}
+	result := make(chan uploadResult, 1)
+	go func() {
+		request, _ := http.NewRequest(
+			http.MethodPut,
+			server.URL+"/v1/sessions/"+host.Session.ID+"/avatar?wait=commit",
+			bytes.NewReader(avatar.Bytes()),
+		)
+		request.Header.Set("Authorization", "Bearer "+guest.Credential.Token)
+		request.Header.Set("Content-Type", "image/png")
+		request.Header.Set("X-Playmesh-Avatar-Sha256", digest)
+		response, err := http.DefaultClient.Do(request)
+		result <- uploadResult{response: response, err: err}
+	}()
+
+	writeRequest := readType(t, hostConnection, "platform.avatar.write")
+	var writePayload avatarWritePayload
+	if err := json.Unmarshal(writeRequest.Payload, &writePayload); err != nil {
+		t.Fatal(err)
+	}
+	if writePayload.PlayerID != guest.Credential.Player.ID || writePayload.Digest != digest {
+		t.Fatalf("avatar write payload = %#v", writePayload)
+	}
+	writeWS(t, hostConnection, map[string]any{
+		"type": "platform.avatar.committed", "sequence": 1,
+		"payload": map[string]any{
+			"playerId": writePayload.PlayerID,
+			"digest":   writePayload.Digest,
+		},
+	})
+
+	uploaded := <-result
+	if uploaded.err != nil {
+		t.Fatal(uploaded.err)
+	}
+	defer uploaded.response.Body.Close()
+	if uploaded.response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(uploaded.response.Body)
+		t.Fatalf("avatar upload status = %d, body = %s", uploaded.response.StatusCode, body)
+	}
+	var payload struct {
+		Player Player `json:"player"`
+	}
+	if err := json.NewDecoder(uploaded.response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Player.Avatar == nil {
+		t.Fatalf("committed avatar player = %#v", payload.Player)
+	}
+	logOutput := logBuffer.String()
+	for _, event := range []string{
+		"session.avatar_upload_received",
+		"session.avatar_write_dispatched",
+		"session.avatar_commit_received",
+		"session.avatar_commit_succeeded",
+		"session.avatar_upload_succeeded",
+	} {
+		if !strings.Contains(logOutput, event) {
+			t.Fatalf("avatar logs missing %q:\n%s", event, logOutput)
+		}
+	}
+	if !strings.Contains(logOutput, guest.Credential.Player.ID) {
+		t.Fatalf("avatar logs missing player context:\n%s", logOutput)
+	}
+}
 
 func TestHandlerRoutesActionsOnlyThroughAuthority(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

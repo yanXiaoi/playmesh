@@ -22,11 +22,15 @@ class HomePage extends StatelessWidget {
     this.featuredGame,
     this.games = const [],
     this.onOpenOnline,
+    this.gameLibraryLoading = false,
+    this.gameLibraryError,
+    this.onRetryGameLibrary,
   });
 
   static const profileHeroKey = Key('home-profile-hero');
   static const profileIdentityKey = Key('home-profile-identity');
   static const scanJoinKey = Key('home-scan-join');
+  static const gameLibraryLoadingKey = Key('home-game-library-loading');
 
   static Key gameQuickLaunchKey(String gameId) =>
       ValueKey('home-game-quick-launch-$gameId');
@@ -37,6 +41,9 @@ class HomePage extends StatelessWidget {
   final GameSummary? featuredGame;
   final List<GameSummary> games;
   final VoidCallback? onOpenOnline;
+  final bool gameLibraryLoading;
+  final Object? gameLibraryError;
+  final VoidCallback? onRetryGameLibrary;
 
   List<GameSummary> get _visibleGames {
     final featured = featuredGame;
@@ -153,8 +160,14 @@ class HomePage extends StatelessWidget {
                       delay: const Duration(milliseconds: 45),
                       child: _RecentGamesSection(
                         games: _visibleGames,
-                        onOpenLibrary: openLibrary,
+                        onOpenLibrary:
+                            gameLibraryLoading || gameLibraryError != null
+                            ? null
+                            : openLibrary,
                         onLaunch: openGame,
+                        loading: gameLibraryLoading,
+                        error: gameLibraryError,
+                        onRetry: onRetryGameLibrary,
                       ),
                     ),
                     const SizedBox(height: 22),
@@ -431,11 +444,17 @@ class _RecentGamesSection extends StatelessWidget {
     required this.games,
     required this.onOpenLibrary,
     required this.onLaunch,
+    required this.loading,
+    this.error,
+    this.onRetry,
   });
 
   final List<GameSummary> games;
-  final VoidCallback onOpenLibrary;
+  final VoidCallback? onOpenLibrary;
   final ValueChanged<GameSummary> onLaunch;
+  final bool loading;
+  final Object? error;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -454,7 +473,42 @@ class _RecentGamesSection extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Card(
-          child: games.isEmpty
+          child: loading
+              ? Semantics(
+                  key: HomePage.gameLibraryLoadingKey,
+                  liveRegion: true,
+                  child: ListTile(
+                    leading: const SizedBox.square(
+                      dimension: 28,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    ),
+                    title: Text(context.tr('library.title')),
+                    subtitle: Text(context.tr('library.loading')),
+                  ),
+                )
+              : error != null
+              ? ListTile(
+                  leading: Icon(
+                    Icons.error_outline_rounded,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  title: Text(context.tr('common.error')),
+                  subtitle: Text(
+                    context.tr(
+                      'error.library_scan',
+                      arguments: {'error': error},
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: onRetry == null
+                      ? null
+                      : TextButton(
+                          onPressed: onRetry,
+                          child: Text(context.tr('common.retry')),
+                        ),
+                )
+              : games.isEmpty
               ? ListTile(
                   onTap: onOpenLibrary,
                   leading: const GradientIcon(

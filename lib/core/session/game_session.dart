@@ -144,6 +144,26 @@ class GameSessionBootstrap {
   final GameSessionCredential credential;
   final String webSocketPath;
   final String binaryWebSocketPath;
+
+  GameSessionBootstrap withSession(GameSessionSnapshot updatedSession) {
+    GameSessionPlayer? updatedPlayer;
+    for (final player in updatedSession.players) {
+      if (player.id == credential.player.id) {
+        updatedPlayer = player;
+        break;
+      }
+    }
+    return GameSessionBootstrap(
+      session: updatedSession,
+      credential: GameSessionCredential(
+        player: updatedPlayer ?? credential.player,
+        token: credential.token,
+        reconnected: credential.reconnected,
+      ),
+      webSocketPath: webSocketPath,
+      binaryWebSocketPath: binaryWebSocketPath,
+    );
+  }
 }
 
 Map<String, Object?> decodeSessionMessage(Object? value) {

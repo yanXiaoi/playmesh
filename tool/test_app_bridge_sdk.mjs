@@ -24,6 +24,8 @@ const window = {
   queueMicrotask,
   setTimeout,
   clearTimeout,
+  addEventListener() {},
+  __PLAYMESH_APP_OPTIONS__: { fallbackUi: false },
   navigator: { userActivation: { isActive: true } },
   document: {
     activeElement: gameFocusTarget,
@@ -48,7 +50,6 @@ const window = {
             nickname: "本机玩家",
             source: "playmesh_app",
           },
-          game: { requiredCapabilities: ["media.camera", "device.vibration"] },
           capabilityRegistry: [{
             code: "media.camera",
             name: "摄像头",
@@ -66,6 +67,21 @@ const window = {
             platform: "android",
             capabilities: ["media.camera", "device.vibration"],
             declaredCapabilities: ["media.camera", "device.vibration"],
+          },
+        };
+      } else if (command.command === "app.game.configure") {
+        result = {
+          capabilityRegistry: [{
+            code: "device.vibration",
+            name: "震动反馈",
+            apiVersion: "1.0.0",
+            methods: [{ name: "vibrate" }],
+            events: [],
+          }],
+          device: {
+            platform: "android",
+            capabilities: ["device.vibration"],
+            declaredCapabilities: ["device.vibration"],
           },
         };
       } else if (command.command === "app.capability.create") {
@@ -88,6 +104,11 @@ vm.runInNewContext(source, window, { filename: "playmesh-app.js" });
 
 const publicBootstrap = await window.playmeshApp.ready;
 assert.equal("_playmeshPlatformUi" in publicBootstrap, false);
+assert.equal("game" in publicBootstrap, false);
+assert.deepEqual(
+  commands.find((item) => item.command === "app.bootstrap").payload,
+  {},
+);
 assert.equal("__getPlatformUiConfiguration" in window.playmeshApp, false);
 assert.deepEqual(
   JSON.parse(
@@ -114,6 +135,17 @@ assert.deepEqual(
   [...window.playmeshApp.capabilities.getDeclared()],
   ["media.camera", "device.vibration"],
 );
+await window.playmeshApp.__configureRuntimeGame({
+  requiredCapabilities: ["device.vibration"],
+});
+assert.deepEqual(
+  commands.find((item) => item.command === "app.game.configure").payload,
+  { declaredCapabilities: ["device.vibration"] },
+);
+assert.deepEqual(
+  [...window.playmeshApp.capabilities.getDeclared()],
+  ["device.vibration"],
+);
 
 const capability = await window.playmeshApp.capabilities.create(
   "device.vibration",
@@ -138,25 +170,38 @@ assert.equal(commands.some((item) => item.command === "app.capability.create"), 
 assert.equal(commands.some((item) => item.command === "app.capability.invoke"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.dispose"), true);
 
-window.document.activeElement = gameFocusTarget;
-await window.playmeshApp.openSharePanel();
+await window.playmeshApp.ui.openSharePanel();
 assert.deepEqual(
   commands.findLast((item) => item.command === "app.ui.openSharePanel").payload,
   { userActivation: true },
 );
-window.document.activeElement = { isConnected: true };
-window.playmeshApp.__restoreGameContentFocus();
-assert.equal(window.document.activeElement, gameFocusTarget);
+assert.equal(window.playmeshApp.hideGameSidebar, undefined);
+assert.equal(window.playmeshApp.onMenuRequest, undefined);
+assert.equal(await window.playmeshApp.ui.showGameSidebar(), false);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(window.playmeshApp.ui.configure({ fallbackUi: false }))),
+  { fallbackUi: false, floatingButton: true },
+);
+for (const methodName of [
+  "configure",
+  "initializeBrowser",
+  "showGameSidebar",
+  "restartGame",
+  "openSharePanel",
+  "openRuntimeLogs",
+  "openGameInfo",
+  "enterFullscreen",
+  "exitFullscreen",
+  "setPerformanceVisible",
+  "togglePerformance",
+  "exitGame",
+]) {
+  assert.equal(window.playmeshApp[methodName], undefined);
+  assert.equal(typeof window.playmeshApp.ui[methodName], "function");
+}
+assert.equal(window.playmeshApp.ui.initializeBrowser(), false);
 
-window.document.activeElement = gameFocusTarget;
-await window.playmeshApp.showGameSidebar();
-window.document.activeElement = { isConnected: true };
-await window.playmeshApp.hideGameSidebar();
-assert.equal(window.document.activeElement, gameFocusTarget);
-assert.equal(commands.some((item) => item.command === "app.ui.gameSidebar.show"), true);
-assert.equal(commands.some((item) => item.command === "app.ui.gameSidebar.hide"), true);
-
-await window.playmeshApp.exitGame();
+await window.playmeshApp.ui.exitGame();
 assert.equal(commands.some((item) => item.command === "app.game.exit"), true);
 await window.playmeshApp.__requestExit();
 

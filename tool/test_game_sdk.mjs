@@ -218,15 +218,6 @@ globalThis.window = {
   playmeshApp: {
     ready: Promise.resolve({
       available: true,
-      game: {
-        name: "角色能力测试",
-        requiredCapabilities: [
-          "media.camera",
-          "media.microphone",
-          "device.midi",
-          "device.vibration",
-        ],
-      },
       capabilityRegistry: [],
       device: {
         platform: "windows",

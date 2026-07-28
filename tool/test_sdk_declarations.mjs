@@ -88,6 +88,14 @@ assert.match(
   /setFullscreen\(enabled: boolean, orientation\?: PlaymeshOrientation\)/,
 );
 assert.match(game, /interface PlaymeshCapabilityHandle/);
+assert.match(
+  game,
+  /interface PlaymeshGameInfo \{[\s\S]*id: string;[\s\S]*name: string;[\s\S]*multiplayer: boolean;[\s\S]*displayMode: PlaymeshDisplayMode;[\s\S]*requiredCapabilities: string\[\];/,
+);
+assert.match(
+  game,
+  /readonly gameInfo: \{[\s\S]*getCurrent\(\): PlaymeshGameInfo \| null;/,
+);
 assert.match(game, /capabilities\.create/);
 assert.doesNotMatch(game, /onDevice\(/);
 assert.match(app, /reference path="\.\/playmesh\.d\.ts"/);
@@ -124,9 +132,36 @@ for (const eventName of [
   );
 }
 assert.match(game, /openSharePanel\(\): Promise<void>/);
-assert.match(game, /showGameSidebar\(\): Promise<void>/);
-assert.match(game, /hideGameSidebar\(\): Promise<void>/);
+assert.match(game, /configure\(options: PlaymeshAppUiOptions\): PlaymeshAppUiOptions/);
+assert.match(game, /initializeBrowser\(\): boolean/);
+assert.match(game, /showGameSidebar\(\): Promise<boolean>/);
+assert.match(game, /restartGame\(\): void/);
+assert.match(game, /openRuntimeLogs\(\): Promise<boolean>/);
+assert.match(game, /openGameInfo\(\): Promise<boolean>/);
+assert.match(game, /setPerformanceVisible\(visible: boolean\): boolean/);
+assert.match(game, /togglePerformance\(\): boolean/);
 assert.match(game, /exitGame\(\): Promise<void>/);
+assert.doesNotMatch(game, /hideGameSidebar\(\)/);
+assert.doesNotMatch(game, /onMenuRequest/);
+const appApiPrefix = game
+  .slice(game.indexOf("interface PlaymeshAppApi {"))
+  .split("readonly identity:")[0];
+for (const topLevelUiMethod of [
+  "configure",
+  "initializeBrowser",
+  "showGameSidebar",
+  "restartGame",
+  "openSharePanel",
+  "openRuntimeLogs",
+  "openGameInfo",
+  "enterFullscreen",
+  "exitFullscreen",
+  "setPerformanceVisible",
+  "togglePerformance",
+  "exitGame",
+]) {
+  assert.doesNotMatch(appApiPrefix, new RegExp(`\\n\\s*${topLevelUiMethod}\\(`));
+}
 assert.match(game, /send\(data: Uint8Array\): Promise<void>/);
 assert.match(game, /send\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
 assert.match(game, /sendLatest\(data: Uint8Array\): Promise<void>/);
@@ -150,16 +185,43 @@ const runtimeNamespace = sdkManifest.namespaces.find(
 assert.equal(runtimeNamespace.members[0].name, "getLocale");
 assert.equal(runtimeNamespace.members[0].signature, "getLocale(): string");
 assert.match(runtimeNamespace.members[0].behavior, /fall back to zh$/);
+const gameInfoNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.gameInfo",
+);
+assert.equal(gameInfoNamespace.members[0].name, "getCurrent");
+assert.equal(
+  gameInfoNamespace.members[0].signature,
+  "getCurrent(): PlaymeshGameInfo | null",
+);
 const appNamespace = sdkManifest.namespaces.find(
   (namespace) => namespace.name === "playmesh.app",
 );
 const openSharePanel = appNamespace.members.find(
-  (member) => member.name === "openSharePanel",
+  (member) => member.name === "ui.openSharePanel",
 );
-assert.equal(openSharePanel.signature, "openSharePanel(): Promise<void>");
+assert.equal(openSharePanel.signature, "ui.openSharePanel(): Promise<void>");
 assert.match(openSharePanel.behavior, /returns no token, URL, QR code/);
-for (const memberName of ["showGameSidebar", "hideGameSidebar", "exitGame"]) {
+for (const memberName of [
+  "ui.configure",
+  "ui.initializeBrowser",
+  "ui.showGameSidebar",
+  "ui.restartGame",
+  "ui.openRuntimeLogs",
+  "ui.openGameInfo",
+  "ui.setPerformanceVisible",
+  "ui.togglePerformance",
+  "ui.exitGame",
+]) {
   assert(appNamespace.members.some((member) => member.name === memberName));
+}
+for (const removedMemberName of [
+  "hideGameSidebar",
+  "onMenuRequest",
+]) {
+  assert.equal(
+    appNamespace.members.some((member) => member.name === removedMemberName),
+    false,
+  );
 }
 const authorityNamespace = sdkManifest.namespaces.find(
   (namespace) => namespace.name === "playmesh.authority",
@@ -169,6 +231,15 @@ assert.equal(
   false,
 );
 assert.equal(sdkSchema.$defs.RuntimeLocale.type, "string");
+assert.deepEqual(
+  sdkSchema.$defs.GameInfo.required,
+  ["id", "name", "multiplayer", "displayMode", "requiredCapabilities"],
+);
+assert.equal(
+  sdkSchema.$defs.SdkBootstrap.properties.gameInfo.$ref,
+  "#/$defs/GameInfo",
+);
+assert(sdkSchema.$defs.SdkBootstrap.required.includes("gameInfo"));
 assert.match("en-US", new RegExp(sdkSchema.$defs.RuntimeLocale.pattern));
 assert(sdkSchema.$defs.RuntimeLocale.examples.includes("zh"));
 assert.deepEqual(

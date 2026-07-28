@@ -166,6 +166,13 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       bootstrap = {
         type: "sdk.bootstrap",
         sdkVersion: PLAYMESH_SDK_VERSION,
+        gameInfo: {
+          id: config.gameId,
+          name: config.gameName,
+          multiplayer: false,
+          displayMode: "solo",
+          requiredCapabilities: [...(config.requiredCapabilities || [])],
+        },
         isAuthority: false,
         player: null,
         session: null,
@@ -241,6 +248,13 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     bootstrap = {
       type: "sdk.bootstrap",
       sdkVersion: PLAYMESH_SDK_VERSION,
+      gameInfo: {
+        id: joined.session.gameId,
+        name: config.gameName,
+        multiplayer: true,
+        displayMode: joined.session.displayMode || config.displayMode,
+        requiredCapabilities: [...(config.requiredCapabilities || [])],
+      },
       isAuthority: false,
       player: publicPlayer(joined.credential.player),
       session: publicSession(joined.session),
@@ -391,21 +405,10 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       device: { platform: "browser", capabilities: [] },
     }),
     isAvailable() { return false; },
-    openSharePanel() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主"));
-    },
-    showGameSidebar() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏侧边栏宿主"));
-    },
-    hideGameSidebar() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏侧边栏宿主"));
-    },
-    exitGame() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主"));
-    },
     __restoreGameContentFocus() {},
     __requestExit() { return Promise.resolve(); },
     __confirmCapabilities() { return Promise.resolve(); },
+    __configureRuntimeGame() { return emptyAppSdk.ready; },
     identity: { getCurrent() { return null; } },
     capabilities: {
       getRegistry() { return []; },
@@ -417,6 +420,20 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       getPlatform() { return "browser"; },
       setFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
       onInput() { return function unsubscribe() {}; },
+    },
+    ui: {
+      initializeBrowser() { return false; },
+      configure() { return { fallbackUi: false, floatingButton: false }; },
+      restartGame() { global.location?.reload?.(); },
+      openSharePanel() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主")); },
+      showGameSidebar() { return Promise.resolve(false); },
+      openRuntimeLogs() { return Promise.resolve(false); },
+      enterFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
+      exitFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
+      openGameInfo() { return Promise.resolve(false); },
+      setPerformanceVisible() { return false; },
+      togglePerformance() { return false; },
+      exitGame() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主")); },
     },
   };
   const appSdk = global.playmeshApp || emptyAppSdk;
@@ -642,6 +659,16 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     return key === "Backspace" && !isPlatformUiEditableTarget(event?.target);
   }
 
+  function isPlatformUiMenuEvent(event) {
+    const key = platformUiEventKey(event);
+    return key === "F10" ||
+      key === "ContextMenu" ||
+      key === "Menu" ||
+      event?.keyCode === 82 ||
+      event?.keyCode === 93 ||
+      event?.keyCode === 121;
+  }
+
   function platformUiControls(value) {
     const raw = typeof value === "function" ? value() : value;
     return Array.from(raw || []).filter(
@@ -785,8 +812,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       ? browserConfig.requiredCapabilities
       : appSdk.isAvailable()
         ? appSdk.capabilities.getDeclared?.()
-        : appBootstrap?.device?.declaredCapabilities ??
-          appBootstrap?.game?.requiredCapabilities;
+        : appBootstrap?.device?.declaredCapabilities;
     const required = normalizeCapabilityList(declaredForCurrentPage);
     const available = normalizeCapabilityList(
       appSdk.isAvailable()
@@ -799,9 +825,8 @@ const gameRuntimeSdkSource = SdkSourceFragment(
         ? appBootstrap.capabilityRegistry
         : [];
     return {
-      gameName: browserConfig?.gameName ||
-        appBootstrap?.game?.name ||
-        platformText("capability.current_game"),
+      gameName:
+        browserConfig?.gameName || platformText("capability.current_game"),
       required,
       available: new Set(available),
       definitions: new Map(definitions.map((definition) => [definition.code, definition])),

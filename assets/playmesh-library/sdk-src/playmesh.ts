@@ -6,6 +6,7 @@ type PlaymeshUnsubscribe = () => void;
 /** SDK 可以跨 Bridge、HTTP 或 WebSocket 传输的 JSON 值。不能包含函数、循环引用或类实例。 */
 type PlaymeshJson = null | boolean | number | string | PlaymeshJson[] | { [key: string]: PlaymeshJson };
 type PlaymeshOrientation = "landscape" | "portrait";
+type PlaymeshDisplayMode = "solo" | "multi_screen" | "single_screen_multiplayer";
 
 /** 当前会话中的玩家。 */
 interface PlaymeshPlayer {
@@ -40,6 +41,20 @@ interface PlaymeshSessionSnapshot {
   [key: string]: unknown;
 }
 
+/** 当前页面对应的游戏声明，由 Game SDK 在初始化时统一提供。 */
+interface PlaymeshGameInfo {
+  /** 稳定的游戏包 ID。 */
+  id: string;
+  /** 面向玩家显示的游戏名称。 */
+  name: string;
+  /** 当前页面是否属于多人游戏。 */
+  multiplayer: boolean;
+  /** 游戏声明的显示模式；单机为 `solo`。 */
+  displayMode: PlaymeshDisplayMode;
+  /** 当前页面角色声明的能力 code。 */
+  requiredCapabilities: string[];
+}
+
 /** 玩家连接状态发生变化时的稳定事件载荷。 */
 interface PlaymeshPlayerConnectionEvent {
   /** 发生连接变化的玩家。 */
@@ -54,6 +69,8 @@ interface PlaymeshPlayerConnectionEvent {
 interface PlaymeshBootstrap {
   /** 当前 Game SDK 版本。 */
   sdkVersion: string;
+  /** 当前游戏声明。 */
+  gameInfo: PlaymeshGameInfo;
   /** 当前页面是否是固定 Authority Client。 */
   isAuthority: boolean;
   /** 当前参与玩家；公共主屏和单机分享页为 `null`。 */
@@ -265,7 +282,41 @@ interface PlaymeshStorageBucket {
   upload(file: File): Promise<string>;
 }
 
-/** App Bridge 能力。App WebView 自动注入；普通浏览器保留安全空实现。 */
+interface PlaymeshAppUiOptions {
+  /** 是否由 SDK 渲染兜底侧边栏、信息和日志覆盖层；默认 `true`。 */
+  fallbackUi?: boolean;
+  /** 普通浏览器是否显示可拖动的悬浮菜单按钮；默认 `true`。 */
+  floatingButton?: boolean;
+}
+
+interface PlaymeshAppUiApi {
+  /** 浏览器专用初始化：启用兜底侧边栏但不创建悬浮球；App WebView 中返回 `false`。 @playmesh-completion playmesh.app.ui.initializeBrowser */
+  initializeBrowser(): boolean;
+  /** 配置 SDK 兜底 UI；应在等待 `playmesh.app.ready` 前调用。 @playmesh-completion playmesh.app.ui.configure */
+  configure(options: PlaymeshAppUiOptions): PlaymeshAppUiOptions;
+  /** 手动打开 SDK 兜底游戏侧边栏；禁用兜底 UI 时返回 `false`。 @playmesh-completion playmesh.app.ui.showGameSidebar */
+  showGameSidebar(): Promise<boolean>;
+  /** 重新加载当前游戏文档。 @playmesh-completion playmesh.app.ui.restartGame */
+  restartGame(): void;
+  /** 打开“分享/邀请”；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.ui.openSharePanel */
+  openSharePanel(): Promise<void>;
+  /** 打开 SDK 运行日志覆盖层。 @playmesh-completion playmesh.app.ui.openRuntimeLogs */
+  openRuntimeLogs(): Promise<boolean>;
+  /** 进入全屏。 @playmesh-completion playmesh.app.ui.enterFullscreen */
+  enterFullscreen(orientation?: PlaymeshOrientation): Promise<unknown>;
+  /** 退出全屏。 @playmesh-completion playmesh.app.ui.exitFullscreen */
+  exitFullscreen(): Promise<unknown>;
+  /** 打开 SDK 游戏信息覆盖层。 @playmesh-completion playmesh.app.ui.openGameInfo */
+  openGameInfo(): Promise<boolean>;
+  /** 显示或隐藏 SDK 性能浮层。 @playmesh-completion playmesh.app.ui.setPerformanceVisible */
+  setPerformanceVisible(visible: boolean): boolean;
+  /** 切换 SDK 性能浮层。 @playmesh-completion playmesh.app.ui.togglePerformance */
+  togglePerformance(): boolean;
+  /** 结束当前游戏。 @playmesh-completion playmesh.app.ui.exitGame */
+  exitGame(): Promise<void>;
+}
+
+/** App Bridge 与统一平台 UI 能力。App WebView 和普通浏览器都会注入。 */
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
   readonly version: "3.0.0";
@@ -273,14 +324,6 @@ interface PlaymeshAppApi {
   readonly ready: Promise<unknown>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
   isAvailable(): boolean;
-  /** 打开 App 的“二维码与链接”界面；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.openSharePanel */
-  openSharePanel(): Promise<void>;
-  /** 显示并聚焦 App 游戏侧边栏。 @playmesh-completion playmesh.app.showGameSidebar */
-  showGameSidebar(): Promise<void>;
-  /** 隐藏 App 游戏侧边栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideGameSidebar */
-  hideGameSidebar(): Promise<void>;
-  /** 请求 App 正常结束当前游戏并返回上一页面。 @playmesh-completion playmesh.app.exitGame */
-  exitGame(): Promise<void>;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
     getCurrent(): PlaymeshAppIdentity | null;
@@ -303,6 +346,8 @@ interface PlaymeshAppApi {
     /** 订阅 App 统一输入事件。 @returns 取消订阅函数。 @playmesh-completion playmesh.app.device.onInput */
     onInput(callback: (input: unknown) => void): PlaymeshUnsubscribe;
   };
+  /** 统一侧边栏及其全部菜单动作。 */
+  readonly ui: PlaymeshAppUiApi;
 }
 
 /** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
@@ -317,6 +362,11 @@ interface PlaymeshApi {
   readonly runtime: {
     /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.runtime.getLocale */
     getLocale(): string;
+  };
+  /** 当前页面对应的游戏声明。 */
+  readonly gameInfo: {
+    /** 返回 Game SDK 初始化后的只读游戏信息；尚未就绪时返回 `null`。 @playmesh-completion playmesh.gameInfo.getCurrent */
+    getCurrent(): PlaymeshGameInfo | null;
   };
   /** 对局状态、Authority 身份和玩家成员事件。 */
   readonly session: {
@@ -1296,6 +1346,17 @@ interface Window { playmesh: PlaymeshApi; }
     }
   }
 
+  function playerConnectionLogContext(player) {
+    const value = publicPlayer(player);
+    return {
+      playerId: value?.id || null,
+      nickname: value?.nickname || null,
+      avatar: value?.avatar ?? null,
+      playerRole: value?.role || null,
+      playerConnected: value?.connected ?? false,
+    };
+  }
+
   function sessionConnectionLogContext(session, player) {
     const players = session?.players || [];
     return {
@@ -1307,9 +1368,7 @@ interface Window { playmesh: PlaymeshApi; }
       roomPlayers: players.length,
       minPlayers: session?.minPlayers ?? null,
       maxPlayers: session?.maxPlayers ?? null,
-      playerId: player?.id || null,
-      nickname: player?.nickname || null,
-      playerRole: player?.role || null,
+      ...playerConnectionLogContext(player),
       isCurrentPlayer: player?.id === bootstrap?.player?.id,
       isAuthority: player?.id === session?.authorityClientId,
     };
@@ -1703,6 +1762,10 @@ interface Window { playmesh: PlaymeshApi; }
   }
 
   async function renderPerformanceUi() {
+    if (typeof appSdk.__refreshRuntimeUi === "function") {
+      appSdk.__refreshRuntimeUi();
+      return;
+    }
     const ui = await ensurePerformanceUi();
     if (!ui) return;
     ui.panel.hidden = !performanceVisible;
@@ -1878,6 +1941,13 @@ interface Window { playmesh: PlaymeshApi; }
       bootstrap = {
         type: "sdk.bootstrap",
         sdkVersion: PLAYMESH_SDK_VERSION,
+        gameInfo: {
+          id: config.gameId,
+          name: config.gameName,
+          multiplayer: false,
+          displayMode: "solo",
+          requiredCapabilities: [...(config.requiredCapabilities || [])],
+        },
         isAuthority: false,
         player: null,
         session: null,
@@ -1953,6 +2023,13 @@ interface Window { playmesh: PlaymeshApi; }
     bootstrap = {
       type: "sdk.bootstrap",
       sdkVersion: PLAYMESH_SDK_VERSION,
+      gameInfo: {
+        id: joined.session.gameId,
+        name: config.gameName,
+        multiplayer: true,
+        displayMode: joined.session.displayMode || config.displayMode,
+        requiredCapabilities: [...(config.requiredCapabilities || [])],
+      },
       isAuthority: false,
       player: publicPlayer(joined.credential.player),
       session: publicSession(joined.session),
@@ -2103,21 +2180,10 @@ interface Window { playmesh: PlaymeshApi; }
       device: { platform: "browser", capabilities: [] },
     }),
     isAvailable() { return false; },
-    openSharePanel() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主"));
-    },
-    showGameSidebar() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏侧边栏宿主"));
-    },
-    hideGameSidebar() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏侧边栏宿主"));
-    },
-    exitGame() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主"));
-    },
     __restoreGameContentFocus() {},
     __requestExit() { return Promise.resolve(); },
     __confirmCapabilities() { return Promise.resolve(); },
+    __configureRuntimeGame() { return emptyAppSdk.ready; },
     identity: { getCurrent() { return null; } },
     capabilities: {
       getRegistry() { return []; },
@@ -2129,6 +2195,20 @@ interface Window { playmesh: PlaymeshApi; }
       getPlatform() { return "browser"; },
       setFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
       onInput() { return function unsubscribe() {}; },
+    },
+    ui: {
+      initializeBrowser() { return false; },
+      configure() { return { fallbackUi: false, floatingButton: false }; },
+      restartGame() { global.location?.reload?.(); },
+      openSharePanel() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主")); },
+      showGameSidebar() { return Promise.resolve(false); },
+      openRuntimeLogs() { return Promise.resolve(false); },
+      enterFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
+      exitFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
+      openGameInfo() { return Promise.resolve(false); },
+      setPerformanceVisible() { return false; },
+      togglePerformance() { return false; },
+      exitGame() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主")); },
     },
   };
   const appSdk = global.playmeshApp || emptyAppSdk;
@@ -2354,6 +2434,16 @@ interface Window { playmesh: PlaymeshApi; }
     return key === "Backspace" && !isPlatformUiEditableTarget(event?.target);
   }
 
+  function isPlatformUiMenuEvent(event) {
+    const key = platformUiEventKey(event);
+    return key === "F10" ||
+      key === "ContextMenu" ||
+      key === "Menu" ||
+      event?.keyCode === 82 ||
+      event?.keyCode === 93 ||
+      event?.keyCode === 121;
+  }
+
   function platformUiControls(value) {
     const raw = typeof value === "function" ? value() : value;
     return Array.from(raw || []).filter(
@@ -2497,8 +2587,7 @@ interface Window { playmesh: PlaymeshApi; }
       ? browserConfig.requiredCapabilities
       : appSdk.isAvailable()
         ? appSdk.capabilities.getDeclared?.()
-        : appBootstrap?.device?.declaredCapabilities ??
-          appBootstrap?.game?.requiredCapabilities;
+        : appBootstrap?.device?.declaredCapabilities;
     const required = normalizeCapabilityList(declaredForCurrentPage);
     const available = normalizeCapabilityList(
       appSdk.isAvailable()
@@ -2511,9 +2600,8 @@ interface Window { playmesh: PlaymeshApi; }
         ? appBootstrap.capabilityRegistry
         : [];
     return {
-      gameName: browserConfig?.gameName ||
-        appBootstrap?.game?.name ||
-        platformText("capability.current_game"),
+      gameName:
+        browserConfig?.gameName || platformText("capability.current_game"),
       required,
       available: new Set(available),
       definitions: new Map(definitions.map((definition) => [definition.code, definition])),
@@ -2694,6 +2782,16 @@ interface Window { playmesh: PlaymeshApi; }
           throw new Error("playmesh.runtime.getLocale requires await playmesh.ready");
         }
         return runtimeLocale;
+      },
+    }),
+    gameInfo: Object.freeze({
+      getCurrent() {
+        const info = bootstrap?.gameInfo;
+        if (!info) return null;
+        return {
+          ...info,
+          requiredCapabilities: [...(info.requiredCapabilities || [])],
+        };
       },
     }),
     session: {
@@ -2890,8 +2988,7 @@ interface Window { playmesh: PlaymeshApi; }
     __receive: receive,
   };
 
-  installBrowserConsoleCapture();
-  global[Symbol.for("playmesh.platform-ui.back")] = handlePlatformBackIntent;
+  registerAppPlatformUiRuntime();
   global.playmesh = playmesh;
   global.console?.info?.("Playmesh Game SDK 注入成功", {
     version: PLAYMESH_SDK_VERSION,
@@ -2900,7 +2997,17 @@ interface Window { playmesh: PlaymeshApi; }
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
   }
   global.addEventListener?.("pagehide", () => markRuntimeExited("游戏页面已退出"));
-  playmesh.ready = appSdk.ready.then(async (appBootstrap) => {
+  playmesh.ready = appSdk.ready.then(async (initialAppBootstrap) => {
+    let appBootstrap = initialAppBootstrap;
+    const runtimeGameDeclaration = global.__PLAYMESH_BROWSER__;
+    if (runtimeGameDeclaration &&
+        appSdk.isAvailable() &&
+        typeof appSdk.__configureRuntimeGame === "function") {
+      appBootstrap = await appSdk.__configureRuntimeGame({
+        requiredCapabilities:
+          runtimeGameDeclaration.requiredCapabilities || [],
+      });
+    }
     const appPlatformUiConfiguration = takeAppPlatformUiConfiguration();
     const platformUiConfiguration = appPlatformUiConfiguration ||
       takeBrowserPlatformUiConfiguration();
@@ -3297,78 +3404,48 @@ interface Window { playmesh: PlaymeshApi; }
     ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
   }
 
-  function handlePlatformBackIntent() {
-    if (appSdk.isAvailable() && typeof appSdk.showGameSidebar === "function") {
-      void appSdk.showGameSidebar().catch((error) => {
-        global.console?.warn?.("Playmesh App 游戏侧边栏未能打开", error);
-      });
-      return true;
-    }
-    if (!global.__PLAYMESH_BROWSER__ || !global.document) return false;
-    const handleUi = (ui) => {
-      if (!ui) return;
-      if (!ui.overlay.hidden) {
-        ui.onNicknameBack?.();
-      } else if (!ui.logsOverlay.hidden) {
-        ui.logsClose.onclick();
-      } else if (!ui.infoOverlay.hidden) {
-        ui.infoClose.onclick();
-      } else if (!ui.sidebarLayer.hidden) {
-        ui.closeSidebar();
-      } else {
-        ui.openSidebar();
-      }
-    };
-    if (browserNicknameUi) {
-      handleUi(browserNicknameUi);
-    } else {
-      void ensureBrowserNicknameUi().then(handleUi).catch((error) => {
-        global.console?.warn?.("Playmesh 浏览器游戏侧边栏未能打开", error);
-      });
-    }
-    return true;
-  }
-
-  function installBrowserBackInterception(ui) {
-    if (appSdk.isAvailable() ||
-        browserBackInterceptionInstalled ||
-        !global.history?.pushState ||
-        !global.history?.replaceState) {
-      return;
-    }
-    try {
-      browserBackGuardUrl = global.location?.href || null;
-      const currentState =
-        global.history.state && typeof global.history.state === "object"
-          ? global.history.state
-          : {};
-      global.history.replaceState(
-        { ...currentState, __playmeshBackBase: true },
-        "",
-        browserBackGuardUrl,
-      );
-      global.history.pushState(
-        { __playmeshBackGuard: true },
-        "",
-        browserBackGuardUrl,
-      );
-      browserBackInterceptionInstalled = true;
-      global.addEventListener?.("popstate", () => {
-        if (browserBackExitRequested) return;
-        handlePlatformBackIntent();
-        try {
-          global.history.pushState(
-            { __playmeshBackGuard: true },
-            "",
-            browserBackGuardUrl,
-          );
-        } catch (error) {
-          global.console?.warn?.("Playmesh 浏览器返回守卫恢复失败", error);
+  function registerAppPlatformUiRuntime() {
+    if (typeof appSdk.__registerRuntimeUi !== "function") return;
+    appSdk.__registerRuntimeUi({
+      async reload() {
+        if (playmesh.session.isAuthority()) {
+          await post("session.reset", {});
         }
-      });
-    } catch (error) {
-      global.console?.warn?.("Playmesh 浏览器无法安装返回守卫", error);
-    }
+        global.location?.reload?.();
+      },
+      async getInfo() {
+        await playmesh.ready;
+        const gameInfo = playmesh.gameInfo.getCurrent();
+        if (!gameInfo) return null;
+        const session = playmesh.session.getCurrent();
+        const player = playmesh.player.getCurrent();
+        return {
+          gameId: gameInfo.id,
+          gameName: gameInfo.name,
+          requiredCapabilities: [...gameInfo.requiredCapabilities],
+          joinCode: session?.joinCode || null,
+          multiplayer: gameInfo.multiplayer,
+          isAuthority: playmesh.session.isAuthority(),
+          playerName: player?.nickname || null,
+          playerCount: Array.isArray(session?.players)
+            ? session.players.length
+            : null,
+          gameSdkVersion: playmesh.version,
+          appSdkVersion: appSdk.version,
+          platform: playmesh.app.device.getPlatform() || "browser",
+        };
+      },
+      getPerformance() {
+        return {
+          fps: currentFps,
+          latency: currentLatency,
+          multiplayer: Boolean(bootstrap?.session),
+        };
+      },
+      setPerformanceVisible(visible) {
+        performanceVisible = visible === true;
+      },
+    });
   }
 
   function exitBrowserGameFromSidebar(ui) {
@@ -3617,7 +3694,6 @@ interface Window { playmesh: PlaymeshApi; }
         onBack: () => ui.logsClose.onclick(),
       },
     );
-    installBrowserBackInterception(ui);
     refreshBrowserPlatformUi(ui);
     performanceUi = browserNicknameUi;
     return browserNicknameUi;

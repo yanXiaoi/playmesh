@@ -75,6 +75,16 @@ void main() {
     );
   });
 
+  test('静态开发上下文允许保留其他平台或旧版本的能力 code', () {
+    final capabilities = GameCapabilities.fromJson({
+      'required': ['sensor.accelerometer'],
+      'controllerRequired': ['vendor.future-capability'],
+    }, requireKnownCapabilities: false);
+
+    expect(capabilities.required, {'sensor.accelerometer'});
+    expect(capabilities.controllerRequired, {'vendor.future-capability'});
+  });
+
   test('插件描述符 code 唯一并公开方法、事件和平台状态', () {
     expect(
       defaultCapabilityDescriptors.map((item) => item.code).toSet(),

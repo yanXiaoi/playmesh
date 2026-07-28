@@ -129,24 +129,29 @@
               <span data-i18n="user.my.package_count"></span>
             </div>
             <button type="button" class="secondary" data-open-dialog="profile-dialog" data-i18n="nav.account"></button>
-            <button type="button" class="secondary" data-open-dialog="key-dialog" data-i18n="uploads.key"></button>
             <button type="button" data-open-dialog="upload-dialog" data-i18n="user.my.upload"></button>
             <button id="logout" type="button" class="secondary" data-i18n="nav.logout"></button>
           </div>
         </div>
-        <section class="my-private-source">
-          <div class="my-private-source-copy">
+        <section class="my-source-access">
+          <div class="my-source-access-copy">
             <div class="eyebrow" data-i18n="user.my.source_eyebrow"></div>
             <h2 data-i18n="user.my.source_title"></h2>
-            <p data-i18n="user.my.source_description"></p>
-            <button
-              type="button"
-              class="secondary"
-              data-open-dialog="key-dialog"
-              data-i18n="user.my.source_configure"
-            ></button>
+            <p id="private-source-status" data-i18n="user.my.source_description"></p>
           </div>
-          <div class="my-private-source-visual">
+          <label class="my-source-key" data-i18n-label="uploads.current_key">
+            <span class="copy-row">
+              <input id="current-upload-key" readonly autocomplete="off">
+              <button
+                type="button"
+                class="secondary"
+                data-copy-target="current-upload-key"
+                data-i18n="common.copy"
+              ></button>
+            </span>
+          </label>
+          <div class="my-source-access-actions">
+            <div class="my-source-qr">
             <img
               id="private-source-qr"
               class="hidden"
@@ -154,6 +159,13 @@
               data-i18n-alt="user.my.source_qr_alt"
             >
             <p id="private-source-qr-empty" data-i18n="user.my.source_key_required"></p>
+            </div>
+            <button
+              type="button"
+              class="secondary"
+              data-open-dialog="key-dialog"
+              data-i18n="user.my.source_configure"
+            ></button>
           </div>
         </section>
         <section class="my-notifications">
@@ -206,7 +218,17 @@
             <button type="submit" data-i18n="uploads.save_rotate"></button>
             <button id="generate-key" type="button" class="secondary" data-i18n="uploads.create_key"></button>
           </div>
-          <label data-i18n-label="uploads.key_once_label"><input id="created-key" readonly></label>
+          <label data-i18n-label="uploads.current_key">
+            <span class="copy-row">
+              <input id="created-key" readonly>
+              <button
+                type="button"
+                class="secondary"
+                data-copy-target="created-key"
+                data-i18n="common.copy"
+              ></button>
+            </span>
+          </label>
         </form>
       </dialog>
 

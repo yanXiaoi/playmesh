@@ -3,10 +3,10 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
-import '../../core/developer/developer_run_controller.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/sdk_feature_registry.dart';
@@ -19,7 +19,6 @@ import '../../core/relay/relay_tunnel.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
-import 'game_controls.dart';
 import 'windows_local_game_web_view.dart';
 
 class RemoteGamePage extends StatefulWidget {
@@ -28,18 +27,23 @@ class RemoteGamePage extends StatefulWidget {
     required this.entryUri,
     required this.userId,
     required this.nickname,
+    this.nativeBackHandler,
+    this.prepareRuntime = true,
   });
 
   final Uri entryUri;
   final String userId;
   final String nickname;
+  @visibleForTesting
+  final Future<bool> Function()? nativeBackHandler;
+  @visibleForTesting
+  final bool prepareRuntime;
 
   @override
   State<RemoteGamePage> createState() => _RemoteGamePageState();
 }
 
 class _RemoteGamePageState extends State<RemoteGamePage> {
-  final GameSidebarController _sidebarController = GameSidebarController();
   WebViewController? _controller;
   AppWebViewBridge? _appBridge;
   LocalTunnelGateway? _webGateway;
@@ -47,19 +51,15 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   LocalAppSdkServer? _localAppSdkServer;
   Uri? _localEntryUri;
   Object? _error;
-  int _windowsReloadKey = 0;
-  int _toolResetGeneration = 0;
+  final int _windowsReloadKey = 0;
   late final WebViewMessageQueue _messageQueue;
   Future<void> Function(String)? _runWindowsJavaScript;
-  DeveloperWebViewJavaScriptExecutor? _evaluateJavaScript;
+  Future<Object?> Function(String)? _evaluateWindowsJavaScript;
   String? _platformUiConfigurationKey;
   Map<String, Object?>? _platformUiConfiguration;
   bool _showPerformance = false;
-  bool _debugVisible = false;
-  bool _infoVisible = false;
   bool _allowPop = false;
-  final List<Map<String, Object?>> _developerLogs = [];
-  StreamSubscription<Map<String, Object?>>? _developerLogSubscription;
+  Future<void>? _nativeBackOperation;
 
   Uri get _launchUri {
     final base = _localEntryUri ?? widget.entryUri;
@@ -82,7 +82,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     super.initState();
     developerEventHub.beginRuntime();
     _messageQueue = WebViewMessageQueue(_runJavaScript);
-    unawaited(_prepare());
+    if (widget.prepareRuntime) unawaited(_prepare());
   }
 
   @override
@@ -165,17 +165,13 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
         nickname: widget.nickname,
-        gameName: context.tr('game.remote_title'),
         acceptRuntimeGameDeclaration: true,
         coreBaseUri: coreGateway.localBaseUri,
         playerSource: usesRelay ? 'server' : 'lan_app',
         platformUiConfiguration: _platformUiConfiguration,
         onOpenSharePanel: _rejectShareFromRemote,
-        onShowGameSidebar: _showGameSidebarFromSdk,
-        onHideGameSidebar: _hideGameSidebarFromSdk,
-        onExitRequested: () async {
-          if (mounted) await Navigator.of(context).maybePop();
-        },
+        showShareAction: false,
+        onExitRequested: _exitRemotePage,
       );
       if (_usesFlutterWebView) {
         await _initialize();
@@ -246,7 +242,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           ),
         );
       _controller = controller;
-      _evaluateJavaScript = controller.runJavaScriptReturningResult;
       await controller.loadRequest(_launchUri);
       if (mounted) setState(() {});
     } on Object catch (error) {
@@ -276,22 +271,23 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         'configuration': configuration,
       }),
     );
+    final appScript =
+        'window.playmeshApp?.__configurePlatformUi?.('
+        '${jsonEncode(configuration)});';
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      await _runWindowsJavaScript?.call(script);
+      await _runWindowsJavaScript?.call('$appScript$script');
       return;
     }
-    if (_controller != null) await _messageQueue.add(script);
+    if (_controller != null) await _messageQueue.add('$appScript$script');
   }
 
   @override
   void dispose() {
-    unawaited(_developerLogSubscription?.cancel());
-    _developerLogSubscription = null;
+    _evaluateWindowsJavaScript = null;
     unawaited(_appBridge?.close());
     unawaited(_localAppSdkServer?.close());
     unawaited(_coreGateway?.close());
     unawaited(_webGateway?.close());
-    _evaluateJavaScript = null;
     unawaited(
       const AppDeviceService().setFullscreen(false).catchError((Object _) {}),
     );
@@ -300,54 +296,17 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
 
   @override
   Widget build(BuildContext context) {
-    return GameRuntimeShortcutScope(
-      controller: _sidebarController,
-      onBack: _handleRuntimeBack,
-      onOpenSidebar: _openSidebarFromShortcut,
-      child: PopScope(
-        canPop: _allowPop,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _handleRuntimeBack();
-        },
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_handleNativeBack());
+      },
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: _handleNativeBackKey,
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              _buildWebView(),
-              GameSidebar(
-                controller: _sidebarController,
-                resetKey: Object.hash(_windowsReloadKey, _toolResetGeneration),
-                backLabel: context.tr('game.back_join'),
-                onContinue: _restoreGameContentFocus,
-                onBack: _exitRemotePage,
-                onReload: _reload,
-                showPerformance: _showPerformance,
-                onTogglePerformance: _togglePerformance,
-                onOpenLogs: _openDebugLogs,
-                onEnterFullscreen: () => _setFullscreen(true),
-                onExitFullscreen: () => _setFullscreen(false),
-                secondaryActions: [
-                  GameSidebarAction(
-                    icon: Icons.info_outline,
-                    label: context.tr('game.info'),
-                    onPressed: () => unawaited(_openGameInfo()),
-                  ),
-                ],
-              ),
-              if (_debugVisible)
-                Positioned.fill(
-                  child: GameRuntimeLogOverlay(
-                    logs: _developerLogs,
-                    onClear: () {
-                      developerEventHub.clearRecentLogs();
-                      setState(_developerLogs.clear);
-                    },
-                    onClose: () => unawaited(_hideDebugLogs()),
-                  ),
-                ),
-            ],
-          ),
+          body: Stack(fit: StackFit.expand, children: [_buildWebView()]),
         ),
       ),
     );
@@ -391,8 +350,8 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           unawaited(_syncPlatformUiConfiguration());
           unawaited(_syncPerformanceVisible());
         },
-        onEvaluateJavaScriptReady: (executor) {
-          _evaluateJavaScript = executor;
+        onEvaluateJavaScriptReady: (evaluateJavaScript) {
+          _evaluateWindowsJavaScript = evaluateJavaScript;
         },
       );
     }
@@ -412,64 +371,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     );
   }
 
-  void _reload() {
-    if (_infoVisible && mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
-    developerEventHub.beginRuntime();
-    _messageQueue.pause(clearPending: true);
-    unawaited(_appBridge?.resetCapabilities());
-    unawaited(_hideDebugLogs(restoreFocus: false));
-    setState(() {
-      _error = null;
-      _runWindowsJavaScript = null;
-      _evaluateJavaScript = null;
-      _showPerformance = false;
-      _debugVisible = false;
-      _windowsReloadKey += 1;
-      _toolResetGeneration += 1;
-    });
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      return;
-    }
-    final controller = _controller;
-    if (controller != null) {
-      unawaited(controller.reload());
-      return;
-    }
-    if (_usesFlutterWebView) {
-      setState(() => _error = null);
-      unawaited(_appBridge == null ? _prepare() : _initialize());
-    }
-  }
-
-  void _setFullscreen(bool enabled) {
-    unawaited(
-      const AppDeviceService()
-          .setFullscreen(enabled, orientation: null)
-          .catchError((Object error) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  context.tr(
-                    enabled
-                        ? 'game.fullscreen_enter_failed'
-                        : 'game.fullscreen_exit_failed',
-                    arguments: {'error': error},
-                  ),
-                ),
-              ),
-            );
-          }),
-    );
-  }
-
-  void _togglePerformance() {
-    setState(() => _showPerformance = !_showPerformance);
-    unawaited(_syncPerformanceVisible());
-  }
-
   Future<void> _syncPerformanceVisible() async {
     final script =
         'window.playmesh && window.playmesh.performance && '
@@ -486,116 +387,64 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     }
   }
 
-  Future<void> _openGameInfo() async {
-    if (_infoVisible || !mounted) return;
-    _infoVisible = true;
-    await showModalBottomSheet<void>(
-      context: context,
-      barrierColor: const Color(0x99000000),
-      builder: (context) => GameToolInfoSheet(
-        title: context.tr('game.remote_title'),
-        description: context.tr('game.remote_description'),
-        labels: const [],
-      ),
-    );
-    _infoVisible = false;
-    if (mounted) _sidebarController.restoreFocus();
-  }
-
-  void _openDebugLogs() {
-    _developerLogs
-      ..clear()
-      ..addAll(developerEventHub.recentLogs);
-    _developerLogSubscription ??= developerEventHub.events.listen((event) {
-      if (event['type'] != 'runtime.log' || !mounted) return;
-      setState(() {
-        _developerLogs.add(Map<String, Object?>.from(event));
-        if (_developerLogs.length > DeveloperEventHub.maxRecentLogs) {
-          _developerLogs.removeRange(
-            0,
-            _developerLogs.length - DeveloperEventHub.maxRecentLogs,
-          );
-        }
-      });
-    });
-    setState(() => _debugVisible = true);
-  }
-
-  Future<void> _hideDebugLogs({bool restoreFocus = true}) async {
-    if (mounted) {
-      setState(() => _debugVisible = false);
-      if (restoreFocus) _sidebarController.restoreFocus();
-    }
-    final subscription = _developerLogSubscription;
-    _developerLogSubscription = null;
-    await subscription?.cancel();
-  }
-
   void _resetTransientUiForLoad() {
     if (!mounted) return;
-    if (_infoVisible && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
-    final hadDebugOverlay = _debugVisible;
     setState(() {
       _showPerformance = false;
-      _debugVisible = false;
-      _toolResetGeneration += 1;
     });
-    if (hadDebugOverlay || _developerLogSubscription != null) {
-      unawaited(_hideDebugLogs(restoreFocus: false));
-    }
     unawaited(_syncPerformanceVisible());
   }
 
-  void _handleRuntimeBack() {
-    if (_debugVisible) {
-      unawaited(_hideDebugLogs());
-      return;
+  KeyEventResult _handleNativeBackKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
     }
-    if (_sidebarController.closeTopLayer()) return;
-    unawaited(_openSidebarFromNativeBack());
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.escape &&
+        key != LogicalKeyboardKey.browserBack &&
+        key != LogicalKeyboardKey.goBack &&
+        key != LogicalKeyboardKey.gameButtonB) {
+      return KeyEventResult.ignored;
+    }
+    unawaited(_handleNativeBack());
+    return KeyEventResult.handled;
   }
 
-  void _restoreGameContentFocus() {
-    FocusManager.instance.primaryFocus?.unfocus();
-    final evaluator = _evaluateJavaScript;
-    if (evaluator == null) return;
-    unawaited(
-      evaluator(
-        'window.playmeshApp?.__restoreGameContentFocus?.()',
-      ).catchError((Object _) => null),
-    );
-  }
-
-  void _exitRemotePage() {
-    if (_allowPop || !mounted) return;
-    setState(() => _allowPop = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.of(context).pop();
+  Future<void> _handleNativeBack() {
+    return _nativeBackOperation ??= _performNativeBack().whenComplete(() {
+      _nativeBackOperation = null;
     });
   }
 
-  void _openSidebarFromShortcut() {
-    if (_debugVisible || _infoVisible) return;
-    _sidebarController.open();
+  Future<void> _performNativeBack() async {
+    if (_allowPop || !mounted) return;
+    try {
+      final injectedHandler = widget.nativeBackHandler;
+      if (injectedHandler != null && await injectedHandler()) return;
+
+      const script = 'Boolean(window.playmeshApp?.__handleNativeBack?.())';
+      final Object? handled;
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+        final evaluate = _evaluateWindowsJavaScript;
+        handled = evaluate == null ? null : await evaluate(script);
+      } else {
+        final controller = _controller;
+        handled = controller == null
+            ? null
+            : await controller.runJavaScriptReturningResult(script);
+      }
+      if (handled == true || handled.toString() == 'true') return;
+    } on Object catch (error) {
+      debugPrint('游戏加入端系统返回未能交给 App SDK: $error');
+    }
+    await _exitRemotePage();
   }
 
-  Future<void> _openSidebarFromNativeBack() async {
-    try {
-      final evaluator = _evaluateJavaScript;
-      final handled = evaluator != null
-          ? await evaluator(
-              'Boolean(window[Symbol.for("playmesh.platform-ui.back")]?.())',
-            )
-          : await _controller?.runJavaScriptReturningResult(
-              'Boolean(window[Symbol.for("playmesh.platform-ui.back")]?.())',
-            );
-      if (handled == true || handled?.toString() == 'true') return;
-    } on Object catch (error) {
-      debugPrint('远程游戏网页未能处理返回键，改由 App 打开侧边栏: $error');
-    }
-    if (mounted) _sidebarController.open();
+  Future<void> _exitRemotePage() async {
+    if (_allowPop || !mounted) return;
+    setState(() => _allowPop = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted) Navigator.of(context).pop();
   }
 
   Future<void> _rejectShareFromRemote() {
@@ -603,29 +452,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       'not_authority',
       '只有当前 Authority 游戏可以打开分享界面',
     );
-  }
-
-  Future<void> _showGameSidebarFromSdk() async {
-    if (!mounted ||
-        _debugVisible ||
-        _infoVisible ||
-        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    if (!_sidebarController.showFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    await WidgetsBinding.instance.endOfFrame;
-  }
-
-  Future<void> _hideGameSidebarFromSdk() async {
-    if (!mounted) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    if (!_sidebarController.hideFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    await WidgetsBinding.instance.endOfFrame;
   }
 }
 

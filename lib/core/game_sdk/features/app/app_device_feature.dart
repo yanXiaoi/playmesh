@@ -8,29 +8,47 @@ const appDeviceSdkSource = SdkSourceFragment(
   const playmeshApp = {
     version: PLAYMESH_APP_SDK_VERSION,
     ready: null,
-    openSharePanel() {
-      return openAppSharePanel();
-    },
-    showGameSidebar() {
-      return showAppGameSidebar();
-    },
-    hideGameSidebar() {
-      return hideAppGameSidebar();
-    },
-    exitGame() {
-      return request("app.game.exit");
-    },
     __requestExit() {
-      return request("app.game.exit");
+      return exitAppUiGame();
     },
     __restoreGameContentFocus() {
       restoreAppUiReturnFocus();
+    },
+    __handleNativeBack() {
+      return handleAppUiNativeBack();
     },
     __syncAvatar(sessionId, credentialToken) {
       return request("app.identity.syncAvatar", { sessionId, credentialToken });
     },
     __confirmCapabilities() {
       return request("app.capabilities.confirm");
+    },
+    __configureRuntimeGame(declaration) {
+      return request("app.game.configure", {
+        declaredCapabilities: [
+          ...(declaration?.requiredCapabilities || []),
+        ],
+      }).then((environment) => {
+        bootstrap = {
+          ...bootstrap,
+          capabilityRegistry: clone(environment?.capabilityRegistry || []),
+          device: clone(environment?.device || bootstrap?.device),
+        };
+        return clone(bootstrap);
+      });
+    },
+    __registerRuntimeUi(adapter) {
+      registerAppUiRuntimeAdapter(adapter);
+    },
+    __refreshRuntimeUi() {
+      refreshAppFallbackUi();
+      refreshAppUiPerformance();
+    },
+    __configurePlatformUi(configuration) {
+      initializeAppPlatformUi({
+        ...(configuration || {}),
+        actions: appUiConfiguration?.actions,
+      });
     },
     isAvailable() {
       return bootstrap?.available === true;
@@ -76,21 +94,73 @@ const appDeviceSdkSource = SdkSourceFragment(
         return () => inputListeners.delete(listener);
       },
     },
+    ui: {
+      initializeBrowser() {
+        return initializeBrowserAppUi();
+      },
+      configure(options) {
+        return configureAppUi(options);
+      },
+      restartGame() {
+        return restartAppUiGame();
+      },
+      openSharePanel() {
+        return openAppSharePanel();
+      },
+      showGameSidebar() {
+        return showAppGameSidebar();
+      },
+      openRuntimeLogs() {
+        return openAppUiRuntimeLogs();
+      },
+      enterFullscreen(orientation) {
+        if (bootstrap?.available === true) {
+          return playmeshApp.device.setFullscreen(true, orientation);
+        }
+        return setAppUiFullscreen(true);
+      },
+      exitFullscreen() {
+        return setAppUiFullscreen(false);
+      },
+      openGameInfo() {
+        return openAppUiGameInfo();
+      },
+      setPerformanceVisible(visible) {
+        return setAppUiPerformanceVisible(visible);
+      },
+      togglePerformance() {
+        return setAppUiPerformanceVisible(!appUiPerformanceVisible);
+      },
+      exitGame() {
+        return exitAppUiGame();
+      },
+    },
     __receive: receive,
   };
 
   global.playmeshApp = playmeshApp;
-  global.console?.info?.("Playmesh App SDK 注入成功", {
-    version: PLAYMESH_APP_SDK_VERSION,
-  });
+  installAppUiConsoleCapture();
+  global.console?.info?.(
+    `Playmesh App SDK 注入成功 ${JSON.stringify({
+      version: PLAYMESH_APP_SDK_VERSION,
+    })}`,
+  );
   if (global.chrome?.webview) {
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
   }
   const runtimeDeclaration = global.__PLAYMESH_BROWSER__;
-  playmeshApp.ready = request("app.bootstrap", runtimeDeclaration ? {
-    gameName: runtimeDeclaration.gameName,
-    declaredCapabilities: runtimeDeclaration.requiredCapabilities || [],
-  } : {}).then((result) => {
+  const runtimePlatformUi = runtimeDeclaration?._playmeshPlatformUi;
+  installAppUiKeyboardInterception();
+  if (runtimePlatformUi) initializeAppPlatformUi(runtimePlatformUi);
+  let appInputTakeoverRequested = false;
+  function requestAppInputTakeover() {
+    if (appInputTakeoverRequested || bootstrap?.available !== true) return;
+    appInputTakeoverRequested = true;
+    void request("app.input.takeover").catch(() => {
+      appInputTakeoverRequested = false;
+    });
+  }
+  playmeshApp.ready = request("app.bootstrap").then((result) => {
     const privateUi = result?._playmeshPlatformUi;
     if (privateUi && typeof privateUi === "object") {
       Object.defineProperty(global, PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY, {
@@ -108,6 +178,8 @@ const appDeviceSdkSource = SdkSourceFragment(
     if (bootstrap && typeof bootstrap === "object") {
       delete bootstrap._playmeshPlatformUi;
     }
+    initializeAppPlatformUi(privateUi);
+    requestAppInputTakeover();
     global.console?.info?.("Playmesh App SDK 就绪");
     return clone(bootstrap);
   }).catch((error) => {
@@ -115,11 +187,11 @@ const appDeviceSdkSource = SdkSourceFragment(
     bootstrap = {
       available: false,
       identity: null,
-      game: { name: "Playmesh 游戏", requiredCapabilities: [] },
       capabilityRegistry: [],
       device: { platform: "browser", capabilities: [], declaredCapabilities: [] },
       error: error?.message || String(error),
     };
+    initializeAppPlatformUi(runtimePlatformUi);
     return clone(bootstrap);
   });
 })(window);

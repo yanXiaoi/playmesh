@@ -103,6 +103,10 @@ const gamePerformanceSdkSource = SdkSourceFragment(
   }
 
   async function renderPerformanceUi() {
+    if (typeof appSdk.__refreshRuntimeUi === "function") {
+      appSdk.__refreshRuntimeUi();
+      return;
+    }
     const ui = await ensurePerformanceUi();
     if (!ui) return;
     ui.panel.hidden = !performanceVisible;

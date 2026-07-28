@@ -186,6 +186,44 @@ func TestUserShellPlacesAuthenticationAndPublisherToolsInMyView(t *testing.T) {
 	}
 }
 
+func TestUploadKeyAndQRCodeRemainVisibleInCompactAccountStrip(t *testing.T) {
+	content, err := assets.ReadFile("assets/user.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	for _, required := range []string{
+		`class="my-source-access"`,
+		`id="current-upload-key"`,
+		`data-copy-target="current-upload-key"`,
+		`id="private-source-qr"`,
+		`id="created-key"`,
+		`data-copy-target="created-key"`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("常驻上传凭证区域缺少 %q", required)
+		}
+	}
+	if strings.Contains(source, `class="my-private-source"`) {
+		t.Fatal("二维码仍占用旧版整卡区域")
+	}
+	script, err := assets.ReadFile("assets/user.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scriptSource := string(script)
+	for _, required := range []string{
+		`jsonRequest("/api/user/upload-key")`,
+		`document.querySelector("#current-upload-key").value = key`,
+		`document.querySelector("#created-key").value = key`,
+		`document.querySelector("#key-form").elements.key.value = key`,
+	} {
+		if !strings.Contains(scriptSource, required) {
+			t.Fatalf("上传凭证回显逻辑缺少 %q", required)
+		}
+	}
+}
+
 func TestCaptchaLoadsInDialogsOnlyAfterAuthenticationSubmit(t *testing.T) {
 	userHTML, err := assets.ReadFile("assets/user.html")
 	if err != nil {

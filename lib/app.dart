@@ -56,12 +56,16 @@ class PlaymeshApp extends StatefulWidget {
     this.gameOrientationController,
     this.games,
     this.uiBootstrap,
+    this.gameLibraryScan,
   });
 
   final GoCoreStatusProvider? goCoreStatusProvider;
   final GameOrientationController? gameOrientationController;
   final List<GameSummary>? games;
   final PlaymeshUiBootstrap? uiBootstrap;
+
+  @visibleForTesting
+  final GameLibraryScan? gameLibraryScan;
 
   static UserProfile createLocalUser() => UserProfile(
     userId: UserProfileStore.generateUserId(),
@@ -124,7 +128,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     if (injectedGames == null) {
       final metadata = GameLibraryLocalMetadataStore();
       _gameLibraryMetadata = metadata;
-      scan = FileGameLibraryScanner(metadataStore: metadata).scan;
+      scan =
+          widget.gameLibraryScan ??
+          FileGameLibraryScanner(metadataStore: metadata).scan;
     } else {
       scan = () async => injectedGames;
     }
@@ -136,7 +142,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     );
     if (injectedGames == null) unawaited(_catalogController.initialize());
     _games = injectedGames == null
-        ? _recoverImportsAndRefreshLibrary()
+        ? widget.gameLibraryScan == null
+              ? _recoverImportsAndRefreshLibrary()
+              : _gameLibrary.refresh()
         : SynchronousFuture(_gameLibrary.cachedGames);
     _developerRuns = DeveloperRunController(onLaunch: _launchDeveloperProject);
     unawaited(cleanupStaleGamePackageExport());
@@ -238,21 +246,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
         return FutureBuilder<List<GameSummary>>(
           future: _games,
           builder: (context, gameSnapshot) {
-            if (gameSnapshot.hasError) {
-              return _buildShell(
-                uiController,
-                _LibraryScanFailure(error: gameSnapshot.error!),
-              );
-            }
-            if (!gameSnapshot.hasData) {
-              return _buildShell(
-                uiController,
-                const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                ),
-              );
-            }
-            return _buildApp(gameSnapshot.data!, uiController);
+            return _buildApp(
+              gameSnapshot.data ?? _gameLibrary.cachedGames,
+              uiController,
+              gameLibraryLoading:
+                  gameSnapshot.connectionState != ConnectionState.done,
+              gameLibraryError: gameSnapshot.error,
+            );
           },
         );
       },
@@ -385,31 +385,12 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     await ui.useTheme(theme);
   }
 
-  Widget _buildShell(PlaymeshUiController ui, Widget home) {
-    return MaterialApp(
-      title: 'Playmesh',
-      debugShowCheckedModeBanner: false,
-      locale: ui.fixedLocale,
-      supportedLocales: ui.supportedLocales,
-      localeResolutionCallback: (locale, _) => ui.resolveLocale(
-        locale,
-        WidgetsBinding.instance.platformDispatcher.locales,
-      ),
-      localizationsDelegates: [
-        PlaymeshLocalizationsDelegate(ui.catalog),
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      theme: PlaymeshTheme.light(),
-      darkTheme: PlaymeshTheme.dark(),
-      themeMode: ui.themeMode,
-      builder: _buildRootInteractionLayer,
-      home: home,
-    );
-  }
-
-  Widget _buildApp(List<GameSummary> games, PlaymeshUiController uiController) {
+  Widget _buildApp(
+    List<GameSummary> games,
+    PlaymeshUiController uiController, {
+    required bool gameLibraryLoading,
+    Object? gameLibraryError,
+  }) {
     final primaryGame = games.isEmpty ? null : games.first;
     return MaterialApp(
       navigatorKey: _navigatorKey,
@@ -431,7 +412,15 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
       darkTheme: PlaymeshTheme.dark(),
       themeMode: uiController.themeMode,
       builder: _buildRootInteractionLayer,
-      home: HomePage(user: _profile, games: games),
+      home: HomePage(
+        user: _profile,
+        games: games,
+        gameLibraryLoading: gameLibraryLoading,
+        gameLibraryError: gameLibraryError,
+        onRetryGameLibrary: gameLibraryError == null
+            ? null
+            : _retryGameLibraryScan,
+      ),
       routes: {
         ProfilePage.routeName: (_) =>
             ProfilePage(user: _profile, onSave: _saveProfile),
@@ -511,6 +500,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
               game: launchArguments.game,
               localUserId: _profile.userId,
               localNickname: _profile.nickname,
+              localProfile: _profile,
               orientationController: widget.gameOrientationController,
               goCoreRuntime: _runtime,
               catalogController: widget.games == null
@@ -611,6 +601,12 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     return _gameLibrary.refresh();
   }
 
+  void _retryGameLibraryScan() {
+    setState(() {
+      _games = _gameLibrary.refresh();
+    });
+  }
+
   Future<void> _exportGame(GameSummary game, String destinationPath) async {
     await _packageTransfer.exportPackage(game, File(destinationPath));
   }
@@ -685,23 +681,6 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     launchDeveloperGameRoute(
       navigator,
       GameLaunchArguments(game: game, developerProjectId: projectId),
-    );
-  }
-}
-
-class _LibraryScanFailure extends StatelessWidget {
-  const _LibraryScanFailure({required this.error});
-
-  final Object error;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Text(
-          context.tr('error.library_scan', arguments: {'error': error}),
-        ),
-      ),
     );
   }
 }

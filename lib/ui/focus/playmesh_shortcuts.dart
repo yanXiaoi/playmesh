@@ -13,10 +13,6 @@ class PlaymeshFocusSearchIntent extends Intent {
   const PlaymeshFocusSearchIntent();
 }
 
-class PlaymeshOpenGameSidebarIntent extends Intent {
-  const PlaymeshOpenGameSidebarIntent();
-}
-
 abstract final class PlaymeshShortcutRegistry {
   static const Map<ShortcutActivator, Intent> shortcuts = {
     SingleActivator(LogicalKeyboardKey.escape): PlaymeshBackIntent(),
@@ -34,26 +30,6 @@ abstract final class PlaymeshShortcutRegistry {
     SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
     SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
   };
-
-  /// 解析平台 WebView 持有焦点时仍必须响应的原始按键。
-  ///
-  /// 映射与 [shortcuts] 放在一起，避免运行页维护第二份不一致的按键表。
-  static Intent? resolveRawKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent) return null;
-    final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.f10 ||
-        key == LogicalKeyboardKey.contextMenu ||
-        key == LogicalKeyboardKey.gameButtonStart) {
-      return const PlaymeshOpenMenuIntent();
-    }
-    if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.browserBack ||
-        key == LogicalKeyboardKey.goBack ||
-        key == LogicalKeyboardKey.gameButtonB) {
-      return const PlaymeshBackIntent();
-    }
-    return null;
-  }
 }
 
 class PlaymeshFocusPolicy extends ReadingOrderTraversalPolicy {

@@ -29,7 +29,8 @@
         "The SDK owns nickname input and nickname editing UI",
         "The SDK stores playerId and nickname in localStorage and reuses them after refresh",
         "A playerId can have only one online WebSocket; reconnect is allowed after disconnection",
-        "playmesh.app is an unavailable empty implementation because playmesh-app.js is not loaded",
+        "The Authority gateway injects its default playmesh-app.js before playmesh.js; native App capabilities remain unavailable",
+        "The default App SDK renders the centered menu and the browser-only draggable floating button",
         "Game code must not construct Core URLs, tokens or WebSocket frames"
       ]
     },
@@ -71,7 +72,7 @@
   "projectValidationSchema": "/dev/schemas/project-validation.json",
   "developerLogging": {
     "transportEvent": "runtime.log",
-    "captureLayer": "App WebView host",
+    "captureLayer": "Current page playmesh-app.js runtime",
     "scope": "local-device",
     "browserLogsRemainInBrowser": true,
     "eventIdentity": "eventId",
@@ -159,8 +160,8 @@
           "behavior": "True only when playmesh-app.js is injected by a Playmesh App WebView"
         },
         {
-          "name": "openSharePanel",
-          "signature": "openSharePanel(): Promise<void>",
+          "name": "ui.openSharePanel",
+          "signature": "ui.openSharePanel(): Promise<void>",
           "availability": "The current App Authority during transient user activation",
           "behavior": "Opens the App-owned share panel and resolves after it is shown; returns no token, URL, QR code, or other share payload",
           "errors": [
@@ -171,22 +172,61 @@
           ]
         },
         {
-          "name": "showGameSidebar",
-          "signature": "showGameSidebar(): Promise<void>",
-          "availability": "Playmesh App WebView",
-          "behavior": "Shows the App-owned game sidebar, then moves focus to Continue game without pausing the runtime"
+          "name": "ui.initializeBrowser",
+          "signature": "ui.initializeBrowser(): boolean",
+          "availability": "Browser runtime only",
+          "behavior": "Enables the default centered browser menu without creating the draggable floating button; returns false in a Playmesh App WebView"
         },
         {
-          "name": "hideGameSidebar",
-          "signature": "hideGameSidebar(): Promise<void>",
-          "availability": "Playmesh App WebView",
-          "behavior": "Hides the App-owned game sidebar and restores the game DOM focus captured by showGameSidebar without resuming an already-running lifecycle"
+          "name": "ui.configure",
+          "signature": "ui.configure(options: PlaymeshAppUiOptions): PlaymeshAppUiOptions",
+          "behavior": "Configures the default App SDK UI. Set fallbackUi to false before ready to disable the centered menu, overlays, floating button, and menu-key interception"
         },
         {
-          "name": "exitGame",
-          "signature": "exitGame(): Promise<void>",
-          "availability": "Playmesh App WebView",
-          "behavior": "Requests the App to end the current game runtime, run normal cleanup, and return to the previous App page"
+          "name": "ui.showGameSidebar",
+          "signature": "ui.showGameSidebar(): Promise<boolean>",
+          "behavior": "Manually opens the SDK game menu and returns false when fallbackUi is disabled"
+        },
+        {
+          "name": "ui.restartGame",
+          "signature": "ui.restartGame(): void",
+          "behavior": "Reloads the current game document"
+        },
+        {
+          "name": "ui.openRuntimeLogs",
+          "signature": "ui.openRuntimeLogs(): Promise<boolean>",
+          "behavior": "Opens the SDK-rendered runtime log overlay when fallback UI is enabled"
+        },
+        {
+          "name": "ui.openGameInfo",
+          "signature": "ui.openGameInfo(): Promise<boolean>",
+          "behavior": "Opens the SDK-rendered game information overlay when fallback UI is enabled"
+        },
+        {
+          "name": "ui.enterFullscreen",
+          "signature": "ui.enterFullscreen(orientation?: PlaymeshOrientation): Promise<unknown>",
+          "behavior": "Uses the App host fullscreen capability in a WebView and the Fullscreen API in a browser"
+        },
+        {
+          "name": "ui.exitFullscreen",
+          "signature": "ui.exitFullscreen(): Promise<unknown>",
+          "behavior": "Exits App host or browser fullscreen mode"
+        },
+        {
+          "name": "ui.setPerformanceVisible",
+          "signature": "ui.setPerformanceVisible(visible: boolean): boolean",
+          "behavior": "Shows or hides the SDK-rendered performance overlay"
+        },
+        {
+          "name": "ui.togglePerformance",
+          "signature": "ui.togglePerformance(): boolean",
+          "behavior": "Toggles the SDK-rendered performance overlay"
+        },
+        {
+          "name": "ui.exitGame",
+          "signature": "ui.exitGame(): Promise<void>",
+          "availability": "Playmesh App WebView or ordinary browser",
+          "behavior": "Requests the App host to end the current game runtime, or exits the current game page in an ordinary browser"
         },
         {
           "name": "identity.getCurrent",
@@ -195,7 +235,7 @@
         },
         {
           "name": "device.getPlatform",
-          "signature": "device.getPlatform(): string"
+          "signature": "device.getPlatform(): string | null"
         },
         {
           "name": "capabilities.getRegistry",
@@ -240,6 +280,17 @@
           "availability": "After await playmesh.ready",
           "behavior": "Returns the locale of the App that is displaying this game; ordinary browsers resolve navigator.languages then navigator.language and fall back to zh",
           "privacy": "Exposes only the locale identifier. Platform UI message dictionaries remain host-private, and game content localization stays game-owned."
+        }
+      ]
+    },
+    {
+      "name": "playmesh.gameInfo",
+      "members": [
+        {
+          "name": "getCurrent",
+          "signature": "getCurrent(): PlaymeshGameInfo | null",
+          "availability": "After await playmesh.ready",
+          "behavior": "Returns the current game id, display name, multiplayer flag, display mode and role-specific required capabilities from playmesh.js; playmesh-app.js does not maintain a second game bootstrap"
         }
       ]
     },

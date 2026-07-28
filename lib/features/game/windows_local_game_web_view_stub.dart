@@ -12,7 +12,9 @@ class WindowsLocalGameWebView extends StatelessWidget {
     required this.title,
     this.bridge,
     this.appBridge,
+    this.appSdkInputTakenOver = true,
     this.declaredCapabilities = const [],
+    this.onNavigationStarted,
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
   });
@@ -22,7 +24,9 @@ class WindowsLocalGameWebView extends StatelessWidget {
   final String title;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
+  final bool appSdkInputTakenOver;
   final List<String> declaredCapabilities;
+  final VoidCallback? onNavigationStarted;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;

@@ -79,6 +79,16 @@ func newAccountTestHarness(
 	engine.POST("/resend", handler.ResendVerification)
 	engine.GET("/me", handler.RequireSession(false), handler.Me)
 	engine.PATCH("/me", handler.RequireSession(true), handler.UpdateMe)
+	engine.GET(
+		"/upload-key",
+		handler.RequireSession(false),
+		handler.GetUploadKey,
+	)
+	engine.PUT(
+		"/upload-key",
+		handler.RequireSession(true),
+		handler.PutUploadKey,
+	)
 	engine.POST("/logout", handler.RequireSession(true), handler.Logout)
 	return &accountTestHarness{
 		handler: handler, store: database, engine: engine, config: cfg,
@@ -287,6 +297,54 @@ func TestVerifiedAccountHTTPFlowPersistsSessionAndCSRF(t *testing.T) {
 	if update.Code != http.StatusOK ||
 		!strings.Contains(update.Body.String(), "原样玩家 en-GB") {
 		t.Fatalf("资料更新响应 = %d %s", update.Code, update.Body.String())
+	}
+	const uploadKey = "Persistent-Upload-Key-123!"
+	saveUploadKey := accountJSONRequest(
+		t,
+		harness.engine,
+		http.MethodPut,
+		"/upload-key",
+		`{"key":"`+uploadKey+`","generate":false}`,
+		[]*http.Cookie{sessionCookie},
+		loginBody.CSRFToken,
+	)
+	if saveUploadKey.Code != http.StatusOK ||
+		!strings.Contains(saveUploadKey.Body.String(), uploadKey) ||
+		!strings.Contains(saveUploadKey.Body.String(), `"sourceQRCode":"data:image/png;base64,`) {
+		t.Fatalf(
+			"保存上传密钥响应 = %d %s",
+			saveUploadKey.Code,
+			saveUploadKey.Body.String(),
+		)
+	}
+	revealUploadKey := accountJSONRequest(
+		t,
+		harness.engine,
+		http.MethodGet,
+		"/upload-key",
+		"",
+		[]*http.Cookie{sessionCookie},
+		"",
+	)
+	if revealUploadKey.Code != http.StatusOK ||
+		!strings.Contains(revealUploadKey.Body.String(), `"recoverable":true`) ||
+		!strings.Contains(revealUploadKey.Body.String(), uploadKey) ||
+		revealUploadKey.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf(
+			"回显上传密钥响应 = %d %s",
+			revealUploadKey.Code,
+			revealUploadKey.Body.String(),
+		)
+	}
+	credential, err := harness.store.UploadCredentialForUser(
+		context.Background(), account.ID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.KeyCiphertext == "" ||
+		strings.Contains(credential.KeyCiphertext, uploadKey) {
+		t.Fatalf("上传密钥未安全加密保存 = %#v", credential)
 	}
 	logout := accountJSONRequest(
 		t,

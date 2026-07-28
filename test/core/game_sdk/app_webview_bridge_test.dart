@@ -13,7 +13,6 @@ void main() {
     final bridge = AppWebViewBridge(
       userId: 'u-current-app',
       nickname: '本机玩家',
-      gameName: '能力测试',
       declaredCapabilities: const ['device.vibration'],
       deviceService: _FakeDeviceService(),
       vibrationDriver: vibrationDriver,
@@ -27,6 +26,7 @@ void main() {
     final registry = result['capabilityRegistry']! as List<Object?>;
 
     expect(result['available'], isTrue);
+    expect(result, isNot(contains('game')));
     expect(identity['userId'], 'u-current-app');
     expect(device['capabilities'], ['device.vibration']);
     expect(device['declaredCapabilities'], ['device.vibration']);
@@ -40,7 +40,7 @@ void main() {
     );
   });
 
-  test('远程 App 入口由本机 SDK 接收游戏声明和回环 Core 地址', () async {
+  test('远程 App 入口由 Game SDK 单向配置终端能力声明', () async {
     final vibrationDriver = _FakeVibrationDriver();
     final bridge = AppWebViewBridge(
       userId: 'u-remote-app',
@@ -53,22 +53,28 @@ void main() {
     );
     addTearDown(bridge.close);
 
-    final response = await _command(
+    final bootstrapResponse = await _command(
       bridge,
       'app.bootstrap',
       'remote-bootstrap',
+    );
+    final bootstrap = bootstrapResponse['result']! as Map<String, Object?>;
+    final initialDevice = bootstrap['device']! as Map<String, Object?>;
+    expect(bootstrap, isNot(contains('game')));
+    expect(initialDevice['declaredCapabilities'], isEmpty);
+
+    final configureResponse = await _command(
+      bridge,
+      'app.game.configure',
+      'remote-game-configure',
       payload: {
-        'gameName': '权威主机游戏',
         'declaredCapabilities': ['device.vibration'],
       },
     );
-    final result = response['result']! as Map<String, Object?>;
-    final game = result['game']! as Map<String, Object?>;
-    final runtime = result['runtime']! as Map<String, Object?>;
-    final device = result['device']! as Map<String, Object?>;
+    final environment = configureResponse['result']! as Map<String, Object?>;
+    final runtime = bootstrap['runtime']! as Map<String, Object?>;
+    final device = environment['device']! as Map<String, Object?>;
 
-    expect(game['name'], '权威主机游戏');
-    expect(game['requiredCapabilities'], ['device.vibration']);
     expect(device['declaredCapabilities'], ['device.vibration']);
     expect(device['capabilities'], ['device.vibration']);
     expect(runtime['coreBase'], 'http://127.0.0.1:45678/');
@@ -173,15 +179,31 @@ void main() {
     await exitRequested.future.timeout(const Duration(seconds: 1));
   });
 
-  test('App 级平台 UI 命令统一转发分享与游戏侧边栏回调', () async {
+  test('App SDK 完成输入监听后明确通知宿主接管', () async {
+    var takeoverCount = 0;
+    final bridge = AppWebViewBridge(
+      userId: 'u-input-takeover',
+      nickname: '玩家',
+      onInputTakeover: () => takeoverCount += 1,
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.input.takeover',
+      'input-takeover',
+    );
+
+    expect(response['type'], 'app.command.result');
+    expect(takeoverCount, 1);
+  });
+
+  test('App 级平台 UI 只向宿主转发受限分享动作', () async {
     var shareCount = 0;
-    final sidebarVisibility = <bool>[];
     final bridge = AppWebViewBridge(
       userId: 'u-app-ui',
       nickname: '玩家',
       onOpenSharePanel: () async => shareCount += 1,
-      onShowGameSidebar: () async => sidebarVisibility.add(true),
-      onHideGameSidebar: () async => sidebarVisibility.add(false),
     );
     addTearDown(bridge.close);
 
@@ -191,22 +213,17 @@ void main() {
       'share',
       payload: {'userActivation': true},
     );
-    final show = await _command(
+    final obsoleteSidebarCommand = await _command(
       bridge,
       'app.ui.gameSidebar.show',
       'sidebar-show',
     );
-    final hide = await _command(
-      bridge,
-      'app.ui.gameSidebar.hide',
-      'sidebar-hide',
-    );
 
     expect(share['type'], 'app.command.result');
-    expect(show['type'], 'app.command.result');
-    expect(hide['type'], 'app.command.result');
+    expect(obsoleteSidebarCommand['type'], 'app.command.error');
+    expect(obsoleteSidebarCommand['code'], isNull);
+    expect(obsoleteSidebarCommand['error'], contains('未注册 App SDK 命令'));
     expect(shareCount, 1);
-    expect(sidebarVisibility, [true, false]);
   });
 
   test('App 分享命令在缺少用户激活标识时返回稳定错误 code', () async {

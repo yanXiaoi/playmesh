@@ -32,6 +32,17 @@ const gameSessionSdkSource = SdkSourceFragment(
     }
   }
 
+  function playerConnectionLogContext(player) {
+    const value = publicPlayer(player);
+    return {
+      playerId: value?.id || null,
+      nickname: value?.nickname || null,
+      avatar: value?.avatar ?? null,
+      playerRole: value?.role || null,
+      playerConnected: value?.connected ?? false,
+    };
+  }
+
   function sessionConnectionLogContext(session, player) {
     const players = session?.players || [];
     return {
@@ -43,9 +54,7 @@ const gameSessionSdkSource = SdkSourceFragment(
       roomPlayers: players.length,
       minPlayers: session?.minPlayers ?? null,
       maxPlayers: session?.maxPlayers ?? null,
-      playerId: player?.id || null,
-      nickname: player?.nickname || null,
-      playerRole: player?.role || null,
+      ...playerConnectionLogContext(player),
       isCurrentPlayer: player?.id === bootstrap?.player?.id,
       isAuthority: player?.id === session?.authorityClientId,
     };
@@ -139,6 +148,7 @@ class _GameSessionFeature implements _GameSdkCommandFeature {
     'game.submitAction',
     'authority.result',
     'session.start',
+    'session.reset',
     'session.finish',
   };
 
@@ -167,6 +177,8 @@ class _GameSessionFeature implements _GameSdkCommandFeature {
         return const SdkCommandResult();
       case 'session.start':
         return SdkCommandResult((await connection.start()).toJson());
+      case 'session.reset':
+        return SdkCommandResult((await connection.reset()).toJson());
       case 'session.finish':
         return SdkCommandResult((await connection.finish()).toJson());
     }

@@ -26,11 +26,17 @@ import '../../core/session/game_session.dart';
 import '../../core/storage/game_storage_service.dart';
 import '../../models/game_summary.dart';
 import '../../models/user_profile.dart';
-import 'game_controls.dart';
 import 'game_launcher.dart';
 import 'game_orientation_controller.dart';
 
 typedef GamePreviewBuilder = Widget Function(GameSummary game);
+
+class _LocalAvatar {
+  const _LocalAvatar(this.pngBytes, this.sha256);
+
+  final Uint8List pngBytes;
+  final String sha256;
+}
 
 class GameJoinRequest {
   const GameJoinRequest({
@@ -62,6 +68,7 @@ class GamePage extends StatefulWidget {
     required this.game,
     this.localUserId = 'u_local',
     this.localNickname = playmeshDefaultLocalNickname,
+    this.localProfile,
     this.previewBuilder,
     this.orientationController,
     this.goCoreRuntime,
@@ -82,6 +89,7 @@ class GamePage extends StatefulWidget {
   final GameSummary game;
   final String localUserId;
   final String localNickname;
+  final UserProfile? localProfile;
   final GamePreviewBuilder? previewBuilder;
   final GameOrientationController? orientationController;
   final GoCoreRuntime? goCoreRuntime;
@@ -100,7 +108,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   int _runtimeGeneration = 0;
   int _configurationGeneration = 0;
-  final GameSidebarController _sidebarController = GameSidebarController();
   final GlobalKey<_ShareOverlayState> _shareOverlayKey =
       GlobalKey<_ShareOverlayState>();
   late final GameOrientationController _orientationController;
@@ -128,16 +135,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   Future<void>? _closeSessionOperation;
   bool _shareGrantActive = false;
   GameStorageService? _soloShareStorage;
-  bool _debugVisible = false;
-  bool _infoVisible = false;
-  final List<Map<String, Object?>> _developerLogs = [];
-  StreamSubscription<Map<String, Object?>>? _developerLogSubscription;
   StreamSubscription<Map<String, Object?>>? _roomSubscription;
   StreamSubscription<RelayConnectionStatus>? _relayStatusSubscription;
   void Function()? _unregisterDeveloperRestart;
   void Function()? _unregisterDeveloperStop;
   void Function()? _unregisterDeveloperJavaScript;
   DeveloperWebViewJavaScriptExecutor? _developerJavaScriptExecutor;
+  VoidCallback? _gameSystemBackHandler;
   String? _developerRunId;
   RelayHostSession? _relaySession;
   OnlineGameSourceProbe? _relaySource;
@@ -148,6 +152,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   Object? _relayError;
 
   GameSdkBridge? get _webViewBridge => _bridge ?? _soloBridge;
+  bool get _canShareFromAppSdk =>
+      _soloBridge != null || _bridge?.connection.isAuthority == true;
   bool get _controllerRole =>
       widget.game.displayMode == 'single_screen_multiplayer' &&
       widget.joinRequest != null;
@@ -268,15 +274,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   Future<void> _resetForWidgetUpdate(int generation) async {
-    if (_infoVisible && mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
-    _infoVisible = false;
     _developerJavaScriptExecutor = null;
     _shareOpenOperation = null;
     _focusBeforeShare = null;
     _shareClosedAt = null;
-    await _hideDebugLogs(restoreFocus: false);
     await _closeSession();
     if (!_isCurrentConfiguration(generation)) return;
     setState(() {
@@ -287,7 +288,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _shareVisible = false;
       _shareLoading = false;
       _shareError = null;
-      _debugVisible = false;
       _fullscreenError = null;
       _relaySources = const [];
       _relaySourcesLoading = false;
@@ -304,8 +304,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _configurationGeneration += 1;
     _unregisterDeveloperHandlers();
     _developerJavaScriptExecutor = null;
-    unawaited(_developerLogSubscription?.cancel());
-    _developerLogSubscription = null;
     final developerProjectId = widget.developerProjectId;
     if (developerProjectId != null) {
       widget.goCoreRuntime?.reportDeveloperGameStopped(
@@ -336,104 +334,82 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return GameRuntimeShortcutScope(
-      controller: _sidebarController,
-      onBack: _handleRuntimeBack,
-      onOpenSidebar: _openSidebarFromShortcut,
-      child: PopScope(
-        canPop: _allowPop,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _handleRuntimeBack();
-        },
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            key: GamePage.gameSurfaceKey,
-            fit: StackFit.expand,
-            children: [
-              Positioned.fill(child: _buildGameRuntime()),
-              GameSidebar(
-                controller: _sidebarController,
-                resetKey: _runtimeGeneration,
-                backLabel: context.tr('game.back_previous'),
-                onContinue: _restoreGameContentFocus,
-                showPerformance: _showPerformance,
-                onTogglePerformance: _togglePerformance,
-                onReload: () =>
-                    unawaited(_restartGame().catchError((Object _) {})),
-                onBack: () => unawaited(_returnToPrevious()),
-                onShare: () => unawaited(_openShare()),
-                onOpenLogs: _openDebugLogs,
-                onEnterFullscreen: () =>
-                    _applyOrientation(_runtimeOrientation, userInitiated: true),
-                onExitFullscreen: () => unawaited(_exitFullscreen()),
-                secondaryActions: [
-                  GameSidebarAction(
-                    icon: Icons.info_outline,
-                    label: context.tr('game.info'),
-                    onPressed: () => unawaited(_openGameInfo()),
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleSystemBack();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          key: GamePage.gameSurfaceKey,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(child: _buildGameRuntime()),
+            if (_fullscreenError != null && !_shareVisible)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: MediaQuery.paddingOf(context).bottom + 12,
+                child: _FullscreenNotice(
+                  error: _fullscreenError!,
+                  onRetry: () => _applyOrientation(
+                    _runtimeOrientation,
+                    userInitiated: true,
                   ),
-                ],
+                  onDismiss: () => setState(() => _fullscreenError = null),
+                ),
               ),
-              if (_fullscreenError != null && !_shareVisible && !_debugVisible)
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: MediaQuery.paddingOf(context).bottom + 12,
-                  child: _FullscreenNotice(
-                    error: _fullscreenError!,
-                    onRetry: () => _applyOrientation(
-                      _runtimeOrientation,
-                      userInitiated: true,
-                    ),
-                    onDismiss: () => setState(() => _fullscreenError = null),
-                  ),
+            if (_shareVisible)
+              Positioned.fill(
+                child: _ShareOverlay(
+                  key: _shareOverlayKey,
+                  joinCode: _bridge?.connection.snapshot.joinCode,
+                  corePort: widget.goCoreRuntime?.endpoint.port,
+                  links: _shareLinks,
+                  selectedLink: _selectedShareLink,
+                  loading: _shareLoading,
+                  error: _shareError,
+                  players:
+                      _bridge?.connection.snapshot.players ??
+                      const <GameSessionPlayer>[],
+                  relaySources: _relaySources,
+                  relaySourcesLoading: _relaySourcesLoading,
+                  relayConnecting: _relayConnecting,
+                  relaySource: _relaySource,
+                  relaySession: _relaySession,
+                  relayStatus: _relayStatus,
+                  relayError: _relayError,
+                  onClose: _hideShare,
+                  onSelectLink: (link) {
+                    setState(() => _selectedShareLink = link);
+                  },
+                  onLoadRelaySources: _loadRelaySources,
+                  onConnectRelay: _connectRelay,
+                  onDisconnectRelay: _disconnectRelay,
                 ),
-              if (_shareVisible)
-                Positioned.fill(
-                  child: _ShareOverlay(
-                    key: _shareOverlayKey,
-                    joinCode: _bridge?.connection.snapshot.joinCode,
-                    corePort: widget.goCoreRuntime?.endpoint.port,
-                    links: _shareLinks,
-                    selectedLink: _selectedShareLink,
-                    loading: _shareLoading,
-                    error: _shareError,
-                    players:
-                        _bridge?.connection.snapshot.players ??
-                        const <GameSessionPlayer>[],
-                    relaySources: _relaySources,
-                    relaySourcesLoading: _relaySourcesLoading,
-                    relayConnecting: _relayConnecting,
-                    relaySource: _relaySource,
-                    relaySession: _relaySession,
-                    relayStatus: _relayStatus,
-                    relayError: _relayError,
-                    onClose: _hideShare,
-                    onSelectLink: (link) {
-                      setState(() => _selectedShareLink = link);
-                    },
-                    onLoadRelaySources: _loadRelaySources,
-                    onConnectRelay: _connectRelay,
-                    onDisconnectRelay: _disconnectRelay,
-                  ),
-                ),
-              if (_debugVisible)
-                Positioned.fill(
-                  child: GameRuntimeLogOverlay(
-                    logs: _developerLogs,
-                    onClear: () {
-                      developerEventHub.clearRecentLogs();
-                      setState(_developerLogs.clear);
-                    },
-                    onClose: () => unawaited(_hideDebugLogs()),
-                  ),
-                ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
+  }
+
+  void _handleSystemBack() {
+    if (_shareVisible) {
+      unawaited(_hideShare());
+      return;
+    }
+    final handler = _gameSystemBackHandler;
+    if (handler != null) {
+      handler();
+      return;
+    }
+    unawaited(_returnToPrevious());
+  }
+
+  void _setGameSystemBackHandler(VoidCallback? handler) {
+    _gameSystemBackHandler = handler;
   }
 
   Widget _buildGameRuntime() {
@@ -459,10 +435,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             localUserId: widget.localUserId,
             localNickname: widget.localNickname,
             controllerRole: _controllerRole,
-            onOpenSharePanel: _openShareFromAppSdk,
-            onShowGameSidebar: _showGameSidebarFromSdk,
-            onHideGameSidebar: _hideGameSidebarFromSdk,
+            onOpenSharePanel: _canShareFromAppSdk ? _openShareFromAppSdk : null,
             onExitRequested: _returnToPrevious,
+            onSystemBackHandlerChanged: _setGameSystemBackHandler,
             onJavaScriptExecutorChanged: (executor) {
               _developerJavaScriptExecutor = executor;
             },
@@ -513,10 +488,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final localNickname = widget.localNickname;
     final developerProjectId = widget.developerProjectId;
     if (_sessionReady || _sessionError != null) {
-      if (_infoVisible && mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-      await _hideDebugLogs(restoreFocus: false);
       if (!_isCurrentConfiguration(configurationGeneration)) return;
       _focusBeforeShare = null;
       _shareClosedAt = null;
@@ -524,7 +495,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         _runtimeGeneration += 1;
         _showPerformance = false;
         _shareVisible = false;
-        _debugVisible = false;
         _fullscreenError = null;
       });
       _webViewBridge?.setPerformanceVisible(false);
@@ -561,6 +531,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     try {
       await _closeSession();
       if (!_isCurrentConfiguration(configurationGeneration)) return;
+      final localAvatar = await _loadLocalAvatar(
+        userId: localUserId,
+        nickname: localNickname,
+      );
+      if (!_isCurrentConfiguration(configurationGeneration)) return;
       late final GoCoreSessionClient client;
       late final GameSessionConnection connection;
       if (joinRequest == null) {
@@ -580,6 +555,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           joinCode: joinRequest.joinCode,
           nickname: joinRequest.nickname,
           playerId: localUserId,
+          avatarBytes: localAvatar?.pngBytes,
+          avatarSha256: localAvatar?.sha256,
         );
       }
       final storage = await GameStorageService.create(gameId: game.id);
@@ -602,7 +579,22 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         }
       }
       late final GameRuntimeBridge bridge;
-      bridge = GameRuntimeBridge(connection, storage: storage);
+      bridge = GameRuntimeBridge(
+        connection,
+        storage: storage,
+        gameName: game.name,
+        requiredCapabilities: game.capabilities
+            .requiredForRole(controller: _controllerRole)
+            .toList(),
+      );
+      if (joinRequest == null) {
+        await _syncLocalAvatar(connection, localAvatar);
+        if (!_isCurrentConfiguration(configurationGeneration)) {
+          await bridge.close();
+          client.close();
+          return;
+        }
+      }
       setState(() {
         _sessionClient = client;
         _bridge = bridge;
@@ -622,13 +614,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         if (message['session'] is! Map) return;
         setState(() {});
       });
-      unawaited(
-        _syncLocalAvatar(
-          connection,
-          userId: localUserId,
-          nickname: localNickname,
-        ),
-      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_isCurrentConfiguration(configurationGeneration) &&
             identical(_bridge, bridge)) {
@@ -689,6 +674,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         gameId: game.id,
         userId: localUserId,
         nickname: localNickname,
+        gameName: game.name,
+        requiredCapabilities: game.capabilities
+            .requiredForRole(controller: _controllerRole)
+            .toList(),
       );
       setState(() {
         _soloBridge = bridge;
@@ -760,24 +749,96 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _sessionClient = null;
   }
 
-  Future<void> _syncLocalAvatar(
-    GameSessionConnection connection, {
+  Future<_LocalAvatar?> _loadLocalAvatar({
     required String userId,
     required String nickname,
   }) async {
     try {
-      final profile = await const UserProfileStore().load(
-        UserProfile(userId: userId, nickname: nickname),
-      );
-      if (profile.userId != userId ||
-          profile.avatarBytes == null ||
-          profile.avatarSha256 == null) {
-        return;
+      final currentProfile = widget.localProfile;
+      final profile = currentProfile != null && currentProfile.userId == userId
+          ? currentProfile
+          : await const UserProfileStore().load(
+              UserProfile(userId: userId, nickname: nickname),
+            );
+      if (profile.userId != userId) {
+        _logAvatar(
+          level: 'WARNING',
+          event: 'session.avatar_load_identity_mismatch',
+          message: 'Playmesh 本地头像加载失败：玩家身份不匹配',
+          playerId: userId,
+          extra: {'profilePlayerId': profile.userId},
+        );
+        return null;
       }
-      await connection.syncAvatar(profile.avatarBytes!, profile.avatarSha256!);
-    } on Object {
-      // 头像失败不影响创建、加入或恢复会话。
+      if (profile.avatarBytes == null || profile.avatarSha256 == null) {
+        _logAvatar(
+          level: 'INFO',
+          event: 'session.avatar_load_skipped',
+          message: 'Playmesh 玩家未设置可上传的本地头像',
+          playerId: userId,
+          extra: {
+            'hasAvatarBytes': profile.avatarBytes != null,
+            'hasAvatarSha256': profile.avatarSha256 != null,
+          },
+        );
+        return null;
+      }
+      _logAvatar(
+        level: 'INFO',
+        event: 'session.avatar_loaded',
+        message: 'Playmesh 本地头像加载成功',
+        playerId: userId,
+        extra: {
+          'avatarSha256': profile.avatarSha256,
+          'avatarBytes': profile.avatarBytes!.length,
+          'profileSource': identical(profile, currentProfile)
+              ? 'memory'
+              : 'storage',
+        },
+      );
+      return _LocalAvatar(profile.avatarBytes!, profile.avatarSha256!);
+    } on Object catch (error) {
+      _logAvatar(
+        level: 'WARNING',
+        event: 'session.avatar_load_failed',
+        message: 'Playmesh 本地头像加载失败，继续进入游戏',
+        playerId: userId,
+        extra: {'error': error.toString()},
+      );
+      return null;
     }
+  }
+
+  Future<void> _syncLocalAvatar(
+    GameSessionConnection connection,
+    _LocalAvatar? avatar,
+  ) async {
+    if (avatar == null) return;
+    try {
+      await connection.syncAvatar(avatar.pngBytes, avatar.sha256);
+    } on Object catch (error) {
+      _logAvatar(
+        level: 'WARNING',
+        event: 'session.avatar_sync_failed_continue',
+        message: 'Playmesh 头像同步失败，继续进入游戏',
+        playerId: connection.currentPlayer.id,
+        sessionId: connection.snapshot.id,
+        extra: {'avatarSha256': avatar.sha256, 'error': error.toString()},
+      );
+    }
+  }
+
+  void _logAvatar({
+    required String level,
+    required String event,
+    required String message,
+    required String playerId,
+    String? sessionId,
+    Map<String, Object?> extra = const {},
+  }) {
+    debugPrint(
+      '[$level] $message ${jsonEncode({'component': 'game-session', 'event': event, 'sessionId': ?sessionId, 'playerId': playerId, 'nickname': widget.localNickname, ...extra})}',
+    );
   }
 
   Future<void> _openShare({bool throwOnError = false}) {
@@ -813,28 +874,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   Future<void> _openShareFromAppSdk() async {
     final isCurrentAuthority =
         _bridge?.connection.isAuthority == true || _soloBridge != null;
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
     if (!mounted ||
         _disposing ||
-        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        lifecycleState == AppLifecycleState.hidden ||
+        lifecycleState == AppLifecycleState.paused ||
+        lifecycleState == AppLifecycleState.detached) {
       throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
     }
     if (!isCurrentAuthority) {
       throw const SdkCommandException(
         'not_authority',
         '只有当前 Authority 游戏可以打开分享界面',
-      );
-    }
-    final executor = _developerJavaScriptExecutor;
-    if (executor == null) {
-      throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
-    }
-    final active = await executor(
-      'Boolean(globalThis.navigator?.userActivation?.isActive)',
-    );
-    if (active != true && active.toString() != 'true') {
-      throw const SdkCommandException(
-        'user_activation_required',
-        '打开分享界面需要当前用户操作',
       );
     }
     final shareClosedAt = _shareClosedAt;
@@ -850,31 +901,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     } on Object {
       throw const SdkCommandException('ui_unavailable', '当前平台分享界面不可用');
     }
-  }
-
-  Future<void> _showGameSidebarFromSdk() async {
-    if (!mounted ||
-        _disposing ||
-        _shareVisible ||
-        _debugVisible ||
-        _infoVisible ||
-        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    if (!_sidebarController.showFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    await WidgetsBinding.instance.endOfFrame;
-  }
-
-  Future<void> _hideGameSidebarFromSdk() async {
-    if (!mounted || _disposing) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    if (!_sidebarController.hideFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
-    }
-    await WidgetsBinding.instance.endOfFrame;
   }
 
   Future<void> _ensureShare({
@@ -991,6 +1017,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         controllerOrientation: game.controllerOrientation,
         gameEntryPath: game.entry.gameEntryPath,
         controllerEntryPath: game.entry.controllerEntryPath,
+        gameId: game.id,
         gameName: game.name,
         gameSdkVersion: game.sdkVersion.isEmpty ? null : game.sdkVersion,
         appSdkVersion: game.appSdkVersion.isEmpty ? null : game.appSdkVersion,
@@ -1064,8 +1091,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           focusBeforeShare.canRequestFocus &&
           focusBeforeShare.context != null) {
         focusBeforeShare.requestFocus();
-      } else {
-        _sidebarController.restoreFocus();
       }
       bridge?.restoreGameContentFocus();
     });
@@ -1219,79 +1244,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
-  Future<void> _openGameInfo() async {
-    if (_infoVisible || !mounted) return;
-    _infoVisible = true;
-    final playerRange = widget.game.minPlayers == widget.game.maxPlayers
-        ? context.tr(
-            'library.player_count',
-            arguments: {'count': widget.game.minPlayers},
-          )
-        : context.tr(
-            'library.player_range',
-            arguments: {
-              'min': widget.game.minPlayers,
-              'max': widget.game.maxPlayers,
-            },
-          );
-    final description =
-        widget.game.description.trim().isNotEmpty ||
-            widget.game.manifestError == null
-        ? widget.game.description
-        : context.tr('game.repair_description');
-    await showModalBottomSheet<void>(
-      context: context,
-      barrierColor: const Color(0x99000000),
-      builder: (context) => GameToolInfoSheet(
-        title: widget.game.name,
-        description: description,
-        labels: [
-          widget.game.manifestError == null && widget.game.sdkVersion.isNotEmpty
-              ? 'Game SDK ${widget.game.sdkVersion}'
-              : context.tr('game.needs_repair'),
-          widget.game.displayMode == 'single_screen_multiplayer'
-              ? context.tr('game.display_single_screen')
-              : context.tr('game.display_multi_screen'),
-          playerRange,
-          widget.game.supportsMultiplayer
-              ? context.tr('library.multiplayer')
-              : context.tr('library.solo'),
-        ],
-      ),
-    );
-    _infoVisible = false;
-    if (mounted) _sidebarController.restoreFocus();
-  }
-
-  void _openDebugLogs() {
-    _developerLogs
-      ..clear()
-      ..addAll(developerEventHub.recentLogs);
-    _developerLogSubscription ??= developerEventHub.events.listen((event) {
-      if (event['type'] != 'runtime.log' || !mounted || _disposing) return;
-      setState(() {
-        _developerLogs.add(Map<String, Object?>.from(event));
-        if (_developerLogs.length > DeveloperEventHub.maxRecentLogs) {
-          _developerLogs.removeRange(
-            0,
-            _developerLogs.length - DeveloperEventHub.maxRecentLogs,
-          );
-        }
-      });
-    });
-    setState(() => _debugVisible = true);
-  }
-
-  Future<void> _hideDebugLogs({bool restoreFocus = true}) async {
-    if (mounted && !_disposing) {
-      setState(() => _debugVisible = false);
-      if (restoreFocus) _sidebarController.restoreFocus();
-    }
-    final subscription = _developerLogSubscription;
-    _developerLogSubscription = null;
-    await subscription?.cancel();
-  }
-
   Future<void> _stopShare() async {
     _shareGeneration += 1;
     _shareOpenOperation = null;
@@ -1326,9 +1278,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   Future<void> _restartGame() async {
-    if (_infoVisible && mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
     final bridge = _bridge;
     final soloBridge = _soloBridge;
     await _webViewBridge?.notifyLifecycle('exit');
@@ -1336,7 +1285,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     await soloBridge?.persistStorage();
     await _soloShareStorage?.flushAll();
     await _stopShare();
-    await _hideDebugLogs(restoreFocus: false);
     if (!mounted) {
       return;
     }
@@ -1344,7 +1292,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     setState(() {
       _runtimeGeneration += 1;
       _showPerformance = false;
-      _debugVisible = false;
       _fullscreenError = null;
     });
     widget.onPerformanceVisibilityChanged?.call(false);
@@ -1373,95 +1320,20 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       projectId: projectId,
       runId: _developerRunId,
     );
-    _developerLogs.clear();
-  }
-
-  void _togglePerformance() {
-    setState(() => _showPerformance = !_showPerformance);
-    _webViewBridge?.setPerformanceVisible(_showPerformance);
-    widget.onPerformanceVisibilityChanged?.call(_showPerformance);
-  }
-
-  void _handleRuntimeBack() {
-    if (_debugVisible) {
-      unawaited(_hideDebugLogs());
-      return;
-    }
-    if (_shareVisible) {
-      unawaited(_hideShare());
-      return;
-    }
-    if (_sidebarController.closeTopLayer()) return;
-    if (_fullscreenError != null) {
-      setState(() => _fullscreenError = null);
-      return;
-    }
-    unawaited(_openSidebarFromNativeBack());
-  }
-
-  void _restoreGameContentFocus() {
-    FocusManager.instance.primaryFocus?.unfocus();
-    _webViewBridge?.restoreGameContentFocus();
-  }
-
-  void _openSidebarFromShortcut() {
-    if (_shareVisible || _debugVisible || _infoVisible) return;
-    _sidebarController.open();
-  }
-
-  Future<void> _openSidebarFromNativeBack() async {
-    final executor = _developerJavaScriptExecutor;
-    if (executor != null) {
-      try {
-        final handled = await executor(
-          'Boolean(window[Symbol.for("playmesh.platform-ui.back")]?.())',
-        );
-        if (handled == true || handled?.toString() == 'true') return;
-      } on Object catch (error) {
-        debugPrint('游戏网页未能处理返回键，改由 App 打开侧边栏: $error');
-      }
-    }
-    if (mounted) _sidebarController.open();
   }
 
   void _resetTransientUiForReconnect() {
     if (!mounted || _disposing) return;
-    if (_infoVisible && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
-    unawaited(_hideDebugLogs(restoreFocus: false));
     _focusBeforeShare = null;
     _shareClosedAt = null;
     setState(() {
       _runtimeGeneration += 1;
       _showPerformance = false;
       _shareVisible = false;
-      _debugVisible = false;
       _fullscreenError = null;
     });
     _webViewBridge?.setPerformanceVisible(false);
     widget.onPerformanceVisibilityChanged?.call(false);
-  }
-
-  Future<void> _exitFullscreen() async {
-    try {
-      await _orientationController.exitFullscreen();
-      if (mounted && _fullscreenError != null) {
-        setState(() => _fullscreenError = null);
-      }
-    } on Object catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.tr(
-              'game.fullscreen_exit_failed',
-              arguments: {'error': error},
-            ),
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _returnToPrevious() =>
@@ -1566,99 +1438,107 @@ class _ShareOverlayState extends State<_ShareOverlay> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return ColoredBox(
-      color: const Color(0xc7000000),
-      child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, viewport) {
-            final panelWidth = min(720.0, max(0.0, viewport.maxWidth - 20));
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: 720,
-                    maxHeight: max(120.0, viewport.maxHeight - 20),
-                  ),
-                  child: Theme(
-                    data: Theme.of(context),
-                    child: Material(
-                      color: colorScheme.surface,
-                      borderRadius: BorderRadius.circular(8),
-                      clipBehavior: Clip.antiAlias,
-                      child: SizedBox(
-                        width: panelWidth,
-                        child: SingleChildScrollView(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  20,
-                                  10,
-                                  8,
-                                  8,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        widget.joinCode == null
-                                            ? context.tr('game.share_title')
-                                            : context.tr(
-                                                'game.join_code_title',
-                                                arguments: {
-                                                  'code': widget.joinCode,
-                                                },
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            unawaited(widget.onClose()),
+      },
+      child: ColoredBox(
+        color: const Color(0xc7000000),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, viewport) {
+              final panelWidth = min(720.0, max(0.0, viewport.maxWidth - 20));
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: 720,
+                      maxHeight: max(120.0, viewport.maxHeight - 20),
+                    ),
+                    child: Theme(
+                      data: Theme.of(context),
+                      child: Material(
+                        color: colorScheme.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        clipBehavior: Clip.antiAlias,
+                        child: SizedBox(
+                          width: panelWidth,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    20,
+                                    10,
+                                    8,
+                                    8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          widget.joinCode == null
+                                              ? context.tr('game.share_title')
+                                              : context.tr(
+                                                  'game.join_code_title',
+                                                  arguments: {
+                                                    'code': widget.joinCode,
+                                                  },
+                                                ),
+                                          style:
+                                              const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                              ).copyWith(
+                                                color: colorScheme.onSurface,
                                               ),
-                                        style:
-                                            const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w800,
-                                            ).copyWith(
-                                              color: colorScheme.onSurface,
-                                            ),
+                                        ),
                                       ),
-                                    ),
-                                    IconButton(
-                                      key: const Key('game-share-close'),
-                                      focusNode: _closeFocusNode,
-                                      autofocus: true,
-                                      tooltip: context.tr('game.share_close'),
-                                      color: colorScheme.onSurface,
-                                      onPressed: () =>
-                                          unawaited(widget.onClose()),
-                                      icon: const Icon(Icons.close),
-                                    ),
-                                  ],
+                                      IconButton(
+                                        key: const Key('game-share-close'),
+                                        focusNode: _closeFocusNode,
+                                        autofocus: true,
+                                        tooltip: context.tr('game.share_close'),
+                                        color: colorScheme.onSurface,
+                                        onPressed: () =>
+                                            unawaited(widget.onClose()),
+                                        icon: const Icon(Icons.close),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const Divider(height: 1),
-                              _buildTabs(),
-                              const Divider(height: 1),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 160),
-                                child: KeyedSubtree(
-                                  key: ValueKey(_tab),
-                                  child: switch (_tab) {
-                                    _SharePanelTab.lan => _buildLan(panelWidth),
-                                    _SharePanelTab.server => _buildServer(
-                                      panelWidth,
-                                    ),
-                                    _SharePanelTab.room => _buildRoom(),
-                                  },
+                                const Divider(height: 1),
+                                _buildTabs(),
+                                const Divider(height: 1),
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 160),
+                                  child: KeyedSubtree(
+                                    key: ValueKey(_tab),
+                                    child: switch (_tab) {
+                                      _SharePanelTab.lan => _buildLan(
+                                        panelWidth,
+                                      ),
+                                      _SharePanelTab.server => _buildServer(
+                                        panelWidth,
+                                      ),
+                                      _SharePanelTab.room => _buildRoom(),
+                                    },
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

@@ -1347,61 +1347,72 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 
-.my-private-source {
+.my-source-access {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(190px, 260px);
-  gap: clamp(24px, 5vw, 64px);
+  grid-template-columns: minmax(190px, .72fr) minmax(280px, 1.2fr) auto;
+  gap: clamp(18px, 3vw, 34px);
   align-items: center;
-  margin-top: 20px;
-  padding: clamp(24px, 4vw, 46px);
-  overflow: hidden;
-  border-radius: 28px 28px 28px 8px;
-  color: #dbe6ed;
-  background:
-    radial-gradient(circle at 88% 18%, rgb(235 90 60 / 22%), transparent 32%),
-    #172b3b;
+  margin-top: 18px;
+  padding: 18px 4px;
+  border-block: 1px solid var(--line);
 }
 
-.my-private-source h2 {
-  margin: 9px 0 13px;
-  color: #ffffff;
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  letter-spacing: -.04em;
+.my-source-access h2 {
+  margin: 5px 0 4px;
+  font-size: 1.08rem;
+  letter-spacing: -.015em;
 }
 
-.my-private-source .eyebrow {
-  color: #ff9078;
+.my-source-access-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .8125rem;
+  line-height: 1.55;
 }
 
-.my-private-source-copy p {
-  max-width: 58ch;
-  margin: 0 0 22px;
-  color: #aebfcb;
-  line-height: 1.7;
+.my-source-key {
+  min-width: 0;
 }
 
-.my-private-source-visual {
+.my-source-key input {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: .8rem;
+}
+
+.my-source-access-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.my-source-qr {
   display: grid;
-  min-height: 220px;
+  width: 96px;
+  height: 96px;
+  flex: 0 0 96px;
   place-items: center;
-  padding: 14px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 22px 22px 22px 7px;
-  background: rgb(255 255 255 / 7%);
-}
-
-.my-private-source-visual img {
-  width: 100%;
-  max-width: 232px;
-  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px 12px 12px 4px;
   background: #ffffff;
 }
 
-.my-private-source-visual p {
-  max-width: 20ch;
+.my-source-qr img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  object-fit: contain;
+}
+
+.my-source-qr p {
+  max-width: 12ch;
   margin: 0;
-  color: #aebfcb;
-  line-height: 1.6;
+  padding: 8px;
+  color: var(--muted);
+  font-size: .6875rem;
+  line-height: 1.35;
   text-align: center;
 }
 
@@ -1934,12 +1945,18 @@ pre {
     justify-content: flex-start;
   }
 
-  .my-private-source {
-    grid-template-columns: 1fr;
+  .my-source-access {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .my-private-source-visual {
-    min-height: 180px;
+  .my-source-key {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .my-source-access-actions {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .notification-item {
@@ -2086,6 +2103,27 @@ pre {
 
   .my-package-count {
     flex: 1 1 100%;
+  }
+
+  .my-source-access {
+    grid-template-columns: 1fr;
+  }
+
+  .my-source-access-copy,
+  .my-source-key,
+  .my-source-access-actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .my-source-access-actions {
+    justify-content: space-between;
+  }
+
+  .my-source-qr {
+    width: 84px;
+    height: 84px;
+    flex-basis: 84px;
   }
 
   .my-dialog {

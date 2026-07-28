@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -34,9 +35,8 @@ class LocalGameWebView extends StatefulWidget {
     this.localNickname = playmeshDefaultLocalNickname,
     this.declaredCapabilities = const [],
     this.onOpenSharePanel,
-    this.onShowGameSidebar,
-    this.onHideGameSidebar,
     this.onExitRequested,
+    this.onSystemBackHandlerChanged,
     this.onJavaScriptExecutorChanged,
   });
 
@@ -51,9 +51,8 @@ class LocalGameWebView extends StatefulWidget {
   final String localNickname;
   final List<String> declaredCapabilities;
   final Future<void> Function()? onOpenSharePanel;
-  final Future<void> Function()? onShowGameSidebar;
-  final Future<void> Function()? onHideGameSidebar;
   final Future<void> Function()? onExitRequested;
+  final ValueChanged<VoidCallback?>? onSystemBackHandlerChanged;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
 
@@ -75,6 +74,19 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   String? _platformUiConfigurationKey;
   Map<String, Object?>? _platformUiConfiguration;
   Future<void> Function(String)? _runWindowsJavaScript;
+  final FocusNode _nativeInputFallbackFocusNode = FocusNode(
+    debugLabel: 'game-native-input-fallback',
+  );
+  final FocusScopeNode _androidWebViewFocusScopeNode = FocusScopeNode(
+    debugLabel: 'game-android-webview',
+  );
+  bool _appSdkInputTakenOver = false;
+  bool _androidNavigationCompleted = false;
+  bool _androidWebViewFocusScheduled = false;
+  bool _androidWebViewFocusGranted = false;
+  int _androidWebViewFocusAttempts = 0;
+  Timer? _androidWebViewFocusRetryTimer;
+  Future<void>? _nativeExitOperation;
 
   bool get _canUsePlatformWebView {
     return supportsPlatformWebView;
@@ -86,13 +98,12 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     _appBridge = AppWebViewBridge(
       userId: widget.localUserId,
       nickname: widget.localNickname,
-      gameName: widget.title,
       declaredCapabilities: widget.declaredCapabilities,
       onOpenSharePanel: widget.onOpenSharePanel,
-      onShowGameSidebar: widget.onShowGameSidebar,
-      onHideGameSidebar: widget.onHideGameSidebar,
+      onInputTakeover: _takeOverAppSdkInput,
       onExitRequested: widget.onExitRequested,
     );
+    widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);
     _webPermissionGate = WebPermissionGate(
       declaredCapabilities: widget.declaredCapabilities,
     );
@@ -105,6 +116,19 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       return;
     }
     unawaited(_initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant LocalGameWebView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(
+      oldWidget.onSystemBackHandlerChanged,
+      widget.onSystemBackHandlerChanged,
+    )) {
+      return;
+    }
+    oldWidget.onSystemBackHandlerChanged?.call(null);
+    widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);
   }
 
   @override
@@ -187,17 +211,21 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   );
                 },
                 onPageStarted: (_) {
+                  _androidNavigationCompleted = false;
+                  _resetAppSdkInputOwnership();
                   widget.onJavaScriptExecutorChanged?.call(null);
                   _messageQueue.pause(clearPending: true);
                   unawaited(_appBridge.resetCapabilities());
                 },
                 onPageFinished: (_) {
+                  _androidNavigationCompleted = true;
                   widget.onJavaScriptExecutorChanged?.call(_evaluateJavaScript);
                   unawaited(
                     _messageQueue.resume().catchError((Object error) {
                       debugPrint('发送启动阶段 WebView Bridge 消息失败: $error');
                     }),
                   );
+                  _scheduleAndroidWebViewFocus();
                 },
               ),
             );
@@ -209,7 +237,10 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         (message) => unawaited(_sendToWebView(message)),
       );
       await _controller!.loadRequest(gateway.entryUri);
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+        _scheduleAndroidWebViewFocus();
+      }
     } on Object catch (error) {
       debugPrint('启动游戏资源网关失败: $error');
       recordLocalWebViewConsole(
@@ -225,6 +256,162 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     await _messageQueue.add(
       'window.playmeshApp && window.playmeshApp.__receive(${jsonEncode(message)});',
     );
+  }
+
+  void _takeOverAppSdkInput() {
+    if (!mounted || _appSdkInputTakenOver) return;
+    setState(() => _appSdkInputTakenOver = true);
+    _nativeInputFallbackFocusNode.unfocus();
+    _resetAndroidWebViewFocus();
+    _scheduleAndroidWebViewFocus();
+  }
+
+  void _resetAppSdkInputOwnership() {
+    if (!mounted) return;
+    _resetAndroidWebViewFocus();
+    if (_appSdkInputTakenOver) {
+      setState(() => _appSdkInputTakenOver = false);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _appSdkInputTakenOver ||
+          !_nativeInputFallbackFocusNode.canRequestFocus) {
+        return;
+      }
+      _nativeInputFallbackFocusNode.requestFocus();
+    });
+  }
+
+  KeyEventResult _handleNativeFallbackKey(FocusNode _, KeyEvent event) {
+    if (_appSdkInputTakenOver || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.browserBack ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.gameButtonB) {
+      _exitBeforeAppSdkTakeover();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _exitBeforeAppSdkTakeover() {
+    final callback = widget.onExitRequested;
+    if (callback == null) return;
+    _nativeExitOperation ??= callback().whenComplete(() {
+      _nativeExitOperation = null;
+    });
+  }
+
+  void _handleNativeSystemBack() {
+    if (!_appSdkInputTakenOver) {
+      _exitBeforeAppSdkTakeover();
+      return;
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_forwardAndroidBackToAppSdk());
+    }
+  }
+
+  void _scheduleAndroidWebViewFocus() {
+    if (!mounted ||
+        kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.android ||
+        !_appSdkInputTakenOver ||
+        !_androidNavigationCompleted ||
+        _controller == null ||
+        _androidWebViewFocusScheduled ||
+        _androidWebViewFocusGranted) {
+      return;
+    }
+    _androidWebViewFocusScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _androidWebViewFocusScheduled = false;
+      if (!mounted || !_appSdkInputTakenOver || !_androidNavigationCompleted) {
+        return;
+      }
+      _androidWebViewFocusAttempts += 1;
+      FocusNode? platformViewFocus;
+      for (final node in _androidWebViewFocusScopeNode.traversalDescendants) {
+        if (node.canRequestFocus) {
+          platformViewFocus = node;
+          break;
+        }
+      }
+      if (platformViewFocus == null) {
+        _scheduleAndroidWebViewFocusRetry();
+        return;
+      }
+      FocusManager.instance.primaryFocus?.unfocus();
+      platformViewFocus.requestFocus();
+      unawaited(_confirmAndroidWebViewFocus(platformViewFocus));
+    });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  Future<void> _confirmAndroidWebViewFocus(FocusNode platformViewFocus) async {
+    try {
+      await _runJavaScript('window.focus();');
+      final result = await _evaluateJavaScript('document.hasFocus()');
+      final documentFocused =
+          result == true || result.toString().toLowerCase() == 'true';
+      if (mounted &&
+          platformViewFocus.hasFocus &&
+          documentFocused &&
+          _appSdkInputTakenOver &&
+          _androidNavigationCompleted) {
+        _androidWebViewFocusGranted = true;
+        _androidWebViewFocusAttempts = 0;
+        _androidWebViewFocusRetryTimer?.cancel();
+        _androidWebViewFocusRetryTimer = null;
+        return;
+      }
+    } on Object catch (error) {
+      debugPrint('Android 游戏 WebView 焦点确认失败: $error');
+    }
+    _scheduleAndroidWebViewFocusRetry();
+  }
+
+  void _scheduleAndroidWebViewFocusRetry() {
+    if (!mounted ||
+        _androidWebViewFocusGranted ||
+        _androidWebViewFocusAttempts >= 6 ||
+        !_appSdkInputTakenOver ||
+        !_androidNavigationCompleted) {
+      return;
+    }
+    _androidWebViewFocusRetryTimer?.cancel();
+    final delay = switch (_androidWebViewFocusAttempts) {
+      <= 1 => const Duration(milliseconds: 40),
+      2 => const Duration(milliseconds: 80),
+      3 => const Duration(milliseconds: 140),
+      _ => const Duration(milliseconds: 240),
+    };
+    _androidWebViewFocusRetryTimer = Timer(delay, () {
+      _androidWebViewFocusRetryTimer = null;
+      _scheduleAndroidWebViewFocus();
+    });
+  }
+
+  void _resetAndroidWebViewFocus() {
+    _androidWebViewFocusGranted = false;
+    _androidWebViewFocusAttempts = 0;
+    _androidWebViewFocusRetryTimer?.cancel();
+    _androidWebViewFocusRetryTimer = null;
+  }
+
+  Future<void> _forwardAndroidBackToAppSdk() async {
+    try {
+      final handled = await _evaluateJavaScript(
+        'Boolean(window.playmeshApp?.__handleNativeBack?.())',
+      );
+      if (handled == true || handled.toString() == 'true') return;
+    } on Object catch (error) {
+      debugPrint('Android 系统返回未能交给 App SDK: $error');
+    }
+    _exitBeforeAppSdkTakeover();
   }
 
   Future<void> _handleWebPermissionRequest(
@@ -262,11 +449,14 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         'configuration': configuration,
       }),
     );
+    final appScript =
+        'window.playmeshApp?.__configurePlatformUi?.('
+        '${jsonEncode(configuration)});';
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      await _runWindowsJavaScript?.call(script);
+      await _runWindowsJavaScript?.call('$appScript$script');
       return;
     }
-    await _messageQueue.add(script);
+    await _messageQueue.add('$appScript$script');
   }
 
   Future<void> _runJavaScript(String script) async {
@@ -283,8 +473,12 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
 
   @override
   void dispose() {
+    widget.onSystemBackHandlerChanged?.call(null);
     widget.onJavaScriptExecutorChanged?.call(null);
     _runWindowsJavaScript = null;
+    _androidWebViewFocusRetryTimer?.cancel();
+    _nativeInputFallbackFocusNode.dispose();
+    _androidWebViewFocusScopeNode.dispose();
     unawaited(_appBridge.close());
     unawaited(_bridgeSubscription?.cancel());
     unawaited(_assetGateway?.close());
@@ -298,7 +492,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
     final entryUri = _entryUri;
 
-    return useWindowsWebView
+    Widget content = useWindowsWebView
         ? entryUri == null || _loadFailed
               ? _WebViewFallback(
                   assetPath: widget.assetPath,
@@ -310,7 +504,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   title: widget.title,
                   bridge: widget.bridge,
                   appBridge: _appBridge,
+                  appSdkInputTakenOver: _appSdkInputTakenOver,
                   declaredCapabilities: widget.declaredCapabilities,
+                  onNavigationStarted: _resetAppSdkInputOwnership,
                   onRunJavaScriptReady: (executor) {
                     _runWindowsJavaScript = executor;
                     unawaited(_sendPlatformUiConfiguration());
@@ -321,7 +517,25 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                 )
         : controller == null || _loadFailed
         ? _WebViewFallback(assetPath: widget.assetPath, title: widget.title)
-        : WebViewWidget(controller: controller);
+        : FocusScope(
+            node: _androidWebViewFocusScopeNode,
+            child: WebViewWidget(controller: controller),
+          );
+    content = Focus(
+      focusNode: _nativeInputFallbackFocusNode,
+      autofocus: !_appSdkInputTakenOver,
+      canRequestFocus: !_appSdkInputTakenOver,
+      onKeyEvent: _handleNativeFallbackKey,
+      child: AbsorbPointer(absorbing: !_appSdkInputTakenOver, child: content),
+    );
+    if (widget.onSystemBackHandlerChanged != null) return content;
+    return PopScope(
+      canPop: !_appSdkInputTakenOver,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleNativeSystemBack();
+      },
+      child: content,
+    );
   }
 }
 

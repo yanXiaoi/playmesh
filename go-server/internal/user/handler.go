@@ -2,6 +2,8 @@ package user
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -366,8 +368,14 @@ func (h *Handler) PutUploadKey(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "source_qrcode_failed", "无法生成当前游戏源二维码")
 		return
 	}
-	if err := h.store.PutUploadCredential(
-		c.Request.Context(), currentUser(c).ID, h.uploadKeyHMAC(key),
+	account := currentUser(c)
+	ciphertext, err := h.encryptUploadKey(account.ID, key)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "upload_key_failed", "上传密钥保存失败")
+		return
+	}
+	if err := h.store.PutUploadCredentialEncrypted(
+		c.Request.Context(), account.ID, h.uploadKeyHMAC(key), ciphertext,
 	); err != nil {
 		writeError(c, http.StatusInternalServerError, "upload_key_failed", "上传密钥保存失败")
 		return
@@ -375,6 +383,59 @@ func (h *Handler) PutUploadKey(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"uploadKey":    key,
 		"sourceQRCode": "data:image/png;base64," + base64.StdEncoding.EncodeToString(sourceQRCode),
+	})
+}
+
+func (h *Handler) GetUploadKey(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	account := currentUser(c)
+	credential, err := h.store.UploadCredentialForUser(
+		c.Request.Context(), account.ID,
+	)
+	if errors.Is(err, store.ErrNotFound) {
+		c.JSON(http.StatusOK, gin.H{
+			"configured":  false,
+			"recoverable": false,
+		})
+		return
+	}
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "upload_key_failed", "无法读取上传密钥")
+		return
+	}
+	if credential.KeyCiphertext == "" {
+		// Credentials created by older versions only contain a one-way HMAC.
+		c.JSON(http.StatusOK, gin.H{
+			"configured":  true,
+			"recoverable": false,
+		})
+		return
+	}
+	key, err := h.decryptUploadKey(account.ID, credential.KeyCiphertext)
+	if err != nil || !validUploadKey(key) ||
+		!hmac.Equal(
+			[]byte(h.uploadKeyHMAC(key)),
+			[]byte(credential.KeyHMAC),
+		) {
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"upload_key_reveal_failed",
+			"上传密钥无法解密，请重新设置",
+		)
+		return
+	}
+	sourceQRCode, err := h.sourceQRCode(key)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "source_qrcode_failed", "无法生成当前游戏源二维码")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"configured":  true,
+		"recoverable": true,
+		"uploadKey":   key,
+		"sourceQRCode": "data:image/png;base64," +
+			base64.StdEncoding.EncodeToString(sourceQRCode),
 	})
 }
 
@@ -672,6 +733,55 @@ func (h *Handler) uploadKeyHMAC(key string) string {
 	mac := hmac.New(sha256.New, []byte(h.config.UploadKeyPepper))
 	_, _ = mac.Write([]byte(key))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (h *Handler) encryptUploadKey(userID int64, key string) (string, error) {
+	aead, err := h.uploadKeyCipher()
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	sealed := aead.Seal(
+		nonce,
+		nonce,
+		[]byte(key),
+		[]byte(fmt.Sprintf("playmesh-upload-key:%d", userID)),
+	)
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func (h *Handler) decryptUploadKey(userID int64, encoded string) (string, error) {
+	aead, err := h.uploadKeyCipher()
+	if err != nil {
+		return "", err
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || len(sealed) < aead.NonceSize() {
+		return "", errors.New("invalid upload key ciphertext")
+	}
+	nonce := sealed[:aead.NonceSize()]
+	plaintext, err := aead.Open(
+		nil,
+		nonce,
+		sealed[aead.NonceSize():],
+		[]byte(fmt.Sprintf("playmesh-upload-key:%d", userID)),
+	)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
+func (h *Handler) uploadKeyCipher() (cipher.AEAD, error) {
+	key := sha256.Sum256([]byte(h.config.UploadKeyPepper))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
 }
 
 func (h *Handler) sourceQRCode(uploadKey string) ([]byte, error) {

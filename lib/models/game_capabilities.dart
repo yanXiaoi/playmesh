@@ -6,7 +6,10 @@ class GameCapabilities {
     this.controllerRequired = const {},
   });
 
-  factory GameCapabilities.fromJson(Map<String, Object?> json) {
+  factory GameCapabilities.fromJson(
+    Map<String, Object?> json, {
+    bool requireKnownCapabilities = true,
+  }) {
     final unknownFields = json.keys.where(
       (key) => key != 'required' && key != 'controllerRequired',
     );
@@ -16,14 +19,28 @@ class GameCapabilities {
       );
     }
     return GameCapabilities(
-      required: Set.unmodifiable(_parseRequired(json['required'], 'required')),
+      required: Set.unmodifiable(
+        _parseRequired(
+          json['required'],
+          'required',
+          requireKnownCapabilities: requireKnownCapabilities,
+        ),
+      ),
       controllerRequired: Set.unmodifiable(
-        _parseRequired(json['controllerRequired'], 'controllerRequired'),
+        _parseRequired(
+          json['controllerRequired'],
+          'controllerRequired',
+          requireKnownCapabilities: requireKnownCapabilities,
+        ),
       ),
     );
   }
 
-  static Set<String> _parseRequired(Object? value, String field) {
+  static Set<String> _parseRequired(
+    Object? value,
+    String field, {
+    required bool requireKnownCapabilities,
+  }) {
     if (value == null) return {};
     if (value is! List) {
       throw FormatException('capabilities.json.$field 必须是数组');
@@ -33,7 +50,8 @@ class GameCapabilities {
       if (rawCapability is! String) {
         throw FormatException('capabilities.json.$field 只能包含字符串');
       }
-      if (!defaultCapabilityDescriptorRegistry.containsKey(rawCapability)) {
+      if (requireKnownCapabilities &&
+          !defaultCapabilityDescriptorRegistry.containsKey(rawCapability)) {
         throw FormatException('当前平台版本不支持游戏能力: $rawCapability');
       }
       if (!required.add(rawCapability)) {

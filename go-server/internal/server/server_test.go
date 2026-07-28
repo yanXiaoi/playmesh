@@ -236,6 +236,7 @@ func TestUserDataRoutesRequireSession(t *testing.T) {
 	defer app.Close()
 	for _, path := range []string{
 		"/api/user/me",
+		"/api/user/upload-key",
 		"/api/user/notifications",
 	} {
 		recorder := httptest.NewRecorder()

@@ -119,16 +119,22 @@ class _AppCoreFeature implements _AppSdkCommandFeature {
   ];
 
   @override
-  Set<String> get commands => const {'app.bootstrap'};
+  Set<String> get commands => const {'app.bootstrap', 'app.game.configure'};
 
   @override
   Future<Object?> execute(
     AppSdkCommandContext context,
     SdkCommandEnvelope command,
   ) {
-    return context.bootstrap(
-      command.payload,
-      _resolveCommandSdkVersion(SdkSourceTarget.app, command),
-    );
+    switch (command.name) {
+      case 'app.bootstrap':
+        return context.bootstrap(
+          command.payload,
+          _resolveCommandSdkVersion(SdkSourceTarget.app, command),
+        );
+      case 'app.game.configure':
+        return context.configureRuntimeGame(command.payload);
+    }
+    throw StateError('未注册的 App 核心命令: ${command.name}');
   }
 }

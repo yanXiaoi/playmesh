@@ -25,6 +25,7 @@ Future<GameWebGateway> startGameWebGateway({
   GameOrientation? controllerOrientation,
   String gameEntryPath = 'app/index.html',
   String controllerEntryPath = 'app/controller/index.html',
+  required String gameId,
   String gameName = 'Playmesh 游戏',
   String? gameSdkVersion,
   String? appSdkVersion,
@@ -70,6 +71,7 @@ Future<GameWebGateway> startGameWebGateway({
     controllerOrientation: controllerOrientation,
     gameEntryPath: gameEntryPath,
     controllerEntryPath: controllerEntryPath,
+    gameId: gameId,
     gameName: gameName,
     gameSdkVersion: resolvedGameSdkVersion,
     appSdkVersion: resolvedAppSdkVersion,
@@ -99,6 +101,7 @@ class _IoGameWebGateway implements GameWebGateway {
     required this.controllerOrientation,
     required this.gameEntryPath,
     required this.controllerEntryPath,
+    required this.gameId,
     required this.gameName,
     required this.gameSdkVersion,
     required this.appSdkVersion,
@@ -121,6 +124,7 @@ class _IoGameWebGateway implements GameWebGateway {
   final GameOrientation? controllerOrientation;
   final String gameEntryPath;
   final String controllerEntryPath;
+  final String gameId;
   final String gameName;
   final String gameSdkVersion;
   final String appSdkVersion;
@@ -248,7 +252,18 @@ class _IoGameWebGateway implements GameWebGateway {
         : '/app/${relativePath.substring(0, lastSeparator + 1)}';
     html = html.replaceFirst('<head>', '<head><base href="$basePath">');
     final browserConfig = jsonEncode({
-      '_playmeshPlatformUi': platformUiAssets.browserCatalog.toJson(),
+      '_playmeshPlatformUi': {
+        ...platformUiAssets.browserCatalog.toJson(),
+        'actions': {
+          'share': false,
+          'restart': true,
+          'logs': true,
+          'fullscreen': true,
+          'info': true,
+          'performance': true,
+          'exit': true,
+        },
+      },
       'mode': multiplayer ? 'multiplayer' : 'solo',
       if (multiplayer)
         'coreBase': Uri(
@@ -259,6 +274,7 @@ class _IoGameWebGateway implements GameWebGateway {
         ).toString(),
       if (multiplayer) 'joinCode': joinCode,
       'shareToken': shareToken,
+      'gameId': gameId,
       'gameName': gameName,
       'orientation': _pageOrientation.manifestValue,
       'requiredCapabilities': _pageRequiredCapabilities,
@@ -273,24 +289,21 @@ class _IoGameWebGateway implements GameWebGateway {
       if (request.uri.queryParameters['playmeshNickname'] != null)
         'nickname': request.uri.queryParameters['playmeshNickname'],
     });
-    html = html.replaceFirst(
-      '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
-      '<script>window.__PLAYMESH_BROWSER__=$browserConfig;</script>'
-          '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
-    );
+    var appSdkSource = '/playmesh/sdk/v1/playmesh-app.js';
     if (request.uri.queryParameters['playmeshApp'] == '1') {
       final appSdkUri = _localAppSdkUri(
         request.uri.queryParameters['playmeshAppSdkUrl'],
       ).replace(queryParameters: {'version': appSdkVersion});
-      final appSdkSource = const HtmlEscape(
+      appSdkSource = const HtmlEscape(
         HtmlEscapeMode.attribute,
       ).convert(appSdkUri.toString());
-      html = html.replaceFirst(
-        '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
-        '<script src="$appSdkSource"></script>'
-            '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
-      );
     }
+    html = html.replaceFirst(
+      '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
+      '<script>window.__PLAYMESH_BROWSER__=$browserConfig;</script>'
+          '<script src="$appSdkSource"></script>'
+          '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
+    );
     await _html(request.response, html);
   }
 

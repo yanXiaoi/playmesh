@@ -1,7 +1,8 @@
 import 'dart:async';
 
 import 'dart:convert';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import 'game_sdk_bridge.dart';
 import 'sdk_feature_registry.dart';
@@ -9,7 +10,12 @@ import '../session/go_core_session_client.dart';
 import '../storage/game_storage_service.dart';
 
 class GameRuntimeBridge implements GameSdkBridge {
-  GameRuntimeBridge(this.connection, {required this.storage}) {
+  GameRuntimeBridge(
+    this.connection, {
+    required this.storage,
+    this.gameName = 'Playmesh 游戏',
+    this.requiredCapabilities = const <String>[],
+  }) {
     _sessionSubscription = connection.messages.listen(
       (message) => unawaited(_handleTransportMessage(message)),
       onError: (Object error) =>
@@ -20,6 +26,8 @@ class GameRuntimeBridge implements GameSdkBridge {
 
   final GameSessionConnection connection;
   final GameStorageService storage;
+  final String gameName;
+  final List<String> requiredCapabilities;
   final StreamController<String> _outbound = StreamController.broadcast();
   final StreamController<double> _fpsValues = StreamController.broadcast();
   final StreamController<double?> _latencyValues = StreamController.broadcast();
@@ -59,6 +67,13 @@ class GameRuntimeBridge implements GameSdkBridge {
       final execution = await SdkFeatureRegistry.dispatchGame(
         GameSdkCommandContext(
           connection: connection,
+          gameInfo: {
+            'id': connection.snapshot.gameId,
+            'name': gameName,
+            'multiplayer': true,
+            'displayMode': connection.snapshot.displayMode,
+            'requiredCapabilities': requiredCapabilities,
+          },
           ensureStorage: ensureStorage,
           emitFps: (value) {
             if (!_fpsValues.isClosed) _fpsValues.add(value);
@@ -162,7 +177,14 @@ class GameRuntimeBridge implements GameSdkBridge {
 
   Future<void> _handleAvatarWrite(Map<String, Object?> message) async {
     final payload = message['payload'];
-    if (payload is! Map) return;
+    if (payload is! Map) {
+      _logAuthorityAvatar(
+        level: 'WARNING',
+        event: 'session.avatar_write_invalid',
+        message: 'Playmesh Authority 收到无效头像写入请求',
+      );
+      return;
+    }
     final normalized = Map<String, Object?>.from(payload);
     String? playerId;
     String? digest;
@@ -172,18 +194,62 @@ class GameRuntimeBridge implements GameSdkBridge {
       final bytes = Uint8List.fromList(
         base64Decode(sdkRequiredString(normalized, 'png')),
       );
+      _logAuthorityAvatar(
+        level: 'INFO',
+        event: 'session.avatar_write_received',
+        message: 'Playmesh Authority 收到玩家头像写入请求',
+        playerId: playerId,
+        sha256: digest,
+        extra: {'avatarBytes': bytes.length},
+      );
       await storage.writeUserAvatar(
         playerId: playerId,
         pngBytes: bytes,
         sha256: digest,
       );
       connection.confirmAvatarWritten(playerId: playerId, sha256: digest);
-    } on Object {
-      // 头像同步失败不能阻止玩家入局，Core 会继续保持 avatar=null。
+      _logAuthorityAvatar(
+        level: 'INFO',
+        event: 'session.avatar_write_succeeded',
+        message: 'Playmesh Authority 已写入玩家头像并发送提交确认',
+        playerId: playerId,
+        sha256: digest,
+      );
+    } on Object catch (error) {
       if (playerId != null && digest != null) {
         connection.rejectAvatarWrite(playerId: playerId, sha256: digest);
       }
+      _logAuthorityAvatar(
+        level: 'WARNING',
+        event: 'session.avatar_write_failed',
+        message: 'Playmesh Authority 写入玩家头像失败，玩家仍可继续游戏',
+        playerId: playerId,
+        sha256: digest,
+        extra: {'error': error.toString()},
+      );
     }
+  }
+
+  void _logAuthorityAvatar({
+    required String level,
+    required String event,
+    required String message,
+    String? playerId,
+    String? sha256,
+    Map<String, Object?> extra = const {},
+  }) {
+    final record = <String, Object?>{
+      'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
+      'level': level,
+      'component': 'game-runtime-bridge',
+      'event': event,
+      'message': message,
+      'sessionId': connection.snapshot.id,
+      'playerId': ?playerId,
+      'avatarSha256': ?sha256,
+      ...extra,
+    };
+    debugPrint('[$level] $message ${jsonEncode(record)}');
   }
 
   Future<void> _handleRemoteStorageRequest(
