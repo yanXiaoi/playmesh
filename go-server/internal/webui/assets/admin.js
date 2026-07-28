@@ -6,7 +6,10 @@ let captchaId = "";
 let pendingAdminLogin = null;
 let adminCaptcha;
 let adminCaptchaRefreshTimer = null;
-const adminState = { page: 1, size: 20, total: 0, games: [] };
+const adminState = {
+  page: 1, size: 20, total: 0, games: [],
+  userPage: 1, userSize: 20, userTotal: 0, users: []
+};
 let adminMessages = {};
 const at = (key, fallback, variables = {}) => {
   const template = adminMessages[key] || fallback || key;
@@ -48,6 +51,7 @@ const api = async (path, options = {}) => {
   const response = await fetch(adminURL(path), { ...options, headers });
   if (response.status === 401 && token) {
     token = ""; sessionStorage.removeItem(tokenKey); showLogin();
+    window.PlaymeshMessage.error(at("error.unauthorized"));
   }
   return response;
 };
@@ -244,7 +248,7 @@ function showLogin() {
 function showAdmin() {
   document.querySelector("#login-view").classList.add("hidden");
   document.querySelector("#admin-view").classList.remove("hidden");
-  loadStats(); loadAdminGames(); loadSettings(); loadRuntimeConfig();
+  loadStats(); loadUsers(); loadAdminGames(); loadSettings(); loadRuntimeConfig();
 }
 
 document.querySelectorAll("[data-section]").forEach((button) => {
@@ -253,6 +257,8 @@ document.querySelectorAll("[data-section]").forEach((button) => {
     button.classList.add("active");
     document.querySelectorAll(".admin-section").forEach((section) => section.classList.add("hidden"));
     document.querySelector(`#${button.dataset.section}-section`).classList.remove("hidden");
+    if (button.dataset.section === "users") loadUsers();
+    if (button.dataset.section === "games") loadAdminGames();
   });
 });
 
@@ -280,6 +286,145 @@ const formatBytes = (value) => {
   return `${(value / 1024 ** 3).toFixed(2)} GiB`;
 };
 setInterval(loadStats, 2000);
+
+async function loadUsers() {
+  if (!token) return;
+  const params = new URLSearchParams({
+    page: adminState.userPage,
+    size: adminState.userSize,
+    status: document.querySelector("#admin-user-status").value,
+    search: document.querySelector("#admin-user-search").value
+  });
+  const response = await api(`/api/admin/users?${params}`);
+  if (!response.ok) return;
+  const result = await response.json();
+  adminState.userTotal = result.total;
+  adminState.users = result.data;
+  document.querySelector("#user-rows").innerHTML = result.data.map((user) => `
+    <tr>
+      <td data-label="${escapeHTML(at("admin.users.account"))}">
+        <strong>${escapeHTML(user.displayName)}</strong><br>
+        <span class="muted">${escapeHTML(user.email)}</span>
+      </td>
+      <td data-label="${escapeHTML(at("admin.users.status"))}">
+        <span class="badge ${user.status === "disabled" ? "rejected" : ""}">
+          ${escapeHTML(at(`admin.users.${user.status === "pending_verification" ? "pending" : user.status}`, user.status))}
+        </span>
+        ${user.disabledReason ? `<br><small class="muted">${escapeHTML(user.disabledReason)}</small>` : ""}
+      </td>
+      <td data-label="${escapeHTML(at("admin.users.games"))}">
+        ${escapeHTML(at("admin.users.game_count", "", {
+          total: user.gameCount, published: user.publishedCount
+        }))}
+      </td>
+      <td data-label="${escapeHTML(at("admin.users.created_at"))}">
+        ${new Date(user.createdAt).toLocaleString(document.documentElement.lang)}
+      </td>
+      <td data-label="${escapeHTML(at("common.actions"))}"><div class="row-actions">
+        ${user.status === "disabled"
+          ? `<button data-user-action="enable" data-id="${user.id}">${escapeHTML(at("admin.users.enable"))}</button>`
+          : `<button data-user-action="disable" data-id="${user.id}" class="warn">${escapeHTML(at("admin.users.disable"))}</button>`}
+        <button data-user-action="delete" data-id="${user.id}" class="danger">${escapeHTML(at("common.delete"))}</button>
+      </div></td>
+    </tr>
+  `).join("") || `<tr><td colspan="5" class="muted">${escapeHTML(at("admin.users.empty"))}</td></tr>`;
+  const pages = Math.max(1, Math.ceil(result.total / adminState.userSize));
+  document.querySelector("#admin-user-page").textContent = at("common.page", "", {
+    current: adminState.userPage, pages
+  });
+  document.querySelector("#admin-user-previous").disabled = adminState.userPage <= 1;
+  document.querySelector("#admin-user-next").disabled = adminState.userPage >= pages;
+}
+
+async function performUserAction(action, id, reason = "") {
+  let response;
+  if (action === "delete") {
+    response = await api(`/api/admin/users/${id}`, { method: "DELETE" });
+  } else {
+    response = await api(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ disabled: action === "disable", reason })
+    });
+  }
+  if (response.status === 401) return;
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    window.PlaymeshMessage.error(localizedAdminError(result));
+    return;
+  }
+  window.PlaymeshMessage.success(at(`admin.users.${action}_success`));
+  await loadUsers();
+}
+
+document.querySelector("#user-rows").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-user-action]");
+  if (!button) return;
+  const action = button.dataset.userAction;
+  const id = button.dataset.id;
+  if (action === "disable") {
+    openReasonDialog("admin.users.disable_reason", (reason) =>
+      performUserAction(action, id, reason));
+    return;
+  }
+  if (action === "delete" && !confirm(at("admin.users.confirm_delete"))) return;
+  try {
+    await performUserAction(action, id);
+  } catch {
+    window.PlaymeshMessage.error(at("error.generic"));
+  }
+});
+
+document.querySelector("#admin-add-user").addEventListener("click", () => {
+  document.querySelector("#create-user-dialog").showModal();
+});
+document.querySelector("#create-user-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    const response = await api("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        email: form.email.value,
+        displayName: form.displayName.value,
+        password: form.password.value,
+        disabled: form.disabled.checked
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      window.PlaymeshMessage.error(localizedAdminError(result));
+      return;
+    }
+    form.reset();
+    document.querySelector("#create-user-dialog").close();
+    window.PlaymeshMessage.success(at("admin.users.create_success"));
+    await loadUsers();
+  } catch {
+    window.PlaymeshMessage.error(at("error.generic"));
+  }
+});
+
+document.querySelector("#admin-user-refresh").addEventListener("click", () => {
+  adminState.userPage = 1; loadUsers();
+});
+document.querySelector("#admin-user-status").addEventListener("change", () => {
+  adminState.userPage = 1; loadUsers();
+});
+let adminUserSearchTimer;
+document.querySelector("#admin-user-search").addEventListener("input", () => {
+  clearTimeout(adminUserSearchTimer);
+  adminUserSearchTimer = setTimeout(() => {
+    adminState.userPage = 1; loadUsers();
+  }, 300);
+});
+document.querySelector("#admin-user-previous").addEventListener("click", () => {
+  if (adminState.userPage > 1) { adminState.userPage--; loadUsers(); }
+});
+document.querySelector("#admin-user-next").addEventListener("click", () => {
+  if (adminState.userPage * adminState.userSize < adminState.userTotal) {
+    adminState.userPage++; loadUsers();
+  }
+});
 
 async function loadAdminGames() {
   if (!token) return;
@@ -331,26 +476,89 @@ document.querySelector("#game-rows").addEventListener("click", async (event) => 
     return;
   }
   if (button.dataset.action === "download") {
-    const response = await api(`/api/admin/games/${id}/download`);
-    if (!response.ok) return alert(at("admin.games.package_unavailable"));
-    const blob = await response.blob();
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob); link.download = `${game.packageId}-${game.version}.zip`;
-    link.click(); URL.revokeObjectURL(link.href); return;
+    try {
+      const response = await api(`/api/admin/games/${id}/download`);
+      if (!response.ok) {
+        window.PlaymeshMessage.error(at("admin.games.package_unavailable"));
+        return;
+      }
+      const blob = await response.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob); link.download = `${game.packageId}-${game.version}.zip`;
+      link.click(); URL.revokeObjectURL(link.href);
+    } catch {
+      window.PlaymeshMessage.error(at("admin.games.package_unavailable"));
+    }
+    return;
   }
-  if (button.dataset.action === "delete" && !confirm(at("admin.games.confirm_delete"))) return;
-  if (button.dataset.action === "reject") {
-    const reason = prompt(at("admin.games.reject_reason"));
-    if (!reason) return;
-    await api(`/api/admin/games/${id}`, { method: "PATCH", body: JSON.stringify({ status: "rejected", reason }) });
-  } else if (button.dataset.action === "approve") {
-    await api(`/api/admin/games/${id}`, { method: "PATCH", body: JSON.stringify({ status: "approved", reason: "" }) });
-  } else if (button.dataset.action === "publish" || button.dataset.action === "unpublish") {
-    await api(`/api/admin/games/${id}/${button.dataset.action}`, { method: "POST" });
-  } else if (button.dataset.action === "delete") {
-    await api(`/api/admin/games/${id}`, { method: "DELETE" });
+  const action = button.dataset.action;
+  if (action === "delete" && !confirm(at("admin.games.confirm_delete"))) return;
+  if (["reject", "unpublish", "delete"].includes(action)) {
+    openReasonDialog(`admin.games.${action}_reason`, (reason) =>
+      performGameAction(action, id, reason));
+    return;
   }
-  loadAdminGames();
+  await performGameAction(action, id);
+});
+
+async function performGameAction(action, id, reason = "") {
+  try {
+    let response;
+    if (action === "approve" || action === "reject") {
+      response = await api(`/api/admin/games/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: action === "approve" ? "approved" : "rejected",
+          reason
+        })
+      });
+    } else if (action === "publish" || action === "unpublish") {
+      response = await api(`/api/admin/games/${id}/${action}`, {
+        method: "POST",
+        ...(action === "unpublish" ? { body: JSON.stringify({ reason }) } : {})
+      });
+    } else if (action === "delete") {
+      response = await api(`/api/admin/games/${id}`, {
+        method: "DELETE", body: JSON.stringify({ reason })
+      });
+    }
+    if (!response || response.status === 401) return;
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      window.PlaymeshMessage.error(localizedAdminError(result));
+      return;
+    }
+    window.PlaymeshMessage.success(at(`admin.games.${action}_success`));
+    await loadAdminGames();
+    await loadUsers();
+  } catch {
+    window.PlaymeshMessage.error(at("error.generic"));
+  }
+}
+
+let pendingReasonAction = null;
+function openReasonDialog(titleKey, action) {
+  pendingReasonAction = action;
+  document.querySelector("#admin-reason-title").textContent = at(titleKey);
+  const form = document.querySelector("#admin-reason-form");
+  form.reset();
+  document.querySelector("#admin-reason-dialog").showModal();
+}
+document.querySelector("#admin-reason-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const action = pendingReasonAction;
+  if (!action) return;
+  const reason = event.currentTarget.reason.value.trim();
+  if (!reason) return;
+  pendingReasonAction = null;
+  document.querySelector("#admin-reason-dialog").close();
+  await action(reason);
+});
+document.querySelectorAll("[data-close-admin-dialog]").forEach((button) => {
+  button.addEventListener("click", () => {
+    pendingReasonAction = null;
+    button.closest("dialog").close();
+  });
 });
 const parseJSON = (value) => { try { return JSON.parse(value); } catch { return value; } };
 document.querySelector("#close-dialog").addEventListener("click", () => document.querySelector("#detail-dialog").close());
@@ -377,17 +585,21 @@ async function loadSettings() {
 document.querySelector("#settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const response = await api("/api/admin/settings", {
-    method: "PUT", body: JSON.stringify({
-      name: form.elements.name.value, author: form.elements.author.value,
-      homepage: form.elements.homepage.value,
-      supportsGameRelay: form.elements.supportsGameRelay.checked
-    })
-  });
-  const notice = document.querySelector("#settings-notice");
-  notice.className = response.ok ? "notice ok" : "notice error";
-  notice.textContent = response.ok
-    ? at("admin.settings.saved") : at("admin.settings.save_failed");
+  try {
+    const response = await api("/api/admin/settings", {
+      method: "PUT", body: JSON.stringify({
+        name: form.elements.name.value, author: form.elements.author.value,
+        homepage: form.elements.homepage.value,
+        supportsGameRelay: form.elements.supportsGameRelay.checked
+      })
+    });
+    if (response.status === 401) return;
+    window.PlaymeshMessage[response.ok ? "success" : "error"](
+      response.ok ? at("admin.settings.saved") : at("admin.settings.save_failed")
+    );
+  } catch {
+    window.PlaymeshMessage.error(at("admin.settings.save_failed"));
+  }
 });
 
 async function loadRuntimeConfig() {
@@ -402,14 +614,8 @@ async function loadRuntimeConfig() {
   form.showPublicSourceQRCode.checked = value.showPublicSourceQRCode;
   form.allowUserRegistration.checked = value.allowUserRegistration;
   form.requireEmailVerification.checked = value.requireEmailVerification;
-  form.captchaMode.value = value.admin.captchaMode;
-  form.captchaImageSource.value = value.admin.captchaImageSource;
-  form.captchaImageDirectory.value = value.admin.captchaImageDirectory;
-  form.captchaImageURL.value = value.admin.captchaImageUrl;
-  form.captchaImageCacheSize.value = value.admin.captchaImageCacheSize;
   form.sessionTTL.value = value.admin.sessionTtlMinutes;
   form.loginInterval.value = value.admin.loginIntervalMilliseconds;
-  form.captchaInterval.value = value.admin.captchaIntervalMilliseconds;
   form.databasePath.value = value.storage.databasePath;
   form.gamesDirectory.value = value.storage.gamesDirectory;
   form.quarantineDirectory.value = value.storage.quarantineDirectory;
@@ -441,23 +647,20 @@ const numeric = (form, name) => Number(form[name].value);
 document.querySelector("#config-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const notice = document.querySelector("#config-notice");
   let whitelist;
   let contentRules;
   try {
     whitelist = JSON.parse(form.whitelist.value);
     if (!Array.isArray(whitelist)) throw new Error();
   } catch {
-    notice.className = "notice error";
-    notice.textContent = at("admin.config.whitelist_invalid");
+    window.PlaymeshMessage.error(at("admin.config.whitelist_invalid"));
     return;
   }
   try {
     contentRules = JSON.parse(form.contentRules.value);
     if (!Array.isArray(contentRules)) throw new Error();
   } catch {
-    notice.className = "notice error";
-    notice.textContent = at("admin.config.rules_invalid");
+    window.PlaymeshMessage.error(at("admin.config.rules_invalid"));
     return;
   }
   const payload = {
@@ -468,14 +671,9 @@ document.querySelector("#config-form").addEventListener("submit", async (event) 
     requireEmailVerification: form.requireEmailVerification.checked,
     authWhitelist: whitelist,
     admin: {
-      listen: form.adminListen.value, captchaMode: form.captchaMode.value,
-      captchaImageSource: form.captchaImageSource.value,
-      captchaImageDirectory: form.captchaImageDirectory.value,
-      captchaImageUrl: form.captchaImageURL.value,
-      captchaImageCacheSize: numeric(form, "captchaImageCacheSize"),
+      listen: form.adminListen.value,
       sessionTtlMinutes: numeric(form, "sessionTTL"),
-      loginIntervalMilliseconds: numeric(form, "loginInterval"),
-      captchaIntervalMilliseconds: numeric(form, "captchaInterval")
+      loginIntervalMilliseconds: numeric(form, "loginInterval")
     },
     storage: {
       databasePath: form.databasePath.value, gamesDirectory: form.gamesDirectory.value,
@@ -501,18 +699,32 @@ document.querySelector("#config-form").addEventListener("submit", async (event) 
       maxConnectionsPerIP: numeric(form, "maxPerIP")
     }
   };
-  const response = await api("/api/admin/config", {
-    method: "PUT", body: JSON.stringify(payload)
-  });
-  const result = await response.json().catch(() => ({}));
-  notice.className = response.ok ? "notice ok" : "notice error";
-  notice.textContent = response.ok
-    ? at("admin.config.saved") : localizedAdminError(result);
+  try {
+    const response = await api("/api/admin/config", {
+      method: "PUT", body: JSON.stringify(payload)
+    });
+    if (response.status === 401) return;
+    const result = await response.json().catch(() => ({}));
+    window.PlaymeshMessage[response.ok ? "success" : "error"](
+      response.ok ? at("admin.config.saved") : localizedAdminError(result)
+    );
+  } catch {
+    window.PlaymeshMessage.error(at("error.config_save_failed"));
+  }
 });
 
 document.querySelector("#logout").addEventListener("click", async () => {
-  await api("/api/admin/logout", { method: "POST" });
-  token = ""; sessionStorage.removeItem(tokenKey); showLogin();
+  try {
+    const response = await api("/api/admin/logout", { method: "POST" });
+    if (!response.ok && response.status !== 401) {
+      window.PlaymeshMessage.error(at("error.generic"));
+      return;
+    }
+    token = ""; sessionStorage.removeItem(tokenKey); showLogin();
+    window.PlaymeshMessage.success(at("admin.logout_success"));
+  } catch {
+    window.PlaymeshMessage.error(at("error.generic"));
+  }
 });
 
 async function initializeAdmin() {

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
+import '../../core/developer/developer_run_controller.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/sdk_feature_registry.dart';
@@ -38,7 +39,7 @@ class RemoteGamePage extends StatefulWidget {
 }
 
 class _RemoteGamePageState extends State<RemoteGamePage> {
-  final GameToolDockController _toolDockController = GameToolDockController();
+  final GameSidebarController _sidebarController = GameSidebarController();
   WebViewController? _controller;
   AppWebViewBridge? _appBridge;
   LocalTunnelGateway? _webGateway;
@@ -50,6 +51,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   int _toolResetGeneration = 0;
   late final WebViewMessageQueue _messageQueue;
   Future<void> Function(String)? _runWindowsJavaScript;
+  DeveloperWebViewJavaScriptExecutor? _evaluateJavaScript;
   String? _platformUiConfigurationKey;
   Map<String, Object?>? _platformUiConfiguration;
   bool _showPerformance = false;
@@ -169,8 +171,8 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         playerSource: usesRelay ? 'server' : 'lan_app',
         platformUiConfiguration: _platformUiConfiguration,
         onOpenSharePanel: _rejectShareFromRemote,
-        onShowToolDock: _showToolDockFromSdk,
-        onHideToolDock: _hideToolDockFromSdk,
+        onShowGameSidebar: _showGameSidebarFromSdk,
+        onHideGameSidebar: _hideGameSidebarFromSdk,
         onExitRequested: () async {
           if (mounted) await Navigator.of(context).maybePop();
         },
@@ -244,6 +246,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           ),
         );
       _controller = controller;
+      _evaluateJavaScript = controller.runJavaScriptReturningResult;
       await controller.loadRequest(_launchUri);
       if (mounted) setState(() {});
     } on Object catch (error) {
@@ -288,6 +291,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     unawaited(_localAppSdkServer?.close());
     unawaited(_coreGateway?.close());
     unawaited(_webGateway?.close());
+    _evaluateJavaScript = null;
     unawaited(
       const AppDeviceService().setFullscreen(false).catchError((Object _) {}),
     );
@@ -297,10 +301,9 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   @override
   Widget build(BuildContext context) {
     return GameRuntimeShortcutScope(
-      controller: _toolDockController,
+      controller: _sidebarController,
       onBack: _handleRuntimeBack,
-      onOpenTools: _openToolsFromShortcut,
-      onMoveTools: _moveToolsFromShortcut,
+      onOpenSidebar: _openSidebarFromShortcut,
       child: PopScope(
         canPop: _allowPop,
         onPopInvokedWithResult: (didPop, _) {
@@ -312,10 +315,11 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
             fit: StackFit.expand,
             children: [
               _buildWebView(),
-              GameToolDock(
-                controller: _toolDockController,
+              GameSidebar(
+                controller: _sidebarController,
                 resetKey: Object.hash(_windowsReloadKey, _toolResetGeneration),
-                backTooltip: context.tr('game.back_join'),
+                backLabel: context.tr('game.back_join'),
+                onContinue: _restoreGameContentFocus,
                 onBack: _exitRemotePage,
                 onReload: _reload,
                 showPerformance: _showPerformance,
@@ -324,7 +328,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
                 onEnterFullscreen: () => _setFullscreen(true),
                 onExitFullscreen: () => _setFullscreen(false),
                 secondaryActions: [
-                  GameToolAction(
+                  GameSidebarAction(
                     icon: Icons.info_outline,
                     label: context.tr('game.info'),
                     onPressed: () => unawaited(_openGameInfo()),
@@ -387,6 +391,9 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           unawaited(_syncPlatformUiConfiguration());
           unawaited(_syncPerformanceVisible());
         },
+        onEvaluateJavaScriptReady: (executor) {
+          _evaluateJavaScript = executor;
+        },
       );
     }
     final controller = _controller;
@@ -416,6 +423,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     setState(() {
       _error = null;
       _runWindowsJavaScript = null;
+      _evaluateJavaScript = null;
       _showPerformance = false;
       _debugVisible = false;
       _windowsReloadKey += 1;
@@ -491,7 +499,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       ),
     );
     _infoVisible = false;
-    if (mounted) _toolDockController.restoreFocus();
+    if (mounted) _sidebarController.restoreFocus();
   }
 
   void _openDebugLogs() {
@@ -516,7 +524,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Future<void> _hideDebugLogs({bool restoreFocus = true}) async {
     if (mounted) {
       setState(() => _debugVisible = false);
-      if (restoreFocus) _toolDockController.restoreFocus();
+      if (restoreFocus) _sidebarController.restoreFocus();
     }
     final subscription = _developerLogSubscription;
     _developerLogSubscription = null;
@@ -541,16 +549,23 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   }
 
   void _handleRuntimeBack() {
-    if (_toolDockController.isMoving) {
-      _toolDockController.closeTopLayer();
-      return;
-    }
     if (_debugVisible) {
       unawaited(_hideDebugLogs());
       return;
     }
-    if (_toolDockController.closeTopLayer()) return;
-    _exitRemotePage();
+    if (_sidebarController.closeTopLayer()) return;
+    unawaited(_openSidebarFromNativeBack());
+  }
+
+  void _restoreGameContentFocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final evaluator = _evaluateJavaScript;
+    if (evaluator == null) return;
+    unawaited(
+      evaluator(
+        'window.playmeshApp?.__restoreGameContentFocus?.()',
+      ).catchError((Object _) => null),
+    );
   }
 
   void _exitRemotePage() {
@@ -561,14 +576,26 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     });
   }
 
-  void _openToolsFromShortcut() {
+  void _openSidebarFromShortcut() {
     if (_debugVisible || _infoVisible) return;
-    _toolDockController.openTools();
+    _sidebarController.open();
   }
 
-  void _moveToolsFromShortcut() {
-    if (_debugVisible || _infoVisible) return;
-    _toolDockController.beginMoveMode();
+  Future<void> _openSidebarFromNativeBack() async {
+    try {
+      final evaluator = _evaluateJavaScript;
+      final handled = evaluator != null
+          ? await evaluator(
+              'Boolean(window[Symbol.for("playmesh.platform-ui.back")]?.())',
+            )
+          : await _controller?.runJavaScriptReturningResult(
+              'Boolean(window[Symbol.for("playmesh.platform-ui.back")]?.())',
+            );
+      if (handled == true || handled?.toString() == 'true') return;
+    } on Object catch (error) {
+      debugPrint('远程游戏网页未能处理返回键，改由 App 打开侧边栏: $error');
+    }
+    if (mounted) _sidebarController.open();
   }
 
   Future<void> _rejectShareFromRemote() {
@@ -578,25 +605,25 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     );
   }
 
-  Future<void> _showToolDockFromSdk() async {
+  Future<void> _showGameSidebarFromSdk() async {
     if (!mounted ||
         _debugVisible ||
         _infoVisible ||
         WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
-    if (!_toolDockController.showFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    if (!_sidebarController.showFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
     await WidgetsBinding.instance.endOfFrame;
   }
 
-  Future<void> _hideToolDockFromSdk() async {
+  Future<void> _hideGameSidebarFromSdk() async {
     if (!mounted) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
-    if (!_toolDockController.hideFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    if (!_sidebarController.hideFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
     await WidgetsBinding.instance.endOfFrame;
   }

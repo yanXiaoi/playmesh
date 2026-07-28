@@ -15,8 +15,8 @@ void main() {
       expect(configuration.localeId, 'en-US');
       expect(configuration.theme, 'system');
       expect(messages.keys, containsAll(platformGameUiRequiredKeys));
-      expect(messages['toolbar.expand'], 'Open game tools');
-      expect(messages['capability.sensor.gyroscope.name'], 'Gyroscope');
+      expect(messages['sidebar.title'], 'Game menu');
+      expect(messages['capability.media.microphone.name'], 'Microphone');
       expect(messages, isNot(contains('home.title')));
       expect(
         messages.keys,

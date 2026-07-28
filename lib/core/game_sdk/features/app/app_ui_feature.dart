@@ -88,16 +88,16 @@ const appUiSdkSource = SdkSourceFragment(
       });
   }
 
-  function showAppToolDock() {
+  function showAppGameSidebar() {
     captureAppUiReturnFocus();
-    return request("app.ui.toolDock.show").catch((error) => {
+    return request("app.ui.gameSidebar.show").catch((error) => {
       clearAppUiReturnFocus();
       throw error;
     });
   }
 
-  function hideAppToolDock() {
-    return request("app.ui.toolDock.hide").then((result) => {
+  function hideAppGameSidebar() {
+    return request("app.ui.gameSidebar.hide").then((result) => {
       restoreAppUiReturnFocus();
       return result;
     });
@@ -117,8 +117,8 @@ final class _AppUiFeature implements _AppSdkCommandFeature {
   @override
   Set<String> get commands => const {
     'app.ui.openSharePanel',
-    'app.ui.toolDock.show',
-    'app.ui.toolDock.hide',
+    'app.ui.gameSidebar.show',
+    'app.ui.gameSidebar.hide',
   };
 
   @override
@@ -135,10 +135,10 @@ final class _AppUiFeature implements _AppSdkCommandFeature {
           );
         }
         return context.openSharePanel();
-      case 'app.ui.toolDock.show':
-        return context.setToolDockVisible(true);
-      case 'app.ui.toolDock.hide':
-        return context.setToolDockVisible(false);
+      case 'app.ui.gameSidebar.show':
+        return context.setGameSidebarVisible(true);
+      case 'app.ui.gameSidebar.hide':
+        return context.setGameSidebarVisible(false);
     }
     throw StateError('未注册的 App 平台 UI 命令: ${command.name}');
   }

@@ -234,13 +234,18 @@ func TestUserDataRoutesRequireSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer app.Close()
-	recorder := httptest.NewRecorder()
-	app.Engine.ServeHTTP(
-		recorder,
-		httptest.NewRequest(http.MethodGet, "/api/user/me", nil),
-	)
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("匿名资料读取状态 = %d", recorder.Code)
+	for _, path := range []string{
+		"/api/user/me",
+		"/api/user/notifications",
+	} {
+		recorder := httptest.NewRecorder()
+		app.Engine.ServeHTTP(
+			recorder,
+			httptest.NewRequest(http.MethodGet, path, nil),
+		)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("匿名访问 %s 状态 = %d", path, recorder.Code)
+		}
 	}
 }
 
@@ -497,6 +502,9 @@ func testConfig(t *testing.T) config.Config {
 	cfg.Storage.DatabasePath = filepath.Join(root, "playmesh-server.db")
 	cfg.Storage.GamesDirectory = filepath.Join(root, "games")
 	cfg.Storage.QuarantineDirectory = filepath.Join(root, "quarantine")
+	// Unit tests must not depend on the default remote CAPTCHA image service.
+	cfg.Admin.CaptchaImageSource = "local"
+	cfg.Admin.CaptchaImageDirectory = filepath.Join(root, "captcha-images")
 	cfg.Auth.Token = "test-source-secret-at-least-32-bytes"
 	cfg.Relay.PublicBaseURL = "https://relay.example.com"
 	cfg.Relay.PendingConnectionTimeoutSeconds = 1

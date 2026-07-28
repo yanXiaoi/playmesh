@@ -131,11 +131,6 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
                     : const Icon(Icons.qr_code_scanner_rounded),
               ),
               IconButton(
-                tooltip: context.tr('online.downloads'),
-                onPressed: _showDownloads,
-                icon: const Icon(Icons.download_outlined),
-              ),
-              IconButton(
                 tooltip: context.tr('online.sources.manage'),
                 onPressed: _openSources,
                 icon: const Icon(Icons.hub_outlined),
@@ -379,9 +374,11 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
       if (current.nextCursor != null && next.nextCursor == current.nextCursor) {
         throw const FormatException('游戏源重复返回 cursor，无法继续读取');
       }
+      final offers = [...current.offers, ...next.offers]
+        ..sort(compareOnlineCatalogOffersNewestFirst);
       return SourceSectionResult(
         source: current.source,
-        offers: List.unmodifiable([...current.offers, ...next.offers]),
+        offers: List.unmodifiable(offers),
         total: next.total,
         page: next.page,
         nextCursor: next.nextCursor,
@@ -550,6 +547,7 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
           mergedOffers[existingIndex] = offer;
         }
       }
+      mergedOffers.sort(compareOnlineCatalogOffersNewestFirst);
       final cursorStalled =
           current.nextCursor != null && current.nextCursor == next.nextCursor;
       final pageStalled =
@@ -619,9 +617,56 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
     }
   }
 
-  void _downloadOffer(OnlineCatalogGame offer) {
-    widget.controller.downloads.enqueue([offer]);
-    _showDownloads();
+  Future<void> _downloadOffer(OnlineCatalogGame offer) async {
+    final installed = widget.controller.installedGame(offer.manifest.id);
+    if (installed != null &&
+        installed.author.trim() != offer.publisher.trim()) {
+      final localPublisher = installed.author.trim().isEmpty
+          ? context.tr('common.publisher_unknown')
+          : installed.author.trim();
+      final onlinePublisher = offer.publisher.trim().isEmpty
+          ? context.tr('common.publisher_unknown')
+          : offer.publisher.trim();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          key: const ValueKey('catalog-publisher-warning'),
+          icon: Icon(
+            Icons.warning_amber_rounded,
+            color: Theme.of(dialogContext).colorScheme.error,
+          ),
+          title: Text(dialogContext.tr('online.download.publisher_warning')),
+          content: Text(
+            dialogContext.tr(
+              'online.download.publisher_warning_message',
+              arguments: {
+                'name': offer.manifest.name,
+                'localPublisher': localPublisher,
+                'onlinePublisher': onlinePublisher,
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(dialogContext.tr('common.cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                dialogContext.tr('online.download.publisher_warning_continue'),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await showGameDownloadProgressDialog(
+      context,
+      controller: widget.controller,
+      offer: offer,
+    );
   }
 
   Future<void> _openVersionPicker(AggregatedGameResult result) async {
@@ -629,7 +674,7 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
       context: context,
       builder: (_) => _VersionPickerDialog(result: result),
     );
-    if (offer != null && mounted) _downloadOffer(offer);
+    if (offer != null && mounted) await _downloadOffer(offer);
   }
 
   Future<void> _openSources() async {
@@ -680,13 +725,28 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
       if (mounted) setState(() => _addingSource = false);
     }
   }
+}
 
-  void _showDownloads() {
-    showDialog<void>(
-      context: context,
-      builder: (_) => _DownloadQueueDialog(queue: widget.controller.downloads),
-    );
+Future<GameDownloadStatus?> showGameDownloadProgressDialog(
+  BuildContext context, {
+  required GameCatalogController controller,
+  required OnlineCatalogGame offer,
+}) async {
+  late final GameDownloadTask task;
+  try {
+    task = controller.startDownload(offer);
+  } on StateError {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(context.tr('online.download.busy'))));
+    return null;
   }
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _SingleDownloadDialog(controller: controller, task: task),
+  );
+  return task.status;
 }
 
 class _SourceHomeSection extends StatefulWidget {
@@ -2064,64 +2124,81 @@ class _PublicUrlDialogState extends State<_PublicUrlDialog> {
   }
 }
 
-class _DownloadQueueDialog extends StatelessWidget {
-  const _DownloadQueueDialog({required this.queue});
+class _SingleDownloadDialog extends StatelessWidget {
+  const _SingleDownloadDialog({required this.controller, required this.task});
 
-  final GameDownloadQueue queue;
+  final GameCatalogController controller;
+  final GameDownloadTask task;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(context.tr('online.downloads')),
-      content: SizedBox(
-        width: 620,
-        height: MediaQuery.sizeOf(context).height * 0.62,
-        child: AnimatedBuilder(
-          animation: queue,
-          builder: (context, _) => queue.tasks.isEmpty
-              ? Center(child: Text(context.tr('online.downloads.empty')))
-              : ListView(
-                  children: [
-                    for (final task in queue.tasks)
-                      ListTile(
-                        leading: Icon(_downloadIcon(task.status)),
-                        title: Text(task.game.manifest.name),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_downloadLabel(context, task)),
-                            if (task.status == GameDownloadStatus.downloading)
-                              LinearProgressIndicator(value: task.progress),
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (task.status == GameDownloadStatus.queued ||
-                                task.status == GameDownloadStatus.downloading)
-                              IconButton(
-                                tooltip: context.tr('online.downloads.stop'),
-                                onPressed: () => queue.stop(task.id),
-                                icon: const Icon(Icons.stop_circle_outlined),
-                              ),
-                            IconButton(
-                              tooltip: context.tr('online.downloads.remove'),
-                              onPressed: () => queue.delete(task.id),
-                              icon: const Icon(Icons.delete_outline),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
+    return AnimatedBuilder(
+      animation: controller.downloadChanges,
+      builder: (context, _) {
+        final active =
+            task.status == GameDownloadStatus.queued ||
+            task.status == GameDownloadStatus.downloading;
+        return PopScope(
+          canPop: !active,
+          child: AlertDialog(
+            key: const ValueKey('catalog-download-progress-dialog'),
+            icon: Icon(_downloadIcon(task.status)),
+            title: Text(context.tr('online.download.progress_title')),
+            content: SizedBox(
+              width: 460,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    task.game.manifest.name,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${task.game.source.name} · v${task.game.manifest.version}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 18),
+                  LinearProgressIndicator(
+                    value: task.status == GameDownloadStatus.downloading
+                        ? task.progress
+                        : task.status == GameDownloadStatus.completed
+                        ? 1
+                        : null,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _downloadLabel(context, task),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              if (active)
+                TextButton.icon(
+                  onPressed: task.cancelled
+                      ? null
+                      : () => controller.cancelDownload(task.id),
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: Text(
+                    task.cancelled
+                        ? context.tr('online.download.cancelling')
+                        : context.tr('common.cancel'),
+                  ),
+                )
+              else
+                FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(context.tr('common.close')),
                 ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(context.tr('common.close')),
-        ),
-      ],
+            ],
+          ),
+        );
+      },
     );
   }
 

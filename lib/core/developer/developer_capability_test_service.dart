@@ -3,8 +3,7 @@ import 'dart:async';
 import '../capabilities/capability_plugin.dart';
 import '../capabilities/capability_registry.dart';
 import '../capabilities/default_capability_plugins.dart';
-import '../capabilities/support/motion_sensor_source.dart';
-import '../platform/app_device_service.dart';
+import '../capabilities/vibration/vibration_capability_plugin.dart';
 import 'developer_event_hub.dart';
 
 /// 开发者工作区能力自检服务。
@@ -13,16 +12,12 @@ import 'developer_event_hub.dart';
 /// App 的完整平台注册表，不按某个项目的 capabilities.json 过滤。
 class DeveloperCapabilityTestService {
   DeveloperCapabilityTestService({
-    MotionSensorSource? motionSource,
-    AppDeviceService? deviceService,
+    VibrationDriver? vibrationDriver,
     CapabilityRegistry? registry,
     void Function(Map<String, Object?> event)? emitEvent,
   }) : registry =
            registry ??
-           createDefaultCapabilityRegistry(
-             motionSource: motionSource,
-             deviceService: deviceService,
-           ),
+           createDefaultCapabilityRegistry(vibrationDriver: vibrationDriver),
        _emitEvent = emitEvent ?? developerEventHub.emit;
 
   final CapabilityRegistry registry;

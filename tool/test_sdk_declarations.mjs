@@ -60,11 +60,11 @@ const developerSources = [
 
 assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
-assert.match(game, /readonly version: "2\.4\.0"/);
-assert.match(game, /readonly version: "2\.2\.0"/);
+assert.match(game, /readonly version: "3\.0\.0"/);
+assert.match(game, /readonly version: "3\.0\.0"/);
 assert.match(
   game,
-  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "2\.2\.0";/,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.0\.0";/,
 );
 assert.match(
   gameRuntimeSource,
@@ -124,8 +124,8 @@ for (const eventName of [
   );
 }
 assert.match(game, /openSharePanel\(\): Promise<void>/);
-assert.match(game, /showToolDock\(\): Promise<void>/);
-assert.match(game, /hideToolDock\(\): Promise<void>/);
+assert.match(game, /showGameSidebar\(\): Promise<void>/);
+assert.match(game, /hideGameSidebar\(\): Promise<void>/);
 assert.match(game, /exitGame\(\): Promise<void>/);
 assert.match(game, /send\(data: Uint8Array\): Promise<void>/);
 assert.match(game, /send\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
@@ -158,7 +158,7 @@ const openSharePanel = appNamespace.members.find(
 );
 assert.equal(openSharePanel.signature, "openSharePanel(): Promise<void>");
 assert.match(openSharePanel.behavior, /returns no token, URL, QR code/);
-for (const memberName of ["showToolDock", "hideToolDock", "exitGame"]) {
+for (const memberName of ["showGameSidebar", "hideGameSidebar", "exitGame"]) {
   assert(appNamespace.members.some((member) => member.name === memberName));
 }
 const authorityNamespace = sdkManifest.namespaces.find(
@@ -181,7 +181,7 @@ assert.deepEqual(sdkSchema.$defs.Player.properties.avatar.type, [
 ]);
 assert.equal("source" in sdkSchema.$defs.Player.properties, false);
 assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
-assert.equal(defaultGameManifest.sdkVersion, "2.4.0");
+assert.equal(defaultGameManifest.sdkVersion, "3.0.0");
 assert.equal("permissions" in defaultGameManifest, false);
 assert.equal("icon" in defaultGameManifest, false);
 assert.equal("permissions" in gameManifestSchema.properties, false);

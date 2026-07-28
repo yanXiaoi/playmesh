@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
+import '../../core/capabilities/audio/audio_capability_plugin.dart';
+import '../../core/capabilities/camera/camera_capability_plugin.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/localization/playmesh_localization.dart';
@@ -17,6 +19,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
     required this.title,
     this.bridge,
     this.appBridge,
+    this.declaredCapabilities = const [],
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
   });
@@ -26,6 +29,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final String title;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
+  final List<String> declaredCapabilities;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;
@@ -144,6 +148,24 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
     );
   }
 
+  Future<WebviewPermissionDecision> _handlePermissionRequest(
+    String url,
+    WebviewPermissionKind kind,
+    bool isUserInitiated,
+  ) async {
+    final capabilityCode = switch (kind) {
+      WebviewPermissionKind.camera => CameraCapabilityPlugin.code,
+      WebviewPermissionKind.microphone => AudioCapabilityPlugin.code,
+      _ => null,
+    };
+    if (capabilityCode == null) {
+      return WebviewPermissionDecision.none;
+    }
+    return widget.declaredCapabilities.contains(capabilityCode)
+        ? WebviewPermissionDecision.allow
+        : WebviewPermissionDecision.deny;
+  }
+
   @override
   void dispose() {
     widget.onEvaluateJavaScriptReady?.call(null);
@@ -168,7 +190,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       );
     }
 
-    return Webview(_controller);
+    return Webview(_controller, permissionRequested: _handlePermissionRequest);
   }
 }
 

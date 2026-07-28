@@ -1,22 +1,17 @@
-import 'accelerometer/accelerometer_capability_plugin.dart';
+import 'audio/audio_capability_plugin.dart';
+import 'camera/camera_capability_plugin.dart';
 import 'capability_plugin.dart';
 import 'capability_registry.dart';
-import 'gyroscope/gyroscope_capability_plugin.dart';
-import 'support/motion_sensor_source.dart';
+import 'midi/midi_capability_plugin.dart';
 import 'vibration/vibration_capability_plugin.dart';
-import '../platform/app_device_service.dart';
 
 typedef DefaultCapabilityPluginFactory =
     CapabilityPlugin Function(DefaultCapabilityDependencies dependencies);
 
 class DefaultCapabilityDependencies {
-  const DefaultCapabilityDependencies({
-    required this.motionSource,
-    required this.deviceService,
-  });
+  const DefaultCapabilityDependencies({required this.vibrationDriver});
 
-  final MotionSensorSource motionSource;
-  final AppDeviceService deviceService;
+  final VibrationDriver vibrationDriver;
 }
 
 class DefaultCapabilityRegistration {
@@ -32,20 +27,21 @@ class DefaultCapabilityRegistration {
 final defaultCapabilityRegistrations =
     List<DefaultCapabilityRegistration>.unmodifiable([
       DefaultCapabilityRegistration(
-        descriptor: AccelerometerCapabilityPlugin.capabilityDescriptor,
-        create: (dependencies) =>
-            AccelerometerCapabilityPlugin(source: dependencies.motionSource),
+        descriptor: CameraCapabilityPlugin.capabilityDescriptor,
+        create: (_) => const CameraCapabilityPlugin(),
       ),
       DefaultCapabilityRegistration(
-        descriptor: GyroscopeCapabilityPlugin.capabilityDescriptor,
-        create: (dependencies) =>
-            GyroscopeCapabilityPlugin(source: dependencies.motionSource),
+        descriptor: AudioCapabilityPlugin.capabilityDescriptor,
+        create: (_) => AudioCapabilityPlugin(),
+      ),
+      DefaultCapabilityRegistration(
+        descriptor: MidiCapabilityPlugin.capabilityDescriptor,
+        create: (_) => const MidiCapabilityPlugin(),
       ),
       DefaultCapabilityRegistration(
         descriptor: VibrationCapabilityPlugin.capabilityDescriptor,
-        create: (dependencies) => VibrationCapabilityPlugin(
-          deviceService: dependencies.deviceService,
-        ),
+        create: (dependencies) =>
+            VibrationCapabilityPlugin(driver: dependencies.vibrationDriver),
       ),
     ]);
 
@@ -60,12 +56,10 @@ final defaultCapabilityDescriptorRegistry =
     });
 
 CapabilityRegistry createDefaultCapabilityRegistry({
-  MotionSensorSource? motionSource,
-  AppDeviceService? deviceService,
+  VibrationDriver? vibrationDriver,
 }) {
   final dependencies = DefaultCapabilityDependencies(
-    motionSource: motionSource ?? const NativeMotionSensorSource(),
-    deviceService: deviceService ?? const AppDeviceService(),
+    vibrationDriver: vibrationDriver ?? const NativeVibrationDriver(),
   );
   return CapabilityRegistry(
     defaultCapabilityRegistrations.map(

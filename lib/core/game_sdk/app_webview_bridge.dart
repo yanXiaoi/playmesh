@@ -8,7 +8,7 @@ import 'sdk_feature_registry.dart';
 import '../capabilities/capability_registry.dart';
 import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
-import '../capabilities/support/motion_sensor_source.dart';
+import '../capabilities/vibration/vibration_capability_plugin.dart';
 import '../platform/app_device_service.dart';
 import '../profile/user_profile_store.dart';
 import '../../models/game_summary.dart';
@@ -25,21 +25,18 @@ class AppWebViewBridge {
     this.playerSource = 'lan_app',
     Map<String, Object?>? platformUiConfiguration,
     this.deviceService = const AppDeviceService(),
-    MotionSensorSource? motionSource,
+    VibrationDriver? vibrationDriver,
     CapabilityRegistry? capabilityRegistry,
     this.onOpenSharePanel,
-    this.onShowToolDock,
-    this.onHideToolDock,
+    this.onShowGameSidebar,
+    this.onHideGameSidebar,
     this.onExitRequested,
   }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
          platformUiConfiguration,
        ),
        capabilityRegistry =
            capabilityRegistry ??
-           createDefaultCapabilityRegistry(
-             motionSource: motionSource,
-             deviceService: deviceService,
-           ) {
+           createDefaultCapabilityRegistry(vibrationDriver: vibrationDriver) {
     _capabilityRuntime = CapabilityRuntime(
       registry: this.capabilityRegistry,
       declaredCapabilities: declaredCapabilities,
@@ -55,8 +52,8 @@ class AppWebViewBridge {
   final String playerSource;
   final AppDeviceService deviceService;
   final Future<void> Function()? onOpenSharePanel;
-  final Future<void> Function()? onShowToolDock;
-  final Future<void> Function()? onHideToolDock;
+  final Future<void> Function()? onShowGameSidebar;
+  final Future<void> Function()? onHideGameSidebar;
   final Future<void> Function()? onExitRequested;
   final CapabilityRegistry capabilityRegistry;
   Map<String, Object?>? _platformUiConfiguration;
@@ -94,7 +91,7 @@ class AppWebViewBridge {
           disposeCapability: _disposeCapability,
           setFullscreen: _fullscreen,
           openSharePanel: _openSharePanel,
-          setToolDockVisible: _setToolDockVisible,
+          setGameSidebarVisible: _setGameSidebarVisible,
           requestExit: _requestExit,
           syncAvatar: _syncAvatar,
         ),
@@ -231,10 +228,10 @@ class AppWebViewBridge {
     return null;
   }
 
-  Future<Object?> _setToolDockVisible(bool visible) async {
-    final callback = visible ? onShowToolDock : onHideToolDock;
+  Future<Object?> _setGameSidebarVisible(bool visible) async {
+    final callback = visible ? onShowGameSidebar : onHideGameSidebar;
     if (callback == null) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
     await callback();
     return null;

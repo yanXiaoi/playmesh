@@ -7,8 +7,8 @@ import 'package:flutter/services.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../ui/focus/playmesh_shortcuts.dart';
 
-class GameToolAction {
-  const GameToolAction({
+class GameSidebarAction {
+  const GameSidebarAction({
     required this.icon,
     required this.label,
     required this.onPressed,
@@ -19,57 +19,49 @@ class GameToolAction {
   final VoidCallback onPressed;
 }
 
-/// 游戏容器用来控制悬浮工具区的短生命周期控制器。
+/// 游戏容器用来控制平台侧边栏的短生命周期控制器。
 ///
-/// 控制器不保存位置或展开状态；运行时重建后始终回到默认收起状态。
-class GameToolDockController {
-  _GameToolDockState? _state;
+/// 控制器不持久化打开状态；运行时重建后始终保持关闭。
+class GameSidebarController {
+  _GameSidebarState? _state;
 
-  bool get isMoving => _state?._moving ?? false;
+  bool get isOpen => _state?._open ?? false;
 
-  void openTools() => _state?._openTools();
+  void open() => _state?._openSidebar();
 
   bool showFromSdk() => _state?._showFromSdk() ?? false;
 
   bool hideFromSdk() => _state?._hideFromSdk() ?? false;
 
-  void beginMoveMode() => _state?._beginMoveMode();
-
   bool closeTopLayer() => _state?._closeTopLayer() ?? false;
 
-  void restoreFocus() => _state?._restoreDockFocus();
+  void restoreFocus() => _state?._restoreSidebarFocus();
 
-  KeyEventResult handleMoveKey(KeyEvent event) {
-    return _state?._handleMoveKey(event) ?? KeyEventResult.ignored;
-  }
-
-  void _attach(_GameToolDockState state) {
+  void _attach(_GameSidebarState state) {
     _state = state;
   }
 
-  void _detach(_GameToolDockState state) {
+  void _detach(_GameSidebarState state) {
     if (identical(_state, state)) _state = null;
   }
 }
 
 /// 让游戏运行面统一接管遥控器、键盘和手柄快捷键。
 ///
-/// 移动悬浮球时方向键、确认键和返回键由移动模式优先消费；其余状态下，
-/// F10/Menu 打开工具，返回键交给页面按“面板 -> 工具 -> 页面”的顺序处理。
+/// F10/Menu 打开侧边栏；返回键交给页面按“覆盖层 -> 侧边栏”的顺序处理，
+/// 不允许直接离开游戏。
 class GameRuntimeShortcutScope extends StatefulWidget {
   const GameRuntimeShortcutScope({
     super.key,
     required this.controller,
     required this.onBack,
-    required this.onOpenTools,
-    required this.onMoveTools,
+    required this.onOpenSidebar,
     required this.child,
   });
 
-  final GameToolDockController controller;
+  final GameSidebarController controller;
   final VoidCallback onBack;
-  final VoidCallback onOpenTools;
-  final VoidCallback onMoveTools;
+  final VoidCallback onOpenSidebar;
   final Widget child;
 
   @override
@@ -106,20 +98,10 @@ class _GameRuntimeShortcutScopeState extends State<GameRuntimeShortcutScope> {
   }
 
   bool _handleRuntimeHardwareKey(KeyEvent event) {
-    if (widget.controller.handleMoveKey(event) == KeyEventResult.handled) {
-      return true;
-    }
-    final intent = PlaymeshShortcutRegistry.resolveRawKeyEvent(
-      event,
-      altPressed: HardwareKeyboard.instance.isAltPressed,
-    );
+    final intent = PlaymeshShortcutRegistry.resolveRawKeyEvent(event);
     if (intent is PlaymeshOpenMenuIntent ||
-        intent is PlaymeshOpenGameToolsIntent) {
-      widget.onOpenTools();
-      return true;
-    }
-    if (intent is PlaymeshMoveGameToolsIntent) {
-      widget.onMoveTools();
+        intent is PlaymeshOpenGameSidebarIntent) {
+      widget.onOpenSidebar();
       return true;
     }
     if (intent is PlaymeshBackIntent) {
@@ -143,21 +125,14 @@ class _GameRuntimeShortcutScopeState extends State<GameRuntimeShortcutScope> {
           ),
           PlaymeshOpenMenuIntent: CallbackAction<PlaymeshOpenMenuIntent>(
             onInvoke: (_) {
-              widget.onOpenTools();
+              widget.onOpenSidebar();
               return null;
             },
           ),
-          PlaymeshOpenGameToolsIntent:
-              CallbackAction<PlaymeshOpenGameToolsIntent>(
+          PlaymeshOpenGameSidebarIntent:
+              CallbackAction<PlaymeshOpenGameSidebarIntent>(
                 onInvoke: (_) {
-                  widget.onOpenTools();
-                  return null;
-                },
-              ),
-          PlaymeshMoveGameToolsIntent:
-              CallbackAction<PlaymeshMoveGameToolsIntent>(
-                onInvoke: (_) {
-                  widget.onMoveTools();
+                  widget.onOpenSidebar();
                   return null;
                 },
               ),
@@ -168,7 +143,7 @@ class _GameRuntimeShortcutScopeState extends State<GameRuntimeShortcutScope> {
             if (_hardwareConsumedKeys.contains(event.physicalKey)) {
               return KeyEventResult.handled;
             }
-            return widget.controller.handleMoveKey(event);
+            return KeyEventResult.ignored;
           },
           child: widget.child,
         ),
@@ -177,14 +152,15 @@ class _GameRuntimeShortcutScopeState extends State<GameRuntimeShortcutScope> {
   }
 }
 
-/// App 游戏容器共用的悬浮工具区。
+/// App 游戏容器共用的平台侧边栏。
 ///
-/// 工具区显式设置前景色和背景色，避免被游戏页面或 App 主题污染。
-class GameToolDock extends StatefulWidget {
-  const GameToolDock({
+/// 侧边栏不提供常驻入口；只能由返回键、菜单快捷键或 SDK 打开。
+class GameSidebar extends StatefulWidget {
+  const GameSidebar({
     super.key,
-    required this.backTooltip,
+    required this.backLabel,
     required this.onBack,
+    required this.onContinue,
     required this.onReload,
     required this.showPerformance,
     required this.onTogglePerformance,
@@ -197,8 +173,9 @@ class GameToolDock extends StatefulWidget {
     this.controller,
   });
 
-  final String backTooltip;
+  final String backLabel;
   final VoidCallback onBack;
+  final VoidCallback onContinue;
   final VoidCallback onReload;
   final bool showPerformance;
   final VoidCallback onTogglePerformance;
@@ -207,132 +184,47 @@ class GameToolDock extends StatefulWidget {
   final Object? resetKey;
   final VoidCallback? onShare;
   final VoidCallback? onOpenLogs;
-  final List<GameToolAction> secondaryActions;
-  final GameToolDockController? controller;
+  final List<GameSidebarAction> secondaryActions;
+  final GameSidebarController? controller;
 
   @override
-  State<GameToolDock> createState() => _GameToolDockState();
+  State<GameSidebar> createState() => _GameSidebarState();
 }
 
-class _GameToolDockState extends State<GameToolDock> {
-  static const _dockWidth = 48.0;
-  static const _menuWidth = 220.0;
-  static const _moveStep = 16.0;
-
-  final FocusNode _collapsedFocus = FocusNode(
-    debugLabel: 'game-tools-collapsed',
+class _GameSidebarState extends State<GameSidebar> {
+  final FocusNode _continueFocus = FocusNode(
+    debugLabel: 'game-sidebar-continue',
   );
-  final FocusNode _collapseFocus = FocusNode(debugLabel: 'game-tools-collapse');
-  final FocusNode _backFocus = FocusNode(debugLabel: 'game-tools-back');
-  final FocusNode _reloadFocus = FocusNode(debugLabel: 'game-tools-reload');
-  final FocusNode _shareFocus = FocusNode(debugLabel: 'game-tools-share');
-  final FocusNode _logsFocus = FocusNode(debugLabel: 'game-tools-logs');
-  final FocusNode _enterFullscreenFocus = FocusNode(
-    debugLabel: 'game-tools-enter-fullscreen',
-  );
-  final FocusNode _exitFullscreenFocus = FocusNode(
-    debugLabel: 'game-tools-exit-fullscreen',
-  );
-  final FocusNode _moreFocus = FocusNode(debugLabel: 'game-tools-more');
-  final List<FocusNode> _menuFocusNodes = [];
-
-  Offset? _offset;
-  Offset? _resolvedOffset;
-  Offset? _moveOrigin;
-  BoxConstraints? _lastConstraints;
-  double _lastTopInset = 0;
-  double _lastBottomInset = 0;
-  bool _expanded = false;
-  bool _menuVisible = false;
-  bool _moving = false;
-  bool _visible = true;
-  bool _openedFromSdk = false;
-  FocusNode? _lastDockFocus;
-
-  List<FocusNode> get _dockFocusNodes => [
-    _collapsedFocus,
-    _collapseFocus,
-    _backFocus,
-    _reloadFocus,
-    _shareFocus,
-    _logsFocus,
-    _enterFullscreenFocus,
-    _exitFullscreenFocus,
-    _moreFocus,
-  ];
+  bool _open = false;
 
   @override
   void initState() {
     super.initState();
     widget.controller?._attach(this);
-    _syncMenuFocusNodes();
-    for (final node in _dockFocusNodes) {
-      node.addListener(_rememberDockFocus);
-    }
   }
 
   @override
-  void didUpdateWidget(covariant GameToolDock oldWidget) {
+  void didUpdateWidget(covariant GameSidebar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
     }
-    _syncMenuFocusNodes();
     if (oldWidget.resetKey != widget.resetKey) {
-      _expanded = false;
-      _menuVisible = false;
-      _moving = false;
-      _visible = true;
-      _openedFromSdk = false;
-      _offset = null;
-      _moveOrigin = null;
+      _open = false;
     }
   }
 
   @override
   void dispose() {
     widget.controller?._detach(this);
-    for (final node in _dockFocusNodes) {
-      node
-        ..removeListener(_rememberDockFocus)
-        ..dispose();
-    }
-    for (final node in _menuFocusNodes) {
-      node.dispose();
-    }
+    _continueFocus.dispose();
     super.dispose();
   }
 
-  void _syncMenuFocusNodes() {
-    final actionCount = widget.secondaryActions.length + 1;
-    while (_menuFocusNodes.length < actionCount) {
-      _menuFocusNodes.add(
-        FocusNode(debugLabel: 'game-tools-menu-${_menuFocusNodes.length}'),
-      );
-    }
-    while (_menuFocusNodes.length > actionCount) {
-      _menuFocusNodes.removeLast().dispose();
-    }
-  }
-
-  void _rememberDockFocus() {
-    for (final node in _dockFocusNodes) {
-      if (node.hasFocus) {
-        _lastDockFocus = node;
-        return;
-      }
-    }
-  }
-
-  int get _buttonCount =>
-      6 +
-      (widget.onShare == null ? 0 : 1) +
-      (widget.onOpenLogs == null ? 0 : 1);
-
-  List<GameToolAction> _menuActions(BuildContext context) => [
+  List<GameSidebarAction> _additionalActions(BuildContext context) => [
     ...widget.secondaryActions,
-    GameToolAction(
+    GameSidebarAction(
       icon: Icons.speed,
       label: widget.showPerformance
           ? context.tr('game.performance_hide')
@@ -343,457 +235,206 @@ class _GameToolDockState extends State<GameToolDock> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
     return LayoutBuilder(
       builder: (context, constraints) {
         final colorScheme = Theme.of(context).colorScheme;
-        final menuActions = _menuActions(context);
+        final portrait = constraints.maxHeight >= constraints.maxWidth;
+        final width = min(
+          constraints.maxWidth,
+          portrait
+              ? min(360.0, constraints.maxWidth * 0.88)
+              : min(420.0, constraints.maxWidth * 0.46),
+        );
         final animationDuration = MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
-            : const Duration(milliseconds: 180);
-        final topInset = MediaQuery.paddingOf(context).top + 12;
-        final bottomInset = MediaQuery.paddingOf(context).bottom + 12;
-        final availableHeight = max(
-          _dockWidth,
-          constraints.maxHeight - topInset - bottomInset,
-        );
-        final expandedExtent = _dockWidth * _buttonCount;
-        final horizontal =
-            _expanded &&
-            availableHeight < expandedExtent &&
-            constraints.maxWidth >= expandedExtent + 24;
-        final dockSize = !_expanded
-            ? const Size(_dockWidth, _dockWidth)
-            : horizontal
-            ? Size(expandedExtent, _dockWidth)
-            : Size(_dockWidth, min(expandedExtent, availableHeight));
-        final fallback = Offset(
-          constraints.maxWidth - dockSize.width - 12,
-          topInset,
-        );
-        final offset = _clampOffset(
-          _offset ?? fallback,
-          constraints,
-          dockSize,
-          topInset,
-          bottomInset,
-        );
-        _resolvedOffset = offset;
-        _lastConstraints = constraints;
-        _lastTopInset = topInset;
-        _lastBottomInset = bottomInset;
-        final menuHeight = min(
-          menuActions.length * 52.0,
-          max(52.0, constraints.maxHeight - 16),
-        );
-        final menuLeft =
-            (horizontal
-                    ? offset.dx + dockSize.width - _menuWidth
-                    : offset.dx - _menuWidth - 8)
-                .clamp(8.0, max(8.0, constraints.maxWidth - _menuWidth - 8))
-                .toDouble();
-        final menuTop =
-            (horizontal ? offset.dy + dockSize.height + 8 : offset.dy)
-                .clamp(8.0, max(8.0, constraints.maxHeight - menuHeight - 8))
-                .toDouble();
-        return Stack(
-          children: [
-            Positioned(
-              left: offset.dx,
-              top: offset.dy,
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  if (_moving) return;
-                  setState(() {
-                    _offset = _clampOffset(
-                      offset + details.delta,
-                      constraints,
-                      dockSize,
-                      topInset,
-                      bottomInset,
-                    );
-                  });
-                },
-                child: Material(
-                  color: _moving
-                      ? colorScheme.tertiaryContainer
-                      : colorScheme.inverseSurface.withAlpha(240),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: BorderSide(
-                      color: _moving
-                          ? colorScheme.tertiary
-                          : colorScheme.primary,
-                      width: _moving ? 2 : 1,
-                    ),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: IconTheme(
-                    data: IconThemeData(
-                      color: _moving
-                          ? colorScheme.onTertiaryContainer
-                          : colorScheme.onInverseSurface,
-                    ),
-                    child: AnimatedSize(
+            : const Duration(milliseconds: 220);
+        return ExcludeFocus(
+          excluding: !_open,
+          child: ExcludeSemantics(
+            excluding: !_open,
+            child: IgnorePointer(
+              ignoring: !_open,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: AnimatedOpacity(
                       duration: animationDuration,
-                      curve: Curves.easeOutCubic,
-                      child: AnimatedSwitcher(
-                        duration: animationDuration,
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: Tween<double>(
-                              begin: 0.92,
-                              end: 1,
-                            ).animate(animation),
-                            child: child,
-                          ),
-                        ),
-                        child: _expanded
-                            ? KeyedSubtree(
-                                key: const ValueKey('expanded-game-tools'),
-                                child: _expandedDock(
-                                  axis: horizontal
-                                      ? Axis.horizontal
-                                      : Axis.vertical,
-                                  viewportExtent: horizontal
-                                      ? dockSize.width
-                                      : dockSize.height,
-                                ),
-                              )
-                            : KeyedSubtree(
-                                key: const ValueKey('collapsed-game-tools'),
-                                child: _collapsedDock(),
-                              ),
+                      opacity: _open ? 1 : 0,
+                      child: GestureDetector(
+                        key: const Key('game-sidebar-dismiss-area'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _closeSidebar,
+                        child: ColoredBox(color: Colors.black.withAlpha(150)),
                       ),
                     ),
                   ),
-                ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: AnimatedSlide(
+                      duration: animationDuration,
+                      curve: Curves.easeOutCubic,
+                      offset: _open ? Offset.zero : const Offset(1, 0),
+                      child: SizedBox(
+                        key: const Key('game-sidebar'),
+                        width: width,
+                        height: constraints.maxHeight,
+                        child: Material(
+                          color: colorScheme.surface,
+                          elevation: 16,
+                          child: SafeArea(
+                            left: false,
+                            child: _buildSidebar(context),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (_menuVisible) ...[
-              Positioned.fill(
-                child: GestureDetector(
-                  key: const Key('game-action-menu-dismiss-area'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _closeMenu,
-                ),
-              ),
-              Positioned(
-                left: menuLeft,
-                top: menuTop,
-                width: _menuWidth,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: menuHeight),
-                  child: _GameActionMenu(
-                    actions: menuActions,
-                    focusNodes: _menuFocusNodes,
-                    onSelected: (action) {
-                      _lastDockFocus = _moreFocus;
-                      _runToolAction(action.onPressed);
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ],
+          ),
         );
       },
     );
   }
 
-  Widget _collapsedDock() {
+  Widget _buildSidebar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Semantics(
-      liveRegion: _moving,
-      label: _moving
-          ? context.tr('game.tools_move')
-          : context.tr('game.tools_open'),
-      child: IconButton(
-        key: const Key('game-tool-dock-handle'),
-        focusNode: _collapsedFocus,
-        tooltip: _moving
-            ? context.tr('game.tools_move')
-            : context.tr('game.tools_open'),
-        onPressed: _moving ? _ignoreMoveActivation : _openTools,
-        icon: Icon(
-          _moving ? Icons.open_with_rounded : Icons.sports_esports_outlined,
-          color: _moving
-              ? colorScheme.onTertiaryContainer
-              : colorScheme.onInverseSurface,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 16, 12),
+          child: Row(
+            children: [
+              Icon(Icons.sports_esports_outlined, color: colorScheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  context.tr('game.sidebar_title'),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+        Divider(height: 1, color: colorScheme.outlineVariant),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              _GameSidebarActionTile(
+                key: const Key('game-sidebar-continue'),
+                focusNode: _continueFocus,
+                icon: Icons.play_arrow_rounded,
+                label: context.tr('game.continue'),
+                emphasized: true,
+                onPressed: _closeSidebar,
+              ),
+              _GameSidebarActionTile(
+                key: const Key('game-sidebar-reload'),
+                icon: Icons.refresh,
+                label: context.tr('game.reload'),
+                onPressed: () => _runAction(widget.onReload),
+              ),
+              if (widget.onShare case final onShare?)
+                _GameSidebarActionTile(
+                  key: const Key('game-sidebar-share'),
+                  icon: Icons.qr_code_2_outlined,
+                  label: context.tr('game.share'),
+                  onPressed: () => _runAction(onShare),
+                ),
+              if (widget.onOpenLogs case final onOpenLogs?)
+                _GameSidebarActionTile(
+                  key: const Key('game-sidebar-logs'),
+                  icon: Icons.receipt_long_outlined,
+                  label: context.tr('game.logs'),
+                  onPressed: () => _runAction(onOpenLogs),
+                ),
+              _GameSidebarActionTile(
+                key: const Key('game-sidebar-enter-fullscreen'),
+                icon: Icons.fullscreen,
+                label: context.tr('game.fullscreen_enter'),
+                onPressed: () => _runAction(widget.onEnterFullscreen),
+              ),
+              _GameSidebarActionTile(
+                key: const Key('game-sidebar-exit-fullscreen'),
+                icon: Icons.fullscreen_exit,
+                label: context.tr('game.fullscreen_exit'),
+                onPressed: () => _runAction(widget.onExitFullscreen),
+              ),
+              for (final action in _additionalActions(context))
+                _GameSidebarActionTile(
+                  icon: action.icon,
+                  label: action.label,
+                  onPressed: () => _runAction(action.onPressed),
+                ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colorScheme.outlineVariant),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: _GameSidebarActionTile(
+            key: const Key('game-sidebar-exit'),
+            icon: Icons.exit_to_app,
+            label: widget.backLabel,
+            foregroundColor: colorScheme.error,
+            onPressed: () => _runAction(widget.onBack),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _expandedDock({required Axis axis, required double viewportExtent}) {
-    final buttons = <Widget>[
-      IconButton(
-        key: const Key('game-tool-collapse'),
-        focusNode: _collapseFocus,
-        tooltip: context.tr('game.tools_close'),
-        onPressed: _collapseTools,
-        icon: const Icon(Icons.unfold_less),
-      ),
-      IconButton(
-        key: const Key('game-tool-back'),
-        focusNode: _backFocus,
-        tooltip: widget.backTooltip,
-        onPressed: () => _runToolAction(widget.onBack),
-        icon: const Icon(Icons.arrow_back),
-      ),
-      IconButton(
-        key: const Key('game-tool-reload'),
-        focusNode: _reloadFocus,
-        tooltip: context.tr('game.reload'),
-        onPressed: () => _runToolAction(widget.onReload),
-        icon: const Icon(Icons.refresh),
-      ),
-      if (widget.onShare case final onShare?)
-        IconButton(
-          key: const Key('game-tool-share'),
-          focusNode: _shareFocus,
-          tooltip: context.tr('game.share'),
-          onPressed: () {
-            _lastDockFocus = _shareFocus;
-            _runToolAction(onShare);
-          },
-          icon: const Icon(Icons.qr_code_2_outlined),
-        ),
-      if (widget.onOpenLogs case final onOpenLogs?)
-        IconButton(
-          key: const Key('game-tool-logs'),
-          focusNode: _logsFocus,
-          tooltip: context.tr('game.logs'),
-          onPressed: () {
-            _lastDockFocus = _logsFocus;
-            _runToolAction(onOpenLogs);
-          },
-          icon: const Icon(Icons.receipt_long_outlined),
-        ),
-      IconButton(
-        key: const Key('game-tool-enter-fullscreen'),
-        focusNode: _enterFullscreenFocus,
-        tooltip: context.tr('game.fullscreen_enter'),
-        onPressed: () => _runToolAction(widget.onEnterFullscreen),
-        icon: const Icon(Icons.fullscreen),
-      ),
-      IconButton(
-        key: const Key('game-tool-exit-fullscreen'),
-        focusNode: _exitFullscreenFocus,
-        tooltip: context.tr('game.fullscreen_exit'),
-        onPressed: () => _runToolAction(widget.onExitFullscreen),
-        icon: const Icon(Icons.fullscreen_exit),
-      ),
-      IconButton(
-        key: const Key('game-tool-more'),
-        focusNode: _moreFocus,
-        tooltip: context.tr('game.more_actions'),
-        icon: const Icon(Icons.more_vert),
-        onPressed: _toggleMenu,
-      ),
-    ];
-    final dock = axis == Axis.horizontal
-        ? Row(mainAxisSize: MainAxisSize.min, children: buttons)
-        : Column(mainAxisSize: MainAxisSize.min, children: buttons);
-    return SizedBox(
-      width: axis == Axis.horizontal ? viewportExtent : _dockWidth,
-      height: axis == Axis.vertical ? viewportExtent : _dockWidth,
-      child: SingleChildScrollView(scrollDirection: axis, child: dock),
-    );
-  }
-
-  Offset _clampOffset(
-    Offset value,
-    BoxConstraints constraints,
-    Size dockSize,
-    double topInset,
-    double bottomInset,
-  ) {
-    final maxX = max(0.0, constraints.maxWidth - dockSize.width);
-    final maxY = max(
-      topInset,
-      constraints.maxHeight - bottomInset - dockSize.height,
-    );
-    return Offset(
-      value.dx.clamp(0.0, maxX).toDouble(),
-      value.dy.clamp(topInset, maxY).toDouble(),
-    );
-  }
-
-  void _openTools() {
-    if (!mounted || _moving) return;
+  void _openSidebar() {
+    if (!mounted || _open) return;
     setState(() {
-      _visible = true;
-      _expanded = true;
-      _menuVisible = false;
-      _openedFromSdk = false;
+      _open = true;
     });
-    _requestFocus(_collapseFocus);
+    _requestFocus(_continueFocus);
   }
 
   bool _showFromSdk() {
     if (!mounted) return false;
     setState(() {
-      _visible = true;
-      _expanded = true;
-      _menuVisible = false;
-      _moving = false;
-      _openedFromSdk = true;
+      _open = true;
     });
-    _requestFocus(_collapseFocus);
+    _requestFocus(_continueFocus);
     return true;
   }
 
   bool _hideFromSdk() {
     if (!mounted) return false;
-    setState(() {
-      _visible = false;
-      _expanded = false;
-      _menuVisible = false;
-      _moving = false;
-      _openedFromSdk = false;
-    });
+    _closeSidebar();
     return true;
   }
 
-  void _ignoreMoveActivation() {
-    // 移动模式的确认键由 _handleMoveKey 保存位置，避免同时触发展开动作。
-  }
-
-  void _collapseTools() {
-    if (!mounted) return;
-    final hide = _openedFromSdk;
-    setState(() {
-      _expanded = false;
-      _menuVisible = false;
-      _visible = !hide;
-      _openedFromSdk = false;
-    });
-    if (!hide) _requestFocus(_collapsedFocus);
-  }
-
-  void _runToolAction(VoidCallback action) {
-    if (!mounted) return;
-    final hide = _openedFromSdk;
-    setState(() {
-      _expanded = false;
-      _menuVisible = false;
-      _visible = !hide;
-      _openedFromSdk = false;
-    });
+  void _runAction(VoidCallback action) {
+    _closeSidebar(resumeGame: false);
     action();
-    if (!hide) _requestFocus(_collapsedFocus);
   }
 
-  void _toggleMenu() {
-    if (!mounted || _moving) return;
-    _lastDockFocus = _moreFocus;
-    if (_menuVisible) {
-      _closeMenu();
-      return;
-    }
-    setState(() => _menuVisible = true);
-    if (_menuFocusNodes.isNotEmpty) {
-      _requestFocus(_menuFocusNodes.first);
-    }
-  }
-
-  void _closeMenu() {
-    if (!mounted || !_menuVisible) return;
-    setState(() => _menuVisible = false);
-    _requestFocus(_moreFocus);
+  void _closeSidebar({bool resumeGame = true}) {
+    if (!mounted || !_open) return;
+    setState(() {
+      _open = false;
+    });
+    if (resumeGame) widget.onContinue();
   }
 
   bool _closeTopLayer() {
-    if (_moving) {
-      _finishMove(commit: false);
-      return true;
-    }
-    if (_menuVisible) {
-      _closeMenu();
-      return true;
-    }
-    if (_expanded) {
-      _collapseTools();
+    if (_open) {
+      _closeSidebar();
       return true;
     }
     return false;
   }
 
-  void _beginMoveMode() {
-    if (!mounted) return;
-    final origin = _resolvedOffset;
-    if (origin == null) return;
-    setState(() {
-      _expanded = false;
-      _menuVisible = false;
-      _moving = true;
-      _visible = true;
-      _openedFromSdk = false;
-      _moveOrigin = origin;
-      _offset = origin;
-    });
-    _requestFocus(_collapsedFocus);
-  }
-
-  KeyEventResult _handleMoveKey(KeyEvent event) {
-    if (!_moving || event is! KeyDownEvent) return KeyEventResult.ignored;
-    final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.browserBack ||
-        key == LogicalKeyboardKey.goBack ||
-        key == LogicalKeyboardKey.gameButtonB) {
-      _finishMove(commit: false);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter ||
-        key == LogicalKeyboardKey.select ||
-        key == LogicalKeyboardKey.gameButtonA) {
-      _finishMove(commit: true);
-      return KeyEventResult.handled;
-    }
-    final delta = switch (key) {
-      LogicalKeyboardKey.arrowLeft => const Offset(-_moveStep, 0),
-      LogicalKeyboardKey.arrowRight => const Offset(_moveStep, 0),
-      LogicalKeyboardKey.arrowUp => const Offset(0, -_moveStep),
-      LogicalKeyboardKey.arrowDown => const Offset(0, _moveStep),
-      _ => null,
-    };
-    if (delta == null) return KeyEventResult.ignored;
-    final constraints = _lastConstraints;
-    final current = _offset ?? _resolvedOffset;
-    if (constraints == null || current == null) return KeyEventResult.handled;
-    setState(() {
-      _offset = _clampOffset(
-        current + delta,
-        constraints,
-        const Size(_dockWidth, _dockWidth),
-        _lastTopInset,
-        _lastBottomInset,
-      );
-    });
-    return KeyEventResult.handled;
-  }
-
-  void _finishMove({required bool commit}) {
-    if (!mounted || !_moving) return;
-    setState(() {
-      if (!commit) _offset = _moveOrigin;
-      _moveOrigin = null;
-      _moving = false;
-    });
-    _requestFocus(_collapsedFocus);
-  }
-
-  void _restoreDockFocus() {
-    final target = _lastDockFocus;
-    if (target != null && target.canRequestFocus && target.context != null) {
-      _requestFocus(target);
-      return;
-    }
-    _requestFocus(_expanded ? _collapseFocus : _collapsedFocus);
+  void _restoreSidebarFocus() {
+    if (_open) _requestFocus(_continueFocus);
   }
 
   void _requestFocus(FocusNode node) {
@@ -804,59 +445,59 @@ class _GameToolDockState extends State<GameToolDock> {
   }
 }
 
-class _GameActionMenu extends StatelessWidget {
-  const _GameActionMenu({
-    required this.actions,
-    required this.focusNodes,
-    required this.onSelected,
+class _GameSidebarActionTile extends StatelessWidget {
+  const _GameSidebarActionTile({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.focusNode,
+    this.emphasized = false,
+    this.foregroundColor,
   });
 
-  final List<GameToolAction> actions;
-  final List<FocusNode> focusNodes;
-  final ValueChanged<GameToolAction> onSelected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final FocusNode? focusNode;
+  final bool emphasized;
+  final Color? foregroundColor;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      key: const Key('game-action-menu'),
-      color: colorScheme.surface,
-      borderRadius: BorderRadius.circular(8),
-      clipBehavior: Clip.antiAlias,
-      elevation: 4,
-      child: DefaultTextStyle(
-        style: TextStyle(
-          color: colorScheme.onSurface,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-        child: IconTheme(
-          data: IconThemeData(color: colorScheme.onSurface),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var index = 0; index < actions.length; index++)
-                  InkWell(
-                    key: ValueKey('game-action-menu-item-$index'),
-                    focusNode: focusNodes[index],
-                    autofocus: index == 0,
-                    onTap: () => onSelected(actions[index]),
-                    child: SizedBox(
-                      height: 52,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Icon(actions[index].icon),
-                            const SizedBox(width: 12),
-                            Expanded(child: Text(actions[index].label)),
-                          ],
-                        ),
+    final color = foregroundColor ?? colorScheme.onSurface;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        color: emphasized ? colorScheme.primaryContainer : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          focusNode: focusNode,
+          onTap: onPressed,
+          child: SizedBox(
+            height: 52,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(
+                children: [
+                  Icon(icon, color: color),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 15,
+                        fontWeight: emphasized
+                            ? FontWeight.w800
+                            : FontWeight.w600,
                       ),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

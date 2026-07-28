@@ -1,7 +1,9 @@
 package captcha
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"image"
 	"image/color"
 	"image/png"
@@ -14,6 +16,24 @@ import (
 	"testing"
 	"time"
 )
+
+func TestWebPDecoderIsRegistered(t *testing.T) {
+	content, err := base64.StdEncoding.DecodeString(
+		"UklGRkYAAABXRUJQVlA4IDoAAABwAgCdASoEAAQAAYcIhYWIhYSIiQIADAzdrBLe" +
+			"ABAAAAEAAAEAAPKn5Nn/0v8//Zxn/6H3QAAAAAA=",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The common browser feature-detection sample omits the RIFF alignment
+	// byte. Go's decoder intentionally requires the complete container.
+	content = append(content, 0)
+	if _, format, err := image.Decode(bytes.NewReader(content)); err != nil {
+		t.Fatalf("decode WebP: %v", err)
+	} else if format != "webp" {
+		t.Fatalf("decoded format = %q, want webp", format)
+	}
+}
 
 func TestLocalImageProviderChoosesRandomImages(t *testing.T) {
 	directory := t.TempDir()
@@ -97,6 +117,38 @@ func TestRemoteImageProviderConsumesAndRefillsCache(t *testing.T) {
 	}
 	if missingCacheBuster.Load() || duplicateCacheBuster.Load() {
 		t.Fatal("remote image requests must carry a unique cache-busting query")
+	}
+}
+
+func TestRemoteImageProviderFollowsImageRedirect(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(
+		writer http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.URL.Path == "/random" {
+			http.Redirect(writer, request, server.URL+"/image.webp", http.StatusMovedPermanently)
+			return
+		}
+		if accept := request.Header.Get("Accept"); accept !=
+			"image/webp,image/png,image/jpeg,image/gif" {
+			t.Errorf("Accept = %q", accept)
+		}
+		writer.Header().Set("Content-Type", "image/png")
+		source := image.NewNRGBA(image.Rect(0, 0, 96, 96))
+		if err := png.Encode(writer, source); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+
+	provider := newImageProvider(Options{
+		ImageSource:          "remote",
+		RemoteImageURL:       server.URL + "/random",
+		RemoteImageCacheSize: 1,
+	}, nil)
+	if err := provider.Warm(context.Background(), 64, 64); err != nil {
+		t.Fatal(err)
 	}
 }
 

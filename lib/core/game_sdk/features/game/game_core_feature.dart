@@ -281,11 +281,11 @@ interface PlaymeshAppApi {
   isAvailable(): boolean;
   /** 打开 App 的“二维码与链接”界面；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.openSharePanel */
   openSharePanel(): Promise<void>;
-  /** 显示并聚焦 App 游戏工具栏。 @playmesh-completion playmesh.app.showToolDock */
-  showToolDock(): Promise<void>;
-  /** 隐藏 App 游戏工具栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideToolDock */
-  hideToolDock(): Promise<void>;
-  /** 请求 App 结束当前游戏并返回上一页。 @playmesh-completion playmesh.app.exitGame */
+  /** 显示并聚焦 App 游戏侧边栏。 @playmesh-completion playmesh.app.showGameSidebar */
+  showGameSidebar(): Promise<void>;
+  /** 隐藏 App 游戏侧边栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideGameSidebar */
+  hideGameSidebar(): Promise<void>;
+  /** 请求 App 正常结束当前游戏并返回上一页面。 @playmesh-completion playmesh.app.exitGame */
   exitGame(): Promise<void>;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
@@ -435,7 +435,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "2.4.0";
+  const PLAYMESH_SDK_VERSION = "3.0.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -457,6 +457,9 @@ interface Window { playmesh: PlaymeshApi; }
   const binaryPending = new Map();
   const binaryChannels = new Map();
   let browserNicknameUi = null;
+  let browserBackInterceptionInstalled = false;
+  let browserBackExitRequested = false;
+  let browserBackGuardUrl = null;
   let capabilityConsentUi = null;
   let transportSequence = 0;
   const pending = new Map();

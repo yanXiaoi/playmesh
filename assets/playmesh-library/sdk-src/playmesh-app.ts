@@ -10,7 +10,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "2.2.0";
+  const PLAYMESH_APP_SDK_VERSION = "3.0.0";
   const PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY =
     typeof Symbol === "function" && typeof Symbol.for === "function"
       ? Symbol.for("playmesh.platform-ui.configuration")
@@ -251,16 +251,16 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       });
   }
 
-  function showAppToolDock() {
+  function showAppGameSidebar() {
     captureAppUiReturnFocus();
-    return request("app.ui.toolDock.show").catch((error) => {
+    return request("app.ui.gameSidebar.show").catch((error) => {
       clearAppUiReturnFocus();
       throw error;
     });
   }
 
-  function hideAppToolDock() {
-    return request("app.ui.toolDock.hide").then((result) => {
+  function hideAppGameSidebar() {
+    return request("app.ui.gameSidebar.hide").then((result) => {
       restoreAppUiReturnFocus();
       return result;
     });
@@ -272,11 +272,11 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     openSharePanel() {
       return openAppSharePanel();
     },
-    showToolDock() {
-      return showAppToolDock();
+    showGameSidebar() {
+      return showAppGameSidebar();
     },
-    hideToolDock() {
-      return hideAppToolDock();
+    hideGameSidebar() {
+      return hideAppGameSidebar();
     },
     exitGame() {
       return request("app.game.exit");

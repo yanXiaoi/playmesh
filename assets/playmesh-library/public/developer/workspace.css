@@ -2698,7 +2698,12 @@ body :where(input[type="checkbox"], input[type="radio"]),
 }
 
 .capability-picker {
+  position: relative;
   min-width: 0;
+}
+
+.capability-picker.open {
+  z-index: 8;
 }
 
 .capability-picker-field {
@@ -2767,10 +2772,13 @@ body :where(input[type="checkbox"], input[type="radio"]),
 }
 
 .capability-picker-panel {
+  position: absolute;
+  z-index: 9;
+  inset: calc(100% + 5px) 0 auto;
   display: none;
   max-height: min(300px, 42vh);
   overflow-y: auto;
-  margin-top: 5px;
+  margin: 0;
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -3135,4 +3143,254 @@ body :where(input[type="checkbox"], input[type="radio"]),
 .tree.tree .file.active > .lucide,
 .tree.tree .file.active > .entry-badge {
   color: var(--text);
+}
+
+/* Refined project forms and Element-style transient workspace messages. */
+.workspace-messages {
+  position: fixed;
+  z-index: 240;
+  inset: 16px 12px auto;
+  display: grid;
+  justify-items: center;
+  pointer-events: none;
+}
+
+.workspace-message {
+  display: flex;
+  max-width: min(520px, calc(100vw - 24px));
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 52%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  opacity: 0;
+  transform: translateY(-10px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.workspace-message.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.workspace-message .lucide {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  stroke-width: 2.4;
+}
+
+.project-dialog,
+.manifest-dialog {
+  border-color: color-mix(in srgb, var(--blue) 20%, var(--line));
+  background: var(--surface);
+}
+
+.project-form,
+.manifest-form {
+  scrollbar-gutter: stable;
+}
+
+.project-form {
+  gap: 12px 16px;
+  padding: 16px 18px 18px;
+}
+
+.project-form > label > span,
+.manifest-grid > label > span,
+.project-capabilities > strong,
+.manifest-capability-section > strong,
+#projectControllerCapabilitySection > strong,
+#controllerCapabilitySection > strong {
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+}
+
+.project-form input,
+.project-form select,
+.project-form textarea,
+.manifest-grid input,
+.manifest-grid select,
+.manifest-grid textarea,
+.manifest-tags-field input,
+.capability-picker-field {
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.project-form input:hover,
+.project-form select:hover,
+.project-form textarea:hover,
+.manifest-grid input:hover,
+.manifest-grid select:hover,
+.manifest-grid textarea:hover,
+.manifest-tags-field input:hover,
+.capability-picker-field:hover {
+  border-color: color-mix(in srgb, var(--blue) 46%, var(--line));
+}
+
+.project-capabilities {
+  gap: 7px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.project-capabilities > p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.project-form > .primary {
+  min-width: 132px;
+  justify-self: end;
+  padding-inline: 18px;
+}
+
+.manifest-tags-field {
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 5px 9px;
+}
+
+.manifest-tags-field > span {
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.manifest-tags-field .manifest-tags {
+  align-items: center;
+}
+
+.manifest-tags-field .manifest-tag {
+  min-height: 26px;
+  gap: 3px;
+  padding: 2px 3px 2px 8px;
+  color: color-mix(in srgb, var(--success) 84%, var(--text));
+  border-color: color-mix(in srgb, var(--success) 42%, var(--line));
+  background: color-mix(in srgb, var(--success) 9%, var(--surface-soft));
+}
+
+.manifest-tags-field .manifest-tag button,
+.capability-picker-chip button {
+  width: 22px !important;
+  min-width: 22px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  color: var(--muted);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.manifest-tags-field .manifest-tag button:hover,
+.capability-picker-chip button:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.manifest-tags-field .manifest-tag button .lucide,
+.capability-picker-chip button .lucide {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.4;
+}
+
+.manifest-tags-field .input-action {
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 5px;
+}
+
+#manifestTagInput,
+#projectTagInput,
+#manifestTagAdd,
+#projectTagAdd {
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+.tag-add-button {
+  width: 34px !important;
+  min-width: 34px !important;
+  padding: 0 !important;
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 46%, var(--line));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-soft));
+}
+
+.tag-add-button:hover {
+  color: var(--text);
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 18%, var(--surface-soft));
+}
+
+.tag-add-button .lucide {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.4;
+}
+
+.capability-picker-field {
+  gap: 5px;
+  padding: 5px;
+  background: color-mix(in srgb, var(--field) 88%, var(--surface-soft));
+}
+
+.capability-picker-chip {
+  gap: 3px;
+  padding: 2px 2px 2px 8px;
+  border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
+  background: color-mix(in srgb, var(--blue) 9%, var(--surface-soft));
+}
+
+.capability-picker-clear {
+  display: grid;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  place-items: center;
+  padding: 0 !important;
+  color: var(--muted);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.capability-picker-clear:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-soft);
+}
+
+.capability-picker-clear .lucide {
+  width: 14px;
+  height: 14px;
+}
+
+.capability-picker-clear:disabled {
+  visibility: hidden;
+}
+
+@media (max-width: 520px) {
+  .project-form > .primary {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .workspace-messages {
+    inset-block-start: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-message {
+    transition: none;
+  }
 }

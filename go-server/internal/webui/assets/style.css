@@ -1347,6 +1347,108 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 
+.my-private-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 260px);
+  gap: clamp(24px, 5vw, 64px);
+  align-items: center;
+  margin-top: 20px;
+  padding: clamp(24px, 4vw, 46px);
+  overflow: hidden;
+  border-radius: 28px 28px 28px 8px;
+  color: #dbe6ed;
+  background:
+    radial-gradient(circle at 88% 18%, rgb(235 90 60 / 22%), transparent 32%),
+    #172b3b;
+}
+
+.my-private-source h2 {
+  margin: 9px 0 13px;
+  color: #ffffff;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  letter-spacing: -.04em;
+}
+
+.my-private-source .eyebrow {
+  color: #ff9078;
+}
+
+.my-private-source-copy p {
+  max-width: 58ch;
+  margin: 0 0 22px;
+  color: #aebfcb;
+  line-height: 1.7;
+}
+
+.my-private-source-visual {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 22px 22px 22px 7px;
+  background: rgb(255 255 255 / 7%);
+}
+
+.my-private-source-visual img {
+  width: 100%;
+  max-width: 232px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.my-private-source-visual p {
+  max-width: 20ch;
+  margin: 0;
+  color: #aebfcb;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.notification-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px 16px 16px 5px;
+  background: #ffffff;
+}
+
+.notification-item.unread {
+  border-left: 4px solid var(--accent);
+}
+
+.notification-item > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+}
+
+.notification-item time {
+  color: var(--muted);
+  font-size: .75rem;
+}
+
+.notification-item p {
+  grid-column: 1;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.notification-item button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
 .my-packages-heading {
   display: flex;
   align-items: end;
@@ -1830,6 +1932,24 @@ pre {
 
   .my-account-bar > .row-actions {
     justify-content: flex-start;
+  }
+
+  .my-private-source {
+    grid-template-columns: 1fr;
+  }
+
+  .my-private-source-visual {
+    min-height: 180px;
+  }
+
+  .notification-item {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-item button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
   }
 }
 

@@ -26,8 +26,8 @@ void main() {
       'app.capability.invoke',
       'app.capability.dispose',
       'app.ui.openSharePanel',
-      'app.ui.toolDock.show',
-      'app.ui.toolDock.hide',
+      'app.ui.gameSidebar.show',
+      'app.ui.gameSidebar.hide',
       'app.device.fullscreen',
       'app.game.exit',
       'app.identity.syncAvatar',
@@ -64,8 +64,8 @@ void main() {
             SdkFeatureRegistry.appSdkVersion,
           ),
     );
-    expect(SdkFeatureRegistry.gameSdkVersion, '2.4.0');
-    expect(SdkFeatureRegistry.appSdkVersion, '2.2.0');
+    expect(SdkFeatureRegistry.gameSdkVersion, '3.0.0');
+    expect(SdkFeatureRegistry.appSdkVersion, '3.0.0');
     expect(
       SdkFeatureRegistry.gameSdkReleases
           .map(
@@ -76,7 +76,7 @@ void main() {
             ),
           )
           .toList(),
-      [('1.0.0', '2.4.0', '2.4.0')],
+      [('1.0.0', '3.0.0', '3.0.0')],
     );
     expect(
       SdkFeatureRegistry.appSdkReleases
@@ -88,7 +88,7 @@ void main() {
             ),
           )
           .toList(),
-      [('1.0.0', '2.2.0', '2.2.0')],
+      [('1.0.0', '3.0.0', '3.0.0')],
     );
     expect(
       SdkFeatureRegistry.gameSdkReleases.single.commandNames,
@@ -98,8 +98,8 @@ void main() {
       SdkFeatureRegistry.appSdkReleases.single.commandNames,
       SdkFeatureRegistry.appCommandNames,
     );
-    expect(SdkFeatureRegistry.resolveGameSdkVersion('1.0.0'), '2.4.0');
-    expect(SdkFeatureRegistry.resolveAppSdkVersion('1.0.0'), '2.2.0');
+    expect(SdkFeatureRegistry.resolveGameSdkVersion('1.0.0'), '3.0.0');
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('1.0.0'), '3.0.0');
     expect(
       SdkFeatureRegistry.sdkFile('playmesh.js'),
       allOf(
@@ -122,8 +122,8 @@ void main() {
         contains('readonly version: "${SdkFeatureRegistry.appSdkVersion}"'),
         contains('avatar: string | null'),
         contains('openSharePanel(): Promise<void>'),
-        contains('showToolDock(): Promise<void>'),
-        contains('hideToolDock(): Promise<void>'),
+        contains('showGameSidebar(): Promise<void>'),
+        contains('hideGameSidebar(): Promise<void>'),
         contains('exitGame(): Promise<void>'),
         isNot(contains('playmesh.authority.openSharePanel')),
         isNot(contains('__PLAYMESH')),
@@ -135,10 +135,10 @@ void main() {
   test('版本选择拒绝未注册范围且兼容版仍从统一 Dart 源组装', () {
     expect(
       SdkFeatureRegistry.sdkFile('playmesh.js', version: '1.0.0'),
-      SdkFeatureRegistry.sdkFile('playmesh.js', version: '2.4.0'),
+      SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.0.0'),
     );
     expect(
-      () => SdkFeatureRegistry.sdkFile('playmesh.js', version: '2.4.1'),
+      () => SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.0.1'),
       throwsUnsupportedError,
     );
     expect(

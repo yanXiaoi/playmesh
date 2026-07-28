@@ -4,14 +4,17 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'windows_local_game_web_view.dart';
+import '../../core/capabilities/web_permission/web_permission_gate.dart';
 import '../../core/developer/developer_run_controller.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_package/game_asset_gateway.dart';
+import '../../core/game_web/android_webview_file_selector.dart';
 import '../../core/localization/platform_game_ui_assets.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/platform/app_platform.dart';
@@ -31,8 +34,8 @@ class LocalGameWebView extends StatefulWidget {
     this.localNickname = playmeshDefaultLocalNickname,
     this.declaredCapabilities = const [],
     this.onOpenSharePanel,
-    this.onShowToolDock,
-    this.onHideToolDock,
+    this.onShowGameSidebar,
+    this.onHideGameSidebar,
     this.onExitRequested,
     this.onJavaScriptExecutorChanged,
   });
@@ -48,8 +51,8 @@ class LocalGameWebView extends StatefulWidget {
   final String localNickname;
   final List<String> declaredCapabilities;
   final Future<void> Function()? onOpenSharePanel;
-  final Future<void> Function()? onShowToolDock;
-  final Future<void> Function()? onHideToolDock;
+  final Future<void> Function()? onShowGameSidebar;
+  final Future<void> Function()? onHideGameSidebar;
   final Future<void> Function()? onExitRequested;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
@@ -65,6 +68,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   GameAssetGateway? _assetGateway;
   Uri? _entryUri;
   late final AppWebViewBridge _appBridge;
+  late final WebPermissionGate _webPermissionGate;
+  final AndroidWebViewFileSelector _androidFileSelector =
+      const AndroidWebViewFileSelector();
   late final WebViewMessageQueue _messageQueue;
   String? _platformUiConfigurationKey;
   Map<String, Object?>? _platformUiConfiguration;
@@ -83,9 +89,12 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       gameName: widget.title,
       declaredCapabilities: widget.declaredCapabilities,
       onOpenSharePanel: widget.onOpenSharePanel,
-      onShowToolDock: widget.onShowToolDock,
-      onHideToolDock: widget.onHideToolDock,
+      onShowGameSidebar: widget.onShowGameSidebar,
+      onHideGameSidebar: widget.onHideGameSidebar,
       onExitRequested: widget.onExitRequested,
+    );
+    _webPermissionGate = WebPermissionGate(
+      declaredCapabilities: widget.declaredCapabilities,
     );
     _messageQueue = WebViewMessageQueue(_runJavaScript);
     final supportsGateway =
@@ -134,57 +143,68 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         if (mounted) setState(() {});
         return;
       }
-      _controller = WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setOnConsoleMessage((message) {
-          recordLocalWebViewConsole(
-            level: message.level.name,
-            message: message.message,
-          );
-        })
-        ..addJavaScriptChannel(
-          'PlaymeshBridge',
-          onMessageReceived: (message) {
-            unawaited(widget.bridge?.handleJavaScriptMessage(message.message));
-          },
-        )
-        ..addJavaScriptChannel(
-          'PlaymeshAppBridge',
-          onMessageReceived: (message) {
-            unawaited(
-              _appBridge.handleJavaScriptMessage(
-                message.message,
-                _sendAppMessage,
+      final controller =
+          WebViewController(
+              onPermissionRequest: (request) {
+                unawaited(_handleWebPermissionRequest(request));
+              },
+            )
+            ..setJavaScriptMode(JavaScriptMode.unrestricted)
+            ..setOnConsoleMessage((message) {
+              recordLocalWebViewConsole(
+                level: message.level.name,
+                message: message.message,
+              );
+            })
+            ..addJavaScriptChannel(
+              'PlaymeshBridge',
+              onMessageReceived: (message) {
+                unawaited(
+                  widget.bridge?.handleJavaScriptMessage(message.message),
+                );
+              },
+            )
+            ..addJavaScriptChannel(
+              'PlaymeshAppBridge',
+              onMessageReceived: (message) {
+                unawaited(
+                  _appBridge.handleJavaScriptMessage(
+                    message.message,
+                    _sendAppMessage,
+                  ),
+                );
+              },
+            )
+            ..setNavigationDelegate(
+              NavigationDelegate(
+                onWebResourceError: (error) {
+                  recordLocalWebViewConsole(
+                    level: 'error',
+                    message:
+                        'Resource load failed: ${error.url ?? error.description}',
+                    href: error.url,
+                    eventType: 'resource.error',
+                  );
+                },
+                onPageStarted: (_) {
+                  widget.onJavaScriptExecutorChanged?.call(null);
+                  _messageQueue.pause(clearPending: true);
+                  unawaited(_appBridge.resetCapabilities());
+                },
+                onPageFinished: (_) {
+                  widget.onJavaScriptExecutorChanged?.call(_evaluateJavaScript);
+                  unawaited(
+                    _messageQueue.resume().catchError((Object error) {
+                      debugPrint('发送启动阶段 WebView Bridge 消息失败: $error');
+                    }),
+                  );
+                },
               ),
             );
-          },
-        )
-        ..setNavigationDelegate(
-          NavigationDelegate(
-            onWebResourceError: (error) {
-              recordLocalWebViewConsole(
-                level: 'error',
-                message:
-                    'Resource load failed: ${error.url ?? error.description}',
-                href: error.url,
-                eventType: 'resource.error',
-              );
-            },
-            onPageStarted: (_) {
-              widget.onJavaScriptExecutorChanged?.call(null);
-              _messageQueue.pause(clearPending: true);
-              unawaited(_appBridge.resetCapabilities());
-            },
-            onPageFinished: (_) {
-              widget.onJavaScriptExecutorChanged?.call(_evaluateJavaScript);
-              unawaited(
-                _messageQueue.resume().catchError((Object error) {
-                  debugPrint('发送启动阶段 WebView Bridge 消息失败: $error');
-                }),
-              );
-            },
-          ),
-        );
+      if (controller.platform case final AndroidWebViewController android) {
+        await android.setOnShowFileSelector(_androidFileSelector.select);
+      }
+      _controller = controller;
       _bridgeSubscription = widget.bridge?.outboundMessages.listen(
         (message) => unawaited(_sendToWebView(message)),
       );
@@ -205,6 +225,24 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     await _messageQueue.add(
       'window.playmeshApp && window.playmeshApp.__receive(${jsonEncode(message)});',
     );
+  }
+
+  Future<void> _handleWebPermissionRequest(
+    WebViewPermissionRequest request,
+  ) async {
+    try {
+      final allowed = await _webPermissionGate.authorizePlatformNames(
+        request.types.map((type) => type.name),
+      );
+      if (allowed) {
+        await request.grant();
+      } else {
+        await request.deny();
+      }
+    } on Object catch (error) {
+      debugPrint('处理游戏 WebView 权限请求失败: $error');
+      await request.deny();
+    }
   }
 
   Future<void> _sendToWebView(String message) async {
@@ -272,6 +310,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   title: widget.title,
                   bridge: widget.bridge,
                   appBridge: _appBridge,
+                  declaredCapabilities: widget.declaredCapabilities,
                   onRunJavaScriptReady: (executor) {
                     _runWindowsJavaScript = executor;
                     unawaited(_sendPlatformUiConfiguration());

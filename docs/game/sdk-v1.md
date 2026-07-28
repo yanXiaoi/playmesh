@@ -1,6 +1,6 @@
 # Game SDK / App 能力插件 API
 
-本文记录 Game SDK `2.4.0` 与 App Bridge SDK `2.2.0` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 明确兼容 `1.0.0-2.4.0` 请求，当前 App SDK 明确兼容 `1.0.0-2.2.0` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
+本文记录 Game SDK `3.0.0` 与 App Bridge SDK `3.0.0` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 和 App SDK 都明确兼容 `1.0.0-3.0.0` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -49,12 +49,12 @@ Authority 面向游戏只公开 `/app/**`、`/bucket/**`、`/playmesh/**` 资源
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "2.4.0"
+console.log(playmesh.version); // "3.0.0"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若当前页面角色在 `capabilities.json` 中对应的能力列表非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
 
-Game SDK 会把当前页面的方向传给 App Bridge；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过 SDK 悬浮工具栏的全屏按钮再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
+Game SDK 会把当前页面的方向传给 App Bridge；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过游戏侧边栏的全屏操作再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
 
 能力确认、普通浏览器工具栏、昵称、信息与日志层都属于 Playmesh 平台 UI。它们的
 文字来自宿主 App 当前 locale 的统一 `app.json`，App WebView 会随 App 语言即时更新；
@@ -98,31 +98,36 @@ unsubscribe();
 
 ## App 能力插件
 
-游戏在根 `capabilities.json` 中按角色声明能力 code：`required` 属于主画面，单屏多人的 `controllerRequired` 属于控制器。SDK 只向当前页面暴露当前角色声明的集合。主 SDK 在 App 和普通浏览器中统一请求用户确认；普通浏览器会把不可用能力标为“本平台暂不支持”，但同意后仍进入游戏。能力不是“订阅函数”的同义词：每个插件可以拥有自己的创建参数、状态、异步方法、事件和返回值，因此录音类插件可以实现由用户操作触发的 `start/stop`，传感器插件则可以持续发送 `reading` 事件。
+游戏在根 `capabilities.json` 中按角色声明能力 code：`required` 属于主画面，单屏多人的 `controllerRequired` 属于控制器。SDK 只向当前页面暴露当前角色声明的集合。主 SDK 在 App 和普通浏览器中统一请求用户确认；普通浏览器会把不可用能力标为“本平台暂不支持”，但同意后仍进入游戏。能力声明只用于 WebView 敏感权限和 Playmesh 多平台原生适配能力。每个能力拥有独立插件；插件可以暂时没有方法和事件，也可以通过后续 `apiVersion` 增加原生方法。
 
 弹窗、开发者工作区的项目设置和能力测试都读取同一份平台注册表。注册表公开 code、中文说明、插件 `apiVersion`、方法、事件和平台状态；工作区能力测试始终显示全平台注册表，不按当前项目声明过滤。
 
 ```js
-await playmesh.ready;
-
-if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
-  const accelerometer = await playmesh.app.capabilities.create(
-    'sensor.accelerometer',
-    { fps: 30 },
-  );
-  const offReading = accelerometer.on('reading', updateTilt);
-  await accelerometer.invoke('start');
-
-  // 页面退出或不再使用时：
-  await accelerometer.invoke('stop');
-  offReading();
-  await accelerometer.dispose();
-}
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: true,
+});
+const midi = await navigator.requestMIDIAccess({ sysex: true });
 ```
 
-通用实例固定提供 `invoke(method, args)`、`on(event, callback)`、`onError(callback)` 和 `dispose()`；具体方法、事件与语义以插件 `apiVersion` 为准。当前加速度计与陀螺仪插件均为 `1.0.0`，创建参数 `fps` 必须是 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。加速度计单位为 `m/s^2`（包含重力），陀螺仪单位为 `rad/s`；`timestamp` 为毫秒时间戳。同一种传感器插件共享一条原生采集流，最后一个实例停止、页面重载或退出后自动释放。
+游戏声明相应 code 后，可直接使用标准 Web API 访问摄像头、麦克风或 MIDI；App
+WebView 在权限回调中核对声明，未声明即拒绝，用户仍可在系统提示中拒绝。
+`media.camera` 和 `device.midi` 当前不创建能力实例。`media.microphone@1.1.0` 另外
+支持 `capabilities.create("media.microphone")`，实例方法
+`toText({localeId, listenFor, pauseFor})` 启动一次短语音识别，并通过
+`textOnSoundLevelChange`、`textOnResult` 事件返回输入级别和完整识别结果。
 
-`device.vibration@1.0.0` 是主动调用型插件，创建参数为 `{}`，不产生事件。`vibrate` 的 `style` 可为 `selection`、`light`、`medium`、`heavy` 或 `vibrate`，省略时使用 `light`：
+加速度计、陀螺仪和设备方向直接使用 Generic Sensor、Device Motion 或 Device
+Orientation 等标准 Web API，不声明 Playmesh 能力。`<input type="file">` 由用户
+主动选择文件，也不声明能力。
+
+有公开方法或事件的能力实例固定提供 `invoke(method, args)`、`on(event, callback)`、
+`onError(callback)` 和 `dispose()`；具体语义以插件 `apiVersion` 为准。
+
+`device.vibration@2.0.0` 是主动调用型插件，创建参数为 `{}`，不产生事件。它通过
+`vibration` 插件公开 `vibrate` 和 `cancel`。`vibrate` 支持默认调用以及
+`duration`、`pattern`、`repeat`、`intensities`、`amplitude`、`sharpness`、
+`preset` 全部参数形态：
 
 ```js
 if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
@@ -130,10 +135,20 @@ if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
     'device.vibration',
     {},
   );
-  await vibration.invoke('vibrate', { style: 'light' });
+  await vibration.invoke('vibrate', { duration: 1000, amplitude: 128 });
+  await vibration.invoke('vibrate', {
+    pattern: [0, 100, 50, 200],
+    intensities: [0, 128, 0, 255],
+    repeat: -1,
+  });
+  await vibration.invoke('vibrate', { preset: 'quickSuccessAlert' });
+  await vibration.invoke('cancel', {});
   await vibration.dispose();
 }
 ```
+
+`preset` 按插件行为覆盖其他参数。非空 `intensities` 必须与 `pattern` 等长；
+`repeat` 必须是 `-1` 或有效 pattern 索引。具体预设枚举以能力注册表为准。
 
 ## 会话
 
@@ -224,7 +239,7 @@ Authority 上下文或 Sync 上下文。游戏如需观察当前页面的联机�
 await playmesh.player.setNickname("新昵称");
 ```
 
-浏览器版 SDK 会自动悬浮显示“修改昵称”按钮，游戏不需要再制作昵称设置界面。昵称去除首尾空白后长度必须为 1 至 32 个字符。
+浏览器版 SDK 会在游戏侧边栏的“游戏信息”弹窗中提供昵称修改入口，游戏不需要再制作昵称设置界面。昵称去除首尾空白后长度必须为 1 至 32 个字符。
 
 ## 游戏消息
 
@@ -317,20 +332,19 @@ SDK 会在发出命令前同步记录当前游戏 DOM 的焦点元素。分享�
 普通浏览器再回退到游戏文档。这个私有过程不会把分享 Token、链接、二维码
 或 App 本地化词典暴露给游戏。
 
-### 游戏工具和退出
+### 游戏侧边栏
 
 ```js
-await playmesh.app.showToolDock();
-await playmesh.app.hideToolDock();
+await playmesh.app.showGameSidebar();
+await playmesh.app.hideGameSidebar();
 await playmesh.app.exitGame();
 ```
 
-`showToolDock()` 显示并展开 App 悬浮游戏工具，并把焦点移到第一个工具按钮。通过
-SDK 唤起的工具在任一实际操作完成后会自动隐藏；用户手动展开的工具在操作后只收起
-为悬浮按钮。“更多”本身只展开二级菜单，选择菜单项后才执行上述收起/隐藏规则。
-`hideToolDock()` 可由游戏主动隐藏工具，并把网页焦点还给 `showToolDock()` 调用前的
-DOM 元素；元素已经移除时回退到游戏文档。`exitGame()` 请求当前显示 App 正常结束
-游戏、执行既有退出清理并返回上一 App 页面。
+`showGameSidebar()` 打开 App 侧边栏，并把焦点移到“继续游戏”；`hideGameSidebar()`
+关闭侧边栏，并把网页焦点还给打开前的 DOM 元素，元素已经移除时回退到游戏文档。
+侧边栏打开或关闭只改变平台 UI，不发送 `pause` / `resume` 生命周期事件。
+`exitGame()` 请求 App 正常结束当前游戏、执行退出清理并返回上一 App 页面；不需要
+先打开侧边栏。
 
 这些方法只控制 App 自己的界面和生命周期，不向游戏暴露 Flutter 控件、分享凭据或
 内部导航对象。App 已退到后台、运行页已经销毁或相应平台 UI 不可用时以
@@ -506,12 +520,13 @@ const off = playmesh.performance.onLatency((value) => console.log(value));
 
 `getLatency()` 在尚无有效样本或 Authority 不在线时返回 `null`。诊断对象包含客户端发送/接收时间、Core 接收/发送时间、Authority 可用状态和原始 RTT，供开发诊断使用；游戏规则不得依赖延迟数值决定胜负。
 
-FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 工具坞只调用显示开关，不再原生重复绘制；普通浏览器由 SDK 创建与 App 游戏工具区对应的可收纳功能区，提供刷新、性能开关、进入/退出全屏、游戏信息、浏览器日志指引和昵称设置，但不模拟 App 导航、退出游戏或分享能力。App 内性能层跟随当前显示 App 的有效主题，普通浏览器工具层跟随浏览器系统主题。新开、刷新或重连后仅收起状态悬浮球可见，性能层、工具列表、菜单、信息和日志层默认关闭。`setVisible(boolean)` 可供宿主集成使用，普通游戏通常不需要调用。
+FPS 与联机延迟由 SDK 在网页内创建同一个隔离悬浮层。App 侧边栏由原生宿主绘制；普通浏览器由 SDK 创建对应侧边栏，提供继续、刷新、日志、性能开关、进入/退出全屏、游戏信息、昵称设置和退出。App 内性能层跟随当前显示 App 的有效主题，普通浏览器侧边栏跟随浏览器系统主题。新开、刷新或重连后侧边栏、性能层、信息层和日志层都默认关闭，没有常驻悬浮入口。侧边栏打开或关闭不改变游戏生命周期。
 
 ## 浏览器行为
 
 - 当前页面角色对应的 `required` 或 `controllerRequired` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；空数组是有效声明，绝不回退到另一角色。不支持项只做标注，不阻止同意后进入。
-- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 悬浮工具栏保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
+- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 侧边栏保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
+- 浏览器会尽力用同页 History 守卫拦截返回意图：先关闭最上层平台弹窗或侧边栏，否则打开侧边栏；无法使用 History API 时由 App 原生返回拦截兜底。普通浏览器中的 `playmesh.app` 不可用，因此由侧边栏退出；App WebView 可直接调用 `playmesh.app.exitGame()`。
 - 普通多人多屏分享加载 `main.json.entries.game`（默认 `app/index.html`），浏览器玩家加入 Session 并建立 WebSocket；只有单屏多人分享才加载 `entries.controller`（默认 `app/controller/index.html`）。
 - 单机分享加载 `entries.game`，不加入多人 Session，也不建立会话 WebSocket；浏览器 Console 只保留在当前浏览器；`session.getCurrent()` 与 `player.getCurrent()` 返回 `null`。
 - 自定义嵌套 HTML 入口由网关按入口所在目录设置页面基准 URL，页面内相对 CSS、脚本和图片仍解析到当前游戏的 `/app/...`，不会改变 SDK、会话或存储边界。

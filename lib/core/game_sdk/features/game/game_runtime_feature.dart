@@ -171,6 +171,11 @@ const gameRuntimeSdkSource = SdkSourceFragment(
         session: null,
       };
       emit(lifecycleListeners, { state: "ready" });
+      if (!appSdk.isAvailable()) {
+        void ensureBrowserNicknameUi().catch((error) => {
+          global.console?.warn?.("Playmesh 浏览器游戏侧边栏初始化失败", error);
+        });
+      }
       void renderPerformanceUi();
       return bootstrap;
     }
@@ -389,11 +394,11 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     openSharePanel() {
       return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主"));
     },
-    showToolDock() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏工具宿主"));
+    showGameSidebar() {
+      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏侧边栏宿主"));
     },
-    hideToolDock() {
-      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏工具宿主"));
+    hideGameSidebar() {
+      return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏侧边栏宿主"));
     },
     exitGame() {
       return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主"));
@@ -804,8 +809,9 @@ const gameRuntimeSdkSource = SdkSourceFragment(
   }
 
   const platformCapabilityMessageRoots = new Map([
-    ["sensor.accelerometer", "capability.sensor.accelerometer"],
-    ["sensor.gyroscope", "capability.sensor.gyroscope"],
+    ["media.camera", "capability.media.camera"],
+    ["media.microphone", "capability.media.microphone"],
+    ["device.midi", "capability.device.midi"],
     ["device.vibration", "capability.device.vibration"],
   ]);
 

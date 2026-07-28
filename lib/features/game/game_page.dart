@@ -100,7 +100,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   int _runtimeGeneration = 0;
   int _configurationGeneration = 0;
-  final GameToolDockController _toolDockController = GameToolDockController();
+  final GameSidebarController _sidebarController = GameSidebarController();
   final GlobalKey<_ShareOverlayState> _shareOverlayKey =
       GlobalKey<_ShareOverlayState>();
   late final GameOrientationController _orientationController;
@@ -337,10 +337,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return GameRuntimeShortcutScope(
-      controller: _toolDockController,
+      controller: _sidebarController,
       onBack: _handleRuntimeBack,
-      onOpenTools: _openToolsFromShortcut,
-      onMoveTools: _moveToolsFromShortcut,
+      onOpenSidebar: _openSidebarFromShortcut,
       child: PopScope(
         canPop: _allowPop,
         onPopInvokedWithResult: (didPop, _) {
@@ -353,10 +352,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             fit: StackFit.expand,
             children: [
               Positioned.fill(child: _buildGameRuntime()),
-              GameToolDock(
-                controller: _toolDockController,
+              GameSidebar(
+                controller: _sidebarController,
                 resetKey: _runtimeGeneration,
-                backTooltip: context.tr('game.back_previous'),
+                backLabel: context.tr('game.back_previous'),
+                onContinue: _restoreGameContentFocus,
                 showPerformance: _showPerformance,
                 onTogglePerformance: _togglePerformance,
                 onReload: () =>
@@ -368,7 +368,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
                     _applyOrientation(_runtimeOrientation, userInitiated: true),
                 onExitFullscreen: () => unawaited(_exitFullscreen()),
                 secondaryActions: [
-                  GameToolAction(
+                  GameSidebarAction(
                     icon: Icons.info_outline,
                     label: context.tr('game.info'),
                     onPressed: () => unawaited(_openGameInfo()),
@@ -460,8 +460,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             localNickname: widget.localNickname,
             controllerRole: _controllerRole,
             onOpenSharePanel: _openShareFromAppSdk,
-            onShowToolDock: _showToolDockFromSdk,
-            onHideToolDock: _hideToolDockFromSdk,
+            onShowGameSidebar: _showGameSidebarFromSdk,
+            onHideGameSidebar: _hideGameSidebarFromSdk,
             onExitRequested: _returnToPrevious,
             onJavaScriptExecutorChanged: (executor) {
               _developerJavaScriptExecutor = executor;
@@ -852,27 +852,27 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _showToolDockFromSdk() async {
+  Future<void> _showGameSidebarFromSdk() async {
     if (!mounted ||
         _disposing ||
         _shareVisible ||
         _debugVisible ||
         _infoVisible ||
         WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
-    if (!_toolDockController.showFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    if (!_sidebarController.showFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
     await WidgetsBinding.instance.endOfFrame;
   }
 
-  Future<void> _hideToolDockFromSdk() async {
+  Future<void> _hideGameSidebarFromSdk() async {
     if (!mounted || _disposing) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
-    if (!_toolDockController.hideFromSdk()) {
-      throw const SdkCommandException('ui_unavailable', '当前平台游戏工具不可用');
+    if (!_sidebarController.hideFromSdk()) {
+      throw const SdkCommandException('ui_unavailable', '当前平台游戏侧边栏不可用');
     }
     await WidgetsBinding.instance.endOfFrame;
   }
@@ -1065,7 +1065,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           focusBeforeShare.context != null) {
         focusBeforeShare.requestFocus();
       } else {
-        _toolDockController.restoreFocus();
+        _sidebarController.restoreFocus();
       }
       bridge?.restoreGameContentFocus();
     });
@@ -1260,7 +1260,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       ),
     );
     _infoVisible = false;
-    if (mounted) _toolDockController.restoreFocus();
+    if (mounted) _sidebarController.restoreFocus();
   }
 
   void _openDebugLogs() {
@@ -1285,7 +1285,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   Future<void> _hideDebugLogs({bool restoreFocus = true}) async {
     if (mounted && !_disposing) {
       setState(() => _debugVisible = false);
-      if (restoreFocus) _toolDockController.restoreFocus();
+      if (restoreFocus) _sidebarController.restoreFocus();
     }
     final subscription = _developerLogSubscription;
     _developerLogSubscription = null;
@@ -1383,10 +1383,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   }
 
   void _handleRuntimeBack() {
-    if (_toolDockController.isMoving) {
-      _toolDockController.closeTopLayer();
-      return;
-    }
     if (_debugVisible) {
       unawaited(_hideDebugLogs());
       return;
@@ -1395,22 +1391,37 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       unawaited(_hideShare());
       return;
     }
-    if (_toolDockController.closeTopLayer()) return;
+    if (_sidebarController.closeTopLayer()) return;
     if (_fullscreenError != null) {
       setState(() => _fullscreenError = null);
       return;
     }
-    unawaited(_returnToPrevious());
+    unawaited(_openSidebarFromNativeBack());
   }
 
-  void _openToolsFromShortcut() {
-    if (_shareVisible || _debugVisible || _infoVisible) return;
-    _toolDockController.openTools();
+  void _restoreGameContentFocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _webViewBridge?.restoreGameContentFocus();
   }
 
-  void _moveToolsFromShortcut() {
+  void _openSidebarFromShortcut() {
     if (_shareVisible || _debugVisible || _infoVisible) return;
-    _toolDockController.beginMoveMode();
+    _sidebarController.open();
+  }
+
+  Future<void> _openSidebarFromNativeBack() async {
+    final executor = _developerJavaScriptExecutor;
+    if (executor != null) {
+      try {
+        final handled = await executor(
+          'Boolean(window[Symbol.for("playmesh.platform-ui.back")]?.())',
+        );
+        if (handled == true || handled?.toString() == 'true') return;
+      } on Object catch (error) {
+        debugPrint('游戏网页未能处理返回键，改由 App 打开侧边栏: $error');
+      }
+    }
+    if (mounted) _sidebarController.open();
   }
 
   void _resetTransientUiForReconnect() {

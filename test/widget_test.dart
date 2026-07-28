@@ -11,6 +11,7 @@ import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
 import 'package:playmesh/features/game/game_launcher.dart';
+import 'package:playmesh/features/game/game_controls.dart';
 import 'package:playmesh/features/game/game_orientation_controller.dart';
 import 'package:playmesh/features/game/game_page.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
@@ -223,42 +224,31 @@ void main() {
     );
     expect(find.byKey(GamePage.gameSurfaceKey), findsOneWidget);
     expect(find.byKey(GamePage.runtimeKey(0)), findsOneWidget);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
     expect(find.text('-- FPS'), findsNothing);
-    final controlsBeforeDrag = tester.getTopLeft(find.byTooltip('展开游戏工具'));
-    await tester.drag(find.byTooltip('展开游戏工具'), const Offset(-120, 80));
-    await tester.pumpAndSettle();
-    final controlsAfterDrag = tester.getTopLeft(find.byTooltip('展开游戏工具'));
-    expect(controlsAfterDrag.dx, lessThan(controlsBeforeDrag.dx));
-    expect(controlsAfterDrag.dy, greaterThan(controlsBeforeDrag.dy));
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('返回上一页'), findsOneWidget);
-    expect(find.byTooltip('刷新游戏'), findsOneWidget);
-    expect(find.byTooltip('退出游戏'), findsNothing);
-    expect(find.byTooltip('二维码与链接'), findsOneWidget);
-    expect(find.byTooltip('运行日志'), findsOneWidget);
-    expect(find.byTooltip('显示性能信息'), findsNothing);
+    expect(find.text('返回上一页'), findsOneWidget);
+    expect(find.text('刷新游戏'), findsOneWidget);
+    expect(find.text('二维码与链接'), findsOneWidget);
+    expect(find.text('运行日志'), findsOneWidget);
+    expect(find.text('显示性能信息'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('运行日志'));
+    await tester.tap(find.text('运行日志'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('关闭运行日志'), findsOneWidget);
     await tester.tap(find.byTooltip('关闭运行日志'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.tap(find.text('显示性能信息'));
     await tester.pumpAndSettle();
     expect(find.text('-- FPS'), findsNothing);
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('更多游戏操作'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.tap(find.text('隐藏性能信息'));
     await tester.pumpAndSettle();
@@ -268,9 +258,9 @@ void main() {
       'type': 'runtime.log',
       'message': 'current game log',
     });
-    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('刷新游戏'));
+    await tester.tap(find.text('刷新游戏'));
     await tester.pumpAndSettle();
 
     expect(
@@ -282,17 +272,15 @@ void main() {
     expect(find.byKey(GamePage.runtimeKey(0)), findsNothing);
     expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
     expect(find.text('游戏内容已刷新。'), findsOneWidget);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-    expect(find.byTooltip('显示性能信息'), findsNothing);
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pumpAndSettle();
-    expect(find.text('显示性能信息'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('game-action-menu-dismiss-area')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('返回上一页'));
+    final exitControl = tester.widget<InkWell>(
+      find.descendant(
+        of: find.byKey(const Key('game-sidebar-exit')),
+        matching: find.byType(InkWell),
+      ),
+    );
+    exitControl.onTap!();
     await tester.pumpAndSettle();
 
     expect(find.text('游戏详情'), findsOneWidget);
@@ -359,7 +347,8 @@ void main() {
     expect(surface.fit, StackFit.expand);
     expect(find.byType(AppBar), findsNothing);
     expect(find.byKey(GamePage.runtimeKey(0)), findsOneWidget);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
+    expect(find.byType(GameSidebar), findsOneWidget);
     expect(find.text('-- FPS'), findsNothing);
     expect(find.text('Fake WebView: test-game/app/index.html'), findsOneWidget);
   });
@@ -381,21 +370,23 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-    await tester.tap(find.byTooltip('展开游戏工具'));
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('显示性能信息'), findsNothing);
+    expect(find.text('显示性能信息'), findsOneWidget);
     expect(visibilityChanges, isEmpty);
 
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('显示性能信息'));
     await tester.pump();
     expect(visibilityChanges, [true]);
-    await tester.tap(find.byTooltip('刷新游戏'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('刷新游戏'));
     await tester.pumpAndSettle();
     expect(visibilityChanges, [true, false]);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
   });
 
   testWidgets('changing the GamePage runtime identity clears transient UI', (
@@ -413,13 +404,25 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.text('显示性能信息'),
+      120,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('game-sidebar')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.tap(find.text('显示性能信息'));
     await tester.pump();
-    await tester.tap(find.byTooltip('运行日志'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('运行日志'));
     await tester.pump();
     expect(find.byTooltip('关闭运行日志'), findsOneWidget);
 
@@ -442,11 +445,9 @@ void main() {
       findsOneWidget,
     );
     expect(find.byTooltip('关闭运行日志'), findsNothing);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-    await tester.tap(find.byTooltip('展开游戏工具'));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('显示性能信息'), findsNothing);
-    await tester.tap(find.byTooltip('更多游戏操作'));
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
     await tester.pumpAndSettle();
     expect(find.text('显示性能信息'), findsOneWidget);
   });
@@ -469,8 +470,8 @@ void main() {
       capabilities: GameCapabilities(
         required: {},
         controllerRequired: {
-          'sensor.accelerometer',
-          'sensor.gyroscope',
+          'media.camera',
+          'media.microphone',
           'device.vibration',
         },
       ),
@@ -501,53 +502,47 @@ void main() {
     expect(webView.declaredCapabilities, isEmpty);
   });
 
-  testWidgets(
-    'landscape game tools and their menu stay inside a short screen',
-    (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(640, 320);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets('landscape game sidebar stays inside a short screen', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(640, 320);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
 
-      await tester.pumpWidget(
-        localizedTestApp(
-          home: GamePage(
-            game: _primaryGame,
-            orientationController: const _ImmediateOrientationController(),
-            previewBuilder: (_) => const ColoredBox(color: Colors.black),
-          ),
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          game: _primaryGame,
+          orientationController: const _ImmediateOrientationController(),
+          previewBuilder: (_) => const ColoredBox(color: Colors.black),
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('展开游戏工具'));
-      await tester.pumpAndSettle();
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
+    await tester.pumpAndSettle();
 
-      expect(find.byTooltip('更多游戏操作'), findsOneWidget);
-      final toolsRect = tester.getRect(
-        find.byKey(const ValueKey('expanded-game-tools')),
-      );
-      expect(toolsRect.left, greaterThanOrEqualTo(0));
-      expect(toolsRect.right, lessThanOrEqualTo(640));
-      expect(toolsRect.bottom, lessThanOrEqualTo(320));
-
-      final modalBarriersBefore = find.byType(ModalBarrier).evaluate().length;
-      await tester.tap(find.byTooltip('更多游戏操作'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('game-action-menu')), findsOneWidget);
-      expect(
-        find.byType(ModalBarrier).evaluate().length,
-        modalBarriersBefore,
-        reason: '游戏操作菜单不应创建带灰色遮罩的弹出路由',
-      );
-      final menuRect = tester.getRect(
-        find.byKey(const Key('game-action-menu')),
-      );
-      expect(menuRect.left, greaterThanOrEqualTo(0));
-      expect(menuRect.right, lessThanOrEqualTo(640));
-      expect(menuRect.top, greaterThanOrEqualTo(0));
-      expect(menuRect.bottom, lessThanOrEqualTo(320));
-    },
-  );
+    final sidebarRect = tester.getRect(find.byKey(const Key('game-sidebar')));
+    expect(sidebarRect.left, greaterThanOrEqualTo(0));
+    expect(sidebarRect.right, lessThanOrEqualTo(640));
+    expect(sidebarRect.top, greaterThanOrEqualTo(0));
+    expect(sidebarRect.bottom, lessThanOrEqualTo(320));
+    expect(find.text('继续游戏'), findsOneWidget);
+    expect(find.text('刷新游戏'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('游戏信息'),
+      80,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('game-sidebar')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('游戏信息'), findsOneWidget);
+  });
 
   testWidgets('refreshes the game library without restarting the app', (
     WidgetTester tester,

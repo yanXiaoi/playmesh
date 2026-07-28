@@ -148,12 +148,10 @@ class GameCatalogServer {
       }
       matches.add(entry);
     }
-    matches.sort((left, right) {
-      final byName = left.manifest.name.compareTo(right.manifest.name);
-      return byName != 0
-          ? byName
-          : left.manifest.id.compareTo(right.manifest.id);
-    });
+    matches.sort(
+      (left, right) =>
+          compareGameManifestsNewestFirst(left.manifest, right.manifest),
+    );
     final start = ((page - 1) * size).clamp(0, matches.length);
     final end = (start + size).clamp(start, matches.length);
     await _json(request.response, HttpStatus.ok, {

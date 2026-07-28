@@ -60,7 +60,7 @@ void main() {
     await _writeZip(source, {
       'main.json': _manifest('com.example.update'),
       'capabilities.json': jsonEncode({
-        'required': ['sensor.accelerometer'],
+        'required': ['media.camera'],
       }),
       'app/index.html': '<!doctype html><title>Old</title>',
       'app/removed.js': 'old',
@@ -83,7 +83,7 @@ void main() {
     await _writeZip(source, {
       'main.json': _manifest('com.example.update', version: '1.1.0'),
       'capabilities.json': jsonEncode({
-        'required': ['sensor.gyroscope'],
+        'required': ['media.microphone'],
       }),
       'app/index.html': '<!doctype html><title>New</title>',
     });

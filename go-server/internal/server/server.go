@@ -228,6 +228,16 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		userHandler.RequireSession(false),
 		userHandler.Games,
 	)
+	external.GET(
+		"/api/user/notifications",
+		userHandler.RequireSession(false),
+		userHandler.Notifications,
+	)
+	external.POST(
+		"/api/user/notifications/:id/read",
+		userHandler.RequireSession(true),
+		userHandler.ReadNotification,
+	)
 	external.POST(
 		"/api/user/games/uploads",
 		middleware.RateLimit(userUploadLimiter, "user-upload"),
@@ -345,14 +355,28 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	adminAPI := management.Group(cfg.AdminPath + "/api/admin")
 	adminAPI.Use(authHandler.RequireSession())
 	adminAPI.POST("/logout", authHandler.Logout)
+	adminAPI.GET("/users", adminHandler.AdminUsers)
+	adminAPI.POST(
+		"/users", limitRequestBody(64<<10), adminHandler.AdminCreateUser,
+	)
+	adminAPI.PATCH(
+		"/users/:id", limitRequestBody(64<<10), adminHandler.AdminUpdateUser,
+	)
+	adminAPI.DELETE("/users/:id", adminHandler.AdminDeleteUser)
 	adminAPI.GET("/games", adminHandler.AdminGames)
 	adminAPI.GET("/games/:id", adminHandler.AdminGame)
 	adminAPI.PATCH(
 		"/games/:id", limitRequestBody(64<<10), adminHandler.AdminUpdateGame,
 	)
-	adminAPI.DELETE("/games/:id", adminHandler.AdminDeleteGame)
+	adminAPI.DELETE(
+		"/games/:id", limitRequestBody(64<<10), adminHandler.AdminDeleteGame,
+	)
 	adminAPI.POST("/games/:id/publish", adminHandler.AdminPublishGame)
-	adminAPI.POST("/games/:id/unpublish", adminHandler.AdminUnpublishGame)
+	adminAPI.POST(
+		"/games/:id/unpublish",
+		limitRequestBody(64<<10),
+		adminHandler.AdminUnpublishGame,
+	)
 	adminAPI.GET("/games/:id/download", adminHandler.AdminDownload)
 	adminAPI.GET("/settings", adminHandler.Settings)
 	adminAPI.PUT(

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 )
 
 const (
@@ -319,7 +320,7 @@ func (p *imageProvider) download(ctx context.Context) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/gif")
+	request.Header.Set("Accept", "image/webp,image/png,image/jpeg,image/gif")
 	request.Header.Set("Cache-Control", "no-cache, no-store")
 	request.Header.Set("Pragma", "no-cache")
 	request.Header.Set("User-Agent", "Playmesh-Captcha/1.0")

@@ -52,6 +52,7 @@
         </div>
         <nav class="nav" aria-label="Admin sections">
           <button class="active" data-section="overview" data-i18n="admin.nav.overview"></button>
+          <button data-section="users" data-i18n="admin.nav.users"></button>
           <button data-section="games" data-i18n="admin.nav.games"></button>
           <button data-section="settings" data-i18n="admin.nav.settings"></button>
           <button data-section="config" data-i18n="admin.nav.config"></button>
@@ -75,6 +76,39 @@
           <div class="panel">
             <h2 data-i18n="admin.overview.boundary_title"></h2>
             <p class="muted" data-i18n="admin.overview.boundary_description"></p>
+          </div>
+        </div>
+        <div id="users-section" class="admin-section hidden">
+          <div class="section-head">
+            <div><div class="eyebrow" data-i18n="admin.users.eyebrow"></div><h2 data-i18n="admin.users.title"></h2></div>
+            <button type="button" id="admin-add-user" data-i18n="admin.users.add"></button>
+          </div>
+          <div class="admin-filters">
+            <select id="admin-user-status">
+              <option value="" data-i18n="admin.users.all_statuses"></option>
+              <option value="active" data-i18n="admin.users.active"></option>
+              <option value="pending_verification" data-i18n="admin.users.pending"></option>
+              <option value="disabled" data-i18n="admin.users.disabled"></option>
+            </select>
+            <input id="admin-user-search" placeholder="" data-i18n-placeholder="admin.users.search">
+            <button id="admin-user-refresh" data-i18n="common.refresh"></button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th data-i18n="admin.users.account"></th>
+                <th data-i18n="admin.users.status"></th>
+                <th data-i18n="admin.users.games"></th>
+                <th data-i18n="admin.users.created_at"></th>
+                <th data-i18n="common.actions"></th>
+              </tr></thead>
+              <tbody id="user-rows"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="admin-user-previous" class="secondary" data-i18n="common.previous"></button>
+            <span id="admin-user-page" class="muted"></span>
+            <button id="admin-user-next" class="secondary" data-i18n="common.next"></button>
           </div>
         </div>
         <div id="games-section" class="admin-section hidden">
@@ -119,14 +153,8 @@
               <label class="choice-field wide"><input name="showPublicSourceQRCode" type="checkbox"><span data-i18n="admin.config.show_qr"></span></label>
               <label class="choice-field wide"><input name="allowUserRegistration" type="checkbox"><span data-i18n="admin.config.allow_registration"></span></label>
               <label class="choice-field wide"><input name="requireEmailVerification" type="checkbox"><span data-i18n="admin.config.require_verification"></span></label>
-              <label data-i18n-label="admin.config.captcha_mode"><select name="captchaMode"><option value="text" data-i18n="admin.config.captcha_text"></option><option value="slide" data-i18n="admin.config.captcha_slide"></option><option value="rotate" data-i18n="admin.config.captcha_rotate"></option></select></label>
-              <label data-i18n-label="admin.config.captcha_image_source"><select name="captchaImageSource"><option value="local" data-i18n="admin.config.captcha_source_local"></option><option value="remote" data-i18n="admin.config.captcha_source_remote"></option></select></label>
-              <label class="wide" data-i18n-label="admin.config.captcha_image_directory"><input name="captchaImageDirectory"></label>
-              <label class="wide" data-i18n-label="admin.config.captcha_image_url"><input name="captchaImageURL" type="url" placeholder="https://example.com/random-image"></label>
-              <label data-i18n-label="admin.config.captcha_cache_size"><input name="captchaImageCacheSize" type="number" min="0" max="128"></label>
               <label data-i18n-label="admin.config.session_minutes"><input name="sessionTTL" type="number" min="1"></label>
               <label data-i18n-label="admin.config.login_rate_ms"><input name="loginInterval" type="number" min="100"></label>
-              <label data-i18n-label="admin.config.captcha_rate_ms"><input name="captchaInterval" type="number" min="100"></label>
             </div>
             <h3 data-i18n="admin.config.storage"></h3>
             <div class="filters">
@@ -177,6 +205,31 @@
   <dialog id="detail-dialog">
     <div class="section-head"><h2 data-i18n="admin.detail.title"></h2><button id="close-dialog" class="secondary" data-i18n="common.close"></button></div>
     <pre id="detail-content"></pre>
+  </dialog>
+
+  <dialog id="create-user-dialog" class="my-dialog">
+    <div class="dialog-heading">
+      <h2 data-i18n="admin.users.add"></h2>
+      <button type="button" class="secondary" data-close-admin-dialog data-i18n="common.close"></button>
+    </div>
+    <form id="create-user-form" class="stack">
+      <label data-i18n-label="auth.email"><input name="email" type="email" required autocomplete="off"></label>
+      <label data-i18n-label="auth.display_name"><input name="displayName" maxlength="40"></label>
+      <label data-i18n-label="auth.password"><input name="password" type="password" minlength="10" maxlength="128" required autocomplete="new-password"></label>
+      <label class="choice-field"><input name="disabled" type="checkbox"><span data-i18n="admin.users.create_disabled"></span></label>
+      <button type="submit" data-i18n="admin.users.create"></button>
+    </form>
+  </dialog>
+
+  <dialog id="admin-reason-dialog" class="my-dialog">
+    <div class="dialog-heading">
+      <h2 id="admin-reason-title"></h2>
+      <button type="button" class="secondary" data-close-admin-dialog data-i18n="common.close"></button>
+    </div>
+    <form id="admin-reason-form" class="stack">
+      <label data-i18n-label="admin.reason.label"><textarea name="reason" rows="5" maxlength="2000" required></textarea></label>
+      <button type="submit" data-i18n="common.confirm"></button>
+    </form>
   </dialog>
 
   <dialog id="admin-captcha-dialog" class="captcha-dialog" aria-label="" data-i18n-aria="auth.captcha_title">

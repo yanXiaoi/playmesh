@@ -39,15 +39,17 @@ type Auth struct {
 }
 
 type Admin struct {
-	Listen                      string `json:"listen"`
-	CaptchaMode                 string `json:"captchaMode"`
-	CaptchaImageSource          string `json:"captchaImageSource"`
-	CaptchaImageDirectory       string `json:"captchaImageDirectory"`
-	CaptchaImageURL             string `json:"captchaImageUrl"`
-	CaptchaImageCacheSize       int    `json:"captchaImageCacheSize"`
+	Listen string `json:"listen"`
+	// CAPTCHA settings are loaded from .env. The JSON names remain accepted
+	// for compatibility with older server.json files, but Save omits them.
+	CaptchaMode                 string `json:"captchaMode,omitempty"`
+	CaptchaImageSource          string `json:"captchaImageSource,omitempty"`
+	CaptchaImageDirectory       string `json:"captchaImageDirectory,omitempty"`
+	CaptchaImageURL             string `json:"captchaImageUrl,omitempty"`
+	CaptchaImageCacheSize       int    `json:"captchaImageCacheSize,omitempty"`
 	SessionTTLMinutes           int    `json:"sessionTtlMinutes"`
 	LoginIntervalMilliseconds   int    `json:"loginIntervalMilliseconds"`
-	CaptchaIntervalMilliseconds int    `json:"captchaIntervalMilliseconds"`
+	CaptchaIntervalMilliseconds int    `json:"captchaIntervalMilliseconds,omitempty"`
 }
 
 type Storage struct {
@@ -153,9 +155,9 @@ func Default() Config {
 		Admin: Admin{
 			Listen:                      "127.0.0.1:16669",
 			CaptchaMode:                 "slide",
-			CaptchaImageSource:          "local",
+			CaptchaImageSource:          "remote",
 			CaptchaImageDirectory:       "data/captcha-images",
-			CaptchaImageURL:             "",
+			CaptchaImageURL:             "https://t.alcy.cc/moe",
 			CaptchaImageCacheSize:       8,
 			SessionTTLMinutes:           480,
 			LoginIntervalMilliseconds:   1000,
@@ -301,6 +303,12 @@ func (c Config) Save() error {
 	copyForDisk.AdminUsername = ""
 	copyForDisk.AdminPassword = ""
 	copyForDisk.AdminPath = ""
+	copyForDisk.Admin.CaptchaMode = ""
+	copyForDisk.Admin.CaptchaImageSource = ""
+	copyForDisk.Admin.CaptchaImageDirectory = ""
+	copyForDisk.Admin.CaptchaImageURL = ""
+	copyForDisk.Admin.CaptchaImageCacheSize = 0
+	copyForDisk.Admin.CaptchaIntervalMilliseconds = 0
 	copyForDisk.Mail = Mail{}
 	copyForDisk.UploadKeyPepper = ""
 	copyForDisk.ConfigPath = ""
@@ -377,8 +385,31 @@ func (c *Config) applyEnvironment() error {
 	c.Auth.ReviewToken = envOr("PLAYMESH_REVIEW_TOKEN", c.Auth.ReviewToken)
 	c.Auth.Token = c.Auth.PublishedToken
 	c.Scanner.ClamScanPath = envOr("PLAYMESH_CLAMSCAN_PATH", c.Scanner.ClamScanPath)
+	c.Admin.CaptchaMode = envOr("PLAYMESH_CAPTCHA_MODE", c.Admin.CaptchaMode)
+	c.Admin.CaptchaImageSource = envOr(
+		"PLAYMESH_CAPTCHA_IMAGE_SOURCE", c.Admin.CaptchaImageSource,
+	)
+	c.Admin.CaptchaImageDirectory = envOr(
+		"PLAYMESH_CAPTCHA_IMAGE_DIRECTORY", c.Admin.CaptchaImageDirectory,
+	)
+	c.Admin.CaptchaImageURL = envOr(
+		"PLAYMESH_CAPTCHA_IMAGE_URL", c.Admin.CaptchaImageURL,
+	)
 
 	var err error
+	c.Admin.CaptchaImageCacheSize, err = envInt(
+		"PLAYMESH_CAPTCHA_IMAGE_CACHE_SIZE", c.Admin.CaptchaImageCacheSize,
+	)
+	if err != nil {
+		return err
+	}
+	c.Admin.CaptchaIntervalMilliseconds, err = envInt(
+		"PLAYMESH_CAPTCHA_INTERVAL_MILLISECONDS",
+		c.Admin.CaptchaIntervalMilliseconds,
+	)
+	if err != nil {
+		return err
+	}
 	c.Scanner.Enabled, err = envBool("PLAYMESH_CLAMAV_ENABLED", true)
 	if err != nil {
 		return err
@@ -434,28 +465,28 @@ func (c Config) Validate() error {
 	if c.Admin.CaptchaMode != "text" &&
 		c.Admin.CaptchaMode != "slide" &&
 		c.Admin.CaptchaMode != "rotate" {
-		return errors.New("admin.captchaMode 只能是 text、slide 或 rotate")
+		return errors.New("PLAYMESH_CAPTCHA_MODE 只能是 text、slide 或 rotate")
 	}
 	if c.Admin.CaptchaImageCacheSize < 0 || c.Admin.CaptchaImageCacheSize > 128 {
-		return errors.New("admin.captchaImageCacheSize 必须在 0 到 128 之间")
+		return errors.New("PLAYMESH_CAPTCHA_IMAGE_CACHE_SIZE 必须在 0 到 128 之间")
 	}
 	switch c.Admin.CaptchaImageSource {
 	case "local":
 		if strings.TrimSpace(c.Admin.CaptchaImageDirectory) == "" {
-			return errors.New("local 验证码图片源必须配置 admin.captchaImageDirectory")
+			return errors.New("local 验证码图片源必须配置 PLAYMESH_CAPTCHA_IMAGE_DIRECTORY")
 		}
 	case "remote":
 		if err := validateHTTPURL(
-			"admin.captchaImageUrl", c.Admin.CaptchaImageURL, false,
+			"PLAYMESH_CAPTCHA_IMAGE_URL", c.Admin.CaptchaImageURL, false,
 		); err != nil {
 			return err
 		}
 		if c.Admin.CaptchaImageCacheSize < 1 ||
 			c.Admin.CaptchaImageCacheSize > 128 {
-			return errors.New("remote 验证码图片缓存数量必须在 1 到 128 之间")
+			return errors.New("PLAYMESH_CAPTCHA_IMAGE_CACHE_SIZE 必须在 1 到 128 之间")
 		}
 	default:
-		return errors.New("admin.captchaImageSource 只能是 local 或 remote")
+		return errors.New("PLAYMESH_CAPTCHA_IMAGE_SOURCE 只能是 local 或 remote")
 	}
 	if c.Admin.SessionTTLMinutes < 1 ||
 		c.Admin.SessionTTLMinutes > 30*24*60 ||

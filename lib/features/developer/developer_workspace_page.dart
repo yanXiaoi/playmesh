@@ -52,18 +52,21 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(context.tr('home.developer')),
-        actions: [
-          IconButton(
-            tooltip: context.tr('developer.reload_workspace'),
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
+    return ExcludeFocus(
+      key: const Key('developer-workspace-focus-exclusion'),
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(context.tr('home.developer')),
+          actions: [
+            IconButton(
+              tooltip: context.tr('developer.reload_workspace'),
+              onPressed: _reload,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        body: _buildBody(),
       ),
-      body: _buildBody(),
     );
   }
 

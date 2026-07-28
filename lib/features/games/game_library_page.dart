@@ -26,7 +26,8 @@ typedef GameLibraryUpdateCheck =
     Future<GameUpdateCheckResult> Function(
       Iterable<GameSummary> installedGames,
     );
-typedef GameLibraryUpdateDownload = void Function(OnlineCatalogGame offer);
+typedef GameLibraryUpdateDownload =
+    Future<void> Function(OnlineCatalogGame offer);
 
 class GameLibraryPage extends StatefulWidget {
   const GameLibraryPage({
@@ -787,21 +788,7 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
       widget.onOpenOnline?.call();
       return;
     }
-    download(offer);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          context.tr(
-            'library.update_queued',
-            arguments: {
-              'source': offer.source.name,
-              'name': offer.manifest.name,
-              'version': offer.manifest.version,
-            },
-          ),
-        ),
-      ),
-    );
+    await download(offer);
   }
 
   Future<void> _showUpdateSourceErrors() async {

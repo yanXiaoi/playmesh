@@ -44,28 +44,29 @@ class GameDownloadQueue extends ChangeNotifier {
   Future<void>? _processingOperation;
 
   List<GameDownloadTask> get tasks => List.unmodifiable(_tasks);
-
-  void enqueue(Iterable<OnlineCatalogGame> games) {
-    final existing = _tasks
-        .where(
-          (task) =>
-              task.status == GameDownloadStatus.queued ||
-              task.status == GameDownloadStatus.downloading,
-        )
-        .map((task) => task.game.downloadKey)
-        .toSet();
-    for (final game in games) {
-      final key = game.downloadKey;
-      if (!existing.add(key)) continue;
-      _tasks.add(
-        GameDownloadTask(
-          id: 'download-${DateTime.now().microsecondsSinceEpoch}-${_tasks.length}',
-          game: game,
-        ),
-      );
+  GameDownloadTask? get activeTask {
+    for (final task in _tasks) {
+      if (task.status == GameDownloadStatus.queued ||
+          task.status == GameDownloadStatus.downloading) {
+        return task;
+      }
     }
+    return null;
+  }
+
+  GameDownloadTask start(OnlineCatalogGame game) {
+    if (activeTask != null) {
+      throw StateError('已有游戏正在下载');
+    }
+    _tasks.clear();
+    final task = GameDownloadTask(
+      id: 'download-${DateTime.now().microsecondsSinceEpoch}',
+      game: game,
+    );
+    _tasks.add(task);
     notifyListeners();
     _startProcessing();
+    return task;
   }
 
   void stop(String taskId) {
@@ -111,6 +112,9 @@ class GameDownloadQueue extends ChangeNotifier {
     operation.whenComplete(() {
       if (identical(_processingOperation, operation)) {
         _processingOperation = null;
+        if (_tasks.any((task) => task.status == GameDownloadStatus.queued)) {
+          _startProcessing();
+        }
       }
     });
   }
@@ -239,13 +243,6 @@ class GameDownloadQueue extends ChangeNotifier {
       }
     }
     if (installed == null) return;
-    final installedPublisher = installed.author.trim();
-    final offerPublisher = offer.publisher.trim();
-    if (installedPublisher.isEmpty ||
-        offerPublisher.isEmpty ||
-        installedPublisher != offerPublisher) {
-      throw const FormatException('已安装游戏与下载包的发布者不一致');
-    }
     final current = SemanticVersion.parse(installed.version);
     final target = SemanticVersion.parse(offer.manifest.version);
     if (target.compareTo(current) <= 0) {
@@ -263,7 +260,8 @@ class GameCatalogController extends ChangeNotifier {
     GameCatalogPreferences? preferences,
     GameCatalogPublisher? publisher,
     DateTime Function()? now,
-  }) : _preferences = preferences ?? GameCatalogPreferences(),
+  }) : _library = library,
+       _preferences = preferences ?? GameCatalogPreferences(),
        _publisher = publisher ?? GameCatalogPublisher(transfer: transfer),
        _now = now ?? DateTime.now,
        _server = GameCatalogServer(
@@ -273,6 +271,7 @@ class GameCatalogController extends ChangeNotifier {
        ),
        downloads = GameDownloadQueue(transfer, onImported, library: library);
 
+  final GameLibraryRepository _library;
   final GameCatalogPreferences _preferences;
   final GameCatalogPublisher _publisher;
   final DateTime Function() _now;
@@ -293,6 +292,22 @@ class GameCatalogController extends ChangeNotifier {
   int get defaultPageSize => _defaultPageSize;
   Object? get shareError => _shareError;
   bool get sharing => _server.running;
+
+  GameSummary? installedGame(String gameId) {
+    for (final game in _library.cachedGames) {
+      if (game.id == gameId) return game;
+    }
+    return null;
+  }
+
+  GameDownloadTask startDownload(OnlineCatalogGame offer) =>
+      downloads.start(offer);
+
+  Listenable get downloadChanges => downloads;
+
+  void cancelDownload(String taskId) {
+    downloads.stop(taskId);
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -432,7 +447,9 @@ class GameCatalogController extends ChangeNotifier {
       name: existing?.name ?? parsed.name,
       host: parsed.host,
       token: parsed.token,
-      uploadKey: existing?.uploadKey ?? '',
+      uploadKey: parsed.uploadKey.isNotEmpty
+          ? parsed.uploadKey
+          : existing?.uploadKey ?? '',
       enabled: existing?.enabled ?? true,
       showOnHome: existing?.showOnHome ?? true,
     );
@@ -799,10 +816,12 @@ class GameCatalogController extends ChangeNotifier {
           : _LatestOfferPageValidation(
               games: List<OnlineCatalogGame>.unmodifiable(games),
             );
+      final sortedGames = validation.games.toList()
+        ..sort(compareOnlineCatalogOffersNewestFirst);
       final total = decoded['total'];
       return _SourceSearchResult(
         source: source,
-        games: validation.games,
+        games: List.unmodifiable(sortedGames),
         total: total is int && total >= 0 ? total : games.length,
         page: page,
         returnedCount: games.length,
@@ -891,6 +910,7 @@ class GameCatalogController extends ChangeNotifier {
                 result.returnedCount == 0 ||
                 result.returnedCount < _defaultPageSize;
       if (complete) {
+        offers.sort(compareOnlineCatalogOffersNewestFirst);
         return SourceSectionResult(
           source: source,
           offers: List.unmodifiable(offers),
@@ -901,6 +921,7 @@ class GameCatalogController extends ChangeNotifier {
         );
       }
       if (added == 0 && nextCursor == null) {
+        offers.sort(compareOnlineCatalogOffersNewestFirst);
         return SourceSectionResult(
           source: source,
           offers: List.unmodifiable(offers),
@@ -914,6 +935,7 @@ class GameCatalogController extends ChangeNotifier {
         );
       }
       if (nextCursor != null && !seenCursors.add(nextCursor)) {
+        offers.sort(compareOnlineCatalogOffersNewestFirst);
         return SourceSectionResult(
           source: source,
           offers: List.unmodifiable(offers),
@@ -926,6 +948,7 @@ class GameCatalogController extends ChangeNotifier {
       requestCursor = nextCursor;
       page += 1;
       if (page > 2048) {
+        offers.sort(compareOnlineCatalogOffersNewestFirst);
         return SourceSectionResult(
           source: source,
           offers: List.unmodifiable(offers),

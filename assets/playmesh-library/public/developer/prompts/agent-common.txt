@@ -9,7 +9,7 @@ PLAYMESH API AGENT 游戏开发提示
 4. main.json 只能通过 manifest API 修改，且 `id`、`author`、`lastModifiedAt` 不可修改。
    清单不定义 `permissions` 或 `icon`；能力只写同级 `capabilities.json`，列表图标
    只使用包根 `icon.png`，不得生成已移除字段。
-5. capabilities.json 只能通过项目 capabilities API 管理。添加或实现平台能力前，先读取全量能力注册表；排查能力输入时调用能力测试 API。
+5. capabilities.json 只能通过项目 capabilities API 管理。它只按需声明 WebView 会拦截的敏感权限和 Playmesh 已做多平台适配的能力；添加或实现平台能力前，先读取全量能力注册表，排查原生适配能力时调用能力测试 API。
 6. 根据用户指定的页面或功能，只读取完成任务所必需的文件，不要遍历读取项目树中的无关文件。修改前读取文件及 `X-Playmesh-Revision`。完整保存使用 PUT，精确修改使用 PATCH，多文件修改优先使用文件变更预览与原子应用接口。
 7. 创建或删除文件/目录后重新读取项目树。删除操作必须严格限制在当前项目内。
 8. 完成后调用项目校验并修复全部 error。项目未运行时调用运行接口；已经运行时优先调用重启接口。
@@ -25,11 +25,13 @@ PLAYMESH API AGENT 游戏开发提示
 - 异步操作必须捕获并显示错误；console 日志由平台统一采集。
 
 【SDK 与能力】
-- 当前 Game SDK 版本字符串，当前为 2.4.0。
+- 当前 Game SDK 版本字符串，当前为 3.0.0。
 - 随后附带的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 是 SDK 接口的唯一事实源，不得臆造成员。
 - `playmesh.app` 只表示当前设备身份与硬件能力，不能替代权威 Game SDK。
 - 游戏项目自行维护业务国际化，平台不会翻译游戏 DOM、玩家昵称、标签或日志。在 `await playmesh.ready` 后可用只读 `playmesh.runtime.getLocale()` 选择游戏自己的语言资源：App WebView 返回当前实际显示 App 的语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`；不得读取 Authority 主机语言或平台内部词典。
-- 每个页面只能使用自身角色在 capabilities.json 中声明的能力；能力 code、版本、方法、事件和参数以实时注册表为准。
+- 非敏感能力直接使用标准 Web API，例如加速度计、陀螺仪和设备方向；用户主动触发的 `<input type="file">` 不声明能力。`capabilities.json` 只按需声明敏感 WebView 权限（`media.camera`、`media.microphone`、`device.midi`）和多平台适配能力（例如 `device.vibration`），且每个页面只使用自身角色声明的能力。
+- 摄像头、麦克风采集和 MIDI 声明后直接使用 `getUserMedia()` 或 `requestMIDIAccess({sysex:true})`；原生短语音识别按实时注册表创建 `media.microphone`，调用 `toText({localeId,listenFor,pauseFor})` 并监听 `textOnSoundLevelChange`、`textOnResult`。只有描述符公开了方法或事件的能力才使用 `playmesh.app.capabilities.create()`，不得臆造 SDK 方法。
+- `device.vibration` 使用 `vibration` 插件适配；创建实例后，`vibrate` 可传 `duration/pattern/repeat/intensities/amplitude/sharpness/preset` 全部参数，持续或重复震动必须用 `cancel` 停止。
 - SDK 不判断玩法业务。准备、倒计时、开局、回合、胜负和结束条件由游戏 Authority 决定；`session.start/finish` 只是通过 SDK 请求 Core 切换基础会话状态。
 
 【交付检查】

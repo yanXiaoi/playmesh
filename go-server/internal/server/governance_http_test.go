@@ -179,6 +179,23 @@ func TestManagementRoutesAreIsolatedAndAdminCanDeleteAnyUnpublishedGame(
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("匿名管理 API 状态 = %d", unauthorized.Code)
 	}
+	adminUsersPath := cfg.AdminPath + "/api/admin/users"
+	externalUsers := httptest.NewRecorder()
+	app.Engine.ServeHTTP(
+		externalUsers,
+		httptest.NewRequest(http.MethodGet, adminUsersPath, nil),
+	)
+	if externalUsers.Code != http.StatusNotFound {
+		t.Fatalf("外部端口暴露用户管理 API，状态 = %d", externalUsers.Code)
+	}
+	unauthorizedUsers := httptest.NewRecorder()
+	app.AdminEngine.ServeHTTP(
+		unauthorizedUsers,
+		httptest.NewRequest(http.MethodGet, adminUsersPath, nil),
+	)
+	if unauthorizedUsers.Code != http.StatusUnauthorized {
+		t.Fatalf("匿名用户管理 API 状态 = %d", unauthorizedUsers.Code)
+	}
 
 	adminToken := strings.Repeat("a", 43)
 	if err := app.store.CreateAdminSession(
@@ -232,7 +249,7 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 		Status:           store.StatusPending,
 		OriginalFilename: "dynamic.zip",
 		StoredPath:       "packages/com.example.dynamic/1.2.3.zip",
-		ManifestJSON:     `{"id":"com.example.dynamic","version":"1.2.3"}`,
+		ManifestJSON:     `{"id":"com.example.dynamic","version":"1.2.3","author":"上传时昵称"}`,
 		ScanStatus:       "clean",
 		ScanReport:       "{}",
 	})
@@ -253,6 +270,11 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 		game.ID,
 		store.AdminReviewActor(cfg.AdminUsername),
 		true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.store.UpdateDisplayName(
+		ctx, owner.ID, "更新后 Publisher en-GB",
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +321,7 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 	if len(payload.Data) != 1 ||
 		payload.Data[0].ID != "com.example.dynamic" ||
 		payload.Data[0].Name != "用户自定义 Game 名称" ||
-		payload.Data[0].Author != "原样 Publisher en-GB" ||
+		payload.Data[0].Author != "更新后 Publisher en-GB" ||
 		payload.Data[0].Remarks != "API 原样 description" {
 		t.Fatalf("动态字段被改写 = %#v", payload.Data)
 	}
@@ -317,16 +339,14 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 	}
 	englishError := requestInvalidToken("en-GB")
 	chineseError := requestInvalidToken("zh-CN")
-	if englishError.Code != http.StatusBadRequest ||
-		chineseError.Code != http.StatusBadRequest ||
-		englishError.Body.String() != chineseError.Body.String() ||
-		!strings.Contains(englishError.Body.String(), "verification_token_invalid") {
+	if englishError.Code != http.StatusSeeOther ||
+		chineseError.Code != http.StatusSeeOther ||
+		englishError.Header().Get("Location") != "/my?emailVerification=failed" ||
+		chineseError.Header().Get("Location") != "/my?emailVerification=failed" {
 		t.Fatalf(
-			"Accept-Language 改写了 API 错误 JSON\nen=%d %s\nzh=%d %s",
-			englishError.Code,
-			englishError.Body.String(),
-			chineseError.Code,
-			chineseError.Body.String(),
+			"Accept-Language 改写了邮箱验证跳转\nen=%d %s\nzh=%d %s",
+			englishError.Code, englishError.Header().Get("Location"),
+			chineseError.Code, chineseError.Header().Get("Location"),
 		)
 	}
 }

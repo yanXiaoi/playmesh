@@ -15,12 +15,13 @@ import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
 void main() {
-  test('publicURL 只接受 HTTP/HTTPS origin 和可选 token', () {
+  test('publicURL 接受 HTTP/HTTPS origin、token 和 uploadKey', () {
     final parsed = parseCatalogPublicUrl(
-      'https://games.example.com?token=read-token',
+      'https://games.example.com?token=read-token&uploadKey=upload-secret',
     );
     expect(parsed.host.toString(), 'https://games.example.com');
     expect(parsed.token, 'read-token');
+    expect(parsed.uploadKey, 'upload-secret');
     expect(
       () => parseCatalogPublicUrl(
         'playmesh://catalog-source?host=https://games.example.com',
@@ -70,12 +71,14 @@ void main() {
       final controller = await _catalogController(root, const []);
       addTearDown(controller.close);
       final publicUrl =
-          'http://127.0.0.1:${server.port}?token=stable-read-token';
+          'http://127.0.0.1:${server.port}'
+          '?token=stable-read-token&uploadKey=stable-upload-key';
 
       final imported = await controller.verifyAndUpsertSource(publicUrl);
 
       expect(imported.name, 'Remote Dynamic Source / 原样');
       expect(imported.declaration?.author, 'Remote Publisher / 原样');
+      expect(imported.uploadKey, 'stable-upload-key');
       expect(requests.single.uri.path, '/apps/info');
       expect(requests.single.uri.queryParameters, isEmpty);
       expect(requests.single.authorization, 'Bearer stable-read-token');
@@ -83,7 +86,8 @@ void main() {
       sourceAvailable = false;
       await expectLater(
         controller.verifyAndUpsertSource(
-          'http://127.0.0.1:${server.port}?token=replacement-token',
+          'http://127.0.0.1:${server.port}'
+          '?token=replacement-token&uploadKey=replacement-upload-key',
         ),
         throwsFormatException,
       );
@@ -95,6 +99,7 @@ void main() {
       expect(controller.sources.single.id, imported.id);
       expect(controller.sources.single.name, imported.name);
       expect(controller.sources.single.token, 'stable-read-token');
+      expect(controller.sources.single.uploadKey, 'stable-upload-key');
       expect(
         controller.sources.single.declaration?.name,
         'Remote Dynamic Source / 原样',
@@ -104,6 +109,7 @@ void main() {
       expect(persisted.sources, hasLength(1));
       expect(persisted.sources.single.id, imported.id);
       expect(persisted.sources.single.token, 'stable-read-token');
+      expect(persisted.sources.single.uploadKey, 'stable-upload-key');
       expect(
         persisted.sources.single.declaration?.name,
         'Remote Dynamic Source / 原样',
@@ -261,6 +267,38 @@ void main() {
     );
   });
 
+  test('在线游戏聚合结果按最后修改时间最新优先', () {
+    final source = OnlineGameSource(
+      id: 'source',
+      name: 'Source',
+      host: Uri.parse('https://source.example'),
+    );
+    final results = aggregateCatalogOffers(
+      [
+        OnlineCatalogGame(
+          manifest: _manifest(
+            id: 'older-hot-game',
+            lastModifiedAt: DateTime.utc(2026, 7, 20),
+          ),
+          source: source,
+        ),
+        OnlineCatalogGame(
+          manifest: _manifest(
+            id: 'newer-game',
+            lastModifiedAt: DateTime.utc(2026, 7, 27),
+          ),
+          source: source,
+        ),
+      ],
+      usage: {'older-hot-game': const GameLibraryUsageStats(launchCount: 100)},
+    );
+
+    expect(results.map((result) => result.gameId), [
+      'newer-game',
+      'older-hot-game',
+    ]);
+  });
+
   test('更新候选只匹配同 gameId、同发布者和更高严格版本', () {
     final source = OnlineGameSource(
       id: 'source',
@@ -339,6 +377,40 @@ void main() {
       {for (final section in result.sections) section.source.id: section.page},
       {'first': 2, 'second': 3},
     );
+  });
+
+  test('游戏源每页结果按最后修改时间最新优先', () async {
+    final server = await _startCatalogServer(
+      (_) => {
+        'total': 2,
+        'data': [
+          _manifest(
+            id: 'com.example.older',
+            lastModifiedAt: DateTime.utc(2026, 7, 20),
+          ).toJson(),
+          _manifest(
+            id: 'com.example.newer',
+            lastModifiedAt: DateTime.utc(2026, 7, 27),
+          ).toJson(),
+        ],
+      },
+    );
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-source-newest-first-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'newest-source'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.loadHomeSource('newest-source');
+
+    expect(result.offers.map((offer) => offer.manifest.id), [
+      'com.example.newer',
+      'com.example.older',
+    ]);
   });
 
   test('后台更新检查读取每个源的全部分页', () async {
@@ -674,11 +746,12 @@ GameManifest _manifest({
   String id = 'com.example.catalog',
   String author = 'Publisher',
   String version = '1.2.3',
+  DateTime? lastModifiedAt,
 }) => GameManifest(
   id: id,
   name: 'Catalog Game',
   author: author,
-  lastModifiedAt: DateTime.utc(2026, 7, 26),
+  lastModifiedAt: lastModifiedAt ?? DateTime.utc(2026, 7, 26),
   remarks: 'Catalog test',
   version: version,
   sdkVersion: '1.0.0',

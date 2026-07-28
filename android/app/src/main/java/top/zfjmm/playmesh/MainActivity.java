@@ -1,10 +1,13 @@
 package top.zfjmm.playmesh;
 
+import android.Manifest;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.PowerManager;
 import android.provider.OpenableColumns;
 
@@ -15,8 +18,12 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
@@ -29,10 +36,14 @@ public class MainActivity extends FlutterActivity {
 
     private static final String GO_CORE_CHANNEL = "playmesh/go_core_host";
     private static final String OPEN_FILE_CHANNEL = "playmesh/open_file";
+    private static final String WEBVIEW_PERMISSION_CHANNEL =
+            "playmesh/webview_permission";
     private static final String DEVELOPER_BACKGROUND_CHANNEL =
             "playmesh/developer_background_host";
+    private static final int WEBVIEW_PERMISSION_REQUEST_CODE = 7301;
 
     private MethodChannel openFileChannel;
+    private MethodChannel.Result pendingWebPermissionResult;
     private static volatile boolean activityAttached;
     private static volatile boolean activityResumed;
     private static volatile boolean windowFocused;
@@ -108,6 +119,25 @@ public class MainActivity extends FlutterActivity {
         final Context appContext = getApplicationContext();
         new MethodChannel(
                 flutterEngine.getDartExecutor().getBinaryMessenger(),
+                WEBVIEW_PERMISSION_CHANNEL
+        ).setMethodCallHandler((call, result) -> {
+            if (!"request".equals(call.method)) {
+                result.notImplemented();
+                return;
+            }
+            try {
+                requestWebPermissions(call.argument("resources"), result);
+            } catch (Exception error) {
+                result.error(
+                        "webview_permission_request_error",
+                        error.getMessage(),
+                        null
+                );
+            }
+        });
+
+        new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
                 DEVELOPER_BACKGROUND_CHANNEL
         ).setMethodCallHandler((call, result) -> {
             try {
@@ -155,6 +185,78 @@ public class MainActivity extends FlutterActivity {
                 );
             }
         });
+    }
+
+    private void requestWebPermissions(
+            @Nullable List<?> resources,
+            MethodChannel.Result result
+    ) {
+        if (pendingWebPermissionResult != null) {
+            result.error(
+                    "webview_permission_request_in_progress",
+                    "已有 WebView 系统权限请求正在处理",
+                    null
+            );
+            return;
+        }
+        if (resources == null || resources.isEmpty()) {
+            result.success(true);
+            return;
+        }
+        Set<String> requiredPermissions = new LinkedHashSet<>();
+        for (Object resource : resources) {
+            if ("camera".equals(resource)) {
+                requiredPermissions.add(Manifest.permission.CAMERA);
+            } else if ("microphone".equals(resource)) {
+                requiredPermissions.add(Manifest.permission.RECORD_AUDIO);
+            } else {
+                throw new IllegalArgumentException(
+                        "unsupported_webview_permission_resource"
+                );
+            }
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            result.success(true);
+            return;
+        }
+        List<String> missingPermissions = new ArrayList<>();
+        for (String permission : requiredPermissions) {
+            if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+                missingPermissions.add(permission);
+            }
+        }
+        if (missingPermissions.isEmpty()) {
+            result.success(true);
+            return;
+        }
+        pendingWebPermissionResult = result;
+        try {
+            requestPermissions(
+                    missingPermissions.toArray(new String[0]),
+                    WEBVIEW_PERMISSION_REQUEST_CODE
+            );
+        } catch (RuntimeException error) {
+            pendingWebPermissionResult = null;
+            throw error;
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            @NonNull String[] permissions,
+            @NonNull int[] grantResults
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != WEBVIEW_PERMISSION_REQUEST_CODE) return;
+        MethodChannel.Result result = pendingWebPermissionResult;
+        pendingWebPermissionResult = null;
+        if (result == null) return;
+        boolean granted = grantResults.length == permissions.length;
+        for (int grantResult : grantResults) {
+            granted = granted && grantResult == PackageManager.PERMISSION_GRANTED;
+        }
+        result.success(granted);
     }
 
     private static String requiredNotificationLocaleId(@Nullable String localeId) {
@@ -308,6 +410,14 @@ public class MainActivity extends FlutterActivity {
         activityAttached = false;
         activityResumed = false;
         windowFocused = false;
+        if (pendingWebPermissionResult != null) {
+            pendingWebPermissionResult.error(
+                    "webview_permission_activity_destroyed",
+                    "Activity 已在系统权限请求完成前销毁",
+                    null
+            );
+            pendingWebPermissionResult = null;
+        }
         if (!DeveloperForegroundService.isRunning()) {
             FlutterEngineCache.getInstance().remove(FLUTTER_ENGINE_ID);
             try {

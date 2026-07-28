@@ -71,9 +71,10 @@ function createPage(
     const listeners = new Map();
     const attributes = new Map();
     const buttonSelectors = new Set([
-      ".edit", ".close", ".save", ".performance", ".expand", ".collapse",
-      ".reload", ".enter-fullscreen", ".exit-fullscreen", ".more", ".info",
-      ".logs", ".info-close", ".logs-clear", ".logs-close", ".allow", ".deny",
+      ".edit", ".close", ".save", ".performance", ".sidebar-scrim",
+      ".continue", ".reload", ".enter-fullscreen", ".exit-fullscreen", ".exit",
+      ".info", ".logs", ".info-close", ".logs-clear", ".logs-close",
+      ".allow", ".deny",
     ]);
     const tagName = selector === "input"
       ? "INPUT"
@@ -82,6 +83,7 @@ function createPage(
         : buttonSelectors.has(selector)
           ? "BUTTON"
           : "DIV";
+    const labelElement = { textContent: "" };
     return {
       hidden: false, textContent: "", value: "", disabled: false,
       scrollTop: 0, scrollHeight: 100, style: {},
@@ -94,6 +96,10 @@ function createPage(
       classList: { toggle() {} },
       setAttribute(name, value) { attributes.set(name, String(value)); },
       getAttribute(name) { return attributes.get(name) ?? null; },
+      querySelector(selector) {
+        return selector === "span:last-child" ? labelElement : null;
+      },
+      __label: labelElement,
       getRootNode() { return this.__root || null; },
       addEventListener(type, listener, options = {}) {
         const registered = options.once
@@ -132,14 +138,6 @@ function createPage(
       },
       remove() { this.removed = true; },
       getBoundingClientRect() {
-        if (selector === ".dock") {
-          return {
-            left: Number.parseFloat(this.style.left) || 740,
-            top: Number.parseFloat(this.style.top) || 12,
-            width: 48,
-            height: 260,
-          };
-        }
         return { left: 0, top: 0, width: 48, height: 48 };
       },
       setPointerCapture() {},
@@ -148,15 +146,17 @@ function createPage(
   }
   const elements = Object.fromEntries([
     ".panel", ".fps", ".latency", ".edit", ".overlay", ".enter", ".card", "form", "h2", "input", ".error", ".close", ".save",
-    ".performance", ".expand", ".tools", ".collapse", ".reload", ".enter-fullscreen", ".exit-fullscreen", ".more", ".menu", ".info", ".logs", ".info-overlay", ".info-close", ".info-title", ".game-name", ".session-info",
-    ".dock", ".logs-overlay", ".logs-card", ".logs-output", ".logs-clear", ".logs-close",
+    ".performance", ".sidebar-layer", ".sidebar", ".sidebar-title",
+    ".sidebar-scrim", ".continue", ".reload", ".enter-fullscreen",
+    ".exit-fullscreen", ".exit", ".info", ".logs", ".info-overlay",
+    ".info-close", ".info-title", ".game-name", ".session-info",
+    ".logs-overlay", ".logs-card", ".logs-output", ".logs-clear", ".logs-close",
     ".allow", ".deny", ".actions", ".capability-copy", ".capability-title",
   ].map((selector) => [selector, fakeElement(selector)]));
   elements[".edit"].hidden = true;
   elements[".latency"].hidden = true;
   elements[".overlay"].hidden = true;
-  elements[".expand"].hidden = true;
-  elements[".menu"].hidden = true;
+  elements[".sidebar-layer"].hidden = true;
   elements[".info-overlay"].hidden = true;
   elements[".logs-overlay"].hidden = true;
   const mountedHosts = [];
@@ -225,6 +225,9 @@ function createPage(
   gameFocusTarget.focus();
   let currentPlayerId = null;
   let currentNickname = null;
+  let historyLength = uiOptions.historyLength ?? 1;
+  let historyState = null;
+  const historyOperations = [];
 
   class FakeWebSocket {
     static CONNECTING = 0;
@@ -446,10 +449,37 @@ function createPage(
     },
     WebSocket: FakeWebSocket,
     history: {
-      length: uiOptions.historyLength ?? 1,
+      get length() { return historyLength; },
+      get state() { return historyState; },
+      replaceState(state, _title, url) {
+        historyState = state;
+        historyOperations.push({ type: "replace", state, url });
+      },
+      pushState(state, _title, url) {
+        historyState = state;
+        historyLength += 1;
+        historyOperations.push({ type: "push", state, url });
+      },
       back() {
         uiOptions.onHistoryBack?.();
       },
+      go(delta) {
+        historyOperations.push({ type: "go", delta });
+        uiOptions.onHistoryGo?.(delta);
+      },
+    },
+    location: {
+      href: "http://127.0.0.1:43000/app/index.html",
+      reload() {
+        uiOptions.onReload?.();
+      },
+      replace(url) {
+        historyOperations.push({ type: "replace-location", url });
+      },
+    },
+    closed: false,
+    close() {
+      uiOptions.onClose?.();
     },
     navigator: navigatorOverride || {
       languages: [...browserLocales],
@@ -519,6 +549,7 @@ function createPage(
   window.__consoleEntries = consoleEntries;
   window.__fullscreenRequests = fullscreenRequests;
   window.__orientationLocks = orientationLocks;
+  window.__historyOperations = historyOperations;
   window.__sockets = FakeWebSocket.instances;
   window.__dispatchWindowEvent = (type, event) => {
     for (const listener of windowListeners.get(type) || []) listener(event);
@@ -600,7 +631,7 @@ assert.equal(
 firstPage.__ui.input.value = "缓存玩家";
 await firstPage.__ui.form.onsubmit({ preventDefault() {} });
 const firstBootstrap = await firstPage.playmesh.ready;
-assert.equal(JSON.stringify(firstBootstrap).includes("toolbar.expand"), false);
+assert.equal(JSON.stringify(firstBootstrap).includes("sidebar.title"), false);
 assert.deepEqual(
   Object.keys(firstBootstrap.player).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
@@ -636,13 +667,23 @@ assert.equal(
   false,
   "浏览器不得自动弹出全屏提示层",
 );
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("更多游戏操作")), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏菜单")), true);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("继续游戏")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("运行日志")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("logs-output")), true);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏设置")), false);
 assert.equal(firstPage.__shadowHtml.some((html) => html.includes("编辑玩家昵称")), true);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("返回游戏")), false);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("退出游戏")), false);
+assert.equal(firstPage.__shadowHtml.some((html) => html.includes("退出游戏")), true);
+assert.equal(
+  firstPage.__ui[".sidebar-layer"].hidden,
+  true,
+  "浏览器游戏侧边栏初始必须关闭且没有常驻入口",
+);
+assert.equal(
+  firstPage.__historyOperations.filter((operation) => operation.type === "push").length,
+  1,
+  "浏览器应安装一个同页返回守卫",
+);
 assert.equal(
   firstPage.__ui[".panel"].hidden,
   true,
@@ -657,77 +698,52 @@ assert.equal(firstPage.__ui[".panel"].hidden, true, "浏览器工具区应能关
 while (firstPage.__ui[".edit"].hidden) {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
-firstPage.__ui[".collapse"].focus();
-assert.equal(firstPage.__ui[".collapse"].getAttribute("tabindex"), "0");
+let pauseEventCount = 0;
+firstPage.playmesh.lifecycle.onPause(() => pauseEventCount += 1);
+firstPage.__dispatchWindowEvent("popstate", {});
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
+assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".continue"]);
+assert.equal(pauseEventCount, 0, "打开游戏侧边栏不得触发 pause 生命周期");
+assert.equal(firstPage.__ui[".continue"].getAttribute("tabindex"), "0");
 assert.equal(firstPage.__ui[".reload"].getAttribute("tabindex"), "-1");
-const toolbarArrow = emitKey(
-  firstPage.__ui[".tools"],
-  firstPage.__ui[".collapse"],
+const sidebarArrow = emitKey(
+  firstPage.__ui[".sidebar"],
+  firstPage.__ui[".continue"],
   "ArrowDown",
 );
-assert.equal(toolbarArrow.defaultPrevented, true);
+assert.equal(sidebarArrow.defaultPrevented, true);
 assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".reload"]);
-assert.equal(firstPage.__ui[".collapse"].getAttribute("tabindex"), "-1");
+assert.equal(firstPage.__ui[".continue"].getAttribute("tabindex"), "-1");
 assert.equal(firstPage.__ui[".reload"].getAttribute("tabindex"), "0");
 emitKey(
-  firstPage.__ui[".tools"],
+  firstPage.__ui[".sidebar"],
   firstPage.__ui[".reload"],
   "End",
 );
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".more"]);
+assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".exit"]);
 emitKey(
-  firstPage.__ui[".tools"],
-  firstPage.__ui[".more"],
-  "Enter",
-);
-assert.equal(firstPage.__ui[".menu"].hidden, false);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".info"]);
-emitKey(
-  firstPage.__ui[".menu"],
-  firstPage.__ui[".info"],
-  "ArrowDown",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".performance"]);
-emitKey(
-  firstPage.__ui[".menu"],
-  firstPage.__ui[".performance"],
-  "End",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".performance"]);
-emitKey(
-  firstPage.__ui[".menu"],
-  firstPage.__ui[".performance"],
-  "Home",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".info"]);
-emitKey(
-  firstPage.__ui[".menu"],
-  firstPage.__ui[".info"],
+  firstPage.__ui[".sidebar"],
+  firstPage.__ui[".exit"],
   "Escape",
 );
-assert.equal(firstPage.__ui[".menu"].hidden, true);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".more"]);
-emitKey(
-  firstPage.__ui[".tools"],
-  firstPage.__ui[".more"],
-  "BrowserBack",
-);
-assert.equal(firstPage.__ui[".tools"].hidden, true);
-assert.equal(firstPage.__ui[".expand"].hidden, false);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".expand"]);
-emitKey(
-  firstPage.__ui[".expand"],
-  firstPage.__ui[".expand"],
-  "Escape",
-);
+assert.equal(firstPage.__ui[".sidebar-layer"].hidden, true);
 assert.equal(
   firstPage.document.activeElement,
   firstPage.__gameFocusTarget,
-  "Back on the collapsed toolbar must return focus to game content",
+  "关闭侧边栏必须把焦点还给游戏内容",
 );
-firstPage.__ui[".expand"].click();
-firstPage.__ui[".more"].click();
-assert.equal(firstPage.__ui[".menu"].hidden, false);
+assert.equal(pauseEventCount, 0, "关闭游戏侧边栏也不得触发 pause 生命周期");
+firstPage.__dispatchWindowEvent("popstate", {});
+assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
+firstPage.__ui[".sidebar-scrim"].click();
+assert.equal(firstPage.__ui[".sidebar-layer"].hidden, true);
+assert.equal(
+  firstPage.document.activeElement,
+  firstPage.__gameFocusTarget,
+  "点击侧边栏外部必须关闭并继续游戏",
+);
+firstPage.__dispatchWindowEvent("popstate", {});
 firstPage.__ui[".info"].click();
 assert.equal(firstPage.__ui[".info-overlay"].hidden, false);
 assert.equal(firstPage.__ui[".game-name"].textContent, "Playmesh 游戏");
@@ -750,12 +766,12 @@ emitKey(
 );
 assert.equal(firstPage.__ui[".info-overlay"].hidden, true);
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".more"]);
+assert.equal(firstPage.document.activeElement, firstPage.__gameFocusTarget);
 firstPage.console.log("浏览器本地日志", { score: 7 });
 firstPage.__dispatchWindowEvent("unhandledrejection", {
   reason: "浏览器 Promise 失败",
 });
-firstPage.__ui[".more"].click();
+firstPage.__dispatchWindowEvent("popstate", {});
 firstPage.__ui[".logs"].click();
 assert.equal(firstPage.__ui[".logs-overlay"].hidden, false);
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -794,7 +810,7 @@ firstPage.playmesh.__receive({
   type: "platform.ui.configure",
   configuration: platformConfiguration("en-US", "light"),
 });
-while (firstPage.__ui[".info"].textContent !== "Game information") {
+while (firstPage.__ui[".info"].__label.textContent !== "Game information") {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 assert.equal(
@@ -825,22 +841,7 @@ emitKey(
 );
 assert.equal(firstPage.__ui[".logs-overlay"].hidden, true);
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".logs"]);
-firstPage.__ui[".dock"].emit("pointerdown", {
-  pointerId: 1,
-  button: 0,
-  clientX: 760,
-  clientY: 30,
-});
-firstPage.__ui[".dock"].emit("pointermove", {
-  pointerId: 1,
-  clientX: 620,
-  clientY: 110,
-  preventDefault() {},
-});
-firstPage.__ui[".dock"].emit("pointerup", { pointerId: 1 });
-assert.equal(firstPage.__ui[".dock"].style.left, "600px");
-assert.equal(firstPage.__ui[".dock"].style.top, "92px");
+assert.equal(firstPage.document.activeElement, firstPage.__gameFocusTarget);
 firstPage.__ui[".performance"].onclick();
 await new Promise((resolve) => setTimeout(resolve, 0));
 const persistedBrowserId = browserLocalStorage.get("playmesh.player-id.v1");
@@ -1040,12 +1041,12 @@ assert.equal(
   "game locale must preserve the displaying browser's own locale",
 );
 while (!englishBrowserPage.__shadowHtml.some(
-  (html) => html.includes("More game actions"),
+  (html) => html.includes("Game menu"),
 )) {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 assert.equal(
-  englishBrowserPage.__shadowHtml.some((html) => html.includes("More game actions")),
+  englishBrowserPage.__shadowHtml.some((html) => html.includes("Game menu")),
   true,
 );
 
@@ -1057,7 +1058,7 @@ assert.equal(
   "game locale must not be limited by Playmesh overlay translations",
 );
 assert.equal(
-  japaneseBrowserPage.__shadowHtml.some((html) => html.includes("更多游戏操作")),
+  japaneseBrowserPage.__shadowHtml.some((html) => html.includes("游戏菜单")),
   true,
   "unsupported overlay locales must independently fall back to zh-CN",
 );

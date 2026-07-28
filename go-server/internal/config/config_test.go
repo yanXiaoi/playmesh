@@ -1,6 +1,11 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestValidateRejectsInvalidRelayLimits(t *testing.T) {
 	cfg := Default()
@@ -95,9 +100,75 @@ func TestValidateCaptchaImageSources(t *testing.T) {
 	})
 	t.Run("local requires directory", func(t *testing.T) {
 		cfg := Default()
+		cfg.Admin.CaptchaImageSource = "local"
 		cfg.Admin.CaptchaImageDirectory = ""
 		if err := cfg.Validate(); err == nil {
 			t.Fatal("local CAPTCHA image source accepted an empty directory")
 		}
 	})
+}
+
+func TestDefaultCaptchaWorksWithoutLocalImages(t *testing.T) {
+	cfg := Default()
+	if cfg.Admin.CaptchaMode != "slide" {
+		t.Fatalf("default CAPTCHA mode = %q, want slide", cfg.Admin.CaptchaMode)
+	}
+	if cfg.Admin.CaptchaImageSource != "remote" {
+		t.Fatalf(
+			"default CAPTCHA image source = %q, want remote",
+			cfg.Admin.CaptchaImageSource,
+		)
+	}
+	if cfg.Admin.CaptchaImageURL != "https://t.alcy.cc/moe" {
+		t.Fatalf("unexpected default CAPTCHA image URL %q", cfg.Admin.CaptchaImageURL)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyEnvironmentOverridesCaptchaSettings(t *testing.T) {
+	t.Setenv("PLAYMESH_CAPTCHA_MODE", "rotate")
+	t.Setenv("PLAYMESH_CAPTCHA_IMAGE_SOURCE", "local")
+	t.Setenv("PLAYMESH_CAPTCHA_IMAGE_DIRECTORY", "fixtures/captcha")
+	t.Setenv("PLAYMESH_CAPTCHA_IMAGE_URL", "https://images.example.com/random")
+	t.Setenv("PLAYMESH_CAPTCHA_IMAGE_CACHE_SIZE", "12")
+	t.Setenv("PLAYMESH_CAPTCHA_INTERVAL_MILLISECONDS", "1750")
+
+	cfg := Default()
+	if err := cfg.applyEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Admin.CaptchaMode != "rotate" ||
+		cfg.Admin.CaptchaImageSource != "local" ||
+		cfg.Admin.CaptchaImageDirectory != "fixtures/captcha" ||
+		cfg.Admin.CaptchaImageURL != "https://images.example.com/random" ||
+		cfg.Admin.CaptchaImageCacheSize != 12 ||
+		cfg.Admin.CaptchaIntervalMilliseconds != 1750 {
+		t.Fatalf("CAPTCHA environment settings were not applied: %+v", cfg.Admin)
+	}
+}
+
+func TestSaveOmitsEnvironmentCaptchaSettings(t *testing.T) {
+	cfg := Default()
+	cfg.ConfigPath = filepath.Join(t.TempDir(), "server.json")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(cfg.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, environmentOnly := range []string{
+		"captchaMode",
+		"captchaImageSource",
+		"captchaImageDirectory",
+		"captchaImageUrl",
+		"captchaImageCacheSize",
+		"captchaIntervalMilliseconds",
+	} {
+		if strings.Contains(string(content), environmentOnly) {
+			t.Fatalf("saved server.json contains environment-only field %q", environmentOnly)
+		}
+	}
 }

@@ -11,11 +11,11 @@ const appDeviceSdkSource = SdkSourceFragment(
     openSharePanel() {
       return openAppSharePanel();
     },
-    showToolDock() {
-      return showAppToolDock();
+    showGameSidebar() {
+      return showAppGameSidebar();
     },
-    hideToolDock() {
-      return hideAppToolDock();
+    hideGameSidebar() {
+      return hideAppGameSidebar();
     },
     exitGame() {
       return request("app.game.exit");

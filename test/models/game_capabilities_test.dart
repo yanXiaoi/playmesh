@@ -10,22 +10,25 @@ void main() {
   test('解析统一的必需能力 code', () {
     final capabilities = GameCapabilities.fromJson({
       'required': [
-        'sensor.accelerometer',
-        'sensor.gyroscope',
+        'media.camera',
+        'media.microphone',
+        'device.midi',
         'device.vibration',
       ],
       'controllerRequired': ['device.vibration'],
     });
 
     expect(capabilities.required, {
-      'sensor.accelerometer',
-      'sensor.gyroscope',
+      'media.camera',
+      'media.microphone',
+      'device.midi',
       'device.vibration',
     });
     expect(capabilities.controllerRequired, {'device.vibration'});
     expect(capabilities.requiredForRole(controller: false), {
-      'sensor.accelerometer',
-      'sensor.gyroscope',
+      'media.camera',
+      'media.microphone',
+      'device.midi',
       'device.vibration',
     });
     expect(capabilities.requiredForRole(controller: true), {
@@ -37,16 +40,18 @@ void main() {
     final capabilities = GameCapabilities.fromJson({
       'required': <String>[],
       'controllerRequired': [
-        'sensor.accelerometer',
-        'sensor.gyroscope',
+        'media.camera',
+        'media.microphone',
+        'device.midi',
         'device.vibration',
       ],
     });
 
     expect(capabilities.requiredForRole(controller: false), isEmpty);
     expect(capabilities.requiredForRole(controller: true), {
-      'sensor.accelerometer',
-      'sensor.gyroscope',
+      'media.camera',
+      'media.microphone',
+      'device.midi',
       'device.vibration',
     });
   });
@@ -54,13 +59,13 @@ void main() {
   test('拒绝未注册、重复或结构错误的能力声明', () {
     expect(
       () => GameCapabilities.fromJson({
-        'required': ['media.camera'],
+        'required': ['sensor.accelerometer'],
       }),
       throwsFormatException,
     );
     expect(
       () => GameCapabilities.fromJson({
-        'required': ['sensor.accelerometer', 'sensor.accelerometer'],
+        'required': ['media.camera', 'media.camera'],
       }),
       throwsFormatException,
     );
@@ -75,16 +80,30 @@ void main() {
       defaultCapabilityDescriptors.map((item) => item.code).toSet(),
       hasLength(defaultCapabilityDescriptors.length),
     );
-    final accelerometer =
-        defaultCapabilityDescriptorRegistry['sensor.accelerometer']!;
-    expect(accelerometer.name, '加速度计');
-    expect(accelerometer.methods.map((item) => item.name), ['start', 'stop']);
-    expect(accelerometer.events.single.name, 'reading');
-    expect(accelerometer.appSupported, isTrue);
-    expect(accelerometer.htmlSupported, isFalse);
+    for (final code in const ['media.camera', 'device.midi']) {
+      final permission = defaultCapabilityDescriptorRegistry[code]!;
+      expect(permission.methods, isEmpty);
+      expect(permission.events, isEmpty);
+      expect(permission.appSupported, isTrue);
+      expect(permission.htmlSupported, isFalse);
+    }
+    final audio = defaultCapabilityDescriptorRegistry['media.microphone']!;
+    expect(audio.apiVersion, '1.1.0');
+    expect(audio.methods.single.name, 'toText');
+    expect(audio.events.map((event) => event.name), [
+      'textOnSoundLevelChange',
+      'textOnResult',
+    ]);
+    expect(audio.appSupported, isTrue);
+    expect(audio.htmlSupported, isFalse);
+
     final vibration = defaultCapabilityDescriptorRegistry['device.vibration']!;
     expect(vibration.name, '震动反馈');
-    expect(vibration.methods.single.name, 'vibrate');
+    expect(vibration.apiVersion, '2.0.0');
+    expect(vibration.methods.map((method) => method.name), [
+      'vibrate',
+      'cancel',
+    ]);
     expect(vibration.events, isEmpty);
   });
 }

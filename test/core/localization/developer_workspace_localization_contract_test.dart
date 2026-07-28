@@ -183,6 +183,17 @@ void main() {
     expect(html, isNot(contains('/playmesh/developer/lucide.svg#')));
     expect(script, isNot(contains('/playmesh/developer/lucide.svg#')));
     expect(script, contains("return window.workspaceIcons.create(name)"));
+    expect(
+      script,
+      contains(
+        "window.workspaceIcons.render(toolbarRun.querySelector('svg'),"
+        "running?'rotate-ccw':'play')",
+      ),
+    );
+    expect(
+      script,
+      isNot(contains("toolbarRun.querySelector('use').setAttribute")),
+    );
     expect(icons, contains('"file-css"'));
     expect(icons, contains('"file-js"'));
     expect(icons, contains('"file-text"'));
@@ -273,6 +284,13 @@ void main() {
     expect(script, isNot(contains('capabilityDraftText')));
     expect(script, isNot(contains("tr('workspace.raw_json')")));
     expect(script, contains('log.textContent=capabilityTestLogLines.join'));
+    expect(
+      script,
+      contains(
+        'capabilityTestLogRenderTimer=setTimeout('
+        'renderCapabilityTestJson,100)',
+      ),
+    );
     expect(script, contains('const capabilityTestLogLimit=100'));
     expect(
       script,
@@ -291,6 +309,14 @@ void main() {
         'async function startCapabilityContinuousTest(){'
         'const item=capabilityTestDefinition();'
         'if(!item||capabilityTestBusy)return;clearCapabilityTestJson();',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        'if(capabilityTestInstance)'
+        'await disposeCapabilityTestInstance({quiet:true});'
+        'if(!(await createCapabilityTestInstance({quiet:true})))return;',
       ),
     );
     expect(
@@ -530,6 +556,156 @@ void main() {
     expect(openSource, isNot(contains("q('quickApply').disabled")));
   });
 
+  test('Project creation and editing share one capability multi-select', () {
+    final html = File('$developerRoot/workspace.html').readAsStringSync();
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+    final css = File('$developerRoot/workspace.css').readAsStringSync();
+
+    expect(RegExp(r'class="capability-picker"').allMatches(html), hasLength(4));
+    expect(
+      html,
+      contains('id="projectCapabilityOptions" class="capability-picker"'),
+    );
+    expect(
+      html,
+      contains(
+        'id="projectControllerCapabilityOptions" class="capability-picker"',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "function renderCapabilityOptions(required=[],"
+        "hostId='capabilityOptions'){renderCapabilityPicker(required,hostId)}",
+      ),
+    );
+    expect(
+      script,
+      contains("renderCapabilityPicker([],'projectCapabilityOptions')"),
+    );
+    expect(
+      script,
+      contains(
+        "renderCapabilityPicker([],'projectControllerCapabilityOptions')",
+      ),
+    );
+
+    final pickerStart = script.indexOf('function renderCapabilityPicker(');
+    final pickerEnd = script.indexOf(
+      '\nasync function openNewProject',
+      pickerStart,
+    );
+    expect(pickerStart, isNonNegative);
+    expect(pickerEnd, greaterThan(pickerStart));
+    final pickerSource = script.substring(pickerStart, pickerEnd);
+    expect(pickerSource, contains("search.setAttribute('role','combobox')"));
+    expect(pickerSource, contains("panel.setAttribute('role','listbox')"));
+    expect(pickerSource, contains('search.onfocus=open'));
+    expect(pickerSource, contains("if(event.key==='Escape')"));
+    expect(
+      pickerSource,
+      contains(
+        "document.addEventListener('pointerdown',"
+        "host._capabilityPickerOutsidePointerDown,true)",
+      ),
+    );
+    expect(pickerSource, contains("if(!host.contains(event.target))close()"));
+    expect(pickerSource, isNot(contains('capabilityContract(')));
+
+    expect(css, contains('.capability-picker-panel {\n  position: absolute;'));
+    expect(css, contains('display: none;'));
+    expect(
+      css,
+      contains(
+        '.capability-picker.open .capability-picker-panel {\n'
+        '  display: grid;',
+      ),
+    );
+
+    expect(
+      html,
+      contains(
+        'id="projectTags" class="manifest-tags"></div>'
+        '<div class="input-action"><input id="projectTagInput"',
+      ),
+    );
+    expect(
+      html,
+      contains('id="projectTagAdd" class="tag-add-button" type="button"'),
+    );
+    expect(html, isNot(contains('<textarea id="projectTags"')));
+    expect(script, contains('function renderTagChips('));
+    expect(script, contains('function renderProjectTags()'));
+    expect(script, contains('function addProjectTag()'));
+    expect(script, contains('tags:[...projectTags]'));
+    expect(script, contains("q('projectTagAdd').onclick=addProjectTag"));
+    expect(script, isNot(contains("q('projectTags').value")));
+    expect(
+      html,
+      contains(
+        'id="manifestTagAdd" class="tag-add-button" type="button" '
+        'data-i18n-title="workspace.add"',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="projectTagAdd" class="tag-add-button" type="button" '
+        'data-i18n-title="workspace.add"',
+      ),
+    );
+    expect(script, contains("clear.replaceChildren(lucideIcon('eraser'))"));
+    expect(script, isNot(contains("clear.textContent=tr('workspace.clear')")));
+    expect(css, contains('.tag-add-button {'));
+    expect(css, contains('.capability-picker-clear:disabled {'));
+    expect(css, contains('visibility: hidden;'));
+  });
+
+  test('Every successful copy surfaces a top workspace message', () {
+    final html = File('$developerRoot/workspace.html').readAsStringSync();
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+    final css = File('$developerRoot/workspace.css').readAsStringSync();
+
+    expect(
+      html,
+      contains(
+        'id="workspaceMessages" class="workspace-messages" '
+        'aria-live="polite" aria-atomic="true"',
+      ),
+    );
+    expect(
+      script,
+      contains("function showWorkspaceMessage(text,type='success')"),
+    );
+    expect(
+      script,
+      contains("showWorkspaceMessage(tr('workspace.copy_succeeded'))"),
+    );
+    expect(
+      RegExp(r'navigator\.clipboard\.writeText\(value\)').allMatches(script),
+      hasLength(1),
+      reason:
+          'All clipboard writes must pass through copyText and its message.',
+    );
+    expect(
+      script,
+      contains(
+        "if(operation==='copy')"
+        "showWorkspaceMessage(tr('workspace.copy_succeeded'))",
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "message.textContent=tr('workspace.project_copied',"
+        "{name:data.project.name});showWorkspaceMessage(message.textContent)",
+      ),
+    );
+    expect(css, contains('.workspace-messages {\n  position: fixed;'));
+    expect(css, contains('.workspace-message.visible {'));
+    expect(css, contains('inset: 16px 12px auto;'));
+  });
+
   test('Project tree commands and run controls stay context-specific', () {
     final html = File('$developerRoot/workspace.html').readAsStringSync();
     final script = File('$developerRoot/workspace.js').readAsStringSync();
@@ -635,10 +811,12 @@ const _dynamicWorkspaceKeys = <String>{
   'workspace.capability_status.failed',
   'workspace.capability_status.unavailable',
   'workspace.capability_status.timeout',
-  'workspace.capability.sensor_accelerometer.name',
-  'workspace.capability.sensor_accelerometer.description',
-  'workspace.capability.sensor_gyroscope.name',
-  'workspace.capability.sensor_gyroscope.description',
+  'workspace.capability.media_camera.name',
+  'workspace.capability.media_camera.description',
+  'workspace.capability.media_microphone.name',
+  'workspace.capability.media_microphone.description',
+  'workspace.capability.device_midi.name',
+  'workspace.capability.device_midi.description',
   'workspace.capability.device_vibration.name',
   'workspace.capability.device_vibration.description',
   'workspace.prompt.category.common',

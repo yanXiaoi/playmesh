@@ -35,6 +35,7 @@ type Options struct {
 type Service struct {
 	options       Options
 	images        *imageProvider
+	logger        *slog.Logger
 	mutex         sync.Mutex
 	captchas      map[string]captchaRecord
 	verifications map[string]verificationRecord
@@ -53,6 +54,7 @@ func New(
 	service := &Service{
 		options:       options,
 		images:        newImageProvider(options, logger),
+		logger:        logger,
 		captchas:      make(map[string]captchaRecord),
 		verifications: make(map[string]verificationRecord),
 	}
@@ -83,6 +85,13 @@ func New(
 func (s *Service) Challenge(c *gin.Context, scope string) {
 	generated, err := s.generate(c.Request.Context())
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Error(
+				"验证码生成失败",
+				"scope", scope,
+				"error", err,
+			)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "captcha_failed",
 			"message": "验证码图片暂时不可用",

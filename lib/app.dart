@@ -435,7 +435,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
       routes: {
         ProfilePage.routeName: (_) =>
             ProfilePage(user: _profile, onSave: _saveProfile),
-        GameLibraryPage.routeName: (_) => GameLibraryPage(
+        GameLibraryPage.routeName: (routeContext) => GameLibraryPage(
           games: _gameLibrary.cachedGames,
           onRefresh: _gameLibrary.refresh,
           onImport: _importGame,
@@ -445,7 +445,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
               ? _catalogController.checkUpdates
               : null,
           onDownloadUpdate: widget.games == null
-              ? (offer) => _catalogController.downloads.enqueue([offer])
+              ? (offer) async {
+                  await showGameDownloadProgressDialog(
+                    routeContext,
+                    controller: _catalogController,
+                    offer: offer,
+                  );
+                }
               : null,
           onOpenOnline: widget.games == null
               ? () => _navigatorKey.currentState?.pushNamed<void>(

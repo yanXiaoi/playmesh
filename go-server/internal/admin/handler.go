@@ -1,8 +1,8 @@
 package admin
 
 import (
-	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,14 +10,14 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	qrcode "github.com/yeqown/go-qrcode/v2"
-	"github.com/yeqown/go-qrcode/writer/standard"
 
 	"go-server/internal/config"
 	"go-server/internal/mailer"
 	"go-server/internal/packages"
+	"go-server/internal/qrimage"
 	"go-server/internal/relay"
 	"go-server/internal/store"
+	useraccount "go-server/internal/user"
 )
 
 type Handler struct {
@@ -30,12 +30,6 @@ type Handler struct {
 	mutex               sync.RWMutex
 	updatePublicBaseURL func(string)
 }
-
-type bufferWriteCloser struct {
-	*bytes.Buffer
-}
-
-func (bufferWriteCloser) Close() error { return nil }
 
 func NewHandler(
 	cfg config.Config,
@@ -121,26 +115,13 @@ func (h *Handler) PublicSourceQRCode(c *gin.Context) {
 	query.Set("token", token)
 	publicURL.RawQuery = query.Encode()
 	payload := publicURL.String()
-	code, err := qrcode.New(payload)
+	output, err := qrimage.PNG(payload)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "qrcode_failed"})
 		return
 	}
-	var output bytes.Buffer
-	writer := standard.NewWithWriter(
-		bufferWriteCloser{Buffer: &output},
-		standard.WithBuiltinImageEncoder(standard.PNG_FORMAT),
-		standard.WithQRWidth(7),
-		standard.WithBorderWidth(18),
-		standard.WithBgColorRGBHex("#ffffff"),
-		standard.WithFgColorRGBHex("#071018"),
-	)
-	if err := code.Save(writer); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "qrcode_failed"})
-		return
-	}
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
-	c.Data(http.StatusOK, "image/png", output.Bytes())
+	c.Data(http.StatusOK, "image/png", output)
 }
 
 func (h *Handler) PublicSourceInfo(c *gin.Context) {
@@ -213,6 +194,172 @@ func (h *Handler) AdminGames(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h *Handler) AdminUsers(c *gin.Context) {
+	page, ok := positiveQuery(c, "page", 1, 1, 1<<31-1)
+	if !ok {
+		return
+	}
+	size, ok := positiveQuery(c, "size", 20, 1, 100)
+	if !ok {
+		return
+	}
+	if len(c.Query("search")) > 320 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "invalid_request", "message": "搜索内容过长",
+		})
+		return
+	}
+	result, err := h.store.ListAdminUsers(
+		c.Request.Context(),
+		store.AdminUserQuery{
+			Search: strings.TrimSpace(c.Query("search")),
+			Status: strings.TrimSpace(c.Query("status")),
+			Page:   page,
+			Size:   size,
+		},
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "user_query_failed", "message": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) AdminCreateUser(c *gin.Context) {
+	var body struct {
+		Email       string `json:"email"`
+		Password    string `json:"password"`
+		DisplayName string `json:"displayName"`
+		Disabled    bool   `json:"disabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request"})
+		return
+	}
+	email, err := useraccount.NormalizeEmail(body.Email)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "email_invalid", "message": err.Error(),
+		})
+		return
+	}
+	passwordHash, err := useraccount.HashPassword(body.Password)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "password_invalid", "message": err.Error(),
+		})
+		return
+	}
+	displayName := strings.TrimSpace(body.DisplayName)
+	if len([]rune(displayName)) > 40 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "display_name_invalid", "message": "展示名称不能超过 40 个字符",
+		})
+		return
+	}
+	account, err := h.store.CreateUser(
+		c.Request.Context(), email, passwordHash, "active",
+	)
+	if err != nil {
+		code := "user_create_failed"
+		status := http.StatusInternalServerError
+		if errors.Is(err, store.ErrEmailExists) {
+			code = "email_exists"
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"code": code, "message": err.Error()})
+		return
+	}
+	if displayName != "" {
+		account, err = h.store.UpdateDisplayName(
+			c.Request.Context(), account.ID, displayName,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code": "profile_update_failed", "message": err.Error(),
+			})
+			return
+		}
+	}
+	if body.Disabled {
+		if err := h.store.SetUserDisabled(
+			c.Request.Context(), account.ID, true, "管理员创建时禁用",
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code": "user_update_failed", "message": err.Error(),
+			})
+			return
+		}
+		account.Status = "disabled"
+	}
+	c.JSON(http.StatusCreated, account)
+}
+
+func (h *Handler) AdminUpdateUser(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	var body struct {
+		Disabled bool   `json:"disabled"`
+		Reason   string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request"})
+		return
+	}
+	body.Reason = strings.TrimSpace(body.Reason)
+	if body.Disabled && body.Reason == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "reason_required", "message": "禁用用户时必须填写原因",
+		})
+		return
+	}
+	if len([]rune(body.Reason)) > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "reason_too_long", "message": "禁用原因不能超过 500 字",
+		})
+		return
+	}
+	if err := h.store.SetUserDisabled(
+		c.Request.Context(), id, body.Disabled, body.Reason,
+	); err != nil {
+		status := http.StatusInternalServerError
+		code := "user_update_failed"
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+			code = "user_not_found"
+		}
+		c.JSON(status, gin.H{"code": code, "message": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) AdminDeleteUser(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	if err := h.store.DeleteUser(c.Request.Context(), id); err != nil {
+		status := http.StatusInternalServerError
+		code := "user_delete_failed"
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			status = http.StatusNotFound
+			code = "user_not_found"
+		case errors.Is(err, store.ErrUserHasGames):
+			status = http.StatusConflict
+			code = "user_has_games"
+		}
+		c.JSON(status, gin.H{"code": code, "message": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) AdminGame(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
@@ -273,12 +420,41 @@ func (h *Handler) AdminUpdateGame(c *gin.Context) {
 		}
 		_ = h.mailer.SendReviewResult(game.Email, game.Name, approved, reason)
 	}
+	title := "游戏包审核通过"
+	message := fmt.Sprintf("%s %s 已通过审核。", game.Name, game.Version)
+	kind := "game_approved"
+	if game.Status == store.StatusRejected {
+		title = "游戏包审核未通过"
+		message = fmt.Sprintf(
+			"%s %s 未通过审核。原因：%s", game.Name, game.Version, body.Reason,
+		)
+		kind = "game_rejected"
+	}
+	_ = h.store.CreateNotification(
+		c.Request.Context(), game.OwnerUserID, kind, title, message,
+	)
 	c.JSON(http.StatusOK, game)
 }
 
 func (h *Handler) AdminDeleteGame(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request"})
+			return
+		}
+	}
+	body.Reason = strings.TrimSpace(body.Reason)
+	if len([]rune(body.Reason)) > 2000 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "reason_too_long", "message": "删除说明不能超过 2000 字",
+		})
 		return
 	}
 	game, err := h.store.BeginDeleteOwnedGame(
@@ -296,6 +472,15 @@ func (h *Handler) AdminDeleteGame(c *gin.Context) {
 		c.JSON(status, gin.H{"code": code, "message": err.Error()})
 		return
 	}
+	reason := body.Reason
+	if reason == "" {
+		reason = "管理员删除了该游戏包记录。"
+	}
+	_ = h.store.CreateNotification(
+		c.Request.Context(), game.OwnerUserID, "game_deleted",
+		"游戏包已删除",
+		fmt.Sprintf("%s %s 已删除。说明：%s", game.Name, game.Version, reason),
+	)
 	if err := packages.DeleteStoredFiles(
 		h.gamesDir, game.StoredPath, game.IconPath,
 	); err != nil {
@@ -319,21 +504,45 @@ func (h *Handler) AdminDeleteGame(c *gin.Context) {
 }
 
 func (h *Handler) AdminPublishGame(c *gin.Context) {
-	h.adminSetPublished(c, true)
+	h.adminSetPublished(c, true, "")
 }
 
 func (h *Handler) AdminUnpublishGame(c *gin.Context) {
-	h.adminSetPublished(c, false)
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request"})
+		return
+	}
+	body.Reason = strings.TrimSpace(body.Reason)
+	if body.Reason == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "reason_required", "message": "下架游戏时必须填写原因",
+		})
+		return
+	}
+	if len([]rune(body.Reason)) > 2000 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": "reason_too_long", "message": "下架原因不能超过 2000 字",
+		})
+		return
+	}
+	h.adminSetPublished(c, false, body.Reason)
 }
 
-func (h *Handler) adminSetPublished(c *gin.Context, published bool) {
+func (h *Handler) adminSetPublished(
+	c *gin.Context,
+	published bool,
+	reason string,
+) {
 	id, ok := pathID(c)
 	if !ok {
 		return
 	}
-	game, err := h.store.SetPublished(
+	game, err := h.store.SetPublishedWithDetail(
 		c.Request.Context(), id,
-		store.AdminReviewActor(h.config.AdminUsername), published,
+		store.AdminReviewActor(h.config.AdminUsername), published, reason,
 	)
 	if err != nil {
 		code := "invalid_game_state"
@@ -342,6 +551,21 @@ func (h *Handler) adminSetPublished(c *gin.Context, published bool) {
 		}
 		c.JSON(http.StatusConflict, gin.H{"code": code, "message": err.Error()})
 		return
+	}
+	if published {
+		_ = h.store.CreateNotification(
+			c.Request.Context(), game.OwnerUserID, "game_published",
+			"游戏包已上架",
+			fmt.Sprintf("%s %s 已上架。", game.Name, game.Version),
+		)
+	} else {
+		_ = h.store.CreateNotification(
+			c.Request.Context(), game.OwnerUserID, "game_unpublished",
+			"游戏包已下架",
+			fmt.Sprintf(
+				"%s %s 已下架。原因：%s", game.Name, game.Version, reason,
+			),
+		)
 	}
 	c.JSON(http.StatusOK, game)
 }
@@ -424,6 +648,12 @@ func (h *Handler) RelayStats(c *gin.Context) {
 	c.JSON(http.StatusOK, h.relay.Stats())
 }
 
+type editableAdminConfig struct {
+	Listen                    string `json:"listen"`
+	SessionTTLMinutes         int    `json:"sessionTtlMinutes"`
+	LoginIntervalMilliseconds int    `json:"loginIntervalMilliseconds"`
+}
+
 type editableConfig struct {
 	ExternalListen           string                  `json:"externalListen"`
 	SupportsGameRelay        bool                    `json:"supportsGameRelay"`
@@ -431,7 +661,7 @@ type editableConfig struct {
 	AllowUserRegistration    bool                    `json:"allowUserRegistration"`
 	RequireEmailVerification bool                    `json:"requireEmailVerification"`
 	AuthWhitelist            []config.WhitelistEntry `json:"authWhitelist"`
-	Admin                    config.Admin            `json:"admin"`
+	Admin                    editableAdminConfig     `json:"admin"`
 	Storage                  config.Storage          `json:"storage"`
 	Scanner                  config.Scanner          `json:"scanner"`
 	Relay                    config.Relay            `json:"relay"`
@@ -467,7 +697,9 @@ func (h *Handler) UpdateRuntimeConfig(c *gin.Context) {
 	next.AllowUserRegistration = body.AllowUserRegistration
 	next.RequireEmailVerification = body.RequireEmailVerification
 	next.Auth.Whitelist = append([]config.WhitelistEntry(nil), body.AuthWhitelist...)
-	next.Admin = body.Admin
+	next.Admin.Listen = strings.TrimSpace(body.Admin.Listen)
+	next.Admin.SessionTTLMinutes = body.Admin.SessionTTLMinutes
+	next.Admin.LoginIntervalMilliseconds = body.Admin.LoginIntervalMilliseconds
 	next.Storage = body.Storage
 	body.Scanner.Enabled = next.Scanner.Enabled
 	next.Scanner = body.Scanner
@@ -523,11 +755,15 @@ func editableFromConfig(cfg config.Config) editableConfig {
 		AllowUserRegistration:    cfg.AllowUserRegistration,
 		RequireEmailVerification: cfg.RequireEmailVerification,
 		AuthWhitelist:            append([]config.WhitelistEntry(nil), cfg.Auth.Whitelist...),
-		Admin:                    cfg.Admin,
-		Storage:                  cfg.Storage,
-		Scanner:                  cfg.Scanner,
-		Relay:                    cfg.Relay,
-		WebUI:                    cfg.WebUI,
+		Admin: editableAdminConfig{
+			Listen:                    cfg.Admin.Listen,
+			SessionTTLMinutes:         cfg.Admin.SessionTTLMinutes,
+			LoginIntervalMilliseconds: cfg.Admin.LoginIntervalMilliseconds,
+		},
+		Storage: cfg.Storage,
+		Scanner: cfg.Scanner,
+		Relay:   cfg.Relay,
+		WebUI:   cfg.WebUI,
 	}
 }
 

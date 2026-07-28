@@ -21,14 +21,8 @@
   },
   "admin": {
     "listen": "0.0.0.0:16669",
-    "captchaMode": "slide",
-    "captchaImageSource": "remote",
-    "captchaImageDirectory": "data/captcha-images",
-    "captchaImageUrl": "https://www.dmoe.cc/random.php",
-    "captchaImageCacheSize": 8,
     "sessionTtlMinutes": 480,
-    "loginIntervalMilliseconds": 1000,
-    "captchaIntervalMilliseconds": 1000
+    "loginIntervalMilliseconds": 1000
   },
   "storage": {
     "databasePath": "data/playmesh-server.db",

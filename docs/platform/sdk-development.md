@@ -48,14 +48,14 @@ Bridge 只负责消息解析、上下文构造、统一分发和响应，不重�
 
 ## 当前公开 SDK 方法
 
-当前 Game SDK 为 `2.4.0`，App Bridge SDK 为 `2.2.0`。下表是当前公开面；
+当前 Game SDK 为 `3.0.0`，App Bridge SDK 为 `3.0.0`。下表是当前公开面；
 精确参数、泛型、返回类型和中文 JSDoc 仍以注册表生成的 `playmesh.d.ts` 与
 `playmesh-app.d.ts` 为准。
 
 | 命名空间或句柄 | 当前公开成员 |
 | --- | --- |
 | `playmesh` | `version`、`ready` |
-| `playmesh.app` | `version`、`ready`、`isAvailable()`、`openSharePanel()`、`showToolDock()`、`hideToolDock()`、`exitGame()` |
+| `playmesh.app` | `version`、`ready`、`isAvailable()`、`openSharePanel()`、`showGameSidebar()`、`hideGameSidebar()`、`exitGame()` |
 | `playmesh.app.identity` | `getCurrent()` |
 | `playmesh.app.capabilities` | `getRegistry()`、`getAvailable()`、`getDeclared()`、`create()` |
 | `CapabilityHandle` | `id`、`code`、`apiVersion`、`invoke()`、`on()`、`onError()`、`dispose()` |
@@ -226,11 +226,11 @@ command.name == "app.ui.openSharePanel"
 且 command.payload["userActivation"] == true
   => context.openSharePanel()
 
-command.name == "app.ui.toolDock.show"
-  => context.setToolDockVisible(true)
+command.name == "app.ui.gameSidebar.show"
+  => context.setGameSidebarVisible(true)
 
-command.name == "app.ui.toolDock.hide"
-  => context.setToolDockVisible(false)
+command.name == "app.ui.gameSidebar.hide"
+  => context.setGameSidebarVisible(false)
 ```
 
 分享功能还会在 App 页面 callback 再判断当前 View、Authority、用户激活、UI 是否

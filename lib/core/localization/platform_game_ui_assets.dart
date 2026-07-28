@@ -13,21 +13,23 @@ const platformGameUiRequiredKeys = <String>{
   'capability.deny',
   'capability.allow',
   'capability.denied',
-  'capability.sensor.accelerometer.name',
-  'capability.sensor.accelerometer.description',
-  'capability.sensor.gyroscope.name',
-  'capability.sensor.gyroscope.description',
+  'capability.media.camera.name',
+  'capability.media.camera.description',
+  'capability.media.microphone.name',
+  'capability.media.microphone.description',
+  'capability.device.midi.name',
+  'capability.device.midi.description',
   'capability.device.vibration.name',
   'capability.device.vibration.description',
-  'toolbar.expand',
-  'toolbar.collapse',
-  'toolbar.restart',
-  'toolbar.logs',
-  'toolbar.enter_fullscreen',
-  'toolbar.exit_fullscreen',
-  'toolbar.more',
-  'menu.info',
-  'menu.performance',
+  'sidebar.title',
+  'sidebar.continue',
+  'sidebar.restart',
+  'sidebar.logs',
+  'sidebar.enter_fullscreen',
+  'sidebar.exit_fullscreen',
+  'sidebar.info',
+  'sidebar.performance',
+  'sidebar.exit',
   'nickname.label',
   'nickname.set_title',
   'nickname.edit_action',
@@ -100,9 +102,10 @@ PlatformGameUiConfiguration platformGameUiConfigurationFor(
   );
 }
 
-/// A read-only, platform-UI-only projection of the shared App localization
-/// catalog. App WebViews receive one host-selected configuration; ordinary
-/// browsers receive enabled projections and resolve them from `navigator`.
+/// App 统一本地化目录中只读、仅限平台 UI 的投影。
+///
+/// App WebView 接收宿主选择的一份配置；普通浏览器接收启用的投影，并根据
+/// `navigator` 选择语言。
 class PlatformGameUiAssets {
   PlatformGameUiAssets._({
     required this.manifest,

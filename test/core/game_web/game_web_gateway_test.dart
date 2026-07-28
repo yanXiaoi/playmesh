@@ -32,8 +32,8 @@ void main() {
       gameName: '测试游戏',
       gameSdkVersion: '1.4.2',
       appSdkVersion: '1.2.1',
-      requiredCapabilities: const ['sensor.accelerometer'],
-      controllerRequiredCapabilities: const ['sensor.gyroscope'],
+      requiredCapabilities: const ['media.camera'],
+      controllerRequiredCapabilities: const ['media.microphone'],
       storage: storage,
     );
     addTearDown(() async {
@@ -69,12 +69,12 @@ void main() {
     expect(controller.body, contains('"fallbackLocale":"zh-CN"'));
     expect(controller.body, contains('"locale":"zh-CN"'));
     expect(controller.body, contains('"locale":"en-US"'));
-    expect(controller.body, contains('"toolbar.expand":"展开游戏工具"'));
-    expect(controller.body, contains('"toolbar.expand":"Open game tools"'));
+    expect(controller.body, contains('"sidebar.title":"游戏菜单"'));
+    expect(controller.body, contains('"sidebar.title":"Game menu"'));
     expect(controller.body, isNot(contains('"home.title"')));
     expect(
       controller.body,
-      contains('"requiredCapabilities":["sensor.gyroscope"]'),
+      contains('"requiredCapabilities":["media.microphone"]'),
     );
     expect(controller.body, contains('"availableCapabilities":[]'));
     expect(controller.body, contains('/playmesh/sdk/v1/playmesh.js'));
@@ -101,7 +101,7 @@ void main() {
     expect(appController.body, contains('"nickname":"App 玩家"'));
     expect(
       appController.body,
-      contains('http://127.0.0.1:45678/playmesh-app.js?version=2.2.0'),
+      contains('http://127.0.0.1:45678/playmesh-app.js?version=3.0.0'),
     );
     expect(
       appController.body,
@@ -109,7 +109,7 @@ void main() {
     );
     expect(
       appController.body.indexOf(
-        'http://127.0.0.1:45678/playmesh-app.js?version=2.2.0',
+        'http://127.0.0.1:45678/playmesh-app.js?version=3.0.0',
       ),
       lessThan(appController.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
     );

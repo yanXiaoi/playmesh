@@ -246,15 +246,21 @@ func TestCaptchaLoadsInDialogsOnlyAfterAuthenticationSubmit(t *testing.T) {
 		`captcha.js`,
 		`id="admin-captcha-dialog"`,
 		`id="admin-captcha-widget"`,
-		`value="slide"`,
-		`value="rotate"`,
+	} {
+		if !strings.Contains(adminSource, required) {
+			t.Fatalf("admin CAPTCHA UI is missing %q", required)
+		}
+	}
+	for _, environmentOnly := range []string{
+		`name="captchaMode"`,
 		`name="captchaImageSource"`,
 		`name="captchaImageDirectory"`,
 		`name="captchaImageURL"`,
 		`name="captchaImageCacheSize"`,
+		`name="captchaInterval"`,
 	} {
-		if !strings.Contains(adminSource, required) {
-			t.Fatalf("admin CAPTCHA configuration is missing %q", required)
+		if strings.Contains(adminSource, environmentOnly) {
+			t.Fatalf("environment-only CAPTCHA setting is exposed in admin UI: %q", environmentOnly)
 		}
 	}
 	for _, forbidden := range []string{

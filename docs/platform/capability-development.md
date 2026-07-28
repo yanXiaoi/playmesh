@@ -37,14 +37,15 @@ lib/core/capabilities/
 
 ## 当前完整能力注册表
 
-当前内置注册表只有以下三项。code 区分大小写，是运行时、项目声明、工作区和 SDK
+当前内置注册表只有以下四项。code 区分大小写，是运行时、项目声明、工作区和 SDK
 调用共同使用的唯一主键。
 
 | code / API 版本 | 创建参数 | 方法 | 事件 | 当前适配声明 |
 | --- | --- | --- | --- | --- |
-| `sensor.accelerometer` / `1.0.0` | 可选 `fps`，整数 `1..120`，默认 30 | `start`、`stop` | `reading`：`x/y/z/timestamp/unit`，单位 `m/s^2` | App 支持；普通 HTML 未适配；设备是否可用取决于原生传感器 |
-| `sensor.gyroscope` / `1.0.0` | 可选 `fps`，整数 `1..120`，默认 30 | `start`、`stop` | `reading`：`x/y/z/timestamp/unit`，单位 `rad/s` | App 支持；普通 HTML 未适配；设备是否可用取决于原生传感器 |
-| `device.vibration` / `1.0.0` | 不接受创建参数 | `vibrate({style})`；style 为 `selection/light/medium/heavy/vibrate` | 无 | App 支持；普通 HTML 未适配；设备是否可用取决于原生触觉反馈 |
+| `media.camera` / `1.0.0` | 不接受创建参数 | 无；游戏直接使用 `getUserMedia({video:true})` | 无 | App WebView 声明后放行权限请求；独立插件保留原生扩展入口 |
+| `media.microphone` / `1.1.0` | 不接受创建参数；同一插件同时只允许一个实例 | `toText({localeId, listenFor, pauseFor})`；两个时限均为整数秒 | `textOnSoundLevelChange({level})`、`textOnResult(SpeechRecognitionResult JSON)` | App WebView 声明后放行麦克风；App 原生适配短语音识别 |
+| `device.midi` / `1.0.0` | 不接受创建参数 | 无；游戏直接使用 `requestMIDIAccess({sysex:true})` | 无 | App WebView 声明后放行 MIDI SysEx；当前平台可用性由插件报告 |
+| `device.vibration` / `2.0.0` | 不接受创建参数 | `vibrate({duration, pattern, repeat, intensities, amplitude, sharpness, preset})`、`cancel({})` | 无 | 使用 `vibration` 插件；当前适配 Android/iOS；设备是否有振动器由自检报告 |
 
 `GET /dev/api/capabilities`、App bootstrap、AI 项目提示词、工作区能力设置和能力确认
 都投影这份注册表。普通浏览器分享网关只把 `htmlSupported == true` 的 code 放入
@@ -52,7 +53,7 @@ lib/core/capabilities/
 
 ## 命名和版本
 
-- code 按功能命名，不绑定供应商或平台，例如 `sensor.accelerometer`。
+- code 按功能命名，不绑定供应商或平台，例如 `media.camera`。
 - code 发布后保持稳定；语义改变时新增 code，而不是复用旧名称。
 - `apiVersion` 使用 `MAJOR.MINOR.PATCH`。
 - 方法、参数、返回值或事件发生不兼容变化时升级插件 `MAJOR`。
@@ -80,6 +81,9 @@ lib/core/capabilities/
 不能只写描述符而不实现同等校验。
 
 ## 实例生命周期
+
+有公开方法或事件的原生适配能力使用下述实例协议。仅用于 WebView 权限声明、且
+描述符方法和事件均为空的能力不要求游戏创建实例；它们由 WebView 权限闸门消费。
 
 宿主 Bridge 固定使用：
 
@@ -202,6 +206,10 @@ decision == "allow"
 
 ### 4. `capabilities.create()` 的双层判断
 
+本节只适用于公开了方法或事件的能力。摄像头和 MIDI 当前只用于 Web 权限声明，
+不调用 `capabilities.create()`。麦克风采集可以直接使用标准 Web API；需要原生
+语音转文字时创建 `media.microphone` 实例。
+
 网页 SDK 首先判断：
 
 ```text
@@ -275,9 +283,9 @@ _instances[instanceId] == null
   => open.instance.invoke(method, arguments)
 ```
 
-具体方法是否存在由插件精确判断。例如震动插件只有
-`method == "vibrate"` 才执行；其他值直接失败。传感器共享实例只有
-`method == "start"` 或 `method == "stop"` 才执行。
+具体方法是否存在由插件精确判断。例如震动插件只有 `vibrate` 和 `cancel`，音频插件
+只有 `toText`；其他值直接失败。震动 `vibrate` 必须完整校验 `vibration` 插件公开的
+全部参数，不能只适配某一种调用形态。
 
 实例产生事件后：
 
@@ -395,8 +403,19 @@ Workspace 按能力 code 写死参数或测试逻辑。
 - 当前角色的显式空声明是最终结果，不能回退到另一角色。
 - 能力声明、用户本次确认、设备可用性三项全部满足后才能创建实例。
 - 用户确认不持久化；插件不能自行扩大到未声明能力。
-- 摄像头、麦克风、文件选择等需要用户动作的能力，应把对应方法标为需要主动触发。
-- 普通浏览器的标准 Web API 权限与 Playmesh 插件权限是两个边界，不能互相冒充。
+- `media.camera` 和 `device.midi` 没有方法或事件；`media.microphone` 另有原生语音
+  转文字方法。WebView 收到三者对应权限回调时必须逐项检查当前角色声明，未声明即
+  拒绝，不能一次放行未知资源。
+- Android 摄像头和麦克风在声明检查通过后还必须申请系统运行时权限；用户拒绝时
+  WebView 请求同样失败。iOS/macOS 必须配置用途说明和沙盒 entitlement。
+- 原生语音识别只适合命令和短句；插件必须转发部分、最终结果和声音级别，页面释放
+  时取消仍在运行的识别。平台可能早于 `listenFor` 或 `pauseFor` 结束任务。
+- 加速度计、陀螺仪、设备方向等非敏感能力直接使用标准 Web API，不进入能力
+  注册表，也不由 Playmesh 权限闸门拦截。
+- 文件选择由 `<input type="file">` 的用户动作触发，宿主只返回用户当次选择的文件，
+  不声明能力，也不允许静默读取文件。
+- 能力声明只用于敏感 WebView 权限和 Playmesh 已做多平台适配的能力，两者均按需
+  声明。其他标准 Web API 由 WebView 自身的特性支持和安全策略决定。
 - 自检不得产生不可预期副作用，例如持续震动、录音或修改用户文件。
 
 ## 平台适配
@@ -415,7 +434,8 @@ Workspace 按能力 code 写死参数或测试逻辑。
 ## 新增插件步骤
 
 1. 新建独立插件目录和实现。
-2. 完成描述符、Schema、实例、`test()` 与 `dispose()`。
+2. 完成描述符、Schema、实例、`test()` 与 `dispose()`；权限声明型插件允许方法和
+   事件为空，但每个能力仍使用独立插件，便于后续增加原生能力。
 3. 在 `default_capability_plugins.dart` 注册一次。
 4. 检查 App Bridge 能否通过通用实例协议完成调用，不新增设备专用 Bridge 命令。
 5. 确认工作区能力列表、项目设置、能力测试和 Agent 注册表自动出现新插件。

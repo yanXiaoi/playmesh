@@ -221,8 +221,9 @@ globalThis.window = {
       game: {
         name: "角色能力测试",
         requiredCapabilities: [
-          "sensor.accelerometer",
-          "sensor.gyroscope",
+          "media.camera",
+          "media.microphone",
+          "device.midi",
           "device.vibration",
         ],
       },
@@ -353,7 +354,7 @@ assert.deepEqual(
   Object.keys(window.playmesh.session.getCurrent().players[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-assert.equal(window.playmesh.version, "2.4.0");
+assert.equal(window.playmesh.version, "3.0.0");
 const unrelatedPlatformFocusTarget = { isConnected: true };
 window.document.activeElement = unrelatedPlatformFocusTarget;
 window.playmesh.__receive({ type: "platform.ui.restoreGameFocus" });

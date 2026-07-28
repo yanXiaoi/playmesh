@@ -331,6 +331,7 @@ class OnlineGameSource {
       name: formatCatalogHost(parsed.host),
       host: parsed.host,
       token: parsed.token,
+      uploadKey: parsed.uploadKey,
     );
   }
 
@@ -339,10 +340,15 @@ class OnlineGameSource {
 }
 
 class ParsedCatalogPublicUrl {
-  const ParsedCatalogPublicUrl({required this.host, required this.token});
+  const ParsedCatalogPublicUrl({
+    required this.host,
+    required this.token,
+    required this.uploadKey,
+  });
 
   final Uri host;
   final String token;
+  final String uploadKey;
 }
 
 ParsedCatalogPublicUrl parseCatalogPublicUrl(String raw) {
@@ -355,13 +361,18 @@ ParsedCatalogPublicUrl parseCatalogPublicUrl(String raw) {
       (uri.path.isNotEmpty && uri.path != '/')) {
     throw const FormatException('游戏源链接必须是有效的 HTTP/HTTPS publicURL');
   }
-  if (uri.queryParametersAll.keys.any((key) => key != 'token') ||
-      (uri.queryParametersAll['token']?.length ?? 0) > 1) {
-    throw const FormatException('游戏源链接只允许一个可选 token 参数');
+  const supportedParameters = {'token', 'uploadKey'};
+  if (uri.queryParametersAll.keys.any(
+        (key) => !supportedParameters.contains(key),
+      ) ||
+      (uri.queryParametersAll['token']?.length ?? 0) > 1 ||
+      (uri.queryParametersAll['uploadKey']?.length ?? 0) > 1) {
+    throw const FormatException('游戏源链接只允许 token 和 uploadKey 参数各出现一次');
   }
   return ParsedCatalogPublicUrl(
     host: catalogOrigin(uri),
     token: uri.queryParameters['token'] ?? '',
+    uploadKey: uri.queryParameters['uploadKey'] ?? '',
   );
 }
 
@@ -391,6 +402,36 @@ class OnlineCatalogGame extends CatalogGameOffer {
     super.icon,
     super.catalogAuthor,
   });
+}
+
+int compareGameManifestsNewestFirst(GameManifest left, GameManifest right) {
+  final leftModified = left.lastModifiedAt;
+  final rightModified = right.lastModifiedAt;
+  if (leftModified != null || rightModified != null) {
+    if (leftModified == null) return 1;
+    if (rightModified == null) return -1;
+    final byModified = rightModified.compareTo(leftModified);
+    if (byModified != 0) return byModified;
+  }
+  final byVersion = SemanticVersion.parse(
+    right.version,
+  ).compareTo(SemanticVersion.parse(left.version));
+  if (byVersion != 0) return byVersion;
+  final byName = left.name.compareTo(right.name);
+  return byName != 0 ? byName : left.id.compareTo(right.id);
+}
+
+int compareOnlineCatalogOffersNewestFirst(
+  OnlineCatalogGame left,
+  OnlineCatalogGame right,
+) {
+  final byManifest = compareGameManifestsNewestFirst(
+    left.manifest,
+    right.manifest,
+  );
+  return byManifest != 0
+      ? byManifest
+      : left.source.id.compareTo(right.source.id);
 }
 
 class OnlineCatalogSearchResult {
@@ -529,7 +570,12 @@ List<AggregatedGameResult> aggregateCatalogOffers(
 }
 
 int _compareAggregated(AggregatedGameResult left, AggregatedGameResult right) {
-  var result = right.heat.compareTo(left.heat);
+  var result = _compareNullableDatesNewestFirst(
+    _latestModifiedAt(left),
+    _latestModifiedAt(right),
+  );
+  if (result != 0) return result;
+  result = right.heat.compareTo(left.heat);
   if (result != 0) return result;
   final leftOpened = left.lastOpenedAt;
   final rightOpened = right.lastOpenedAt;
@@ -547,6 +593,26 @@ int _compareAggregated(AggregatedGameResult left, AggregatedGameResult right) {
     right.representative.manifest.name,
   );
   return result != 0 ? result : left.groupKey.compareTo(right.groupKey);
+}
+
+DateTime? _latestModifiedAt(AggregatedGameResult result) {
+  DateTime? latest;
+  for (final version in result.versions) {
+    for (final offer in version.offers) {
+      final modified = offer.manifest.lastModifiedAt;
+      if (modified != null && (latest == null || modified.isAfter(latest))) {
+        latest = modified;
+      }
+    }
+  }
+  return latest;
+}
+
+int _compareNullableDatesNewestFirst(DateTime? left, DateTime? right) {
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+  return right.compareTo(left);
 }
 
 class GameUpdateSource {

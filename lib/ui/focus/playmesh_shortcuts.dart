@@ -13,12 +13,8 @@ class PlaymeshFocusSearchIntent extends Intent {
   const PlaymeshFocusSearchIntent();
 }
 
-class PlaymeshOpenGameToolsIntent extends Intent {
-  const PlaymeshOpenGameToolsIntent();
-}
-
-class PlaymeshMoveGameToolsIntent extends Intent {
-  const PlaymeshMoveGameToolsIntent();
+class PlaymeshOpenGameSidebarIntent extends Intent {
+  const PlaymeshOpenGameSidebarIntent();
 }
 
 abstract final class PlaymeshShortcutRegistry {
@@ -35,28 +31,20 @@ abstract final class PlaymeshShortcutRegistry {
         PlaymeshFocusSearchIntent(),
     SingleActivator(LogicalKeyboardKey.keyF, meta: true):
         PlaymeshFocusSearchIntent(),
-    SingleActivator(LogicalKeyboardKey.keyM, alt: true):
-        PlaymeshMoveGameToolsIntent(),
     SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
     SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
   };
 
-  /// Resolves raw key events that must still work while a platform WebView owns
-  /// focus. Keeping this mapping beside [shortcuts] prevents runtime pages from
-  /// growing a second, subtly different key table.
-  static Intent? resolveRawKeyEvent(
-    KeyEvent event, {
-    required bool altPressed,
-  }) {
+  /// 解析平台 WebView 持有焦点时仍必须响应的原始按键。
+  ///
+  /// 映射与 [shortcuts] 放在一起，避免运行页维护第二份不一致的按键表。
+  static Intent? resolveRawKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return null;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.f10 ||
         key == LogicalKeyboardKey.contextMenu ||
         key == LogicalKeyboardKey.gameButtonStart) {
       return const PlaymeshOpenMenuIntent();
-    }
-    if (key == LogicalKeyboardKey.keyM && altPressed) {
-      return const PlaymeshMoveGameToolsIntent();
     }
     if (key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.browserBack ||

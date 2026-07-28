@@ -12,6 +12,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
     required this.title,
     this.bridge,
     this.appBridge,
+    this.declaredCapabilities = const [],
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
   });
@@ -21,6 +22,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
   final String title;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
+  final List<String> declaredCapabilities;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;

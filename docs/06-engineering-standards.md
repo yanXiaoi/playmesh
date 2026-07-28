@@ -41,7 +41,9 @@ Game Package
 - Developer API 是否依赖可见 View 必须声明在统一 `DeveloperOperationDefinition.requiresForegroundView` 元数据中，并同步进入 OpenAPI 和操作目录；禁止只在某个 Handler 内临时判断。后台、锁屏、熄屏或窗口失焦时统一返回 `409 app_view_unavailable` 和机器可读状态详情，不得等待超时或伪造成功。
 - Domain 负责用户、游戏声明、会话、玩家和输入事件的规则。
 - Go Handler 只负责解析请求、鉴权、调用服务和生成响应，不直接修改会话内部状态。
-- Game SDK 是游戏访问平台能力的唯一入口，游戏页面不直接调用 Flutter、Go、原生桥接或任意端口。
+- Game SDK 是游戏访问 Playmesh 原生适配能力的唯一入口，游戏页面不直接调用 Flutter、
+  Go、原生桥接或任意端口。浏览器标准 API 可以直接使用；仅在 WebView 权限回调覆盖
+  的敏感权限和 Playmesh 多平台适配能力需要写入 `capabilities.json`。
 - 游戏分享运行时采用严格的最小公开面，只允许提供 `/app/**`、`/bucket/**`、`/playmesh/**`，以及 SDK 在浏览器沙箱内确实无法替代的受控底层连接能力（例如当前游戏受控的 WebSocket Upgrade）。该清单是完整公开边界而非接口示例。新增平台功能时必须遵循“SDK 优先”原则，优先修改 Game SDK 或 App Bridge SDK，不得为接入便利新增分享 HTTP 业务接口；只有确属连接或传输层的能力才可增加底层入口，且必须固定绑定当前游戏和会话、在建连前鉴权、禁止任意目标地址，并同步补齐协议文档与回归测试。
 - SDK 分为权威主机运行时 `playmesh.js` 与 App 本机桥接 `playmesh-app.js`。前者负责会话、联机和主机存储；后者只负责当前 App 的身份与本机能力，由 App 自动注入，不得持久化游戏能力授权。Console 必须由 WebView/浏览器宿主在底层捕获并只保留在当前设备，禁止经 SDK 或游戏网关跨设备转发。普通浏览器不得加载 App SDK，主 SDK 必须提供安全的 `playmesh.app` 空实现。
 - 游戏可以自带引擎或工具库，但必须放在自己的游戏包内并通过包校验流程管理；不得因为使用第三方引擎而绕过 SDK 的身份、存储和联机边界。
@@ -170,7 +172,7 @@ Game Package
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `3.0.0+22` | `pubspec.yaml` |
+| Playmesh App | `3.0.0+23` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
 | Game SDK | `2.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
@@ -292,28 +294,33 @@ Android 与 iOS 的 `playmesh-library` 位于系统应用支持目录。Windows�
 
 导入压缩包只在临时目录中存在；安装元数据保存 `gameId`、版本、内容哈希、解压路径和校验结果，用于问题定位和一致性检查。解压目录必须只读。安装失败不得覆盖已安装游戏。用户安装库只负责扫描、存储、加载、卸载和清理，不负责开发者版本回滚、版本决策或自动切换旧版本。卸载时直接删除整个 `packages/{gameId}/` 目录。
 
-## 能力插件与高频传感器
+## 能力插件与 WebView 权限
 
-能力宿主采用有状态实例协议，不把所有能力约束为订阅。公开桥接命令固定为 `app.capability.create/invoke/dispose`，异步输出固定为 `app.capability.event/error`；公开 SDK 通过 `playmesh.app.capabilities.create()` 返回 `invoke/on/onError/dispose` 实例。具体方法和事件由插件 `apiVersion` 定义，录音、语音转写等能力可以要求用户主动调用 `start/stop`。
+能力宿主采用有状态实例协议，不把所有能力约束为订阅。公开桥接命令固定为 `app.capability.create/invoke/dispose`，异步输出固定为 `app.capability.event/error`；公开 SDK 通过 `playmesh.app.capabilities.create()` 返回 `invoke/on/onError/dispose` 实例。具体方法和事件由插件 `apiVersion` 定义，录音、语音转写等能力可以要求用户主动调用 `start/stop`。仅用于 WebView 权限声明且方法、事件均为空的插件不要求游戏创建实例，但每个能力仍必须保留独立插件与执行器。
 
-高频传感器由对应插件负责正常使用体验，游戏代码不直接处理原生采样：
+当前调用链：
 
 ```text
-capabilities.json：声明 sensor.accelerometer / sensor.gyroscope
+capabilities.json：按需声明 media.camera / media.microphone / device.midi
   -> SDK 初始化：App/浏览器每次展示能力确认，拒绝则退出
-  -> capabilities.create(code, {fps})：创建实例
-  -> instance.invoke('start')：启动插件
-  -> instance.on('reading')：接收采样
+  -> 游戏直接调用 getUserMedia() / requestMIDIAccess({sysex:true})
+  -> WebView 权限回调逐项核对当前角色声明
+  -> 未声明即拒绝；声明后继续系统权限流程
 
 capabilities.json：声明 device.vibration
   -> capabilities.create('device.vibration', {})：创建实例
-  -> instance.invoke('vibrate', {style})：主动触发一次反馈
+  -> instance.invoke('vibrate', {duration/pattern/...})：通过 vibration 插件触发震动
+  -> instance.invoke('cancel', {})：取消持续或重复震动
   -> instance.dispose()：释放实例
 ```
 
-当前加速度计与陀螺仪各自位于独立插件目录，插件 API 版本均为 `1.0.0`，方法为 `start/stop`，事件为 `reading`。内部每种传感器只建立一条原生流，原生采样频率取该插件全部运行实例请求频率的最大值；最后一个实例停止、页面重载或退出时必须释放原生流。频率范围为每秒 `1` 至 `120` 次。
-
-能力 ID 与提供方解耦，后续摄像头、麦克风等能力可以由 App 原生适配器或浏览器标准 API 提供。当前局域网浏览器分享使用 HTTP，加速度计、陀螺仪和震动只由 App SDK 提供；普通浏览器将这些原生能力标为暂不支持，但用户同意后仍可进入游戏，游戏不得把原生能力设为不可降级的主流程前提。震动插件不建立持续采样流，工作区自检也不得主动制造副作用。
+加速度计、陀螺仪、设备方向等非敏感能力不注册 Playmesh 能力，游戏按平台支持情况
+直接使用标准 Web API。文件选择由 `<input type="file">` 的显式用户动作触发，不声明
+能力且不得静默读取文件。摄像头、音频、MIDI 和震动各自位于独立插件目录。
+`media.camera` 与 `device.midi` 当前没有公开方法或事件；`media.microphone@1.1.0`
+提供 `toText` 以及识别结果、声音级别事件。后续原生拍照、录音或 MIDI 适配继续在
+对应插件扩展。震动插件完整透传 `vibration` 的时长、振幅、波形、强度、重复、锐度
+和预设参数，并提供 `cancel`；工作区自检只查询支持状态，不得主动制造震动。
 
 ## Authority Client 与 Go Core 边界
 

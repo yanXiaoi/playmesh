@@ -16,6 +16,7 @@
 </head>
 <body>
 <a class="skip-link" href="#workspaceMain" data-i18n="workspace.skip_to_editor"></a>
+<div id="workspaceMessages" class="workspace-messages" aria-live="polite" aria-atomic="true"></div>
 <div class="shell">
 <header class="toolbar">
   <span class="brand" data-i18n="workspace.brand" translate="no"></span>
@@ -129,7 +130,7 @@
       <label class="wide"><span data-i18n="workspace.controller_entry"></span><input id="manifestControllerEntry" name="manifestControllerEntry" required data-i18n-placeholder="workspace.controller_entry_placeholder" autocomplete="off"></label>
       <label class="wide"><span data-i18n="workspace.authority_entry"></span><input id="manifestAuthorityEntry" name="manifestAuthorityEntry" data-i18n-placeholder="workspace.authority_entry_placeholder" autocomplete="off"></label>
     </div>
-    <div class="manifest-tags-field"><span data-i18n="workspace.tags"></span><div id="manifestTags" class="manifest-tags"></div><div class="input-action"><input id="manifestTagInput" name="manifestTagInput" maxlength="64" data-i18n-placeholder="workspace.tag_placeholder" autocomplete="off"><button id="manifestTagAdd" type="button" data-i18n="workspace.add"></button></div></div>
+    <div class="manifest-tags-field"><span data-i18n="workspace.tags"></span><div id="manifestTags" class="manifest-tags"></div><div class="input-action"><input id="manifestTagInput" name="manifestTagInput" maxlength="64" data-i18n-placeholder="workspace.tag_placeholder" autocomplete="off"><button id="manifestTagAdd" class="tag-add-button" type="button" data-i18n-title="workspace.add" data-i18n-aria-label="workspace.add"><svg class="lucide" aria-hidden="true"><use href="#plus"></use></svg></button></div></div>
     </section>
     <section class="manifest-capability-section"><h3 translate="no">capabilities.json</h3><p class="manifest-help" data-i18n="workspace.capability_manifest_help"></p><strong data-i18n="workspace.main_capabilities"></strong><div id="capabilityOptions" class="capability-picker"></div><div id="controllerCapabilitySection" hidden><strong data-i18n="workspace.controller_capabilities"></strong><div id="controllerCapabilityOptions" class="capability-picker"></div></div></section>
     <div id="manifestError" class="form-error" aria-live="polite"></div>
@@ -149,8 +150,8 @@
     <label id="projectControllerOrientationField" hidden><span data-i18n="workspace.controller_orientation"></span><select id="projectControllerOrientation" name="projectControllerOrientation"><option value="portrait" data-i18n="workspace.portrait"></option><option value="landscape" data-i18n="workspace.landscape"></option></select></label>
     <label><span data-i18n="workspace.minimum_players"></span><input id="projectMin" name="projectMin" type="number" inputmode="numeric" min="1" max="32" value="2"></label>
     <label><span data-i18n="workspace.maximum_players"></span><input id="projectMax" name="projectMax" type="number" inputmode="numeric" min="1" max="32" value="5"></label>
-    <label class="wide"><span data-i18n="workspace.tags_input_label"></span><textarea id="projectTags" name="projectTags" maxlength="1300" rows="2" data-i18n-placeholder="workspace.tags_placeholder" autocomplete="off"></textarea></label>
-    <section class="project-capabilities wide"><strong data-i18n="workspace.main_capabilities"></strong><p data-i18n="workspace.create_capabilities_help"></p><div id="projectCapabilityOptions" class="capability-options"></div><div id="projectControllerCapabilitySection" hidden><strong data-i18n="workspace.controller_capabilities"></strong><div id="projectControllerCapabilityOptions" class="capability-options"></div></div></section>
+    <div class="manifest-tags-field wide"><span data-i18n="workspace.tags"></span><div id="projectTags" class="manifest-tags"></div><div class="input-action"><input id="projectTagInput" name="projectTagInput" maxlength="64" data-i18n-placeholder="workspace.tag_placeholder" autocomplete="off"><button id="projectTagAdd" class="tag-add-button" type="button" data-i18n-title="workspace.add" data-i18n-aria-label="workspace.add"><svg class="lucide" aria-hidden="true"><use href="#plus"></use></svg></button></div></div>
+    <section class="project-capabilities wide"><strong data-i18n="workspace.main_capabilities"></strong><p data-i18n="workspace.create_capabilities_help"></p><div id="projectCapabilityOptions" class="capability-picker"></div><div id="projectControllerCapabilitySection" hidden><strong data-i18n="workspace.controller_capabilities"></strong><div id="projectControllerCapabilityOptions" class="capability-picker"></div></div></section>
     <div id="projectError" class="form-error" aria-live="polite"></div>
     <button type="submit" class="primary" data-i18n="workspace.create_project"></button>
   </form>

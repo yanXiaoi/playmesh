@@ -199,7 +199,7 @@ preview.src = imageUrl;
 - key 只允许字母、数字、点、下划线和连字符，长度为 1 至 128。
 - 平台只自动绑定当前 `gameId`，不创建 `{userId}` 目录。用户维度由游戏在 key 或 JSON 内容中设计。
 - 所有客户端读写 Authority 主机的同一份 Bucket。浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Bucket。
-- 浏览器昵称采集、修改和普通浏览器游戏功能区由 SDK 统一提供。功能区模拟 App 可用的刷新、性能、全屏和信息操作，但不伪造 App 返回、退出或分享能力；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具或昵称悬浮控件。
+- 浏览器昵称采集、修改和普通浏览器游戏侧边栏由 SDK 统一提供。侧边栏包含继续、刷新、日志、性能、全屏、信息和退出；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具入口或昵称控件。
 - 使用 `session.onPlayerJoin`、`session.onPlayerLeave` 和 `session.onPlayerReconnect` 处理首次连接、掉线和同 ID 重连。不要用昵称推断玩家身份。
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
 - JSON 值存放在私有 `data/json`；`upload(file)` 使用原始文件流写入 `data/data`，返回运行时 `/bucket/...` 地址。游戏不得猜测宿主文件路径、枚举目录或用 `/bucket` 读取 JSON 存档。
@@ -221,37 +221,43 @@ Canvas/WebGL 游戏应在实际绘制或提交完成后调用。非逐帧渲染�
 
 ## 平台能力插件
 
-需要平台能力时，在 `main.json` 同级创建可选 `capabilities.json`。`required` 声明主画面能力；单屏多人使用 `controllerRequired` 独立声明控制器能力，其他模式禁止该字段。`main.json` 没有 `permissions` 字段，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和“项目设置”中都从平台注册表为两个角色分别生成选项。`GET /dev/api/capabilities` 返回每个插件的 code、`apiVersion`、方法、事件和平台状态。工作区“能力测试”显示并测试全平台注册表，不按当前项目声明过滤；项目声明只控制当前页面角色可创建哪些插件实例。
+需要 WebView 敏感权限或 Playmesh 多平台适配能力时，在 `main.json` 同级创建可选
+`capabilities.json`。`required` 声明主画面能力；单屏多人使用
+`controllerRequired` 独立声明控制器能力，其他模式禁止该字段。`main.json` 没有
+`permissions` 字段，也不要在代码里自行维护能力名称清单；开发者工作区在新建项目和
+“项目设置”中都从平台注册表为两个角色分别生成选项。`GET /dev/api/capabilities`
+返回每个插件的 code、`apiVersion`、方法、事件和平台状态。
 
 ```json
 {
   "required": [
-    "sensor.accelerometer",
-    "sensor.gyroscope",
+    "media.camera",
+    "media.microphone",
     "device.vibration"
   ]
 }
 ```
 
-主 SDK 会在 App 和普通浏览器每次进入游戏时展示本次所需能力，不保存确认结果。用户拒绝则退出；当前环境不支持的能力显示“本平台暂不支持”，但用户同意后仍可进入，因此传感器不能成为无法降级的主流程前提。
+主 SDK 会在 App 和普通浏览器每次进入游戏时展示本次所需能力，不保存确认结果。
+用户拒绝则退出；当前环境不支持的能力显示“本平台暂不支持”，但用户同意后仍可
+进入，游戏必须保留降级路径。
 
 ```js
-await playmesh.ready;
-
-if (playmesh.app.capabilities.getAvailable().includes('sensor.accelerometer')) {
-  const sensor = await playmesh.app.capabilities.create(
-    'sensor.accelerometer',
-    { fps: 30 },
-  );
-  sensor.on('reading', updateTilt);
-  await sensor.invoke('start');
-  playmesh.lifecycle.onExit(() => sensor.dispose());
-}
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: true,
+});
 ```
 
-能力实例统一提供 `invoke/on/onError/dispose`，具体方法和事件必须以注册表中对应插件的 `apiVersion` 契约为准。加速度计与陀螺仪插件的 `fps` 必须为 `1` 至 `120` 的整数，方法为 `start/stop`，事件为 `reading`。App 为同种传感器共享一条原生流；实例停止、释放或页面退出后清理。传感器和震动均只在 App 中适配，普通局域网 HTML 环境使用安全空实现。
+摄像头、麦克风采集和 MIDI 声明后直接使用 `getUserMedia()` 或
+`requestMIDIAccess({sysex:true})`；未声明时 App WebView 拒绝对应权限回调。
+`media.microphone@1.1.0` 还可通过能力实例调用
+`toText({localeId, listenFor, pauseFor})`，并监听 `textOnSoundLevelChange` 与
+`textOnResult`。加速度计、陀螺仪和设备方向直接使用标准 Web API，不写
+`capabilities.json`。文件上传使用 `<input type="file">` 让用户当次主动选择文件，
+同样不声明能力，也不能静默读取文件系统。
 
-震动是主动调用型插件，不需要保持订阅：
+震动是多平台原生适配插件，通过 App SDK 主动调用：
 
 ```js
 if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
@@ -259,7 +265,11 @@ if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
     'device.vibration',
     {},
   );
-  await vibration.invoke('vibrate', { style: 'medium' });
+  await vibration.invoke('vibrate', {
+    pattern: [0, 100, 50, 200],
+    intensities: [0, 128, 0, 255],
+  });
+  await vibration.invoke('cancel', {});
   await vibration.dispose();
 }
 ```

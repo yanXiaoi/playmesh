@@ -39,22 +39,22 @@ const window = {
         result = {
           _playmeshPlatformUi: {
             locale: "en-US",
-            messages: { "toolbar.expand": "Open game tools" },
+            messages: { "sidebar.title": "Game menu" },
           },
           available: true,
-          sdkVersion: "2.2.0",
+          sdkVersion: "3.0.0",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
             source: "playmesh_app",
           },
-          game: { requiredCapabilities: ["sensor.accelerometer", "device.vibration"] },
+          game: { requiredCapabilities: ["media.camera", "device.vibration"] },
           capabilityRegistry: [{
-            code: "sensor.accelerometer",
-            name: "加速度计",
+            code: "media.camera",
+            name: "摄像头",
             apiVersion: "1.0.0",
-            methods: [{ name: "start" }, { name: "stop" }],
-            events: [{ name: "reading" }],
+            methods: [],
+            events: [],
           }, {
             code: "device.vibration",
             name: "震动反馈",
@@ -64,14 +64,14 @@ const window = {
           }],
           device: {
             platform: "android",
-            capabilities: ["sensor.accelerometer", "device.vibration"],
-            declaredCapabilities: ["sensor.accelerometer", "device.vibration"],
+            capabilities: ["media.camera", "device.vibration"],
+            declaredCapabilities: ["media.camera", "device.vibration"],
           },
         };
       } else if (command.command === "app.capability.create") {
         result = {
           instanceId: "capability-1",
-          code: "sensor.accelerometer",
+          code: command.payload.code,
           apiVersion: "1.0.0",
         };
       }
@@ -97,10 +97,10 @@ assert.deepEqual(
   ),
   {
     locale: "en-US",
-    messages: { "toolbar.expand": "Open game tools" },
+    messages: { "sidebar.title": "Game menu" },
   },
 );
-assert.equal(window.playmeshApp.version, "2.2.0");
+assert.equal(window.playmeshApp.version, "3.0.0");
 assert.equal(window.playmeshApp.isAvailable(), true);
 assert.deepEqual(
   JSON.parse(JSON.stringify(window.playmeshApp.identity.getCurrent())),
@@ -108,31 +108,26 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [...window.playmeshApp.capabilities.getAvailable()],
-  ["sensor.accelerometer", "device.vibration"],
+  ["media.camera", "device.vibration"],
 );
 assert.deepEqual(
   [...window.playmeshApp.capabilities.getDeclared()],
-  ["sensor.accelerometer", "device.vibration"],
+  ["media.camera", "device.vibration"],
 );
 
 const capability = await window.playmeshApp.capabilities.create(
-  "sensor.accelerometer",
-  { fps: 30 },
+  "device.vibration",
+  {},
 );
-let reading = null;
-capability.on("reading", (value) => { reading = value; });
-await capability.invoke("start");
-window.playmeshApp.__receive({
-  type: "app.capability.event",
-  instanceId: "capability-1",
-  event: "reading",
-  data: { x: 1, y: 2, z: 3, unit: "m/s^2" },
-});
-assert.equal(reading.unit, "m/s^2");
+await capability.invoke("vibrate", { duration: 250, amplitude: 128 });
 await capability.dispose();
 
 const vibration = await window.playmeshApp.capabilities.create("device.vibration");
-await vibration.invoke("vibrate", { style: "medium" });
+await vibration.invoke("vibrate", {
+  pattern: [0, 100, 50, 200],
+  intensities: [0, 128, 0, 255],
+});
+await vibration.invoke("cancel", {});
 await vibration.dispose();
 await window.playmeshApp.device.setFullscreen(true, "portrait");
 assert.deepEqual(
@@ -154,14 +149,15 @@ window.playmeshApp.__restoreGameContentFocus();
 assert.equal(window.document.activeElement, gameFocusTarget);
 
 window.document.activeElement = gameFocusTarget;
-await window.playmeshApp.showToolDock();
+await window.playmeshApp.showGameSidebar();
 window.document.activeElement = { isConnected: true };
-await window.playmeshApp.hideToolDock();
+await window.playmeshApp.hideGameSidebar();
 assert.equal(window.document.activeElement, gameFocusTarget);
-assert.equal(commands.some((item) => item.command === "app.ui.toolDock.show"), true);
-assert.equal(commands.some((item) => item.command === "app.ui.toolDock.hide"), true);
+assert.equal(commands.some((item) => item.command === "app.ui.gameSidebar.show"), true);
+assert.equal(commands.some((item) => item.command === "app.ui.gameSidebar.hide"), true);
 
 await window.playmeshApp.exitGame();
 assert.equal(commands.some((item) => item.command === "app.game.exit"), true);
+await window.playmeshApp.__requestExit();
 
 console.log("Playmesh App capability plugin bridge contract passed");

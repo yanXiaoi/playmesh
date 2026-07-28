@@ -22,7 +22,7 @@ const (
 	StatusApproved = "approved"
 	StatusRejected = "rejected"
 	StatusDeleting = "deleting"
-	SchemaVersion  = 3
+	SchemaVersion  = 4
 )
 
 var (
@@ -34,6 +34,7 @@ var (
 	ErrGameMustBeUnpublished = errors.New("游戏必须先下架")
 	ErrNotLatestVersion      = errors.New("只能上架当前最新审核版本")
 	ErrInvalidGameState      = errors.New("游戏状态不允许此操作")
+	ErrUserHasGames          = errors.New("用户仍拥有游戏包，请先删除其全部游戏包")
 )
 
 type VersionConflictError struct {
@@ -103,6 +104,37 @@ type User struct {
 type UploadCredential struct {
 	UserID  int64
 	KeyHMAC string
+}
+
+type AdminUser struct {
+	User
+	DisabledReason string `json:"disabledReason,omitempty"`
+	GameCount      int64  `json:"gameCount"`
+	PublishedCount int64  `json:"publishedCount"`
+}
+
+type AdminUserQuery struct {
+	Search string
+	Status string
+	Page   int
+	Size   int
+}
+
+type PagedUsers struct {
+	Total   int64       `json:"total"`
+	Current int         `json:"current"`
+	Size    int         `json:"size"`
+	Data    []AdminUser `json:"data"`
+}
+
+type UserNotification struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"userId"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	Message   string `json:"message"`
+	ReadAt    int64  `json:"readAt,omitempty"`
+	CreatedAt int64  `json:"createdAt"`
 }
 
 type AdminGameQuery struct {
@@ -211,6 +243,13 @@ func Open(cfg config.Storage, defaults Settings) (*Store, error) {
 			_ = db.Close()
 			return nil, err
 		}
+		if schemaVersion == 3 {
+			if err := result.migrateV3ToV4(); err != nil {
+				_ = db.Close()
+				return nil, err
+			}
+			schemaVersion = SchemaVersion
+		}
 		if schemaVersion != SchemaVersion {
 			_ = db.Close()
 			return nil, fmt.Errorf(
@@ -293,6 +332,22 @@ func (s *Store) createSchema() error {
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		);
+		CREATE TABLE disabled_users (
+			user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			reason TEXT NOT NULL DEFAULT '',
+			disabled_at INTEGER NOT NULL
+		);
+		CREATE TABLE user_notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			message TEXT NOT NULL,
+			read_at INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL
+		);
+		CREATE INDEX user_notifications_user_idx
+			ON user_notifications(user_id, created_at DESC);
 		CREATE TABLE game_ownership (
 			package_id TEXT PRIMARY KEY,
 			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -362,10 +417,43 @@ func (s *Store) createSchema() error {
 	return tx.Commit()
 }
 
+func (s *Store) migrateV3ToV4() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		CREATE TABLE disabled_users (
+			user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			reason TEXT NOT NULL DEFAULT '',
+			disabled_at INTEGER NOT NULL
+		);
+		CREATE TABLE user_notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			message TEXT NOT NULL,
+			read_at INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL
+		);
+		CREATE INDEX user_notifications_user_idx
+			ON user_notifications(user_id, created_at DESC);
+	`); err != nil {
+		return fmt.Errorf("升级 SQLite schema v3 到 v4: %w", err)
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 4"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) verifySchema() error {
 	required := []string{
 		"users", "user_sessions", "email_verification_tokens", "upload_credentials",
-		"game_ownership", "games", "review_events", "server_settings", "admin_sessions",
+		"disabled_users", "user_notifications", "game_ownership", "games",
+		"review_events", "server_settings", "admin_sessions",
 	}
 	for _, table := range required {
 		var count int
@@ -487,7 +575,12 @@ func (s *Store) UpdateDisplayName(
 	userID int64,
 	displayName string,
 ) (User, error) {
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
 		UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?
 	`, displayName, time.Now().UnixMilli(), userID)
 	if err != nil {
@@ -496,7 +589,246 @@ func (s *Store) UpdateDisplayName(
 	if affected, _ := result.RowsAffected(); affected != 1 {
 		return User{}, ErrNotFound
 	}
-	return s.GetUser(ctx, userID)
+	// Keep the denormalized author snapshot consistent for maintenance and
+	// exports. Read APIs still join users.display_name so legacy rows whose
+	// snapshot is already stale are also returned correctly.
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE games SET author = ? WHERE owner_user_id = ?",
+		displayName, userID,
+	); err != nil {
+		return User{}, err
+	}
+	user, err := scanUser(tx.QueryRowContext(ctx, `
+		SELECT id, normalized_email, display_name, status, email_verified_at,
+		       created_at
+		FROM users WHERE id = ?
+	`, userID))
+	if err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+
+func (s *Store) ListAdminUsers(
+	ctx context.Context,
+	query AdminUserQuery,
+) (PagedUsers, error) {
+	where := []string{"1 = 1"}
+	args := make([]any, 0, 5)
+	if value := strings.ToLower(strings.TrimSpace(query.Search)); value != "" {
+		where = append(where,
+			"(lower(u.normalized_email) LIKE ? OR lower(u.display_name) LIKE ?)")
+		pattern := "%" + value + "%"
+		args = append(args, pattern, pattern)
+	}
+	if status := strings.TrimSpace(query.Status); status != "" {
+		switch status {
+		case "disabled":
+			where = append(where, "d.user_id IS NOT NULL")
+		case "active", "pending_verification":
+			where = append(where, "d.user_id IS NULL AND u.status = ?")
+			args = append(args, status)
+		default:
+			return PagedUsers{}, ErrInvalidGameState
+		}
+	}
+	whereSQL := strings.Join(where, " AND ")
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM users u
+		LEFT JOIN disabled_users d ON d.user_id = u.id
+		WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return PagedUsers{}, err
+	}
+	offset := int64(query.Page-1) * int64(query.Size)
+	listArgs := append(append([]any{}, args...), query.Size, offset)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT u.id, u.normalized_email, u.display_name,
+		       CASE WHEN d.user_id IS NULL THEN u.status ELSE 'disabled' END,
+		       u.email_verified_at, u.created_at, COALESCE(d.reason, ''),
+		       COUNT(g.id),
+		       COALESCE(SUM(CASE WHEN g.published = 1 THEN 1 ELSE 0 END), 0)
+		FROM users u
+		LEFT JOIN disabled_users d ON d.user_id = u.id
+		LEFT JOIN games g ON g.owner_user_id = u.id
+		WHERE `+whereSQL+`
+		GROUP BY u.id, d.user_id, d.reason
+		ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?
+	`, listArgs...)
+	if err != nil {
+		return PagedUsers{}, err
+	}
+	defer rows.Close()
+	users := make([]AdminUser, 0)
+	for rows.Next() {
+		var item AdminUser
+		if err := rows.Scan(
+			&item.ID, &item.Email, &item.DisplayName, &item.Status,
+			&item.EmailVerifiedAt, &item.CreatedAt, &item.DisabledReason,
+			&item.GameCount, &item.PublishedCount,
+		); err != nil {
+			return PagedUsers{}, err
+		}
+		users = append(users, item)
+	}
+	if err := rows.Err(); err != nil {
+		return PagedUsers{}, err
+	}
+	return PagedUsers{
+		Total: total, Current: query.Page, Size: query.Size, Data: users,
+	}, nil
+}
+
+func (s *Store) SetUserDisabled(
+	ctx context.Context,
+	userID int64,
+	disabled bool,
+	reason string,
+) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var status string
+	if err := tx.QueryRowContext(
+		ctx, "SELECT status FROM users WHERE id = ?", userID,
+	).Scan(&status); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if disabled {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO disabled_users(user_id, reason, disabled_at) VALUES(?, ?, ?)
+			ON CONFLICT(user_id) DO UPDATE SET
+				reason = excluded.reason, disabled_at = excluded.disabled_at
+		`, userID, strings.TrimSpace(reason), time.Now().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(
+			ctx, "DELETE FROM user_sessions WHERE user_id = ?", userID,
+		); err != nil {
+			return err
+		}
+	} else if _, err := tx.ExecContext(
+		ctx, "DELETE FROM disabled_users WHERE user_id = ?", userID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) UserDisabled(ctx context.Context, userID int64) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(
+		ctx, "SELECT COUNT(*) FROM disabled_users WHERE user_id = ?", userID,
+	).Scan(&count)
+	return count == 1, err
+}
+
+func (s *Store) DeleteUser(ctx context.Context, userID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var games int
+	if err := tx.QueryRowContext(
+		ctx, "SELECT COUNT(*) FROM games WHERE owner_user_id = ?", userID,
+	).Scan(&games); err != nil {
+		return err
+	}
+	if games > 0 {
+		return ErrUserHasGames
+	}
+	if _, err := tx.ExecContext(
+		ctx, "DELETE FROM game_ownership WHERE user_id = ?", userID,
+	); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id = ?", userID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateNotification(
+	ctx context.Context,
+	userID int64,
+	kind string,
+	title string,
+	message string,
+) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_notifications(
+			user_id, kind, title, message, read_at, created_at
+		) VALUES(?, ?, ?, ?, 0, ?)
+	`, userID, strings.TrimSpace(kind), strings.TrimSpace(title),
+		strings.TrimSpace(message), time.Now().UnixMilli())
+	return err
+}
+
+func (s *Store) ListNotifications(
+	ctx context.Context,
+	userID int64,
+	limit int,
+) ([]UserNotification, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, kind, title, message, read_at, created_at
+		FROM user_notifications WHERE user_id = ?
+		ORDER BY created_at DESC, id DESC LIMIT ?
+	`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]UserNotification, 0)
+	for rows.Next() {
+		var item UserNotification
+		if err := rows.Scan(
+			&item.ID, &item.UserID, &item.Kind, &item.Title,
+			&item.Message, &item.ReadAt, &item.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) MarkNotificationRead(
+	ctx context.Context,
+	userID int64,
+	notificationID int64,
+) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE user_notifications SET read_at = ?
+		WHERE id = ? AND user_id = ? AND read_at = 0
+	`, time.Now().UnixMilli(), notificationID, userID)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		var count int
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM user_notifications WHERE id = ? AND user_id = ?
+		`, notificationID, userID).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrNotFound
+		}
+	}
+	return nil
 }
 
 func (s *Store) CreateUserSession(
@@ -856,7 +1188,7 @@ func (s *Store) ListAdminGames(ctx context.Context, query AdminGameQuery) (Paged
 	}
 	if value := strings.ToLower(strings.TrimSpace(query.Search)); value != "" {
 		where = append(where, `(lower(g.package_id) LIKE ? OR lower(g.name) LIKE ? OR
-			lower(g.author) LIKE ? OR lower(u.normalized_email) LIKE ? OR lower(g.version) LIKE ?)`)
+			lower(u.display_name) LIKE ? OR lower(u.normalized_email) LIKE ? OR lower(g.version) LIKE ?)`)
 		pattern := "%" + value + "%"
 		args = append(args, pattern, pattern, pattern, pattern, pattern)
 	}
@@ -903,7 +1235,7 @@ func (s *Store) ListCatalogGames(
 	filterSQL := strings.Join(filters, " AND ")
 	cte := `
 		WITH ranked AS (
-			SELECT g.*, u.normalized_email,
+			SELECT g.*, u.normalized_email, u.display_name AS owner_display_name,
 			       ROW_NUMBER() OVER (
 			           PARTITION BY g.package_id
 			           ORDER BY g.version_major DESC, g.version_minor DESC, g.version_patch DESC
@@ -955,7 +1287,7 @@ func (s *Store) GetCatalogGame(
 ) (Game, error) {
 	row := s.db.QueryRowContext(ctx, `
 		WITH ranked AS (
-			SELECT g.*, u.normalized_email,
+			SELECT g.*, u.normalized_email, u.display_name AS owner_display_name,
 			       ROW_NUMBER() OVER (
 			           PARTITION BY g.package_id
 			           ORDER BY g.version_major DESC, g.version_minor DESC, g.version_patch DESC
@@ -1099,6 +1431,16 @@ func (s *Store) SetPublished(
 	actor ReviewActor,
 	published bool,
 ) (Game, error) {
+	return s.SetPublishedWithDetail(ctx, id, actor, published, "")
+}
+
+func (s *Store) SetPublishedWithDetail(
+	ctx context.Context,
+	id int64,
+	actor ReviewActor,
+	published bool,
+	reason string,
+) (Game, error) {
 	now := time.Now().UnixMilli()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1141,8 +1483,9 @@ func (s *Store) SetPublished(
 		ctx, tx, id, current.PackageID, current.Version,
 		actor, action,
 		fmt.Sprintf(
-			"from=%s target=%s",
+			"from=%s target=%s reason=%q",
 			publicationState(current.Published), publicationState(published),
+			strings.TrimSpace(reason),
 		),
 		now,
 	); err != nil {
@@ -1597,7 +1940,7 @@ func (s *Store) CleanupAdminSessions(ctx context.Context, now time.Time) error {
 }
 
 const gameSelect = `
-	SELECT g.id, g.package_id, g.name, g.author, g.version, g.remarks, g.tags_text,
+	SELECT g.id, g.package_id, g.name, u.display_name, g.version, g.remarks, g.tags_text,
 	       u.normalized_email, g.owner_user_id, g.status, g.published,
 	       g.original_filename, g.stored_path, g.icon_path, g.manifest_json,
 	       g.scan_status, g.scan_report, g.rejection_reason,
@@ -1606,7 +1949,7 @@ const gameSelect = `
 `
 
 const rankedGameColumns = `
-	id, package_id, name, author, version, remarks, tags_text, normalized_email,
+	id, package_id, name, owner_display_name, version, remarks, tags_text, normalized_email,
 	owner_user_id, status, published, original_filename, stored_path, icon_path,
 	manifest_json, scan_status, scan_report, rejection_reason,
 	created_at, updated_at, reviewed_at

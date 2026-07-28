@@ -134,6 +134,38 @@
             <button id="logout" type="button" class="secondary" data-i18n="nav.logout"></button>
           </div>
         </div>
+        <section class="my-private-source">
+          <div class="my-private-source-copy">
+            <div class="eyebrow" data-i18n="user.my.source_eyebrow"></div>
+            <h2 data-i18n="user.my.source_title"></h2>
+            <p data-i18n="user.my.source_description"></p>
+            <button
+              type="button"
+              class="secondary"
+              data-open-dialog="key-dialog"
+              data-i18n="user.my.source_configure"
+            ></button>
+          </div>
+          <div class="my-private-source-visual">
+            <img
+              id="private-source-qr"
+              class="hidden"
+              alt=""
+              data-i18n-alt="user.my.source_qr_alt"
+            >
+            <p id="private-source-qr-empty" data-i18n="user.my.source_key_required"></p>
+          </div>
+        </section>
+        <section class="my-notifications">
+          <div class="my-packages-heading">
+            <div>
+              <div class="eyebrow" data-i18n="user.notifications.eyebrow"></div>
+              <h2 data-i18n="user.notifications.title"></h2>
+            </div>
+            <p data-i18n="user.notifications.description"></p>
+          </div>
+          <div id="my-notifications" class="notification-list"></div>
+        </section>
         <div class="my-packages-heading">
           <div>
             <div class="eyebrow" data-i18n="user.my.packages_eyebrow"></div>

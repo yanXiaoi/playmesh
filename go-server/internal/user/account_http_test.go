@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,6 +54,8 @@ func newAccountTestHarness(
 	cfg.Storage.GamesDirectory = filepath.Join(root, "games")
 	cfg.Storage.QuarantineDirectory = filepath.Join(root, "quarantine")
 	cfg.Relay.PublicBaseURL = "http://source.example"
+	cfg.Auth.PublishedToken = "published-token"
+	cfg.UploadKeyPepper = "upload-key-pepper-for-tests"
 	database, err := store.Open(cfg.Storage, store.Settings{
 		AllowUserRegistration:    true,
 		RequireEmailVerification: requireVerification,
@@ -83,6 +86,31 @@ func newAccountTestHarness(
 	}
 }
 
+func TestPrivateSourceConfigurationIncludesUploadKey(t *testing.T) {
+	harness := newAccountTestHarness(t, false)
+	payload, err := harness.handler.sourceConfigurationURL("upload-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "http" ||
+		parsed.Host != "source.example" ||
+		parsed.Query().Get("token") != "published-token" ||
+		parsed.Query().Get("uploadKey") != "upload-secret" {
+		t.Fatalf("专属游戏源二维码载荷 = %q", payload)
+	}
+	png, err := harness.handler.sourceQRCode("upload-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(png) < 4 || string(png[:4]) != "\x89PNG" {
+		t.Fatalf("专属游戏源二维码不是 PNG: %x", png[:min(4, len(png))])
+	}
+}
+
 func accountJSONRequest(
 	t *testing.T,
 	engine http.Handler,
@@ -108,7 +136,7 @@ func accountJSONRequest(
 	return recorder
 }
 
-func TestVerifiedAccountHTTPFlowUsesSecureSessionAndCSRF(t *testing.T) {
+func TestVerifiedAccountHTTPFlowPersistsSessionAndCSRF(t *testing.T) {
 	harness := newAccountTestHarness(t, true)
 	register := accountJSONRequest(
 		t,
@@ -173,19 +201,22 @@ func TestVerifiedAccountHTTPFlowUsesSecureSessionAndCSRF(t *testing.T) {
 	oldToken := accountJSONRequest(
 		t, harness.engine, http.MethodGet, "/verify?token=old-token", "", nil, "",
 	)
-	if oldToken.Code != http.StatusBadRequest {
+	if oldToken.Code != http.StatusSeeOther ||
+		oldToken.Header().Get("Location") != "/my?emailVerification=failed" {
 		t.Fatalf("被替换 Token 状态 = %d", oldToken.Code)
 	}
 	currentToken := accountJSONRequest(
 		t, harness.engine, http.MethodGet, "/verify?token=current-token", "", nil, "",
 	)
-	if currentToken.Code != http.StatusOK {
+	if currentToken.Code != http.StatusSeeOther ||
+		currentToken.Header().Get("Location") != "/my?emailVerification=success" {
 		t.Fatalf("当前 Token 状态 = %d, body = %s", currentToken.Code, currentToken.Body.String())
 	}
 	reusedToken := accountJSONRequest(
 		t, harness.engine, http.MethodGet, "/verify?token=current-token", "", nil, "",
 	)
-	if reusedToken.Code != http.StatusBadRequest {
+	if reusedToken.Code != http.StatusSeeOther ||
+		reusedToken.Header().Get("Location") != "/my?emailVerification=failed" {
 		t.Fatalf("重复使用 Token 状态 = %d", reusedToken.Code)
 	}
 
@@ -216,11 +247,11 @@ func TestVerifiedAccountHTTPFlowUsesSecureSessionAndCSRF(t *testing.T) {
 			csrfCookie = cookie
 		}
 	}
-	if sessionCookie == nil || !sessionCookie.HttpOnly || !sessionCookie.Secure ||
+	if sessionCookie == nil || !sessionCookie.HttpOnly || sessionCookie.Secure ||
 		sessionCookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("会话 Cookie = %#v", sessionCookie)
 	}
-	if csrfCookie == nil || csrfCookie.HttpOnly || !csrfCookie.Secure ||
+	if csrfCookie == nil || csrfCookie.HttpOnly || csrfCookie.Secure ||
 		csrfCookie.SameSite != http.SameSiteLaxMode ||
 		csrfCookie.Value != loginBody.CSRFToken {
 		t.Fatalf("CSRF Cookie = %#v, body token = %q", csrfCookie, loginBody.CSRFToken)
@@ -277,6 +308,34 @@ func TestVerifiedAccountHTTPFlowUsesSecureSessionAndCSRF(t *testing.T) {
 	}
 }
 
+func TestSessionCookiesAreSecureForHTTPS(t *testing.T) {
+	harness := newAccountTestHarness(t, false)
+	for _, test := range []struct {
+		name      string
+		target    string
+		forwarded string
+	}{
+		{name: "TLS request", target: "https://source.example/login"},
+		{name: "TLS proxy", target: "http://source.example/login", forwarded: "https"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, test.target, nil)
+			if test.forwarded != "" {
+				request.Header.Set("X-Forwarded-Proto", test.forwarded)
+			}
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = request
+			harness.handler.setSessionCookie(context, "session", 60)
+			harness.handler.setCSRFCookie(context, "csrf", 60)
+			cookies := recorder.Result().Cookies()
+			if len(cookies) != 2 || !cookies[0].Secure || !cookies[1].Secure {
+				t.Fatalf("HTTPS Cookies = %#v", cookies)
+			}
+		})
+	}
+}
+
 func TestRegistrationResponseDoesNotEnumerateExistingEmail(t *testing.T) {
 	harness := newAccountTestHarness(t, false)
 	body := `{"email":"user@example.com","password":"Password1!","confirmPassword":"Password1!","captchaToken":"verified"}`
@@ -305,6 +364,71 @@ func TestRegistrationResponseDoesNotEnumerateExistingEmail(t *testing.T) {
 		"user@example.com",
 	); err != nil {
 		t.Fatalf("统一响应后账号未创建: %v", err)
+	}
+}
+
+func TestDisabledAccountCannotLogin(t *testing.T) {
+	harness := newAccountTestHarness(t, false)
+	passwordHash, err := hashPassword("Password1!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := harness.store.CreateUser(
+		context.Background(), "disabled@example.com", passwordHash, "active",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.store.SetUserDisabled(
+		context.Background(), account.ID, true, "测试禁用",
+	); err != nil {
+		t.Fatal(err)
+	}
+	response := accountJSONRequest(
+		t,
+		harness.engine,
+		http.MethodPost,
+		"/login",
+		`{"email":"disabled@example.com","password":"Password1!","captchaToken":"verified"}`,
+		nil,
+		"",
+	)
+	if response.Code != http.StatusForbidden ||
+		!strings.Contains(response.Body.String(), `"code":"user_disabled"`) {
+		t.Fatalf("禁用用户登录响应 = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDisabledAccountCannotUploadWithExistingKey(t *testing.T) {
+	harness := newAccountTestHarness(t, false)
+	account, err := harness.store.CreateUser(
+		context.Background(), "upload-disabled@example.com", "hash", "active",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const uploadKey = "Upload!Key123"
+	if err := harness.store.PutUploadCredential(
+		context.Background(), account.ID, harness.handler.uploadKeyHMAC(uploadKey),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.store.SetUserDisabled(
+		context.Background(), account.ID, true, "禁止继续上传",
+	); err != nil {
+		t.Fatal(err)
+	}
+	engine := gin.New()
+	engine.POST("/upload", harness.handler.RequireUploadKey(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/upload", nil)
+	request.Header.Set("Authorization", "UploadKey "+uploadKey)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden ||
+		!strings.Contains(response.Body.String(), `"code":"user_disabled"`) {
+		t.Fatalf("禁用用户上传响应 = %d %s", response.Code, response.Body.String())
 	}
 }
 

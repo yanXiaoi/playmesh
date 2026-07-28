@@ -615,6 +615,173 @@ func testStorage(root string, databasePath string) config.Storage {
 	}
 }
 
+func TestAdminUserLifecycleAndNotifications(t *testing.T) {
+	root := t.TempDir()
+	database, err := Open(
+		testStorage(root, filepath.Join(root, "server.db")),
+		Settings{AllowUserRegistration: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	account, err := database.CreateUser(
+		ctx, "publisher@example.com", "password-hash", "active",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateUserSession(
+		ctx, account.ID, "session-hash", "csrf-hash", time.Now().Add(time.Hour),
+	); err != nil {
+		t.Fatal(err)
+	}
+	users, err := database.ListAdminUsers(ctx, AdminUserQuery{
+		Search: "publisher", Page: 1, Size: 20,
+	})
+	if err != nil || users.Total != 1 || len(users.Data) != 1 {
+		t.Fatalf("用户搜索 = %#v, err=%v", users, err)
+	}
+	if err := database.SetUserDisabled(
+		ctx, account.ID, true, "违反发布规则",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := database.UserBySession(
+		ctx, "session-hash", time.Now(),
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("禁用后会话仍然有效: %v", err)
+	}
+	disabled, err := database.ListAdminUsers(ctx, AdminUserQuery{
+		Status: "disabled", Page: 1, Size: 20,
+	})
+	if err != nil || disabled.Total != 1 ||
+		disabled.Data[0].DisabledReason != "违反发布规则" {
+		t.Fatalf("禁用用户列表 = %#v, err=%v", disabled, err)
+	}
+	if err := database.CreateNotification(
+		ctx, account.ID, "game_unpublished", "游戏包已下架", "原因：测试",
+	); err != nil {
+		t.Fatal(err)
+	}
+	notifications, err := database.ListNotifications(ctx, account.ID, 50)
+	if err != nil || len(notifications) != 1 || notifications[0].ReadAt != 0 {
+		t.Fatalf("站内通知 = %#v, err=%v", notifications, err)
+	}
+	if err := database.MarkNotificationRead(
+		ctx, account.ID, notifications[0].ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	notifications, err = database.ListNotifications(ctx, account.ID, 50)
+	if err != nil || notifications[0].ReadAt == 0 {
+		t.Fatalf("通知未标为已读 = %#v, err=%v", notifications, err)
+	}
+	if _, err := database.CreateOwnedGame(ctx, gameInput(account.ID, "1.0.0")); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteUser(ctx, account.ID); !errors.Is(err, ErrUserHasGames) {
+		t.Fatalf("拥有游戏包的用户删除错误 = %v", err)
+	}
+}
+
+func TestOpenMigratesSchemaV3ToV4(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "server.db")
+	storage := testStorage(root, databasePath)
+	database, err := Open(storage, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`
+		DROP TABLE user_notifications;
+		DROP TABLE disabled_users;
+		PRAGMA user_version = 3;
+	`); err != nil {
+		_ = raw.Close()
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := Open(storage, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	var version int
+	if err := migrated.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("迁移后 schema 版本 = %d", version)
+	}
+}
+
+func TestDisplayNameUpdateAppliesToExistingGames(t *testing.T) {
+	root := t.TempDir()
+	database, err := Open(
+		testStorage(root, filepath.Join(root, "server.db")),
+		Settings{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	owner, err := database.CreateUser(ctx, "publisher@example.com", "hash", "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.UpdateDisplayName(ctx, owner.ID, "上传时昵称"); err != nil {
+		t.Fatal(err)
+	}
+	game, err := database.CreateOwnedGame(ctx, gameInput(owner.ID, "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.UpdateDisplayName(ctx, owner.ID, "更新后昵称"); err != nil {
+		t.Fatal(err)
+	}
+	var storedAuthor string
+	if err := database.db.QueryRow(
+		"SELECT author FROM games WHERE id = ?", game.ID,
+	).Scan(&storedAuthor); err != nil {
+		t.Fatal(err)
+	}
+	if storedAuthor != "更新后昵称" {
+		t.Fatalf("游戏作者快照 = %q", storedAuthor)
+	}
+	// A legacy stale snapshot must not leak through current read APIs.
+	if _, err := database.db.Exec(
+		"UPDATE games SET author = '旧快照' WHERE id = ?", game.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	current, err := database.GetGame(ctx, game.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Author != "更新后昵称" {
+		t.Fatalf("游戏读取作者 = %q", current.Author)
+	}
+	userGames, err := database.ListUserGames(ctx, owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(userGames) != 1 || userGames[0].Author != "更新后昵称" {
+		t.Fatalf("用户游戏作者 = %#v", userGames)
+	}
+}
+
 func gameInput(userID int64, gameVersion string) CreateGameInput {
 	return CreateGameInput{
 		PackageID:        "com.example.game",

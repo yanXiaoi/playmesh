@@ -1,6 +1,6 @@
 {
-  "version": "2.4.0",
-  "channelVersion": "2.2.0",
+  "version": "3.0.0",
+  "channelVersion": "3.0.0",
   "script": "/playmesh/sdk/v1/playmesh.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -141,7 +141,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "2.4.0"
+          "value": "3.0.0"
         },
         {
           "name": "ready",
@@ -171,22 +171,22 @@
           ]
         },
         {
-          "name": "showToolDock",
-          "signature": "showToolDock(): Promise<void>",
+          "name": "showGameSidebar",
+          "signature": "showGameSidebar(): Promise<void>",
           "availability": "Playmesh App WebView",
-          "behavior": "Shows and expands the App-owned game tool dock, then moves focus to its first control"
+          "behavior": "Shows the App-owned game sidebar, then moves focus to Continue game without pausing the runtime"
         },
         {
-          "name": "hideToolDock",
-          "signature": "hideToolDock(): Promise<void>",
+          "name": "hideGameSidebar",
+          "signature": "hideGameSidebar(): Promise<void>",
           "availability": "Playmesh App WebView",
-          "behavior": "Hides the App-owned game tool dock and restores the game DOM focus captured by showToolDock"
+          "behavior": "Hides the App-owned game sidebar and restores the game DOM focus captured by showGameSidebar without resuming an already-running lifecycle"
         },
         {
           "name": "exitGame",
           "signature": "exitGame(): Promise<void>",
           "availability": "Playmesh App WebView",
-          "behavior": "Requests the App to end the current game runtime and return to the previous App page"
+          "behavior": "Requests the App to end the current game runtime, run normal cleanup, and return to the previous App page"
         },
         {
           "name": "identity.getCurrent",

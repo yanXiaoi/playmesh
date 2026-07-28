@@ -12,9 +12,10 @@
 
 适用于：
 
-- 把项目提示词交给普通对话 AI；
+- 按 [ChatAI 使用方法](chat-ai-development.md) 把项目提示词交给普通对话 AI；
 - 在工作区“对话控制台”执行 AI 返回的 JSON 指令；
-- 让可调用 HTTP API 的 Agent 直接读取项目、修改文件、校验、运行和诊断日志。
+- 按 [AgentAI 使用方法](agent-ai-development.md) 让可调用 HTTP API 的 Agent
+  直接读取项目、修改文件、校验、运行和诊断日志。
 
 AI 开发与手工开发使用同一个项目目录、SDK、校验器、运行时和本地历史，不存在独立的
 “AI 项目格式”。
@@ -47,8 +48,8 @@ AI 提示词和操作审批。
 2. [游戏包与 main.json](package-format.md)：目录结构、清单、入口、能力声明、数据目录
    和导入导出边界。
 3. [Game SDK / App Bridge SDK](sdk-v1.md)：当前公开 API、类型、角色限制和错误语义。
-4. [游戏能力使用指南](capability-plugins.md)：如何在 `capabilities.json` 中声明能力，
-   并通过 `playmesh.app.capabilities` 创建和释放实例。
+4. [游戏能力使用指南](capability-plugins.md)：如何直接使用非敏感 Web API，并按需在
+   `capabilities.json` 中声明敏感权限或 Playmesh 多平台适配能力。
 5. [在线游戏源与 Catalog API](../catalog-api.md)：游戏源声明、搜索、下载与认证。
 
 ## 当前契约
@@ -104,7 +105,8 @@ packages/com.example.hello/
 - 大屏 Authority 主机不属于 `players`；普通多屏主机可同时作为 Player，但玩家顺序
   没有 Authority 语义。
 - 持久化数据写入 Authority 主机；浏览器和加入设备不建立独立 Bucket 副本。
-- 设备能力必须先在 `capabilities.json` 按页面角色声明，再由用户确认并通过 SDK 创建。
+- 非敏感权限和用户主动文件选择直接使用标准 Web API；WebView 敏感权限与 Playmesh
+  多平台适配能力才需要在 `capabilities.json` 中按页面角色声明。
 
 ## 文档扩展规则
 

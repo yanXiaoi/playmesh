@@ -202,7 +202,7 @@ class AppSdkCommandContext {
     required this.disposeCapability,
     required this.setFullscreen,
     required this.openSharePanel,
-    required this.setToolDockVisible,
+    required this.setGameSidebarVisible,
     required this.requestExit,
     required this.syncAvatar,
   });
@@ -219,7 +219,7 @@ class AppSdkCommandContext {
   disposeCapability;
   final Future<Object?> Function(Map<String, Object?> payload) setFullscreen;
   final Future<Object?> Function() openSharePanel;
-  final Future<Object?> Function(bool visible) setToolDockVisible;
+  final Future<Object?> Function(bool visible) setGameSidebarVisible;
   final Object? Function() requestExit;
   final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
 }

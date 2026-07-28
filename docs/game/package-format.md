@@ -71,8 +71,8 @@ game-package/
   "lastModifiedAt": 1784851200000,
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "2.4.0",
-  "appSdkVersion": "2.2.0",
+  "sdkVersion": "3.0.0",
+  "appSdkVersion": "3.0.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": ["multiplayer"],
@@ -97,8 +97,8 @@ game-package/
 | `lastModifiedAt` | 新发布必有，旧包可缺省 | 最后上传的 Unix 毫秒时间戳，只读；缺省由 App 外壳显示本地化“无”，有值时按设备本地时区显示 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `2.4.0` |
-| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `2.2.0`；CLI 发布时总会写入当前值 |
+| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `3.0.0` |
+| `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `3.0.0`；CLI 发布时总会写入当前值 |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `controllerOrientation` | 单屏多人必填 | 控制器全屏方向；其他显示模式禁止声明 |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
@@ -123,10 +123,10 @@ game-package/
   `icon`。
 - `icon.png` 只允许 PNG，最大 2 MiB；解码失败、超限或尺寸异常时忽略并显示默认
   图标，不能阻断游戏包导入或运行。
-- `main.json` 不定义 `permissions`。所有受保护平台能力只在同级
-  `capabilities.json` 声明；浏览器自身的 DOM、触摸、键盘和浏览器原生权限 API
-  不依赖清单字段。读取额外字段不赋予其语义，规范化保存、CLI 重写、导入和导出
-  都会移除 `permissions`。
+- `main.json` 不定义 `permissions`。WebView 会拦截的敏感权限，以及 Playmesh 已做
+  多平台原生适配的能力，只在同级 `capabilities.json` 按需声明。普通 DOM、触摸、
+  键盘、运动传感器和文件选择等标准 Web API 不依赖清单字段。读取额外字段不赋予
+  其语义，规范化保存、CLI 重写、导入和导出都会移除 `permissions`。
 
 ## capabilities.json
 
@@ -135,11 +135,12 @@ game-package/
 ```json
 {
   "required": [
+    "media.camera",
+    "media.microphone",
     "device.vibration"
   ],
   "controllerRequired": [
-    "sensor.accelerometer",
-    "sensor.gyroscope"
+    "device.midi"
   ]
 }
 ```
@@ -147,10 +148,16 @@ game-package/
 - `required` 只授权 `entries.game` 主画面；`controllerRequired` 只授权 `entries.controller` 控制器。任一角色声明为空时不弹能力确认，也不会回退读取另一角色的声明。
 - `controllerRequired` 仅允许用于 `single_screen_multiplayer`，其他模式声明会校验失败。
 
-- 能力 ID 与实现环境解耦。当前两个传感器能力由 App 适配器提供；未来摄像头、麦克风等通用能力可由 App 和 HTTPS 浏览器分别实现同一 ID。
+- `media.camera`、`media.microphone` 和 `device.midi` 是 WebView 权限声明：
+  游戏直接调用标准 Web API，App 只在权限回调中核对当前角色是否声明，未声明即拒绝。
+  三个能力各自拥有独立插件；`media.microphone@1.1.0` 另提供原生语音转文字方法和
+  事件，其他原生扩展继续在对应插件内增加。
+- `device.vibration` 是多平台原生适配能力，游戏通过 App SDK 创建实例并调用。
 - 平台统一能力插件注册表把每个 code 映射为中文名、用途、`apiVersion`、方法、事件以及 App/HTML 适配状态。能力确认弹窗、开发者工作区的新建/项目设置选项和能力声明校验均以该注册表为准；工作区能力测试展示全平台注册表并调用各插件自带的自检，不按当前项目声明过滤。
 - 主 SDK 在 App WebView 和普通浏览器每次加载游戏时展示全部所需能力。用户只能“同意并进入”或“拒绝并退出”；授权结果不写入房主或本机文件。
-- 普通浏览器当前局域网 HTTP 分享不可靠支持运动传感器，因此这两个能力显示“本平台暂不支持”。该标记不阻止用户同意后进入，游戏必须在能力不可用时保持主流程可玩。
+- 加速度计、陀螺仪和设备方向直接使用浏览器标准 API，不声明能力；文件选择通过
+  `<input type="file">` 由用户主动选择，同样不声明能力。游戏必须先做特性检测，
+  并在 WebView、来源或系统不支持时保持主流程可玩。
 
 ## 屏幕方向
 

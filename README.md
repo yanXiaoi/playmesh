@@ -1,26 +1,49 @@
 # Playmesh
 
-Playmesh 是一个局域网优先、支持公共中转的跨平台 HTML 游戏平台。Flutter App
-负责游戏库、用户资料、会话编排与 WebView 容器；Go Core 负责本机会话和消息路由；
-Game SDK 为单机与多人游戏提供权威状态、JSON 消息、二进制 Channel、Bucket 存储
-和设备能力；可独立部署的 Go Server 提供轻量游戏包分享、上传、分发与公共联机中转。
+> **App 即服务器：创作完成，打开即玩，分享即可加入。**
 
-游戏只面向稳定的 Game SDK 编程。局域网 App、普通浏览器和公共中转 App 的加载来源、
-连接方式与传输安全由平台处理，不进入游戏业务代码。
+Playmesh 是一个局域网优先、支持公共中转的跨平台 HTML 游戏平台。创建者启动游戏时，
+Playmesh App 同时承担游戏宿主、联机会话与 Authority，不需要为局域网对局另外部署
+专用游戏服务器。朋友扫描二维码或打开分享链接，就能使用普通浏览器立即加入，无需先
+安装 App。
+
+普通浏览器加入面向低门槛体验，不提供 Playmesh App 的原生硬件能力；标准 Web API
+是否可用仍取决于浏览器、系统和用户授权。希望获得完整能力，或与不在同一局域网的朋友
+联机时，双方都使用 Playmesh App。公网联机需要可访问的公共中转服务器，中转只负责
+配对和转发端到端加密字节，游戏规则与 Authority 仍运行在创建者的 App 中。
+
+| 游玩场景 | 加入方式 | 能力边界 |
+| --- | --- | --- |
+| 同一局域网，只有创建者安装 App | 朋友通过二维码或链接在浏览器中加入 | 无需安装 App；不具备 Playmesh 原生硬件能力 |
+| 双方都安装 App | 局域网可直接加入；异地通过公共中转加入 | 可按游戏声明使用 App 平台能力；公网模式依赖公共中转服务器 |
+
+游戏只面向稳定的 Game SDK 编程。同一份游戏代码不需要区分局域网浏览器、局域网 App
+或公共中转 App；页面加载、连接路径、身份与传输安全都由平台处理。
+
+Playmesh 还把 AI 接入游戏开发全流程：平台会根据当前项目、运行模式、能力声明与 SDK
+自动生成完整的 ChatAI 和 AgentAI 项目提示词。普通对话 AI 可以通过结构化指令协助
+开发；具备本地工具调用能力的 Agent 则可直接完成文件读取、修改、校验、运行和日志
+诊断。
+
+项目说明：本项目目前采用 AI 驱动的集中式开发模式。为保持架构和代码生成流程的一致性，
+暂不接受 Pull Request，欢迎通过 Issue 报告 Bug 或提出功能建议。
 
 ## 核心能力
 
 - 导入、导出和管理根目录包含 `main.json` 的 Playmesh 游戏包。
-- 创建或加入局域网对局，通过二维码、链接或 App 控制器参与游戏。
-- 通过轻量 Go Server 分享、上传和下载游戏包，并让不在同一局域网的 App 通过
-  公共中转联机；中转只配对并复制端到端加密字节。
+- **App 即服务器**：创建者的 App 直接托管游戏、会话与 Authority，局域网无需额外
+  游戏服务器。
+- **浏览器免安装加入**：朋友通过二维码或链接立即参与局域网游戏，适合快速分享和
+  临时组局。
+- **双 App 跨网络联机**：不在同一局域网时，通过可独立部署的 Go Server 公共中转
+  建立端到端加密连接。
 - 为 HTML/CSS/JavaScript 游戏提供 Authority、状态同步、生命周期、存储、性能和
   设备能力插件。
-- 提供桌面与移动端共用的网页开发者工作区，包含代码编辑、Diff、本地历史、校验、
-  运行、日志、AI 对话控制台和 Agent API。
+- **内置 AI 开发闭环**：为 ChatAI 与 AgentAI 生成完整项目提示词，并提供代码编辑、
+  Diff、本地历史、校验、真实运行、日志、对话控制台和 Agent API。
 - 提供 Go 编写的 `playmesh-cli`，支持在 IDEA 等外部 IDE 中创建、拉取、发布、
   运行项目并跟随日志。
-- 支持 Android 与 Windows 发布构建；桌面包自动携带 Go Core 与 Developer CLI。
+- 支持 Android，AndroidTV 与 Windows 发布构建；桌面包自动携带 Go Core 与 Developer CLI。
 
 ## 架构概览
 
@@ -81,25 +104,31 @@ flutter run
 
 | 开发方式 | 入口 | 适用场景 |
 | --- | --- | --- |
-| AI 对话 / Agent | [AI 游戏开发](docs/game/ai-development.md) | 使用工作区提示词、对话控制台或 Developer API 生成和迭代游戏 |
+| ChatAI | [ChatAI 使用方法](docs/game/chat-ai-development.md) | 使用普通对话 AI，通过工作区对话控制台读取和修改项目 |
+| AgentAI | [AgentAI 使用方法](docs/game/agent-ai-development.md) | 让具备本地 HTTP 工具能力的 Agent 直接开发、校验、运行和诊断 |
+| AI 开发总览 | [AI 游戏开发](docs/game/ai-development.md) | 比较两种工作流并了解共同安全边界 |
 | IDEA / CLI | [IDEA 与 CLI 游戏开发](docs/game/idea-cli-development.md) | 在外部 IDE 中编辑本地副本，并发布到目标 App |
 | 网页工作区 | [网页开发者通道](docs/game/web-dev-channel.md) | 在 App 或局域网浏览器中编辑、校验、运行和查看日志 |
 | 通用契约 | [游戏开发指南](docs/game/development-guide.md) | 理解运行模式、Player/Authority 分层、生命周期和存储 |
 | 包格式 | [游戏包与 main.json](docs/game/package-format.md) | 定义目录、清单、能力声明和发布边界 |
 | SDK API | [Game SDK / App Bridge SDK](docs/game/sdk-v1.md) | 查询当前公开 API、类型、角色限制和错误语义 |
-| 游戏使用设备能力 | [游戏能力使用指南](docs/game/capability-plugins.md) | 声明并调用传感器、震动等平台能力 |
+| 游戏使用设备能力 | [游戏能力使用指南](docs/game/capability-plugins.md) | 使用标准 Web API，并按需声明敏感权限或多平台适配能力 |
 
 ### AI 开发
 
-在 App 设置中开启开发者模式，进入工作区的“AI”页面：
+Playmesh 不是只提供一段通用系统提示词，而是为当前游戏动态组装项目类型、页面角色、
+项目树、公开 SDK 类型声明、能力上下文与 Developer Operation 契约。AI 因此能够沿用
+与人工开发相同的项目、校验器、运行时、日志和本地历史完成闭环。
 
-1. 选择或创建游戏项目。
-2. 填写公共“自定义想法”。
-3. 获取纯聊天提示词，或选择 Agent 可访问的局域网 Base URL 获取 Agent 提示词。
-4. 让 AI 修改项目后执行结构化校验、真实运行和日志诊断。
+- **ChatAI（普通对话 AI）**不需要本地工具权限。把生成的对话提示词交给 AI，再将
+  AI 返回的 JSON 指令粘贴到工作区“对话控制台”执行；结构化结果可继续发回 AI，
+  逐轮完成读取、修改和验证。详见 [ChatAI 使用方法](docs/game/chat-ai-development.md)。
+- **AgentAI（本地可操作工具 AI）**使用生成的 Agent 提示词和 Developer Gateway，
+  可直接读取项目、原子修改文件、校验、启动或重启游戏并查看日志。详见
+  [AgentAI 使用方法](docs/game/agent-ai-development.md)。
 
-纯聊天 AI 输出的 JSON 指令粘贴到工作区“对话控制台”；Agent 直接调用同一套
-Developer Operation API。危险操作统一经过工作区审批。
+两种方式都通过同一套 Developer Operation API 工作；删除、WebView JavaScript 等
+危险操作会暂停并在工作区请求开发者审批。
 
 Playmesh 只翻译 App 自己的界面。游戏在 `playmesh.ready` 后可用
 `playmesh.runtime.getLocale()` 读取当前显示端 locale，但不会获得 App 词典；游戏
@@ -184,6 +213,27 @@ Catalog、已审核下载与 Relay；`16669` 是只承载 `PLAYMESH_ADMIN_PATH` 
 ```
 
 脚本会在构建前生成 SDK，重新构建目标平台 Go Core，校验包内入口并输出 SHA-256。
+
+提交当前 `master` 的所有变更后，可使用当前 `pubspec.yaml` 的
+`MAJOR.MINOR.PATCH+BUILD` 一键构建并发布 GitHub Release：
+
+```powershell
+# 首次使用先安装并登录 GitHub CLI
+winget install --id GitHub.cli
+gh auth login
+
+# 构建 Android 与 Windows，并发布 v{VERSION}-build{BUILD}
+.\tool\publish_github_release.ps1
+
+# 只发布某个平台
+.\tool\publish_github_release.ps1 -Target android
+.\tool\publish_github_release.ps1 -Target windows
+```
+
+脚本要求工作树干净且当前分支为 `master`，会推送 `origin/master`、调用统一发布构建、
+生成 `SHA256SUMS.txt`，再创建 GitHub Release 并上传产物。已有产物可使用
+`-SkipBuild`；只想创建草稿可加 `-Draft`。Android 默认要求正式签名，显式允许 Debug
+签名时还必须同时使用 `-Draft` 或 `-Prerelease`，避免误发成正式版本。
 
 签名、产物目录、工具链隔离和 Windows Ninja 构建说明见：
 

@@ -4,7 +4,32 @@
 
 - 状态：开发中，尚未发布。
 - 上一份历史详细日志：`docs/version/2.2.0.md`；它不代表当前工作树版本。
-- 当前开发版本：App `3.0.0+22`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK `2.4.0`、App Bridge SDK `2.2.0`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.3.0`、Developer CLI `1.4.0`。
+- 当前开发版本：App `3.0.0+23`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK `3.0.0`、App Bridge SDK `3.0.0`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、Developer API / OpenAPI `2.3.0`、Developer CLI `1.4.0`。
+
+## WebView 权限能力
+
+- 删除 `sensor.accelerometer` 和 `sensor.gyroscope` 原生插件；游戏改为按 WebView
+  支持情况直接使用标准运动传感器 API，无需能力声明。
+- 新增独立的 `media.camera`、`media.microphone` 和 `device.midi` 插件。游戏声明后
+  可分别使用 `getUserMedia()` 和 `requestMIDIAccess({sysex:true})`；WebView 权限
+  回调对未声明请求统一拒绝。`media.microphone@1.1.0` 另提供 `toText`、声音级别和
+  完整识别结果事件，用于跨平台原生短语音转文字。
+- 文件选择通过用户主动触发的 `<input type="file">` 接入，不进入能力声明，也不允许
+  静默读盘。
+- `device.vibration@2.0.0` 改用 `vibration` 插件，SDK 能力实例公开 `vibrate` 的
+  全部参数形态和 `cancel`；原 `style` 参数不再使用。
+- Android 增加摄像头/录音运行时权限衔接，iOS/macOS 补齐麦克风用途说明和沙盒
+  entitlement；AI 提示词和能力开发文档同步区分标准 Web API 与声明型能力。
+
+## 游戏侧边栏与返回意图
+
+- 删除进入游戏后常驻的悬浮球和二级“更多”菜单，App WebView 与普通浏览器统一使用右侧侧边栏；横竖屏按可用空间自适应，所有操作同时显示图标与文字。
+- 侧边栏默认关闭且不显示进入提示。“继续游戏”和点击遮罩都会关闭侧边栏、恢复游戏内容焦点；打开、关闭侧边栏均不发送 `pause` / `resume` 生命周期事件。
+- WebView 的系统返回与键盘返回先交给网页私有返回处理器；浏览器可使用 History API 时安装同页返回守卫。网页无法处理时由原生宿主打开侧边栏兜底。侧边栏已打开时返回只关闭侧边栏；侧边栏退出和显式调用 `playmesh.app.exitGame()` 都可以离开游戏。
+- Game SDK 和 App Bridge SDK 升级到 `3.0.0`。公开接口将 `showToolDock()` / `hideToolDock()` 替换为 `showGameSidebar()` / `hideGameSidebar()`，并保留直接退出游戏的 `exitGame()`。
+- 调用链：`PopScope / 硬件返回 -> window[Symbol.for("playmesh.platform-ui.back")] -> playmesh.app.showGameSidebar() -> app.ui.gameSidebar.show -> AppWebViewBridge -> GameSidebarController`；网页执行器缺失、异常或返回 `false` 时直接由 `GameSidebarController` 打开。普通浏览器走 `popstate -> 私有返回处理器 -> 浏览器侧边栏`；直接退出走 `playmesh.app.exitGame() -> app.game.exit -> AppWebViewBridge -> 页面退出清理`。
+- 验证覆盖 Flutter 侧栏行为、横竖屏尺寸、退出边界、App Bridge/注册表/本地化/网关契约，以及浏览器返回守卫、遮罩关闭、焦点恢复和“侧栏开关不触发 pause”；最新版 SDK 静态产物由注册表重新生成。
+- 回滚点是本节涉及的 `GameSidebar`、返回处理器和 Game/App SDK `3.0.0` 发行边界，必须整体回滚，不能只恢复旧 SDK 名称或只恢复悬浮 UI。浏览器 History/关闭窗口受浏览器策略限制，因此拦截与离开都保持尽力而为；App WebView 始终保留原生返回兜底。
 
 ## 3.0.0 破坏边界
 
@@ -57,7 +82,7 @@
 - Go Core 玩家快照新增来源和延迟，并区分“服务器 / 局域网 App / 局域网 HTML”；断线玩家保留在当前房间状态中，延迟清空，重连后按 `playerId` 更新。
 - 房间状态独立于具体分享通道，实时显示全部已加入玩家、在线状态和 RTT。
 - Go Core 当前为 `0.5.0`，Core 协议为 `1.3.0`。Player 快照兼容新增只读
-  `avatar`；Game SDK `2.4.0` 继续公开该字段，App Bridge SDK 当前为 `2.2.0`。
+  `avatar`；Game SDK `3.0.0` 继续公开该字段，App Bridge SDK 当前为 `3.0.0`。
   现有游戏包继续由兼容发行范围承接。
 
 ## 游戏返回导航
@@ -145,7 +170,7 @@
   同时逐个验证所有 SDK 网关/API 响应与注册表即时组装内容一致。
 - 注册表新增不可重叠的 Game/App SDK 兼容发行范围；游戏清单版本在网关启动时解析，
   SDK Bridge 命令携带实际 bundle 版本并再次校验。当前 Game SDK 明确承接
-  `1.0.0-2.4.0`，App SDK 明确承接 `1.0.0-2.2.0`，未知版本仍直接拒绝。
+  `1.0.0-3.0.0`，App SDK 明确承接 `1.0.0-3.0.0`，未知版本仍直接拒绝。
 - 每个 Dart 命令执行器通过 `supportedVersions` 自行声明支持范围；调用契约未变化时
   使用 `SdkVersionRange.last` 开放上界，后续 SDK 升级无需逐个修改。相同命令名允许
   存在多个不重叠版本实现，但注册器和生成器都会拒绝同一版本命中两个执行器。只有
@@ -153,11 +178,11 @@
 - 本地 App SDK 服务删除测试脚本注入参数，所有版本响应都必须经过同一注册表；
   未注册或格式错误的版本请求直接失败。
 - Game SDK 新增 `Player.avatar`、只读 `runtime.getLocale()`，并把 App 级分享、
-  游戏工具和退出能力统一声明在 `playmesh.app`，升级到 `2.4.0`。
-- App Bridge SDK 新增 `openSharePanel()`、`showToolDock()`、`hideToolDock()` 和
-  `exitGame()`，升级到 `2.2.0`。SDK 拉起工具时自动聚焦，任一实际工具操作后整组
-  自动隐藏；用户手动展开时操作后只收起为悬浮按钮。现有已注册游戏包继续按清单
-  版本运行，旧 `playmesh.authority.openSharePanel()` 不再保留。
+  游戏工具能力统一声明在 `playmesh.app`。
+- App Bridge SDK 提供 `openSharePanel()`、`showGameSidebar()`、`hideGameSidebar()`
+  和 `exitGame()`。SDK 拉起侧边栏时自动聚焦“继续游戏”，关闭时把焦点还给游戏；
+  游戏也可以通过 `exitGame()` 直接执行正常退出清理。现有已注册游戏包继续按清单版本运行，旧
+  `playmesh.authority.openSharePanel()` 不再保留。
 
 ## 游戏源声明与 Catalog API 2.0.0
 
@@ -190,7 +215,7 @@
 - `main.json` 新增 `controllerOrientation`；单屏多人必填，其他模式禁止声明。
 - 主画面使用 `orientation`，控制器使用 `controllerOrientation`。本地 App WebView、远程 App WebView、普通浏览器分享入口均按当前页面角色选择方向。
 - Game SDK 在 App 中调用 `playmesh.app.device.setFullscreen(true, orientation)`，原生宿主进入全屏并应用横竖屏；退出时解除方向限制。
-- 普通浏览器不再显示全屏提示层，SDK 会直接尽力请求 Fullscreen API，再调用 Screen Orientation API；用户激活、浏览器策略或平台不支持导致的失败不阻断 SDK 初始化和加入对局，悬浮工具栏保留全屏按钮供用户手势重试。
+- 普通浏览器不再显示全屏提示层，SDK 会直接尽力请求 Fullscreen API，再调用 Screen Orientation API；用户激活、浏览器策略或平台不支持导致的失败不阻断 SDK 初始化和加入对局，侧边栏保留全屏操作供用户手势重试。
 
 ## 发布元数据与详情
 
@@ -202,10 +227,10 @@
 ## 浏览器扫码工具
 
 - 普通浏览器扫码加入页在当前页面本地拦截 `console.log/info/warn/error/debug`、资源错误、
-  未捕获异常和 Promise rejection；最近 500 条可从悬浮菜单“运行日志”查看和清空，
+  未捕获异常和 Promise rejection；最近 500 条可从侧边栏“运行日志”查看和清空，
   不上传到 App、Developer Gateway、Core 或中转服务，刷新页面后清空。
-- 普通浏览器的游戏悬浮工具支持指针和触摸拖动，并限制在当前视口内；拖动不会误触
-  工具按钮。App WebView 继续使用宿主工具，不启用该浏览器本地实现。
+- 普通浏览器的游戏侧边栏支持横竖屏响应式布局、键盘焦点循环、遮罩关闭和返回意图
+  拦截。App WebView 使用原生宿主侧边栏，不启用浏览器本地实现。
 
 ## 角色化能力声明
 
@@ -274,7 +299,7 @@
   其他未知键一样按普通多余字段静默忽略；工作区保存、CLI SDK 版本重写、导入和
   导出规范化均不输出这些键。
 - AI 游戏提示词遵守最小披露原则，只提供可调用的公开 SDK 和任务必需约束，不暴露回环代理、中转鉴权、密钥协商或加密通道实现。
-- Game SDK 升级到 `2.4.0`，App Bridge SDK 升级到 `2.2.0`，Developer API / OpenAPI
+- Game SDK 升级到 `3.0.0`，App Bridge SDK 升级到 `3.0.0`，Developer API / OpenAPI
   升级到 `2.3.0`；CLI 因 `icon.png` 包契约升级到 `1.4.0`。
 - Go Core 升级到 `0.5.0`，Core 协议升级到 `1.3.0`；Player 增加只读头像路径，
   在线状态继续包含来源与延迟字段。
@@ -282,7 +307,7 @@
 ## 验证与构建
 
 - 使用固定 SDK 在沙箱外串行执行 Dart/Flutter 静态分析、定向测试、全量测试、SDK JavaScript 契约与 CLI Go 测试。
-- App `3.0.0+22` 已完成 265 项 Flutter 回归、Flutter analyze、三套 Go
+- 此前 App `3.0.0+22` 已完成 265 项 Flutter 回归、Flutter analyze、三套 Go
   `test/race/vet`、全部 SDK/本地化 Node 契约、浏览器中英文/主题/管理入口联调，以及
   Android/Windows 统一发布构建。产物 SHA-256、内部 Android 签名边界和完整结果记录在
   `docs/verification/playmesh-3.0.0-2026-07-26.md`。

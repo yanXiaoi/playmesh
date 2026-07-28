@@ -9,94 +9,160 @@ import '../../support/localized_test_app.dart';
 void main() {
   setUpAll(initializeLocalizedTestApp);
 
-  testWidgets('扫码加入工具区与主机一致但不提供分享或退出游戏', (tester) async {
+  testWidgets('游戏运行面初始没有悬浮入口且侧边栏不可交互', (tester) async {
+    final controller = GameSidebarController();
     await tester.pumpWidget(
-      localizedTestApp(
-        home: Scaffold(
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              const ColoredBox(color: Colors.white),
-              GameToolDock(
-                backTooltip: '返回加入页面',
-                onBack: () {},
-                onReload: () {},
-                showPerformance: true,
-                onTogglePerformance: () {},
-                onOpenLogs: () {},
-                onEnterFullscreen: () {},
-                onExitFullscreen: () {},
-                secondaryActions: [
-                  GameToolAction(
-                    icon: Icons.info_outline,
-                    label: '游戏信息',
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+      localizedTestApp(home: _sidebarSurface(controller: controller)),
     );
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
-    await tester.pumpAndSettle();
-
-    expect(find.byTooltip('返回加入页面'), findsOneWidget);
-    expect(find.byTooltip('刷新游戏'), findsOneWidget);
-    expect(find.byTooltip('运行日志'), findsOneWidget);
-    expect(find.byTooltip('隐藏性能信息'), findsNothing);
-    expect(find.byTooltip('进入全屏'), findsOneWidget);
-    expect(find.byTooltip('退出全屏'), findsOneWidget);
-    expect(find.byTooltip('二维码与链接'), findsNothing);
-    expect(find.byTooltip('退出游戏'), findsNothing);
-
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pumpAndSettle();
-    final menu = tester.widget<Material>(
-      find.byKey(const Key('game-action-menu')),
-    );
+    expect(controller.isOpen, isFalse);
+    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
     expect(
-      menu.color,
-      Theme.of(
-        tester.element(find.byKey(const Key('game-action-menu'))),
-      ).colorScheme.surface,
+      find.byWidgetPredicate(
+        (widget) => widget is AnimatedOpacity && widget.opacity == 0,
+      ),
+      findsOneWidget,
     );
-    expect(find.text('游戏信息'), findsOneWidget);
-    expect(find.text('隐藏性能信息'), findsOneWidget);
-    expect(find.text('设置'), findsNothing);
   });
 
-  testWidgets('分享入口作为主机工具区一级按钮显示', (tester) async {
+  testWidgets('侧边栏把全部工具显示为图标加文字并由继续游戏关闭', (tester) async {
+    final controller = GameSidebarController();
+    var continueCount = 0;
     await tester.pumpWidget(
       localizedTestApp(
-        home: Scaffold(
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              GameToolDock(
-                backTooltip: '返回游戏详情',
-                onBack: () {},
-                onReload: () {},
-                showPerformance: true,
-                onTogglePerformance: () {},
-                onEnterFullscreen: () {},
-                onExitFullscreen: () {},
-                onShare: () {},
-              ),
-            ],
+        home: _sidebarSurface(
+          controller: controller,
+          onContinue: () => continueCount += 1,
+          showPerformance: true,
+          onShare: () {},
+          onOpenLogs: () {},
+          secondaryActions: [
+            GameSidebarAction(
+              icon: Icons.info_outline,
+              label: '游戏信息',
+              onPressed: () {},
+            ),
+          ],
+        ),
+      ),
+    );
+
+    controller.open();
+    await tester.pumpAndSettle();
+
+    expect(find.text('游戏菜单'), findsOneWidget);
+    for (final label in const [
+      '继续游戏',
+      '刷新游戏',
+      '二维码与链接',
+      '运行日志',
+      '进入全屏',
+      '退出全屏',
+      '游戏信息',
+      '隐藏性能信息',
+      '返回游戏详情',
+    ]) {
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(
+      tester.widgetList<Icon>(
+        find.descendant(
+          of: find.byKey(const Key('game-sidebar')),
+          matching: find.byType(Icon),
+        ),
+      ),
+      isNotEmpty,
+    );
+
+    await tester.tap(find.byKey(const Key('game-sidebar-continue')));
+    await tester.pumpAndSettle();
+    expect(controller.isOpen, isFalse);
+    expect(continueCount, 1);
+
+    controller.open();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('game-sidebar-dismiss-area')));
+    await tester.pumpAndSettle();
+    expect(controller.isOpen, isFalse);
+    expect(continueCount, 2);
+  });
+
+  testWidgets('返回键只打开或关闭侧边栏，侧边栏退出项目可以离开游戏', (tester) async {
+    final controller = GameSidebarController();
+    var exitCount = 0;
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GameRuntimeShortcutScope(
+          controller: controller,
+          onBack: () {
+            if (!controller.closeTopLayer()) controller.open();
+          },
+          onOpenSidebar: controller.open,
+          child: _sidebarSurface(
+            controller: controller,
+            onBack: () => exitCount += 1,
           ),
         ),
       ),
     );
 
-    await tester.tap(find.byTooltip('展开游戏工具'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('二维码与链接'), findsOneWidget);
+    expect(controller.isOpen, isTrue);
+    expect(exitCount, 0);
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'game-sidebar-continue',
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(controller.isOpen, isFalse);
+    expect(exitCount, 0);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('game-sidebar-exit')));
+    await tester.pumpAndSettle();
+    expect(exitCount, 1);
+    expect(controller.isOpen, isFalse);
   });
 
-  testWidgets('运行时重置后工具区和二级菜单恢复收起', (tester) async {
+  testWidgets('SDK 显示侧边栏后聚焦继续游戏且实际操作后关闭', (tester) async {
+    final controller = GameSidebarController();
+    var reloadCount = 0;
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: _sidebarSurface(
+          controller: controller,
+          onReload: () => reloadCount += 1,
+        ),
+      ),
+    );
+
+    expect(controller.showFromSdk(), isTrue);
+    await tester.pumpAndSettle();
+    expect(controller.isOpen, isTrue);
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'game-sidebar-continue',
+    );
+
+    await tester.tap(find.byKey(const Key('game-sidebar-reload')));
+    await tester.pumpAndSettle();
+    expect(reloadCount, 1);
+    expect(controller.isOpen, isFalse);
+
+    controller.showFromSdk();
+    await tester.pumpAndSettle();
+    expect(controller.hideFromSdk(), isTrue);
+    await tester.pumpAndSettle();
+    expect(controller.isOpen, isFalse);
+  });
+
+  testWidgets('运行时重置会关闭已经打开的侧边栏', (tester) async {
+    final controller = GameSidebarController();
     var resetKey = 0;
     late StateSetter update;
     await tester.pumpWidget(
@@ -104,317 +170,40 @@ void main() {
         home: StatefulBuilder(
           builder: (context, setState) {
             update = setState;
-            return Scaffold(
-              body: Stack(
-                children: [
-                  GameToolDock(
-                    resetKey: resetKey,
-                    backTooltip: '返回',
-                    onBack: () {},
-                    onReload: () {},
-                    showPerformance: false,
-                    onTogglePerformance: () {},
-                    onEnterFullscreen: () {},
-                    onExitFullscreen: () {},
-                    secondaryActions: [
-                      GameToolAction(
-                        icon: Icons.info_outline,
-                        label: '游戏信息',
-                        onPressed: () {},
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
+            return _sidebarSurface(controller: controller, resetKey: resetKey);
           },
         ),
       ),
     );
-    await tester.tap(find.byTooltip('展开游戏工具'));
+
+    controller.open();
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('game-action-menu')), findsOneWidget);
+    expect(controller.isOpen, isTrue);
 
     update(() => resetKey += 1);
     await tester.pumpAndSettle();
-
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-    expect(find.byKey(const Key('game-action-menu')), findsNothing);
+    expect(controller.isOpen, isFalse);
   });
 
-  testWidgets('F10 打开工具且返回键依次关闭菜单和工具', (tester) async {
-    final controller = GameToolDockController();
-    var pageBackCount = 0;
-    var toolBackCount = 0;
-    await tester.pumpWidget(
-      localizedTestApp(
-        home: GameRuntimeShortcutScope(
-          controller: controller,
-          onBack: () {
-            if (!controller.closeTopLayer()) pageBackCount += 1;
-          },
-          onOpenTools: controller.openTools,
-          onMoveTools: controller.beginMoveMode,
-          child: Scaffold(
-            body: Stack(
-              children: [
-                GameToolDock(
-                  controller: controller,
-                  backTooltip: '返回',
-                  onBack: () => toolBackCount += 1,
-                  onReload: () {},
-                  showPerformance: false,
-                  onTogglePerformance: () {},
-                  onEnterFullscreen: () {},
-                  onExitFullscreen: () {},
-                  secondaryActions: [
-                    GameToolAction(
-                      icon: Icons.info_outline,
-                      label: '游戏信息',
-                      onPressed: () {},
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('收起游戏工具'), findsOneWidget);
-    expect(
-      tester.binding.focusManager.primaryFocus?.debugLabel,
-      'game-tools-collapse',
-    );
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pump();
-    expect(
-      tester.binding.focusManager.primaryFocus?.debugLabel,
-      'game-tools-back',
-    );
-    await tester.sendKeyEvent(LogicalKeyboardKey.select);
-    await tester.pumpAndSettle();
-    expect(toolBackCount, 1);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.f10);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.f10);
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('更多游戏操作'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('game-action-menu')), findsOneWidget);
-    expect(
-      tester.binding.focusManager.primaryFocus?.debugLabel,
-      'game-tools-menu-0',
-    );
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('game-action-menu')), findsNothing);
-    expect(
-      tester.binding.focusManager.primaryFocus?.debugLabel,
-      'game-tools-more',
-    );
-    expect(pageBackCount, 0);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-    expect(pageBackCount, 0);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pump();
-    expect(pageBackCount, 1);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('收起游戏工具'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.gameButtonB);
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-  });
-
-  testWidgets('SDK 显示工具后自动聚焦，任一操作完成后隐藏整个工具', (tester) async {
-    final controller = GameToolDockController();
-    var reloadCount = 0;
-    var infoCount = 0;
-    await tester.pumpWidget(
-      localizedTestApp(
-        home: Scaffold(
-          body: Stack(
-            children: [
-              GameToolDock(
-                controller: controller,
-                backTooltip: '返回',
-                onBack: () {},
-                onReload: () => reloadCount += 1,
-                showPerformance: false,
-                onTogglePerformance: () {},
-                onEnterFullscreen: () {},
-                onExitFullscreen: () {},
-                secondaryActions: [
-                  GameToolAction(
-                    icon: Icons.info_outline,
-                    label: '游戏信息',
-                    onPressed: () => infoCount += 1,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    controller.showFromSdk();
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('收起游戏工具'), findsOneWidget);
-    expect(
-      tester.binding.focusManager.primaryFocus?.debugLabel,
-      'game-tools-collapse',
-    );
-
-    await tester.tap(find.byKey(const Key('game-tool-reload')));
-    await tester.pumpAndSettle();
-    expect(reloadCount, 1);
-    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
-    expect(find.byKey(const Key('game-tool-collapse')), findsNothing);
-
-    controller.showFromSdk();
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('game-tool-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('游戏信息'));
-    await tester.pumpAndSettle();
-    expect(infoCount, 1);
-    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
-
-    controller.showFromSdk();
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('game-tool-collapse')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
-
-    controller.showFromSdk();
-    await tester.pumpAndSettle();
-    controller.hideFromSdk();
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
-  });
-
-  testWidgets('悬浮球移动模式可还原或确认且不会误展开菜单', (tester) async {
-    final controller = GameToolDockController();
-    await tester.pumpWidget(
-      localizedTestApp(
-        home: GameRuntimeShortcutScope(
-          controller: controller,
-          onBack: controller.closeTopLayer,
-          onOpenTools: controller.openTools,
-          onMoveTools: controller.beginMoveMode,
-          child: Scaffold(
-            body: Stack(
-              children: [
-                GameToolDock(
-                  controller: controller,
-                  backTooltip: '返回',
-                  onBack: () {},
-                  onReload: () {},
-                  showPerformance: false,
-                  onTogglePerformance: () {},
-                  onEnterFullscreen: () {},
-                  onExitFullscreen: () {},
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    final handle = find.byKey(const Key('game-tool-dock-handle'));
-    final initial = tester.getTopLeft(handle);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
-    await tester.pumpAndSettle();
-    expect(controller.isMoving, isTrue);
-    await tester.tap(handle);
-    await tester.pump();
-    expect(controller.isMoving, isTrue);
-    expect(find.byTooltip('收起游戏工具'), findsNothing);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.pump();
-    expect(tester.getTopLeft(handle).dx, lessThan(initial.dx));
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(controller.isMoving, isFalse);
-    expect(tester.getTopLeft(handle), initial);
-    expect(find.byTooltip('展开游戏工具'), findsOneWidget);
-
-    controller.beginMoveMode();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(controller.isMoving, isFalse);
-    expect(tester.getTopLeft(handle).dx, lessThan(initial.dx));
-    expect(find.byTooltip('收起游戏工具'), findsNothing);
-  });
-
-  testWidgets('低高度运行面把展开工具横向排列', (tester) async {
-    tester.view.physicalSize = const Size(760, 250);
-    tester.view.devicePixelRatio = 1;
+  testWidgets('侧边栏在竖屏与横屏使用受限自适应宽度', (tester) async {
+    final controller = GameSidebarController();
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    tester.view.devicePixelRatio = 1;
 
+    tester.view.physicalSize = const Size(390, 844);
     await tester.pumpWidget(
-      localizedTestApp(
-        home: Scaffold(
-          body: Stack(
-            children: [
-              GameToolDock(
-                backTooltip: '返回',
-                onBack: () {},
-                onReload: () {},
-                showPerformance: false,
-                onTogglePerformance: () {},
-                onEnterFullscreen: () {},
-                onExitFullscreen: () {},
-                onShare: () {},
-                secondaryActions: [
-                  GameToolAction(
-                    icon: Icons.info_outline,
-                    label: '游戏信息',
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+      localizedTestApp(home: _sidebarSurface(controller: controller)),
     );
-    await tester.tap(find.byTooltip('展开游戏工具'));
+    controller.open();
     await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('game-sidebar'))).width, 343.2);
 
-    final scrollViews = tester.widgetList<SingleChildScrollView>(
-      find.byType(SingleChildScrollView),
-    );
+    tester.view.physicalSize = const Size(844, 390);
+    await tester.pumpAndSettle();
     expect(
-      scrollViews.any(
-        (scrollView) => scrollView.scrollDirection == Axis.horizontal,
-      ),
-      isTrue,
+      tester.getSize(find.byKey(const Key('game-sidebar'))).width,
+      closeTo(388.24, 0.01),
     );
   });
 
@@ -484,6 +273,42 @@ void main() {
       );
     }
   });
+}
+
+Widget _sidebarSurface({
+  required GameSidebarController controller,
+  Object? resetKey,
+  VoidCallback? onBack,
+  VoidCallback? onContinue,
+  VoidCallback? onReload,
+  bool showPerformance = false,
+  VoidCallback? onShare,
+  VoidCallback? onOpenLogs,
+  List<GameSidebarAction> secondaryActions = const [],
+}) {
+  return Scaffold(
+    body: Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Colors.black),
+        GameSidebar(
+          controller: controller,
+          resetKey: resetKey,
+          backLabel: '返回游戏详情',
+          onContinue: onContinue ?? _noop,
+          onBack: onBack ?? _noop,
+          onReload: onReload ?? _noop,
+          showPerformance: showPerformance,
+          onTogglePerformance: _noop,
+          onEnterFullscreen: _noop,
+          onExitFullscreen: _noop,
+          onShare: onShare,
+          onOpenLogs: onOpenLogs,
+          secondaryActions: secondaryActions,
+        ),
+      ],
+    ),
+  );
 }
 
 void _noop() {}

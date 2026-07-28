@@ -79,7 +79,7 @@ Go Core 监听 0.0.0.0:0
 
 第六阶段已于 2026-07-18 完成。加入 App 不再要求预装游戏，而是直接加载权威主机提供的当前入口；游戏与控制器的全屏请求不再参与运行前置条件，失败时只提示，并可在 WebView 悬浮工具中按需进入或退出。Android 已接通系统文件打开/分享入口：压缩包复用 Playmesh 包导入，单个 HTML 使用无 SDK 的独立 WebView，游戏包导出交给系统保存或分享。
 
-运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。第六阶段归档时 Game SDK 为 `2.2.2`；当前开发线已经升级到 `2.3.0`，App Bridge SDK 保持 `2.1.1`。能力统一通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`。单屏多人按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
+运行身份拆分为两层：`playmesh.js` 始终使用 Authority 主机的会话、日志和游戏数据；App WebView 自动注入 `playmesh-app.js`，只提供当前 App 的持久身份和能力插件宿主。普通浏览器不加载 App Bridge，但保留 `playmesh.app` 安全空实现。具有公开方法或事件的原生适配能力通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`；摄像头、麦克风和 MIDI 当前只在 WebView 权限回调中核对声明，游戏直接使用标准 Web API。单屏多人按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
@@ -132,6 +132,6 @@ Go Core 监听 0.0.0.0:0
 
 - 完整房间列表或局域网自动发现。
 - 云端账号和中心化房间大厅。
-- 完整原生键盘、USB、摄像头适配，以及加速度计、陀螺仪之外的传感器适配。加速度计和陀螺仪已在 Playmesh 1.3.0 通过 App SDK 接入，原生震动已通过 `device.vibration` 插件接入。
+- 完整原生键盘、USB、摄像头、音频和 MIDI 方法适配。加速度计、陀螺仪和设备方向由游戏按 WebView 支持情况直接使用标准 Web API；原生震动继续通过 `device.vibration` 插件接入。
 - iOS 发布和云端游戏包分发。
 - 创意工坊与生产级签名审核系统。

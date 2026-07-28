@@ -102,35 +102,31 @@ PLAYMESH_ADMIN_PATH=/manage-replace-with-a-long-random-path
 哈希。验证码已封装在独立的 `internal/captcha` 模块中，管理员登录、用户登录和注册
 共用生成、一次性存储、校验及图片供应逻辑。文字点选、滑动和旋转模式全部使用
 Apache-2.0 的 [`wenlng/go-captcha/v2`](https://github.com/wenlng/go-captcha)，
-不再保留自定义数字计算验证码。验证码模式在 `server.json` 中配置为 `text`、
-`slide` 或 `rotate`：
+不再保留自定义数字计算验证码。验证码配置全部放在 `.env` 中，服务启动时读取，
+避免图片源损坏后必须登录后台才能修复的配置死锁。默认使用远程滑动验证码：
 
-```json
-{
-  "captchaMode": "slide",
-  "captchaImageSource": "local",
-  "captchaImageDirectory": "data/captcha-images",
-  "captchaImageUrl": "",
-  "captchaImageCacheSize": 8
-}
+```dotenv
+PLAYMESH_CAPTCHA_MODE=slide
+PLAYMESH_CAPTCHA_IMAGE_SOURCE=remote
+PLAYMESH_CAPTCHA_IMAGE_DIRECTORY=data/captcha-images
+PLAYMESH_CAPTCHA_IMAGE_URL=https://t.alcy.cc/moe
+PLAYMESH_CAPTCHA_IMAGE_CACHE_SIZE=8
+PLAYMESH_CAPTCHA_INTERVAL_MILLISECONDS=1000
 ```
 
 `local` 模式从指定目录内的 JPG、PNG 或 GIF 图片中每次随机抽取一张，不按名称排序
-轮询，也不对源文件做预处理。`remote` 模式只配置一个“每次请求返回随机图片”的 URL：
+轮询，也不对源文件做预处理。切换为本地图片时修改 `.env`：
 
-```json
-{
-  "captchaMode": "rotate",
-  "captchaImageSource": "remote",
-  "captchaImageDirectory": "data/captcha-images",
-  "captchaImageUrl": "https://www.dmoe.cc/random.php",
-  "captchaImageCacheSize": 12
-}
+```dotenv
+PLAYMESH_CAPTCHA_MODE=rotate
+PLAYMESH_CAPTCHA_IMAGE_SOURCE=local
+PLAYMESH_CAPTCHA_IMAGE_DIRECTORY=data/captcha-images
 ```
 
 远程图片会按实际组件尺寸做中心裁剪和高质量缩放后进入内存缓存。生成验证码会消费
 一张缓存图片；余量低于配置数量时模块自动并发补齐，缓存为空时会同步拉取。远程拉取
-失败或本地目录没有有效图片时接口直接返回失败，不切换图片源或使用隐藏回退。
+失败或本地目录没有有效图片时接口直接返回失败，不切换图片源或使用隐藏回退。修改
+验证码 `.env` 配置后需要重启服务。
 
 验证码不会常驻登录/注册表单，只有点击登录或注册后才在弹窗中加载。验证码采用
 两阶段流程：GET 接口签发绑定用途的不透明挑战 ID；前端把 ID 和组件原样产生的答案

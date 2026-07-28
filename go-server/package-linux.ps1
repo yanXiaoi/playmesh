@@ -23,8 +23,11 @@ $artifactName = "playmesh-go-server-linux-$Architecture"
 $stagingRoot = Join-Path $outputRoot ".package-$artifactName"
 $bundleRoot = Join-Path $stagingRoot $artifactName
 $archivePath = Join-Path $outputRoot "$artifactName.tar.gz"
-$checksumPath = "$archivePath.sha256"
+$archiveTempPath = "$archivePath.new"
+$publishedArchivePath = $archivePath
+$checksumPath = "$publishedArchivePath.sha256"
 $binaryPath = Join-Path $bundleRoot "playmesh-go-server"
+$standaloneBinaryPath = Join-Path $outputRoot $artifactName
 
 function Assert-PathInside {
     param(
@@ -81,16 +84,15 @@ $tarCommand = Get-Command tar -ErrorAction Stop
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 Assert-PathInside -ChildPath $stagingRoot -ParentPath $outputRoot
 Assert-PathInside -ChildPath $archivePath -ParentPath $outputRoot
+Assert-PathInside -ChildPath $archiveTempPath -ParentPath $outputRoot
 Assert-PathInside -ChildPath $checksumPath -ParentPath $outputRoot
+Assert-PathInside -ChildPath $standaloneBinaryPath -ParentPath $outputRoot
 
 if (Test-Path -LiteralPath $stagingRoot) {
     Remove-Item -LiteralPath $stagingRoot -Recurse -Force
 }
-if (Test-Path -LiteralPath $archivePath) {
-    Remove-Item -LiteralPath $archivePath -Force
-}
-if (Test-Path -LiteralPath $checksumPath) {
-    Remove-Item -LiteralPath $checksumPath -Force
+if (Test-Path -LiteralPath $archiveTempPath) {
+    Remove-Item -LiteralPath $archiveTempPath -Force
 }
 
 New-Item -ItemType Directory -Path $bundleRoot -Force | Out-Null
@@ -114,16 +116,38 @@ try {
         Invoke-Go -Arguments @("test", "./...")
     }
 
+    $buildVersion = "dev"
+    $buildCommit = "unknown"
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -ne $gitCommand) {
+        $describedVersion = & $gitCommand.Source describe --tags --always --dirty 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($describedVersion)) {
+            $buildVersion = ([string]$describedVersion).Trim()
+        }
+        $describedCommit = & $gitCommand.Source rev-parse --short=12 HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($describedCommit)) {
+            $buildCommit = ([string]$describedCommit).Trim()
+        }
+    }
+    $builtAt = [System.DateTime]::UtcNow.ToString(
+        "yyyy-MM-ddTHH:mm:ssZ",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+    $linkerFlags = "-s -w" +
+        " -X go-server/internal/buildinfo.Version=$buildVersion" +
+        " -X go-server/internal/buildinfo.Commit=$buildCommit" +
+        " -X go-server/internal/buildinfo.BuiltAt=$builtAt"
+
     $env:GOOS = "linux"
     $env:GOARCH = $Architecture
     $env:CGO_ENABLED = "0"
 
-    Write-Host "Building the linux/$Architecture executable..."
+    Write-Host "Building $buildVersion for linux/$Architecture..."
     Invoke-Go -Arguments @(
         "build",
         "-buildvcs=false",
         "-trimpath",
-        "-ldflags=-s -w",
+        "-ldflags=$linkerFlags",
         "-o",
         $binaryPath,
         "."
@@ -195,10 +219,34 @@ The runtime user needs read/write permissions for the pre-created ``data/`` dire
         $utf8WithoutBom
     )
 
+    Copy-Item -LiteralPath $binaryPath -Destination $standaloneBinaryPath -Force
+
     Write-Host "Creating the archive..."
-    & $tarCommand.Source "-czf" $archivePath "-C" $stagingRoot $artifactName
+    & $tarCommand.Source "-czf" $archiveTempPath "-C" $stagingRoot $artifactName
     if ($LASTEXITCODE -ne 0) {
         throw "tar failed with exit code $LASTEXITCODE"
+    }
+    if (Test-Path -LiteralPath $archivePath) {
+        try {
+            Copy-Item -LiteralPath $archiveTempPath -Destination $archivePath -Force
+        }
+        catch {
+            $safeVersion = $buildVersion -replace "[^A-Za-z0-9._-]", "-"
+            $publishedArchivePath = Join-Path(
+                $outputRoot,
+                "$artifactName-$safeVersion.tar.gz"
+            )
+            Assert-PathInside -ChildPath $publishedArchivePath -ParentPath $outputRoot
+            Copy-Item -LiteralPath $archiveTempPath -Destination $publishedArchivePath -Force
+            Write-Warning(
+                "The default archive is in use; wrote the versioned archive instead: " +
+                $publishedArchivePath
+            )
+        }
+        Remove-Item -LiteralPath $archiveTempPath -Force
+    }
+    else {
+        Move-Item -LiteralPath $archiveTempPath -Destination $archivePath
     }
 }
 finally {
@@ -209,17 +257,25 @@ finally {
     if (Test-Path -LiteralPath $stagingRoot) {
         Remove-Item -LiteralPath $stagingRoot -Recurse -Force
     }
+    if (Test-Path -LiteralPath $archiveTempPath) {
+        Remove-Item -LiteralPath $archiveTempPath -Force
+    }
 }
 
-$archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksumPath = "$publishedArchivePath.sha256"
+Assert-PathInside -ChildPath $checksumPath -ParentPath $outputRoot
+$archiveHash = (Get-FileHash -LiteralPath $publishedArchivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$binaryHash = (Get-FileHash -LiteralPath $standaloneBinaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
 [System.IO.File]::WriteAllText(
     $checksumPath,
-    "$archiveHash  $([System.IO.Path]::GetFileName($archivePath))`n",
+    "$archiveHash  $([System.IO.Path]::GetFileName($publishedArchivePath))`n",
     $utf8WithoutBom
 )
 
 Write-Host ""
 Write-Host "Linux server package completed:"
-Write-Host "  Archive: $archivePath"
+Write-Host "  Archive: $publishedArchivePath"
 Write-Host "  Checksum: $checksumPath"
-Write-Host "  SHA256: $archiveHash"
+Write-Host "  Archive SHA256: $archiveHash"
+Write-Host "  Binary: $standaloneBinaryPath"
+Write-Host "  Binary SHA256: $binaryHash"

@@ -13,7 +13,6 @@ import 'package:playmesh/core/developer/developer_project_catalog.dart';
 import 'package:playmesh/core/developer/developer_preferences.dart';
 import 'package:playmesh/core/developer/developer_run_controller.dart';
 import 'package:playmesh/core/developer/developer_web_gateway.dart';
-import 'package:playmesh/core/capabilities/support/motion_sensor_source.dart';
 import 'package:playmesh/core/game_package/asset_game_library_scanner.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
@@ -69,9 +68,7 @@ void main() {
       ),
       developerPreferences: DeveloperPreferences(libraryRoot: promptRoot),
       developerRunController: runController,
-      developerCapabilityTests: DeveloperCapabilityTestService(
-        motionSource: const _UnavailableMotionSource(),
-      ),
+      developerCapabilityTests: DeveloperCapabilityTestService(),
       developerWorkspaceLocalizationBridge:
           DeveloperWorkspaceLocalizationBridge(
             current: () => DeveloperWorkspaceLocalization(
@@ -383,15 +380,15 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '2.4.0');
-    expect(statusJson['appSdkVersion'], '2.2.0');
+    expect(statusJson['gameSdkVersion'], '3.0.0');
+    expect(statusJson['appSdkVersion'], '3.0.0');
     expect(
       statusJson['gameSdkCompatibility'],
       contains(containsPair('minimumRequestedVersion', '1.0.0')),
     );
     expect(
       statusJson['appSdkCompatibility'],
-      contains(containsPair('maximumRequestedVersion', '2.2.0')),
+      contains(containsPair('maximumRequestedVersion', '3.0.0')),
     );
 
     final sdkBundle = await http.get(
@@ -399,15 +396,15 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '2.4.0');
-    expect(sdkBundleJson['appSdkVersion'], '2.2.0');
+    expect(sdkBundleJson['gameSdkVersion'], '3.0.0');
+    expect(sdkBundleJson['appSdkVersion'], '3.0.0');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '2.4.0')),
+      contains(containsPair('bundleVersion', '3.0.0')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
-      contains(containsPair('bundleVersion', '2.2.0')),
+      contains(containsPair('bundleVersion', '3.0.0')),
     );
     expect(
       (sdkBundleJson['files'] as Map).keys,
@@ -446,7 +443,7 @@ void main() {
         (jsonDecode(capabilityRegistry.body) as Map)['capabilities'] as List;
     expect(
       capabilityItems,
-      contains(containsPair('code', 'sensor.accelerometer')),
+      contains(containsPair('code', 'media.camera')),
     );
     expect(capabilityItems, everyElement(contains('appSupported')));
     expect(capabilityItems, everyElement(contains('htmlSupported')));
@@ -466,7 +463,7 @@ void main() {
       base.resolve('/dev/api/capability-tests?token=custom-dev-token'),
       headers: {'content-type': 'application/json'},
       body: jsonEncode({
-        'codes': ['sensor.accelerometer'],
+        'codes': ['device.midi'],
         'timeoutMs': 250,
       }),
     );
@@ -481,8 +478,8 @@ void main() {
       ),
       headers: {'content-type': 'application/json'},
       body: jsonEncode({
-        'code': 'sensor.accelerometer',
-        'options': {'fps': 30},
+        'code': 'device.midi',
+        'options': <String, Object?>{},
       }),
     );
     expect(unavailableCapabilityInstance.statusCode, HttpStatus.conflict);
@@ -724,7 +721,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "2.2.0"'));
+    expect(aiPrompt.body, contains('readonly version: "3.0.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -764,7 +761,9 @@ void main() {
     expect(aiPrompt.body, contains('static/js/service/index.js'));
     expect(aiPrompt.body, contains('当前项目已声明的平台能力'));
     expect(aiPrompt.body, contains('未声明平台能力。'));
-    expect(aiPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
+    expect(aiPrompt.body, contains('非敏感能力优先直接使用标准 Web API'));
+    expect(aiPrompt.body, contains('`media.camera`、`media.microphone`、`device.midi`'));
+    expect(aiPrompt.body, contains('`<input type="file">`'));
 
     final takeoverBaseUrl = baseUrls.first;
     final agentPrompt = await http.get(
@@ -813,7 +812,9 @@ void main() {
     expect(agentPrompt.body, contains('/dev/api/capability-tests'));
     expect(agentPrompt.body, contains('"timeoutMs": 3000'));
     expect(agentPrompt.body, contains('capabilities.required: 未声明'));
-    expect(agentPrompt.body, isNot(contains('"code": "sensor.accelerometer"')));
+    expect(agentPrompt.body, contains('非敏感能力直接使用标准 Web API'));
+    expect(agentPrompt.body, contains('`media.camera`、`media.microphone`、`device.midi`'));
+    expect(agentPrompt.body, contains('`<input type="file">`'));
     expect(agentPrompt.body, isNot(contains('平台统一能力注册表（code')));
     expect(agentPrompt.body, contains('entries.game: app/index.html'));
     expect(agentPrompt.body, contains('- [file] app/index.html'));
@@ -1236,7 +1237,7 @@ void main() {
         minPlayers: 2,
         maxPlayers: 4,
         tags: ['party', 'motion'],
-        requiredCapabilities: ['sensor.accelerometer'],
+        requiredCapabilities: ['media.camera'],
       ),
     );
     final files = await catalog.listFiles(project.id);
@@ -1255,7 +1256,7 @@ void main() {
       project.id,
       'capabilities.json',
     );
-    expect(utf8.decode(capabilities.bytes), contains('sensor.accelerometer'));
+    expect(utf8.decode(capabilities.bytes), contains('media.camera'));
     expect(manifest.readOnly, isTrue);
     expect(repository.cachedGames.map((game) => game.id), contains(project.id));
     await expectLater(
@@ -1602,7 +1603,7 @@ void main() {
       endpoint('capabilities'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'required': ['sensor.accelerometer'],
+        'required': ['media.camera'],
         'baseRevision': 0,
       }),
     );
@@ -1612,22 +1613,22 @@ void main() {
     expect(capabilityPrompt.statusCode, HttpStatus.ok);
     expect(
       capabilityPrompt.body,
-      contains('capabilities.required: sensor.accelerometer'),
+      contains('capabilities.required: media.camera'),
     );
     expect(
       capabilityPrompt.body,
-      isNot(contains('"code": "sensor.accelerometer"')),
+      isNot(contains('"code": "media.camera"')),
     );
     final capabilityChatPrompt = await http.get(endpoint('chat-prompt.txt'));
     expect(capabilityChatPrompt.statusCode, HttpStatus.ok);
     expect(capabilityChatPrompt.body, contains('当前项目已声明的平台能力'));
     expect(
       capabilityChatPrompt.body,
-      contains('"code": "sensor.accelerometer"'),
+      contains('"code": "media.camera"'),
     );
     expect(
       capabilityChatPrompt.body,
-      isNot(contains('"code": "sensor.gyroscope"')),
+      isNot(contains('"code": "media.microphone"')),
     );
     expect(capabilityChatPrompt.body, contains('"optionsSchema"'));
     expect(capabilityChatPrompt.body, contains('"methods"'));
@@ -1836,9 +1837,7 @@ void main() {
       developerProjectCatalog: _FakeCatalog(),
       developerPreferences: DeveloperPreferences(libraryRoot: root),
       developerRunController: runController,
-      developerCapabilityTests: DeveloperCapabilityTestService(
-        motionSource: const _UnavailableMotionSource(),
-      ),
+      developerCapabilityTests: DeveloperCapabilityTestService(),
       developerBackgroundNotificationLocalizationProvider: () =>
           notificationLocalization,
       developerBackgroundHost: backgroundHost,
@@ -2343,24 +2342,6 @@ class _FakeProjectPublisher implements DeveloperProjectPublisher {
       ]),
     );
   }
-}
-
-class _UnavailableMotionSource implements MotionSensorSource {
-  const _UnavailableMotionSource();
-
-  @override
-  bool get accelerometerAvailable => false;
-
-  @override
-  bool get gyroscopeAvailable => false;
-
-  @override
-  Stream<MotionSample> accelerometerEvents(Duration samplingPeriod) =>
-      Stream.error(UnsupportedError('测试环境无加速度计'));
-
-  @override
-  Stream<MotionSample> gyroscopeEvents(Duration samplingPeriod) =>
-      Stream.error(UnsupportedError('测试环境无陀螺仪'));
 }
 
 DeveloperBackgroundNotificationLocalization _notificationLocalization({

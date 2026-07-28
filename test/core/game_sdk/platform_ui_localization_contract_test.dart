@@ -14,7 +14,7 @@ void main() {
         platformUiConfiguration: const {
           'locale': 'en-US',
           'theme': 'light',
-          'messages': {'toolbar.expand': 'Open game tools'},
+          'messages': {'sidebar.title': 'Game menu'},
         },
       );
       addTearDown(bridge.close);
@@ -71,10 +71,10 @@ void main() {
       expect(source, contains('"zh-CN"'));
       expect(source, isNot(contains('readPlatformUiJson')));
       expect(source, isNot(contains('/playmesh/localization/')));
-      expect(source, contains('platformHtml("toolbar.expand")'));
+      expect(source, contains('platformHtml("sidebar.title")'));
       expect(
         source,
-        contains('setPlatformControlLabel(ui.expand, "toolbar.expand")'),
+        contains('setSidebarActionLabel(ui.reload, "sidebar.restart")'),
       );
       expect(source, contains('platformText("nickname.invalid")'));
       expect(source, contains('platformText("nickname.update_failed")'));

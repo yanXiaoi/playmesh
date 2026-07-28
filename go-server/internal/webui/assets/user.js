@@ -94,7 +94,10 @@ document.querySelector("#locale-select").addEventListener("change", async (event
   if (state.view === "games") await loadGames();
   if (state.view === "my") {
     await loadRegistrationState();
-    if (state.user) await loadMyGames();
+    if (state.user) {
+      await loadMyGames();
+      await loadNotifications();
+    }
   }
   if (document.querySelector("#auth-captcha-dialog").open) {
     userCaptcha?.relocalize();
@@ -116,8 +119,12 @@ async function jsonRequest(path, options = {}) {
 async function copyValue(targetId) {
   const input = document.querySelector(`#${targetId}`);
   if (!input?.value) return;
-  await navigator.clipboard.writeText(input.value);
-  document.querySelector("#source-info-notice").textContent = t("user.source.copied");
+  try {
+    await navigator.clipboard.writeText(input.value);
+    window.PlaymeshMessage.success(t("user.source.copied"));
+  } catch {
+    window.PlaymeshMessage.error(t("error.copy_failed"));
+  }
 }
 function localizedError(error) {
   const code = error?.result?.code || error?.result?.error || "generic";
@@ -315,7 +322,16 @@ async function showAccount() {
   document.querySelector("#my-user-email").textContent = user.email;
   document.querySelector("#profile-email").value = user.email;
   document.querySelector("#profile-form").elements.displayName.value = user.displayName;
-  await loadMyGames();
+  try {
+    await loadMyGames();
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
+  try {
+    await loadNotifications();
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
 }
 
 async function showSignedOut(kind = "login") {
@@ -346,10 +362,15 @@ document.querySelectorAll(".my-dialog").forEach((dialog) => {
 document.querySelector("#profile-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  state.user = await jsonRequest("/api/user/me", {
-    method: "PATCH", body: JSON.stringify({ displayName: form.elements.displayName.value })
-  });
-  document.querySelector("#profile-dialog").close();
+  try {
+    state.user = await jsonRequest("/api/user/me", {
+      method: "PATCH", body: JSON.stringify({ displayName: form.elements.displayName.value })
+    });
+    document.querySelector("#profile-dialog").close();
+    window.PlaymeshMessage.success(t("user.profile_saved"));
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
 });
 
 async function saveUploadKey(generate) {
@@ -358,35 +379,44 @@ async function saveUploadKey(generate) {
     method: "PUT", body: JSON.stringify({ key: form.elements.key.value, generate })
   });
   document.querySelector("#created-key").value = result.uploadKey;
+  const sourceQRCode = document.querySelector("#private-source-qr");
+  sourceQRCode.src = result.sourceQRCode;
+  sourceQRCode.classList.remove("hidden");
+  document.querySelector("#private-source-qr-empty").classList.add("hidden");
   form.elements.key.value = "";
+  window.PlaymeshMessage.success(t("uploads.key_saved"));
 }
 document.querySelector("#key-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  try { await saveUploadKey(false); } catch (error) { alert(localizedError(error)); }
+  try { await saveUploadKey(false); } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
 });
 document.querySelector("#generate-key").addEventListener("click", async () => {
-  try { await saveUploadKey(true); } catch (error) { alert(localizedError(error)); }
+  try { await saveUploadKey(true); } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
 });
 
 document.querySelector("#game-upload-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const notice = document.querySelector("#upload-notice");
   try {
     const result = await jsonRequest("/api/user/games/uploads", {
       method: "POST", body: new FormData(event.currentTarget)
     });
-    notice.textContent = t("uploads.submitted", "", {
+    window.PlaymeshMessage.success(t("uploads.submitted", "", {
       packageId: result.packageId, version: result.version
-    });
+    }), 4200);
     event.currentTarget.reset();
     await loadMyGames();
   } catch (error) {
     const highest = error.result?.currentHighestVersion;
-    notice.textContent = highest
+    const message = highest
       ? t("uploads.error_with_highest", "", {
         message: localizedError(error), version: highest
       })
       : localizedError(error);
+    window.PlaymeshMessage.error(message, 4200);
   }
 });
 
@@ -411,6 +441,32 @@ async function loadMyGames() {
     </article>`;
   }).join("") || `<div class="empty">${escapeHTML(t("games.mine_empty"))}</div>`;
 }
+
+async function loadNotifications() {
+  const result = await jsonRequest("/api/user/notifications");
+  document.querySelector("#my-notifications").innerHTML = result.data.map((item) => `
+    <article class="notification-item ${item.readAt ? "" : "unread"}">
+      <div>
+        <strong>${escapeHTML(item.title)}</strong>
+        <time>${new Date(item.createdAt).toLocaleString(document.documentElement.lang)}</time>
+      </div>
+      <p>${escapeHTML(item.message)}</p>
+      ${item.readAt ? "" : `<button type="button" class="secondary" data-notification-read="${item.id}">${escapeHTML(t("user.notifications.mark_read"))}</button>`}
+    </article>
+  `).join("") || `<div class="empty">${escapeHTML(t("user.notifications.empty"))}</div>`;
+}
+document.querySelector("#my-notifications").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-notification-read]");
+  if (!button) return;
+  try {
+    await jsonRequest(`/api/user/notifications/${button.dataset.notificationRead}/read`, {
+      method: "POST"
+    });
+    await loadNotifications();
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
+});
 document.querySelector("#my-games").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-game-action]");
   if (!button) return;
@@ -421,15 +477,23 @@ document.querySelector("#my-games").addEventListener("click", async (event) => {
   try {
     await jsonRequest(path, { method: action === "delete" ? "DELETE" : "POST" });
     await loadMyGames();
-  } catch (error) { alert(localizedError(error)); }
+    window.PlaymeshMessage.success(t(`games.${action}_success`));
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
 });
 
 document.querySelector("#logout").addEventListener("click", async () => {
-  await jsonRequest("/api/user/auth/logout", { method: "POST" });
-  state.user = null; state.csrfToken = "";
-  state.captcha = { id: "", kind: "" };
-  document.querySelectorAll(".my-dialog[open]").forEach((dialog) => dialog.close());
-  await showSignedOut("login");
+  try {
+    await jsonRequest("/api/user/auth/logout", { method: "POST" });
+    state.user = null; state.csrfToken = "";
+    state.captcha = { id: "", kind: "" };
+    document.querySelectorAll(".my-dialog[open]").forEach((dialog) => dialog.close());
+    await showSignedOut("login");
+    window.PlaymeshMessage.success(t("auth.logout_success"));
+  } catch (error) {
+    window.PlaymeshMessage.error(localizedError(error));
+  }
 });
 
 async function loadGames() {
@@ -492,20 +556,41 @@ function applyUserView() {
   });
 }
 
+function showEmailVerificationResult() {
+  const url = new URL(window.location.href);
+  const result = url.searchParams.get("emailVerification");
+  if (!result) return;
+  url.searchParams.delete("emailVerification");
+  window.history.replaceState(
+    null, "", `${url.pathname}${url.search}${url.hash}`
+  );
+  if (result === "success") {
+    window.PlaymeshMessage.success(t("auth.email_verification_success"), 5000);
+  } else {
+    window.PlaymeshMessage.error(t("auth.email_verification_failed"), 5000);
+  }
+}
+
 async function initialize() {
   try {
     applyUserView();
     await loadLocalization();
+    showEmailVerificationResult();
     if (state.view === "home") await loadSourceInfo();
     if (state.view === "games") await loadGames();
     if (state.view === "my") {
-      await loadRegistrationState();
+      try {
+        await loadRegistrationState();
+      } catch (error) {
+        window.PlaymeshMessage.error(localizedError(error));
+      }
       try {
         state.user = await jsonRequest("/api/user/me");
-        await showAccount();
       } catch {
         await showSignedOut(location.pathname === "/register" ? "register" : "login");
+        return;
       }
+      await showAccount();
     }
   } finally {
     window.__playmeshRevealUI?.();

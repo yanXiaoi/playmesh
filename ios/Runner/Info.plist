@@ -34,7 +34,11 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Playmesh uses the local network for developer workspaces and multiplayer games.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Playmesh uses the camera to scan game invitation QR codes.</string>
+	<string>Playmesh uses the camera to scan game invitation QR codes and for games that declare camera access.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Playmesh uses the microphone for games that declare microphone access.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Playmesh uses speech recognition for games that request speech-to-text.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

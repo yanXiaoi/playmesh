@@ -11,11 +11,6 @@ class AppDeviceService {
 
   String get platform => kIsWeb ? 'web' : defaultTargetPlatform.name;
 
-  bool get hapticsAvailable =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
-
   Future<void> setFullscreen(
     bool enabled, {
     GameOrientation? orientation,
@@ -46,28 +41,6 @@ class AppDeviceService {
           DeviceOrientation.portraitDown,
         ],
       });
-    }
-  }
-
-  Future<void> haptic(String style) async {
-    switch (style) {
-      case 'selection':
-        await HapticFeedback.selectionClick();
-        return;
-      case 'light':
-        await HapticFeedback.lightImpact();
-        return;
-      case 'medium':
-        await HapticFeedback.mediumImpact();
-        return;
-      case 'heavy':
-        await HapticFeedback.heavyImpact();
-        return;
-      case 'vibrate':
-        await HapticFeedback.vibrate();
-        return;
-      default:
-        throw FormatException('不支持的触觉反馈类型：$style');
     }
   }
 }

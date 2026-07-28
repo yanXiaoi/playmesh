@@ -47,3 +47,6 @@ app.*.map.json
 /android/.kotlin/
 /release/
 /dev-cli/playmesh-cli.exe
+
+# Local development environment and signing details
+/docs/04-dev-env.md

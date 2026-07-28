@@ -1,13 +1,18 @@
 # AI 游戏开发
 
-Playmesh 支持两类 AI 工作流：
+Playmesh 把 AI 接入项目创建、代码修改、结构化校验、真实运行和日志诊断的完整流程。
+平台不是提供一段与项目无关的通用提示词，而是根据当前游戏动态组装模式、显示拓扑、
+页面角色、项目树、公开 SDK 类型声明、能力上下文和 Developer Operation 契约。
 
-- **对话 AI**：读取完整项目提示词，返回可粘贴到工作区“对话控制台”的 JSON 指令。
-- **API Agent**：持有用户选择的 Developer Gateway Base URL 和 token，直接调用
-  Developer Operation API 完成读取、修改、校验、运行和日志诊断。
+Playmesh 支持两类互补的 AI 工作流：
 
-两种方式都操作统一游戏库中的真实项目，不使用额外的 AI 项目格式、测试服务器或
-模拟 SDK。
+| 工作流 | 适合的 AI | 如何操作项目 | 开发者参与方式 |
+| --- | --- | --- | --- |
+| [ChatAI](chat-ai-development.md) | 普通文字对话 AI | 返回可粘贴到“对话控制台”的 JSON 指令 | 在 AI 与工作区之间传递指令和结构化结果 |
+| [AgentAI](agent-ai-development.md) | 能调用本地 HTTP 工具的 Agent | 直接调用 Developer Gateway API | 监督执行、处理审批并在真实设备上验收 |
+
+两种方式都操作统一游戏库中的真实项目，共用 SDK、校验器、运行时、审批、本地历史和
+日志，不使用额外的 AI 项目格式、测试服务器或模拟 SDK。
 
 ## 准备工作
 
@@ -18,59 +23,16 @@ Playmesh 支持两类 AI 工作流：
 5. 根据 AI 类型获取“对话提示词”或“Agent 提示词”。
 
 项目提示词会按当前 `modes`、`displayModes`、页面角色和能力声明，只加入完成任务
-需要的公开契约与源码。
+需要的公开契约与项目结构；项目文件内容由 AI 再按任务需要读取。
 
-## 对话 AI 工作流
+## 选择哪一种
 
-```text
-获取项目对话提示词
-  -> 发送给对话 AI
-  -> AI 返回一个 JSON 指令对象或数组
-  -> 粘贴到工作区“对话控制台”
-  -> 预览和执行
-  -> 校验项目
-  -> 运行并查看日志
-  -> 把错误和相关源码继续交给 AI
-```
-
-对话控制台指令包含：
-
-```json
-{
-  "method": "GET",
-  "path": "/dev/api/projects/com.example.game/file?path=app/index.html"
-}
-```
-
-修改多个文件时优先使用：
-
-```text
-POST /dev/api/projects/{projectId}/file-changes/preview
-POST /dev/api/projects/{projectId}/file-changes/apply
-```
-
-`apply` 必须提交预览返回的 `baseRevisions`，避免覆盖用户或另一个工作区刚完成的修改。
-
-## Agent 工作流
-
-Agent 提示词生成时必须选择 Agent 所在电脑能够访问的局域网 Base URL。Agent 使用：
-
-```http
-Authorization: Bearer <developer-token>
-X-Playmesh-AI-Channel: agent
-```
-
-推荐闭环：
-
-1. 读取 `/dev/api/operations?target=agent` 和项目文件。
-2. 读取 Game SDK 声明、当前 Manifest 和能力注册表。
-3. 使用结构化文件变更接口预览并原子提交。
-4. 调用项目校验接口，修复全部 `error` 诊断。
-5. 请求 App 启动或重启项目。
-6. 轮询运行状态并读取最近日志；需要实时体验时再消费 SSE。
-7. 结合 `requestId`、`projectId`、`runId` 和 `eventId` 定位本次运行。
-
-Agent 不应自行拼接未记录的 API，也不能直接访问游戏目录、Core 或系统命令。
+- 只想使用现有聊天 AI、不愿授予本地连接能力时，选择
+  [ChatAI 使用方法](chat-ai-development.md)。
+- 希望 AI 自主读取文件、修改、校验并运行，且所用 Agent 能访问 Developer Gateway
+  时，选择 [AgentAI 使用方法](agent-ai-development.md)。
+- 可以先用 ChatAI 讨论玩法与结构，再把明确的实现目标交给 AgentAI；两者始终操作同一
+  项目，不需要导入导出中间工程。
 
 ## 危险操作审批
 
@@ -91,6 +53,8 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 - Agent 通过 `GET /dev/api/capabilities` 按需读取全平台注册表。
 - 能力自检使用 `GET/POST /dev/api/capability-tests`。
 - `.d.ts` 是公开 SDK 方法、参数、返回值和中文 JSDoc 的接口事实源。
+- 非敏感权限和用户主动文件选择直接使用标准 Web API，不需要能力声明；WebView 敏感
+  权限和 Playmesh 多平台适配能力才按需写入 `capabilities.json`。
 - 游戏仍需先等待 `playmesh.ready`，不能因为由 AI 生成就绕过 Player/Authority 分层。
 
 ## 最小披露原则
@@ -122,6 +86,8 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 
 更多说明：
 
+- [ChatAI 使用方法](chat-ai-development.md)
+- [AgentAI 使用方法](agent-ai-development.md)
 - [游戏开发指南](development-guide.md)
 - [网页开发者通道](web-dev-channel.md)
 - [Game SDK / App Bridge SDK](sdk-v1.md)

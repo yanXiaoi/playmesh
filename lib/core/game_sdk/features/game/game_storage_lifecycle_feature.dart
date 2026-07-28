@@ -214,6 +214,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   };
 
   installBrowserConsoleCapture();
+  global[Symbol.for("playmesh.platform-ui.back")] = handlePlatformBackIntent;
   global.playmesh = playmesh;
   global.console?.info?.("Playmesh Game SDK 注入成功", {
     version: PLAYMESH_SDK_VERSION,
@@ -259,7 +260,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     } else {
       void requestBrowserFullscreen(config.orientation).catch((error) => {
         global.console?.info?.(
-          "浏览器未允许自动全屏，可通过悬浮工具栏手动进入",
+          "浏览器未允许自动全屏，可通过游戏侧边栏手动进入",
           error,
         );
       });
@@ -484,7 +485,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     openPlatformUiLayer(
       ui.overlay,
       ui.input,
-      options.returnFocus || (options.required ? null : ui.more),
+      options.returnFocus || (options.required ? null : ui.pageReturnFocus),
     );
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -492,7 +493,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         if (settled) return;
         settled = true;
         ui.onNicknameBack = null;
-        closePlatformUiLayer(ui.overlay, options.returnFocus || ui.more);
+        closePlatformUiLayer(
+          ui.overlay,
+          options.returnFocus || ui.pageReturnFocus,
+        );
         if (error) reject(error);
         else resolve(value);
       };
@@ -616,66 +620,96 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
   }
 
-  function installBrowserDockDrag(ui) {
-    const dock = ui?.dock;
-    if (!dock?.addEventListener) return;
-    let drag = null;
-    let suppressClick = false;
-    const clampPosition = (left, top, rect) => ({
-      left: Math.max(4, Math.min(left, Math.max(4, (global.innerWidth || 0) - rect.width - 4))),
-      top: Math.max(4, Math.min(top, Math.max(4, (global.innerHeight || 0) - rect.height - 4))),
-    });
-    const moveDock = (left, top, rect) => {
-      const position = clampPosition(left, top, rect);
-      dock.style.left = `${position.left}px`;
-      dock.style.top = `${position.top}px`;
-      dock.style.right = "auto";
-      dock.style.bottom = "auto";
+  function handlePlatformBackIntent() {
+    if (appSdk.isAvailable() && typeof appSdk.showGameSidebar === "function") {
+      void appSdk.showGameSidebar().catch((error) => {
+        global.console?.warn?.("Playmesh App 游戏侧边栏未能打开", error);
+      });
+      return true;
+    }
+    if (!global.__PLAYMESH_BROWSER__ || !global.document) return false;
+    const handleUi = (ui) => {
+      if (!ui) return;
+      if (!ui.overlay.hidden) {
+        ui.onNicknameBack?.();
+      } else if (!ui.logsOverlay.hidden) {
+        ui.logsClose.onclick();
+      } else if (!ui.infoOverlay.hidden) {
+        ui.infoClose.onclick();
+      } else if (!ui.sidebarLayer.hidden) {
+        ui.closeSidebar();
+      } else {
+        ui.openSidebar();
+      }
     };
-    dock.addEventListener("pointerdown", (event) => {
-      if (event.isPrimary === false || (event.button != null && event.button !== 0)) return;
-      const rect = dock.getBoundingClientRect();
-      drag = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-        moved: false,
-      };
-      dock.setPointerCapture?.(event.pointerId);
-    });
-    dock.addEventListener("pointermove", (event) => {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      const deltaX = event.clientX - drag.startX;
-      const deltaY = event.clientY - drag.startY;
-      if (!drag.moved && Math.hypot(deltaX, deltaY) < 6) return;
-      drag.moved = true;
-      event.preventDefault?.();
-      ui.menu.hidden = true;
-      moveDock(drag.left + deltaX, drag.top + deltaY, drag);
-    });
-    const finishDrag = (event) => {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      suppressClick = drag.moved;
-      dock.releasePointerCapture?.(event.pointerId);
-      drag = null;
-    };
-    dock.addEventListener("pointerup", finishDrag);
-    dock.addEventListener("pointercancel", finishDrag);
-    dock.addEventListener("click", (event) => {
-      if (!suppressClick) return;
-      suppressClick = false;
-      event.preventDefault?.();
-      event.stopImmediatePropagation?.();
-    }, true);
-    global.addEventListener?.("resize", () => {
-      if (!dock.style.left) return;
-      const rect = dock.getBoundingClientRect();
-      moveDock(rect.left, rect.top, rect);
-    });
+    if (browserNicknameUi) {
+      handleUi(browserNicknameUi);
+    } else {
+      void ensureBrowserNicknameUi().then(handleUi).catch((error) => {
+        global.console?.warn?.("Playmesh 浏览器游戏侧边栏未能打开", error);
+      });
+    }
+    return true;
+  }
+
+  function installBrowserBackInterception(ui) {
+    if (appSdk.isAvailable() ||
+        browserBackInterceptionInstalled ||
+        !global.history?.pushState ||
+        !global.history?.replaceState) {
+      return;
+    }
+    try {
+      browserBackGuardUrl = global.location?.href || null;
+      const currentState =
+        global.history.state && typeof global.history.state === "object"
+          ? global.history.state
+          : {};
+      global.history.replaceState(
+        { ...currentState, __playmeshBackBase: true },
+        "",
+        browserBackGuardUrl,
+      );
+      global.history.pushState(
+        { __playmeshBackGuard: true },
+        "",
+        browserBackGuardUrl,
+      );
+      browserBackInterceptionInstalled = true;
+      global.addEventListener?.("popstate", () => {
+        if (browserBackExitRequested) return;
+        handlePlatformBackIntent();
+        try {
+          global.history.pushState(
+            { __playmeshBackGuard: true },
+            "",
+            browserBackGuardUrl,
+          );
+        } catch (error) {
+          global.console?.warn?.("Playmesh 浏览器返回守卫恢复失败", error);
+        }
+      });
+    } catch (error) {
+      global.console?.warn?.("Playmesh 浏览器无法安装返回守卫", error);
+    }
+  }
+
+  function exitBrowserGameFromSidebar(ui) {
+    browserBackExitRequested = true;
+    ui.closeSidebar(false);
+    markRuntimeExited("用户从游戏侧边栏退出");
+    try {
+      if (browserBackInterceptionInstalled && global.history.length > 2) {
+        global.history.go(-2);
+        return;
+      }
+      global.close?.();
+      global.setTimeout(() => {
+        if (!global.closed) global.location?.replace?.("about:blank");
+      }, 0);
+    } catch (error) {
+      global.console?.warn?.("浏览器无法离开当前游戏页面", error);
+    }
   }
 
   async function ensureBrowserNicknameUi() {
@@ -694,16 +728,21 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       :host{all:initial;--pm-surface:#121720eb;--pm-surface-solid:#20242b;--pm-surface-hover:#343b46;--pm-text:#f4f7fb;--pm-muted:#d5dbe4;--pm-border:#596272;--pm-soft-border:#ffffff35;--pm-divider:#ffffff18;--pm-overlay:#0008;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#0b0f15;--pm-log-text:#dbe5f0;--pm-focus:#78a6ff;--pm-error:#fda4af;font-family:system-ui,"Microsoft YaHei",sans-serif;letter-spacing:0;color-scheme:dark}
       :host([data-theme="light"]){--pm-surface:#fffffff2;--pm-surface-solid:#ffffff;--pm-surface-hover:#e8edf3;--pm-text:#18212c;--pm-muted:#526071;--pm-border:#91a0b0;--pm-soft-border:#aab5c2;--pm-divider:#d5dde6;--pm-overlay:#dce3ecd9;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#f4f7fa;--pm-log-text:#1f2937;--pm-focus:#075dce;--pm-error:#a1122f;color-scheme:light}
       button,input{box-sizing:border-box;font:inherit;letter-spacing:0}
-      .dock{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483646;display:flex;align-items:flex-end;flex-direction:column;color:var(--pm-text);filter:drop-shadow(0 8px 20px #0006);touch-action:none;user-select:none}
-      .tools{display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface)}
-      .tool,.expand{display:grid;place-items:center;width:48px;height:48px;padding:0;border:0;border-bottom:1px solid var(--pm-divider);background:transparent;color:var(--pm-text);font:800 21px/1 system-ui;cursor:pointer}
-      .tool:last-child{border-bottom:0}.tool:hover,.expand:hover{background:var(--pm-surface-hover)}.tool:focus-visible,.expand:focus-visible,.menu button:focus-visible,.actions button:focus-visible,.logs-head button:focus-visible,.logs-output:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}.tool.active{color:#087f6d}
-      .expand{border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface)}
-      .panel{display:flex;align-items:center;gap:10px;margin-top:8px;padding:8px 10px;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);font:700 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
-      .menu{position:absolute;right:56px;top:0;width:190px;overflow:hidden;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 12px 30px #0005}
-      .menu button{display:flex;align-items:center;width:100%;height:48px;padding:0 15px;border:0;border-bottom:1px solid var(--pm-divider);background:var(--pm-surface-solid);color:var(--pm-text);font:700 14px/1 system-ui,"Microsoft YaHei",sans-serif;cursor:pointer}.menu button:last-child{border-bottom:0}.menu button:hover{background:var(--pm-surface-hover)}
+      .sidebar-layer{position:fixed;inset:0;z-index:2147483646;color:var(--pm-text)}
+      .sidebar-scrim{position:absolute;inset:0;width:100%;height:100%;padding:0;border:0;background:var(--pm-overlay);cursor:pointer}
+      .sidebar{box-sizing:border-box;position:absolute;right:0;top:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(88vw,360px);height:100%;height:100dvh;padding:max(16px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) 10px;border-left:1px solid var(--pm-border);background:var(--pm-surface-solid);box-shadow:-18px 0 42px #0006}
+      .sidebar-head{display:flex;align-items:center;gap:12px;padding:4px 10px 14px;border-bottom:1px solid var(--pm-divider)}
+      .sidebar-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#087f6d;color:#fff;font:800 18px/1 system-ui}
+      .sidebar-title{margin:0;color:var(--pm-text);font-size:20px;line-height:1.25;font-weight:800}
+      .sidebar-actions{min-height:0;overflow:auto;padding:8px 0}
+      .sidebar-action{display:flex;align-items:center;gap:13px;width:100%;min-height:52px;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--pm-text);font:700 15px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer}
+      .sidebar-action:hover{background:var(--pm-surface-hover)}.sidebar-action:focus-visible,.sidebar-scrim:focus-visible,.actions button:focus-visible,.logs-head button:focus-visible,.logs-output:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}
+      .sidebar-action.continue{background:#087f6d;color:#fff}.sidebar-action.exit{color:var(--pm-error)}
+      .sidebar-icon{display:grid;place-items:center;flex:0 0 24px;width:24px;font:800 19px/1 system-ui}
+      .sidebar-foot{padding-top:8px;border-top:1px solid var(--pm-divider)}
+      .panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483645;display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);font:700 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
       .overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}
-      .overlay[hidden],.panel[hidden],.menu[hidden],.expand[hidden],.tools[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden],.logs-overlay[hidden]{display:none}
+      .sidebar-layer[hidden],.overlay[hidden],.panel[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden],.logs-overlay[hidden]{display:none}
       form,.info-card{box-sizing:border-box;width:min(100%,380px);max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}
       h2{margin:0 0 16px;font-size:20px;line-height:1.3;letter-spacing:0}
       label{display:block;margin-bottom:6px;font-size:14px;font-weight:700}
@@ -715,21 +754,25 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       .info-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}.info-card p{margin:8px 0;color:var(--pm-muted);line-height:1.6}.info-card strong{color:var(--pm-text)}.info-card .actions{margin-top:18px}
       .logs-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:14px;background:var(--pm-overlay)}.logs-card{box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,760px);height:min(78vh,620px);height:min(78dvh,620px);padding:16px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}.logs-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}.logs-head h2{flex:1;margin:0}.logs-head button{height:36px;padding:0 12px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}.logs-output{min-width:0;min-height:0;margin:0;padding:10px;overflow:auto;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-log-bg);color:var(--pm-log-text);white-space:pre-wrap;word-break:break-word;user-select:text;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.logs-card .actions{margin-top:10px}
       button:disabled{cursor:wait;opacity:.65}
-      @media (max-height:360px) and (min-width:500px){.tools{flex-direction:row}.tool{border-right:1px solid #ffffff18;border-bottom:0}.tool:last-child{border-right:0}.panel{position:absolute;right:0;top:56px;margin:0}.menu{right:0;top:56px}}
+      @media (orientation:landscape){.sidebar{width:min(46vw,420px)}.sidebar-head{padding-bottom:10px}.sidebar-actions{padding:5px 0}.sidebar-action{min-height:46px}.sidebar-foot{padding-top:5px}}
     </style>
-    <div class="dock">
-      <button class="expand" type="button" title="${platformHtml("toolbar.expand")}" aria-label="${platformHtml("toolbar.expand")}" aria-expanded="false" aria-controls="playmesh-browser-tools" tabindex="0">🎮</button>
-      <div class="tools" id="playmesh-browser-tools" role="toolbar" hidden>
-        <button class="tool collapse" type="button" title="${platformHtml("toolbar.collapse")}" aria-label="${platformHtml("toolbar.collapse")}" tabindex="0">⌃</button>
-        <button class="tool reload" type="button" title="${platformHtml("toolbar.restart")}" aria-label="${platformHtml("toolbar.restart")}" tabindex="-1">↻</button>
-        <button class="tool logs" type="button" title="${platformHtml("toolbar.logs")}" aria-label="${platformHtml("toolbar.logs")}" tabindex="-1">≡</button>
-        <button class="tool enter-fullscreen" type="button" title="${platformHtml("toolbar.enter_fullscreen")}" aria-label="${platformHtml("toolbar.enter_fullscreen")}" tabindex="-1">⛶</button>
-        <button class="tool exit-fullscreen" type="button" title="${platformHtml("toolbar.exit_fullscreen")}" aria-label="${platformHtml("toolbar.exit_fullscreen")}" tabindex="-1">⊡</button>
-        <button class="tool more" type="button" title="${platformHtml("toolbar.more")}" aria-label="${platformHtml("toolbar.more")}" aria-expanded="false" aria-controls="playmesh-browser-menu" tabindex="-1">⋮</button>
-      </div>
-      <div class="panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>
-      <div class="menu" id="playmesh-browser-menu" role="menu" hidden><button class="info" role="menuitem" type="button" aria-label="${platformHtml("menu.info")}" tabindex="0">${platformHtml("menu.info")}</button><button class="performance" role="menuitem" type="button" aria-label="${platformHtml("menu.performance")}" aria-pressed="false" tabindex="-1">${platformHtml("menu.performance")}</button></div>
+    <div class="sidebar-layer" hidden>
+      <button class="sidebar-scrim" type="button" aria-label="${platformHtml("sidebar.continue")}" tabindex="-1"></button>
+      <aside class="sidebar" role="dialog" aria-modal="true" aria-labelledby="playmesh-sidebar-title">
+        <header class="sidebar-head"><span class="sidebar-mark" aria-hidden="true">P</span><h2 class="sidebar-title" id="playmesh-sidebar-title">${platformHtml("sidebar.title")}</h2></header>
+        <nav class="sidebar-actions">
+          <button class="sidebar-action continue" type="button"><span class="sidebar-icon" aria-hidden="true">▶</span><span>${platformHtml("sidebar.continue")}</span></button>
+          <button class="sidebar-action reload" type="button"><span class="sidebar-icon" aria-hidden="true">↻</span><span>${platformHtml("sidebar.restart")}</span></button>
+          <button class="sidebar-action logs" type="button"><span class="sidebar-icon" aria-hidden="true">≡</span><span>${platformHtml("sidebar.logs")}</span></button>
+          <button class="sidebar-action enter-fullscreen" type="button"><span class="sidebar-icon" aria-hidden="true">⛶</span><span>${platformHtml("sidebar.enter_fullscreen")}</span></button>
+          <button class="sidebar-action exit-fullscreen" type="button"><span class="sidebar-icon" aria-hidden="true">⊡</span><span>${platformHtml("sidebar.exit_fullscreen")}</span></button>
+          <button class="sidebar-action info" type="button"><span class="sidebar-icon" aria-hidden="true">ⓘ</span><span>${platformHtml("sidebar.info")}</span></button>
+          <button class="sidebar-action performance" type="button" aria-pressed="false"><span class="sidebar-icon" aria-hidden="true">◴</span><span>${platformHtml("sidebar.performance")}</span></button>
+        </nav>
+        <footer class="sidebar-foot"><button class="sidebar-action exit" type="button"><span class="sidebar-icon" aria-hidden="true">↩</span><span>${platformHtml("sidebar.exit")}</span></button></footer>
+      </aside>
     </div>
+    <div class="panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>
     <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-nickname-title" hidden>
       <form><h2 id="playmesh-nickname-title"></h2><label class="nickname-label" for="nickname">${platformHtml("nickname.label")}</label>
       <input id="nickname" maxlength="32" autocomplete="nickname" required>
@@ -743,7 +786,11 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     browserNicknameUi = {
       host,
       pageReturnFocus,
-      dock: root.querySelector(".dock"),
+      sidebarLayer: root.querySelector(".sidebar-layer"),
+      sidebar: root.querySelector(".sidebar"),
+      sidebarTitle: root.querySelector(".sidebar-title"),
+      sidebarScrim: root.querySelector(".sidebar-scrim"),
+      continueButton: root.querySelector(".continue"),
       panel: root.querySelector(".panel"),
       fps: root.querySelector(".fps"),
       latency: root.querySelector(".latency"),
@@ -757,15 +804,11 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       error: root.querySelector(".error"),
       close: root.querySelector(".close"),
       submit: root.querySelector(".save"),
-      expand: root.querySelector(".expand"),
-      tools: root.querySelector(".tools"),
-      collapse: root.querySelector(".collapse"),
       reload: root.querySelector(".reload"),
       enterFullscreen: root.querySelector(".enter-fullscreen"),
       exitFullscreen: root.querySelector(".exit-fullscreen"),
-      more: root.querySelector(".more"),
-      menu: root.querySelector(".menu"),
       info: root.querySelector(".info"),
+      exit: root.querySelector(".exit"),
       logs: root.querySelector(".logs"),
       infoOverlay: root.querySelector(".info-overlay"),
       infoClose: root.querySelector(".info-close"),
@@ -784,50 +827,45 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         ui.pageReturnFocus = event.target;
       }
     }, true);
-    const toolbarControls = () => [
-      ui.collapse,
+    const sidebarControls = () => [
+      ui.continueButton,
       ui.reload,
       ui.logs,
       ui.enterFullscreen,
       ui.exitFullscreen,
-      ui.more,
+      ui.info,
+      ui.performanceButton,
+      ui.exit,
     ];
-    const menuControls = () => [ui.info, ui.performanceButton];
-    const closeBrowserMenu = (restoreFocus = true) => {
-      ui.menu.hidden = true;
-      ui.more.setAttribute?.("aria-expanded", "false");
-      if (restoreFocus) focusPlatformUiControl(ui.more);
+    const closeBrowserSidebar = (restoreFocus = true) => {
+      ui.sidebarLayer.hidden = true;
+      if (restoreFocus) focusPlatformUiControl(ui.pageReturnFocus);
     };
-    const openBrowserMenu = () => {
-      ui.menu.hidden = false;
-      ui.more.setAttribute?.("aria-expanded", "true");
-      const first = setPlatformUiRovingTabStop(menuControls(), ui.info);
-      focusPlatformUiControl(first);
-    };
-    ui.collapse.onclick = () => {
-      ui.tools.hidden = true;
-      ui.expand.hidden = false;
-      ui.expand.setAttribute?.("aria-expanded", "false");
-      closeBrowserMenu(false);
-      focusPlatformUiControl(ui.expand);
-    };
-    ui.expand.onclick = () => {
-      ui.tools.hidden = false;
-      ui.expand.hidden = true;
-      ui.expand.setAttribute?.("aria-expanded", "true");
+    const openBrowserSidebar = () => {
+      const activeElement = global.document.activeElement;
+      if (activeElement && activeElement !== host) ui.pageReturnFocus = activeElement;
+      ui.sidebarLayer.hidden = false;
       const first = setPlatformUiRovingTabStop(
-        toolbarControls(),
-        ui.collapse,
+        sidebarControls(),
+        ui.continueButton,
       );
       focusPlatformUiControl(first);
     };
-    ui.reload.onclick = () => global.location?.reload?.();
+    ui.openSidebar = openBrowserSidebar;
+    ui.closeSidebar = closeBrowserSidebar;
+    ui.continueButton.onclick = () => closeBrowserSidebar();
+    ui.sidebarScrim.onclick = () => closeBrowserSidebar();
+    ui.reload.onclick = () => {
+      closeBrowserSidebar(false);
+      global.location?.reload?.();
+    };
     ui.performanceButton.onclick = () => {
       performanceVisible = !performanceVisible;
       void renderPerformanceUi();
-      closeBrowserMenu();
+      closeBrowserSidebar();
     };
     ui.enterFullscreen.onclick = async () => {
+      closeBrowserSidebar(false);
       try {
         await requestBrowserFullscreen(browserConnectionConfig?.orientation);
       } catch (error) {
@@ -835,13 +873,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       }
     };
     ui.exitFullscreen.onclick = () => {
+      closeBrowserSidebar(false);
       if (global.document.fullscreenElement) {
         Promise.resolve(global.document.exitFullscreen?.()).catch(() => {});
       }
-    };
-    ui.more.onclick = () => {
-      if (ui.menu.hidden) openBrowserMenu();
-      else closeBrowserMenu();
     };
     ui.info.onclick = () => {
       const config = global.__PLAYMESH_BROWSER__ || {};
@@ -853,48 +888,32 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
             joinCode: bootstrap.session.joinCode,
           })
         : platformText("info.solo_share");
-      closeBrowserMenu(false);
-      openPlatformUiLayer(ui.infoOverlay, ui.infoClose, ui.more);
+      closeBrowserSidebar(false);
+      openPlatformUiLayer(ui.infoOverlay, ui.infoClose, ui.pageReturnFocus);
     };
     ui.logs.onclick = () => {
       renderBrowserConsoleLogs(ui);
-      closeBrowserMenu(false);
-      openPlatformUiLayer(ui.logsOverlay, ui.logsClose, ui.logs);
+      closeBrowserSidebar(false);
+      openPlatformUiLayer(ui.logsOverlay, ui.logsClose, ui.pageReturnFocus);
     };
     ui.infoClose.onclick = () => {
-      closePlatformUiLayer(ui.infoOverlay, ui.more);
+      closePlatformUiLayer(ui.infoOverlay, ui.pageReturnFocus);
     };
     ui.logsClear.onclick = () => {
       browserConsoleLogs.length = 0;
       renderBrowserConsoleLogs(ui);
     };
     ui.logsClose.onclick = () => {
-      closePlatformUiLayer(ui.logsOverlay, ui.logs);
+      closePlatformUiLayer(ui.logsOverlay, ui.pageReturnFocus);
     };
+    ui.exit.onclick = () => exitBrowserGameFromSidebar(ui);
     installPlatformUiKeyboardNavigation(
-      ui.expand,
-      () => [ui.expand],
+      ui.sidebar,
+      sidebarControls,
       {
-        onBack: () => focusPlatformUiControl(ui.pageReturnFocus),
-      },
-    );
-    installPlatformUiKeyboardNavigation(
-      ui.tools,
-      toolbarControls,
-      {
+        trap: true,
         roving: true,
-        onBack: () => {
-          if (!ui.menu.hidden) closeBrowserMenu();
-          else ui.collapse.onclick();
-        },
-      },
-    );
-    installPlatformUiKeyboardNavigation(
-      ui.menu,
-      menuControls,
-      {
-        roving: true,
-        onBack: () => closeBrowserMenu(),
+        onBack: () => closeBrowserSidebar(),
       },
     );
     installPlatformUiKeyboardNavigation(
@@ -921,7 +940,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         onBack: () => ui.logsClose.onclick(),
       },
     );
-    installBrowserDockDrag(ui);
+    installBrowserBackInterception(ui);
     refreshBrowserPlatformUi(ui);
     performanceUi = browserNicknameUi;
     return browserNicknameUi;
@@ -935,21 +954,31 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     if (visible) element.textContent = label;
   }
 
+  function setSidebarActionLabel(element, key) {
+    if (!element) return;
+    const label = platformText(key);
+    element.setAttribute?.("aria-label", label);
+    element.setAttribute?.("title", label);
+    const text = element.querySelector?.("span:last-child");
+    if (text) text.textContent = label;
+  }
+
   function refreshBrowserPlatformUi(ui) {
     if (!ui) return;
-    ui.dock?.getRootNode?.()?.host?.setAttribute?.("lang", platformUiLocale);
     ui.host?.setAttribute?.("data-theme", platformUiTheme);
-    setPlatformControlLabel(ui.expand, "toolbar.expand");
-    setPlatformControlLabel(ui.collapse, "toolbar.collapse");
-    setPlatformControlLabel(ui.reload, "toolbar.restart");
-    setPlatformControlLabel(ui.logs, "toolbar.logs");
-    setPlatformControlLabel(ui.enterFullscreen, "toolbar.enter_fullscreen");
-    setPlatformControlLabel(ui.exitFullscreen, "toolbar.exit_fullscreen");
-    setPlatformControlLabel(ui.more, "toolbar.more");
-    setPlatformControlLabel(ui.info, "menu.info", { visible: true });
-    setPlatformControlLabel(ui.performanceButton, "menu.performance", {
-      visible: true,
-    });
+    ui.host?.setAttribute?.("lang", platformUiLocale);
+    if (ui.sidebarTitle) {
+      ui.sidebarTitle.textContent = platformText("sidebar.title");
+    }
+    setPlatformControlLabel(ui.sidebarScrim, "sidebar.continue");
+    setSidebarActionLabel(ui.continueButton, "sidebar.continue");
+    setSidebarActionLabel(ui.reload, "sidebar.restart");
+    setSidebarActionLabel(ui.logs, "sidebar.logs");
+    setSidebarActionLabel(ui.enterFullscreen, "sidebar.enter_fullscreen");
+    setSidebarActionLabel(ui.exitFullscreen, "sidebar.exit_fullscreen");
+    setSidebarActionLabel(ui.info, "sidebar.info");
+    setSidebarActionLabel(ui.performanceButton, "sidebar.performance");
+    setSidebarActionLabel(ui.exit, "sidebar.exit");
     setPlatformControlLabel(ui.button, "nickname.edit_action", {
       visible: true,
     });

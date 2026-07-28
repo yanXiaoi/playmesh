@@ -16,7 +16,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "2.2.0";
+  const PLAYMESH_APP_SDK_VERSION = "3.0.0";
   const PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY =
     typeof Symbol === "function" && typeof Symbol.for === "function"
       ? Symbol.for("playmesh.platform-ui.configuration")

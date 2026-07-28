@@ -120,6 +120,9 @@ func (h *Handler) List(c *gin.Context) {
 		if err := json.Unmarshal([]byte(game.ManifestJSON), &manifest); err != nil {
 			continue
 		}
+		// The account profile is the source of truth for publisher identity.
+		// Uploaded manifests contain only the name snapshot from upload time.
+		manifest["author"] = game.Author
 		if game.IconPath != "" {
 			manifest["icon"] = h.currentPublicBaseURL() + "/apps/icon?id=" +
 				url.QueryEscape(game.PackageID) +

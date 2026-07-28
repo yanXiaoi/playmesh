@@ -10,6 +10,7 @@ import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/features/games/online_game_library_page.dart';
 import 'package:playmesh/models/game_manifest.dart';
 import 'package:playmesh/models/game_summary.dart';
+import 'package:playmesh/models/local_game_entry.dart';
 
 import '../../support/localized_test_app.dart';
 
@@ -216,6 +217,106 @@ void main() {
     expect(find.textContaining('publicURL'), findsNothing);
     expect(find.textContaining('/apps/info'), findsNothing);
   });
+
+  testWidgets(
+    'publisher mismatch warns, then progress dialog blocks closing until cancel',
+    (tester) async {
+      final root = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('playmesh-download-widget-'),
+      ))!;
+      final source = _source(id: 'remote', name: 'Remote source');
+      final offer = _offer(
+        source,
+        id: 'com.example.same-game',
+        name: 'Same game',
+        author: 'Online Publisher',
+        version: '2.0.0',
+      );
+      final controller = _FakeCatalogController(
+        root: root,
+        sources: [source],
+        initialGames: [
+          _installedGame(
+            id: offer.manifest.id,
+            author: 'Local Publisher',
+            version: '1.0.0',
+          ),
+        ],
+        loadHome: (_, page, _) async => SourceSectionResult(
+          source: source,
+          offers: [offer],
+          total: 1,
+          page: page,
+        ),
+      );
+      addTearDown(
+        () => tester.runAsync(() async {
+          await controller.close();
+          await root.delete(recursive: true);
+        }),
+      );
+
+      await tester.pumpWidget(
+        localizedTestApp(home: OnlineGameLibraryPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('下载队列'), findsNothing);
+      await tester.tap(
+        find.byKey(ValueKey('catalog-home-offer-action-${offer.downloadKey}')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('catalog-publisher-warning')),
+        findsOneWidget,
+      );
+      final warning = find.byKey(const ValueKey('catalog-publisher-warning'));
+      expect(
+        find.descendant(
+          of: warning,
+          matching: find.textContaining('Local Publisher'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: warning,
+          matching: find.textContaining('Online Publisher'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('仍要下载'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('catalog-download-progress-dialog')),
+        findsOneWidget,
+      );
+      expect(controller.startedTask, isNotNull);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('catalog-download-progress-dialog')),
+        findsOneWidget,
+        reason: 'An active download must not be dismissed by the back action.',
+      );
+
+      await tester.tap(find.text('取消'));
+      await tester.pump();
+      expect(controller.startedTask!.status, GameDownloadStatus.stopped);
+      expect(find.text('已停止'), findsOneWidget);
+      expect(find.text('关闭'), findsOneWidget);
+
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('catalog-download-progress-dialog')),
+        findsNothing,
+      );
+    },
+  );
 }
 
 typedef _HomeLoader =
@@ -231,13 +332,14 @@ class _FakeCatalogController extends GameCatalogController {
   _FakeCatalogController({
     required Directory root,
     required List<OnlineGameSource> sources,
+    List<GameSummary> initialGames = const [],
     this._loadHome,
     this._refreshDeclaration,
   }) : _sources = [...sources],
        super(
          library: GameLibraryRepository(
-           () async => const <GameSummary>[],
-           initialGames: const <GameSummary>[],
+           () async => initialGames,
+           initialGames: initialGames,
          ),
          transfer: GamePackageTransferService(libraryRoot: root),
          onImported: (_) async {},
@@ -247,6 +349,8 @@ class _FakeCatalogController extends GameCatalogController {
   final List<OnlineGameSource> _sources;
   final _HomeLoader? _loadHome;
   final _DeclarationRefresher? _refreshDeclaration;
+  final ChangeNotifier _downloadNotifier = ChangeNotifier();
+  GameDownloadTask? startedTask;
 
   @override
   List<OnlineGameSource> get sources => List.unmodifiable(_sources);
@@ -269,6 +373,36 @@ class _FakeCatalogController extends GameCatalogController {
 
   @override
   Future<List<int>?> loadOfferIcon(OnlineCatalogGame offer) async => null;
+
+  @override
+  Listenable get downloadChanges => _downloadNotifier;
+
+  @override
+  GameDownloadTask startDownload(OnlineCatalogGame offer) {
+    final current = startedTask;
+    if (current != null &&
+        (current.status == GameDownloadStatus.queued ||
+            current.status == GameDownloadStatus.downloading)) {
+      throw StateError('already downloading');
+    }
+    final task = GameDownloadTask(id: 'fake-download', game: offer)
+      ..status = GameDownloadStatus.downloading
+      ..progress = 0.35;
+    startedTask = task;
+    _downloadNotifier.notifyListeners();
+    return task;
+  }
+
+  @override
+  void cancelDownload(String taskId) {
+    final task = startedTask;
+    if (task == null || task.id != taskId) return;
+    task
+      ..cancelled = true
+      ..status = GameDownloadStatus.stopped
+      ..progress = null;
+    _downloadNotifier.notifyListeners();
+  }
 
   @override
   Future<OnlineGameSourceProbe> refreshSourceDeclaration(String id) async {
@@ -316,16 +450,19 @@ OnlineCatalogGame _offer(
   OnlineGameSource source, {
   required String id,
   required String name,
+  String author = 'Publisher value / 原样',
+  String version = '1.0.0',
+  DateTime? lastModifiedAt,
 }) {
   return OnlineCatalogGame(
     source: source,
     manifest: GameManifest(
       id: id,
       name: name,
-      author: 'Publisher value / 原样',
-      lastModifiedAt: DateTime.utc(2026, 7, 26),
+      author: author,
+      lastModifiedAt: lastModifiedAt ?? DateTime.utc(2026, 7, 26),
       remarks: 'API remarks / 原样',
-      version: '1.0.0',
+      version: version,
       sdkVersion: '1.0.0',
       appSdkVersion: '1.0.0',
       orientation: GameOrientation.landscape,
@@ -340,3 +477,22 @@ OnlineCatalogGame _offer(
     ),
   );
 }
+
+GameSummary _installedGame({
+  required String id,
+  required String author,
+  required String version,
+}) => GameSummary(
+  id: id,
+  name: 'Installed game',
+  version: version,
+  author: author,
+  description: 'Installed description',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: 'Multi screen',
+  displayMode: 'multi_screen',
+  orientation: GameOrientation.landscape,
+  entry: const LocalGameEntry(assetPath: 'app/index.html', statusLabel: 'SDK'),
+);

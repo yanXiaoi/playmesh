@@ -9,7 +9,7 @@ void main() {
     expect(source, contains('function capabilityDisplayText'));
     expect(
       source,
-      contains('["sensor.accelerometer", "capability.sensor.accelerometer"]'),
+      contains('["media.camera", "capability.media.camera"]'),
     );
     expect(source, contains('name: definition?.name || capability'));
     expect(source, contains('description: definition?.description || ""'));

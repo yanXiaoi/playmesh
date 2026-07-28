@@ -25,6 +25,7 @@ import (
 	"go-server/internal/gameid"
 	"go-server/internal/mailer"
 	"go-server/internal/packages"
+	"go-server/internal/qrimage"
 	"go-server/internal/store"
 	"go-server/internal/version"
 )
@@ -221,8 +222,17 @@ func (h *Handler) Login(c *gin.Context) {
 		writeError(c, http.StatusUnauthorized, "credentials_invalid", "邮箱或密码无效")
 		return
 	}
+	disabled, err := h.store.UserDisabled(c.Request.Context(), account.ID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "login_failed", "无法读取账号状态")
+		return
+	}
+	if disabled {
+		writeError(c, http.StatusForbidden, "user_disabled", "账号已被管理员禁用")
+		return
+	}
 	if account.Status != "active" {
-		writeError(c, http.StatusForbidden, "email_verification_required", "请先完成邮箱验证")
+		writeError(c, http.StatusForbidden, "email_verification_required", "请先验证邮箱后再登录")
 		return
 	}
 	sessionToken, err := randomToken()
@@ -273,17 +283,17 @@ func (h *Handler) Logout(c *gin.Context) {
 func (h *Handler) VerifyEmail(c *gin.Context) {
 	token := strings.TrimSpace(c.Query("token"))
 	if token == "" {
-		writeError(c, http.StatusBadRequest, "verification_token_invalid", "验证链接无效或已过期")
+		c.Redirect(http.StatusSeeOther, "/my?emailVerification=failed")
 		return
 	}
 	err := h.store.ConsumeEmailVerificationToken(
 		c.Request.Context(), hashToken(token), time.Now(),
 	)
 	if err != nil {
-		writeError(c, http.StatusBadRequest, "verification_token_invalid", "验证链接无效或已过期")
+		c.Redirect(http.StatusSeeOther, "/my?emailVerification=failed")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "verified"})
+	c.Redirect(http.StatusSeeOther, "/my?emailVerification=success")
 }
 
 func (h *Handler) ResendVerification(c *gin.Context) {
@@ -351,13 +361,21 @@ func (h *Handler) PutUploadKey(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "upload_key_invalid", "上传密钥不符合复杂度要求")
 		return
 	}
+	sourceQRCode, err := h.sourceQRCode(key)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "source_qrcode_failed", "无法生成当前游戏源二维码")
+		return
+	}
 	if err := h.store.PutUploadCredential(
 		c.Request.Context(), currentUser(c).ID, h.uploadKeyHMAC(key),
 	); err != nil {
 		writeError(c, http.StatusInternalServerError, "upload_key_failed", "上传密钥保存失败")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"uploadKey": key})
+	c.JSON(http.StatusOK, gin.H{
+		"uploadKey":    key,
+		"sourceQRCode": "data:image/png;base64," + base64.StdEncoding.EncodeToString(sourceQRCode),
+	})
 }
 
 func (h *Handler) Games(c *gin.Context) {
@@ -367,6 +385,36 @@ func (h *Handler) Games(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": games})
+}
+
+func (h *Handler) Notifications(c *gin.Context) {
+	items, err := h.store.ListNotifications(
+		c.Request.Context(), currentUser(c).ID, 50,
+	)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "notifications_failed", "无法读取站内通知")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *Handler) ReadNotification(c *gin.Context) {
+	id, err := parsePositiveInt64(c.Param("id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "invalid_id", "通知 ID 无效")
+		return
+	}
+	if err := h.store.MarkNotificationRead(
+		c.Request.Context(), currentUser(c).ID, id,
+	); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(c, http.StatusNotFound, "notification_not_found", "通知不存在")
+			return
+		}
+		writeError(c, http.StatusInternalServerError, "notification_update_failed", "无法更新通知")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) BrowserUpload(c *gin.Context) {
@@ -512,6 +560,20 @@ func (h *Handler) RequireSession(requireCSRF bool) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		disabled, disabledErr := h.store.UserDisabled(
+			c.Request.Context(), account.ID,
+		)
+		if disabledErr != nil || disabled {
+			code := "user_unauthorized"
+			message := "登录会话无效或已过期"
+			if disabledErr == nil && disabled {
+				code = "user_disabled"
+				message = "账号已被管理员禁用"
+			}
+			writeError(c, http.StatusUnauthorized, code, message)
+			c.Abort()
+			return
+		}
 		if requireCSRF {
 			provided := hashToken(strings.TrimSpace(c.GetHeader("X-CSRF-Token")))
 			if subtle.ConstantTimeCompare([]byte(provided), []byte(csrfHash)) != 1 {
@@ -540,6 +602,20 @@ func (h *Handler) RequireUploadKey() gin.HandlerFunc {
 		)
 		if err != nil {
 			writeError(c, http.StatusUnauthorized, "upload_key_invalid", "上传密钥无效")
+			c.Abort()
+			return
+		}
+		disabled, disabledErr := h.store.UserDisabled(
+			c.Request.Context(), account.ID,
+		)
+		if disabledErr != nil || disabled {
+			code := "upload_key_invalid"
+			message := "上传密钥无效"
+			if disabledErr == nil && disabled {
+				code = "user_disabled"
+				message = "账号已被管理员禁用"
+			}
+			writeError(c, http.StatusForbidden, code, message)
 			c.Abort()
 			return
 		}
@@ -598,14 +674,53 @@ func (h *Handler) uploadKeyHMAC(key string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func (h *Handler) sourceQRCode(uploadKey string) ([]byte, error) {
+	payload, err := h.sourceConfigurationURL(uploadKey)
+	if err != nil {
+		return nil, err
+	}
+	return qrimage.PNG(payload)
+}
+
+func (h *Handler) sourceConfigurationURL(uploadKey string) (string, error) {
+	publicURL, err := url.Parse(strings.TrimRight(h.currentPublicBaseURL(), "/"))
+	if err != nil || publicURL.Scheme == "" || publicURL.Host == "" {
+		return "", errors.New("public URL is invalid")
+	}
+	query := publicURL.Query()
+	query.Set("token", h.config.Auth.PublishedToken)
+	query.Set("uploadKey", uploadKey)
+	publicURL.RawQuery = query.Encode()
+	return publicURL.String(), nil
+}
+
 func (h *Handler) setSessionCookie(c *gin.Context, value string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(sessionCookieName, value, maxAge, "/", "", true, true)
+	c.SetCookie(
+		sessionCookieName, value, maxAge, "/", "",
+		requestIsHTTPS(c.Request), true,
+	)
 }
 
 func (h *Handler) setCSRFCookie(c *gin.Context, value string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(csrfCookieName, value, maxAge, "/", "", true, false)
+	c.SetCookie(
+		csrfCookieName, value, maxAge, "/", "",
+		requestIsHTTPS(c.Request), false,
+	)
+}
+
+func requestIsHTTPS(request *http.Request) bool {
+	if request != nil && request.TLS != nil {
+		return true
+	}
+	if request == nil {
+		return false
+	}
+	forwarded := strings.TrimSpace(strings.Split(
+		request.Header.Get("X-Forwarded-Proto"), ",",
+	)[0])
+	return strings.EqualFold(forwarded, "https")
 }
 
 func (h *Handler) writeUploadError(c *gin.Context, err error) {
@@ -669,6 +784,17 @@ func normalizeEmail(input string) (string, error) {
 		return "", errors.New("邮箱无效")
 	}
 	return strings.ToLower(address.Address), nil
+}
+
+func NormalizeEmail(input string) (string, error) {
+	return normalizeEmail(input)
+}
+
+func HashPassword(password string) (string, error) {
+	if !validPassword(password) {
+		return "", errors.New("密码长度必须为 10 到 128 个字符")
+	}
+	return hashPassword(password)
 }
 
 func validPassword(value string) bool {

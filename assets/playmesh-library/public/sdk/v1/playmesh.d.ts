@@ -266,18 +266,18 @@ interface PlaymeshStorageBucket {
 /** App Bridge 能力。App WebView 自动注入；普通浏览器保留安全空实现。 */
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
-  readonly version: "2.2.0";
+  readonly version: "3.0.0";
   /** App Bridge 完成身份和能力插件注册表注入后 resolve。 */
   readonly ready: Promise<unknown>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
   isAvailable(): boolean;
   /** 打开 App 的“二维码与链接”界面；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.openSharePanel */
   openSharePanel(): Promise<void>;
-  /** 显示并聚焦 App 游戏工具栏。 @playmesh-completion playmesh.app.showToolDock */
-  showToolDock(): Promise<void>;
-  /** 隐藏 App 游戏工具栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideToolDock */
-  hideToolDock(): Promise<void>;
-  /** 请求 App 结束当前游戏并返回上一页。 @playmesh-completion playmesh.app.exitGame */
+  /** 显示并聚焦 App 游戏侧边栏。 @playmesh-completion playmesh.app.showGameSidebar */
+  showGameSidebar(): Promise<void>;
+  /** 隐藏 App 游戏侧边栏并把网页焦点还给调用前的元素。 @playmesh-completion playmesh.app.hideGameSidebar */
+  hideGameSidebar(): Promise<void>;
+  /** 请求 App 正常结束当前游戏并返回上一页面。 @playmesh-completion playmesh.app.exitGame */
   exitGame(): Promise<void>;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
@@ -306,7 +306,7 @@ interface PlaymeshAppApi {
 /** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
 interface PlaymeshApi {
   /** 当前 Game SDK 版本。 */
-  readonly version: "2.4.0";
+  readonly version: "3.0.0";
   /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
   readonly ready: Promise<PlaymeshBootstrap>;
   /** 当前设备的 App Bridge 能力；普通浏览器中 `isAvailable()` 为 false。 */
