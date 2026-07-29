@@ -232,7 +232,8 @@ gh auth login
 ```
 
 脚本要求工作树干净且当前分支为 `master`，会推送 `origin/master`、调用统一发布构建、
-生成 `SHA256SUMS.txt`，再创建 GitHub Release 并上传产物。已有产物可使用
+生成 `SHA256SUMS.txt`，在 Release 正文链接到对应标签下的
+`docs/version/<版本号>.md`，再创建 GitHub Release 并上传产物。已有产物可使用
 `-SkipBuild`；只想创建草稿可加 `-Draft`。Android 默认要求正式签名，显式允许 Debug
 签名时还必须同时使用 `-Draft` 或 `-Prerelease`，避免误发成正式版本。
 

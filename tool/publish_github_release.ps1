@@ -79,7 +79,12 @@ $tagName = "v$versionName-build$buildNumber"
 $releaseTitle = "Playmesh $versionName (build $buildNumber)"
 $artifactPrefix = "Playmesh-$versionName-build$buildNumber"
 $releaseDir = Join-Path $repoRoot "release\$versionName"
+$releaseNotesPath = Join-Path $repoRoot "docs\version\$versionName.md"
 $buildAndroid = $Target -in @('all', 'android')
+
+if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
+  throw "Release notes were not found: $releaseNotesPath"
+}
 
 if ($buildAndroid -and $AllowDebugSigning -and
     (-not $Draft) -and (-not $Prerelease)) {
@@ -187,6 +192,10 @@ try {
   $commitSha = Read-CommandText `
     -Command $gitCommand.Source `
     -Arguments @('rev-parse', 'HEAD')
+  $releaseNotesUrl =
+    "https://github.com/$repository/blob/$tagName/docs/version/$versionName.md"
+  $releaseNotesBody =
+    "[docs/version/$versionName.md]($releaseNotesUrl)"
 
   $releaseArguments = @(
     'release',
@@ -201,7 +210,8 @@ try {
     $repository,
     '--title',
     $releaseTitle,
-    '--generate-notes',
+    '--notes',
+    $releaseNotesBody,
     '--fail-on-no-commits'
   )
   if ($Draft) {
