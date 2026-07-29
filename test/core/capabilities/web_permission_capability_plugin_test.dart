@@ -1,66 +1,212 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/capabilities/audio/audio_capability_plugin.dart';
 import 'package:playmesh/core/capabilities/camera/camera_capability_plugin.dart';
+import 'package:playmesh/core/capabilities/capability_plugin.dart';
+import 'package:playmesh/core/capabilities/capability_registry.dart';
 import 'package:playmesh/core/capabilities/midi/midi_capability_plugin.dart';
-import 'package:playmesh/core/capabilities/web_permission/web_permission_gate.dart';
+import 'package:playmesh/core/capabilities/web_permission/capability_web_permission.dart';
+import 'package:playmesh/core/capabilities/web_permission/web_permission_platform_authorizer.dart';
 
 void main() {
-  test('权限资源和能力 code 使用插件内的唯一映射', () {
+  test('权限型能力复用能力 code 注册唯一执行器与 WebView 资源映射', () async {
+    final authorizer = _RecordingPlatformAuthorizer();
+    final camera = CameraCapabilityPlugin(webPermissionAuthorizer: authorizer);
+    final microphone = AudioCapabilityPlugin(
+      webPermissionAuthorizer: authorizer,
+    );
+    final midi = MidiCapabilityPlugin(webPermissionAuthorizer: authorizer);
+    final registry = CapabilityRegistry([camera, microphone, midi]);
+    addTearDown(registry.dispose);
+
     expect(
-      WebPermissionResource.camera.capabilityCode,
+      registry.webPermissionCapabilityCode('camera'),
       CameraCapabilityPlugin.code,
     );
     expect(
-      WebPermissionResource.microphone.capabilityCode,
+      registry.webPermissionCapabilityCode('microphone'),
       AudioCapabilityPlugin.code,
     );
     expect(
-      WebPermissionResource.midiSysex.capabilityCode,
+      registry.webPermissionCapabilityCode('midiSysex'),
       MidiCapabilityPlugin.code,
     );
-  });
-
-  test('已声明的 WebView 权限才交给平台授权', () async {
-    Set<WebPermissionResource>? requested;
-    final gate = WebPermissionGate(
-      declaredCapabilities: const ['media.camera', 'device.midi'],
-      authorizePlatform: (resources) async {
-        requested = resources;
-        return true;
-      },
+    expect(
+      identical(camera.webPermissionExecutor, camera.webPermissionExecutor),
+      isTrue,
+    );
+    expect(
+      identical(
+        microphone.webPermissionExecutor,
+        microphone.webPermissionExecutor,
+      ),
+      isTrue,
+    );
+    expect(
+      identical(midi.webPermissionExecutor, midi.webPermissionExecutor),
+      isTrue,
     );
 
-    expect(await gate.authorizePlatformNames(['camera']), isTrue);
-    expect(requested, {WebPermissionResource.camera});
+    final context = CapabilityWebPermissionContext(
+      role: AppWebPermissionRole.authority,
+      requestedResources: const ['camera'],
+      declaredCapabilities: const ['media.camera'],
+    );
+    await camera.webPermissionExecutor.authorize(context);
+    await microphone.webPermissionExecutor.authorize(context);
+    await midi.webPermissionExecutor.authorize(context);
+    expect(authorizer.requests.map((request) => request.androidPermissions), [
+      ['android.permission.CAMERA'],
+      ['android.permission.RECORD_AUDIO'],
+      <String>[],
+    ]);
+  });
 
-    requested = null;
-    expect(await gate.authorizePlatformNames(['microphone']), isFalse);
-    expect(requested, isNull);
+  test('统一注册表按当前角色声明解析 code 并按能力执行一次', () async {
+    var cameraAuthorizations = 0;
+    var microphoneAuthorizations = 0;
+    CapabilityWebPermissionContext? cameraContext;
+    final registry = CapabilityRegistry([
+      _FakePermissionPlugin(
+        code: 'media.camera',
+        resources: const ['camera', 'cameraPanTiltZoom'],
+        authorize: (context) async {
+          cameraAuthorizations += 1;
+          cameraContext = context;
+          return true;
+        },
+      ),
+      _FakePermissionPlugin(
+        code: 'media.microphone',
+        resources: const ['microphone'],
+        authorize: (_) async {
+          microphoneAuthorizations += 1;
+          return true;
+        },
+      ),
+    ]);
+    addTearDown(registry.dispose);
 
     expect(
-      await gate.authorizePlatformNames(['camera', 'microphone']),
+      await registry.authorizeWebPermissions(
+        resources: ['camera'],
+        declaredCapabilities: ['media.camera'],
+        role: AppWebPermissionRole.joiner,
+        sourceUri: Uri.parse('http://127.0.0.1/controller/'),
+        isUserInitiated: true,
+      ),
+      isTrue,
+    );
+    expect(cameraAuthorizations, 1);
+    expect(cameraContext?.role, AppWebPermissionRole.joiner);
+    expect(cameraContext?.requestedResources, ['camera']);
+    expect(cameraContext?.declaredCapabilities, ['media.camera']);
+    expect(cameraContext?.sourceUri?.path, '/controller/');
+    expect(cameraContext?.isUserInitiated, isTrue);
+
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: ['camera', 'microphone'],
+        declaredCapabilities: ['media.camera'],
+        role: AppWebPermissionRole.authority,
+      ),
       isFalse,
     );
-    expect(await gate.authorizePlatformNames(['midiSysex']), isTrue);
-    expect(requested, {WebPermissionResource.midiSysex});
-  });
+    expect(cameraAuthorizations, 1);
+    expect(microphoneAuthorizations, 0);
 
-  test('未知或空的 WebView 权限请求默认拒绝', () async {
-    final gate = WebPermissionGate(
-      declaredCapabilities: const [
-        'media.camera',
-        'media.microphone',
-        'device.midi',
-      ],
-      authorizePlatform: (_) async => true,
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: ['camera', 'cameraPanTiltZoom', 'microphone'],
+        declaredCapabilities: ['media.camera', 'media.microphone'],
+        role: AppWebPermissionRole.authority,
+      ),
+      isTrue,
     );
-
-    expect(await gate.authorizePlatformNames(const []), isFalse);
-    expect(await gate.authorizePlatformNames(['protectedMediaId']), isFalse);
+    expect(cameraAuthorizations, 2);
+    expect(microphoneAuthorizations, 1);
   });
 
-  test('权限声明型插件没有方法和事件', () async {
-    const plugin = CameraCapabilityPlugin();
+  test('统一层对空、未知、不可用和执行器拒绝的权限默认拒绝', () async {
+    final registry = CapabilityRegistry([
+      _FakePermissionPlugin(
+        code: 'media.camera',
+        resources: const ['camera'],
+        authorize: (_) async => false,
+      ),
+      _FakePermissionPlugin(
+        code: 'device.midi',
+        resources: const ['midiSysex'],
+        available: false,
+      ),
+    ]);
+    addTearDown(registry.dispose);
+
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: const [],
+        declaredCapabilities: const ['media.camera'],
+        role: AppWebPermissionRole.authority,
+      ),
+      isFalse,
+    );
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: const ['protectedMediaId'],
+        declaredCapabilities: const ['media.camera'],
+        role: AppWebPermissionRole.authority,
+      ),
+      isFalse,
+    );
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: const ['midiSysex'],
+        declaredCapabilities: const ['device.midi'],
+        role: AppWebPermissionRole.authority,
+      ),
+      isFalse,
+    );
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: const ['camera'],
+        declaredCapabilities: const ['media.camera'],
+        role: AppWebPermissionRole.authority,
+      ),
+      isFalse,
+    );
+  });
+
+  test('重复注册同一个 WebView 权限资源会被拒绝', () {
+    expect(
+      () => CapabilityRegistry([
+        _FakePermissionPlugin(code: 'one', resources: const ['camera']),
+        _FakePermissionPlugin(code: 'two', resources: const ['camera']),
+      ]),
+      throwsArgumentError,
+    );
+  });
+
+  test('单个能力不能注册空资源或重复资源', () {
+    expect(
+      () => CapabilityRegistry([
+        _FakePermissionPlugin(code: 'empty', resources: const []),
+      ]),
+      throwsArgumentError,
+    );
+    expect(
+      () => CapabilityRegistry([
+        _FakePermissionPlugin(
+          code: 'duplicate',
+          resources: const ['camera', 'camera'],
+        ),
+      ]),
+      throwsArgumentError,
+    );
+  });
+
+  test('权限声明型插件没有实例方法和事件', () async {
+    final plugin = CameraCapabilityPlugin();
     final instance = await plugin.create(const {});
     addTearDown(instance.dispose);
 
@@ -71,4 +217,72 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+}
+
+class _RecordingPlatformAuthorizer implements WebPermissionPlatformAuthorizer {
+  final List<WebPermissionPlatformRequest> requests = [];
+
+  @override
+  Future<bool> authorize(WebPermissionPlatformRequest request) async {
+    requests.add(request);
+    return true;
+  }
+}
+
+class _FakePermissionPlugin
+    implements CapabilityPlugin, CapabilityWebPermissionPlugin {
+  _FakePermissionPlugin({
+    required String code,
+    required List<String> resources,
+    this.available = true,
+    CapabilityWebPermissionAuthorize? authorize,
+  }) : descriptor = CapabilityDescriptor(
+         code: code,
+         name: code,
+         description: code,
+         apiVersion: '1.0.0',
+         methods: const [],
+         events: const [],
+       ),
+       webPermissionResources = resources,
+       webPermissionExecutor = CapabilityWebPermissionExecutor(
+         authorize: authorize ?? _allow,
+       );
+
+  @override
+  final CapabilityDescriptor descriptor;
+
+  @override
+  final List<String> webPermissionResources;
+
+  @override
+  final CapabilityWebPermissionExecutor webPermissionExecutor;
+
+  final bool available;
+
+  @override
+  bool get isAvailable => available;
+
+  @override
+  Future<CapabilityInstance> create(CapabilityJson options) async =>
+      _FakeCapabilityInstance();
+
+  @override
+  Future<CapabilityJson> test(Duration timeout) async => const {};
+
+  @override
+  Future<void> dispose() async {}
+
+  static Future<bool> _allow(CapabilityWebPermissionContext _) async => true;
+}
+
+class _FakeCapabilityInstance implements CapabilityInstance {
+  @override
+  Stream<CapabilityInstanceEvent> get events => const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<Object?> invoke(String method, CapabilityJson arguments) async => null;
 }

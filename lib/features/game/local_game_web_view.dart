@@ -9,7 +9,6 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'game_webview_exit.dart';
 import 'windows_local_game_web_view.dart';
-import '../../core/capabilities/web_permission/web_permission_gate.dart';
 import '../../core/developer/developer_run_controller.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
@@ -68,7 +67,6 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   GameAssetGateway? _assetGateway;
   Uri? _entryUri;
   late final AppWebViewBridge _appBridge;
-  late final WebPermissionGate _webPermissionGate;
   final AndroidWebViewFileSelector _androidFileSelector =
       const AndroidWebViewFileSelector();
   late final WebViewMessageQueue _messageQueue;
@@ -105,9 +103,6 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       onExitRequested: _exitFromAppGameMenu,
     );
     widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);
-    _webPermissionGate = WebPermissionGate(
-      declaredCapabilities: widget.declaredCapabilities,
-    );
     _messageQueue = WebViewMessageQueue(_runJavaScript);
     final supportsGateway =
         !kIsWeb &&
@@ -430,8 +425,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     WebViewPermissionRequest request,
   ) async {
     try {
-      final allowed = await _webPermissionGate.authorizePlatformNames(
+      final allowed = await _appBridge.authorizeWebPermissions(
         request.types.map((type) => type.name),
+        sourceUri: _entryUri,
       );
       if (allowed) {
         await request.grant();
@@ -517,7 +513,6 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   bridge: widget.bridge,
                   appBridge: _appBridge,
                   appSdkInputTakenOver: _appSdkInputTakenOver,
-                  declaredCapabilities: widget.declaredCapabilities,
                   onNavigationStarted: _resetAppSdkInputOwnership,
                   onRunJavaScriptReady: (executor) {
                     _runWindowsJavaScript = executor;

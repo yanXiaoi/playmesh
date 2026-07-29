@@ -1,6 +1,5 @@
 package top.zfjmm.playmesh;
 
-import android.Manifest;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
@@ -126,7 +125,7 @@ public class MainActivity extends FlutterActivity {
                 return;
             }
             try {
-                requestWebPermissions(call.argument("resources"), result);
+                requestWebPermissions(call.argument("permissions"), result);
             } catch (Exception error) {
                 result.error(
                         "webview_permission_request_error",
@@ -188,7 +187,7 @@ public class MainActivity extends FlutterActivity {
     }
 
     private void requestWebPermissions(
-            @Nullable List<?> resources,
+            @Nullable List<?> permissions,
             MethodChannel.Result result
     ) {
         if (pendingWebPermissionResult != null) {
@@ -199,21 +198,19 @@ public class MainActivity extends FlutterActivity {
             );
             return;
         }
-        if (resources == null || resources.isEmpty()) {
+        if (permissions == null || permissions.isEmpty()) {
             result.success(true);
             return;
         }
         Set<String> requiredPermissions = new LinkedHashSet<>();
-        for (Object resource : resources) {
-            if ("camera".equals(resource)) {
-                requiredPermissions.add(Manifest.permission.CAMERA);
-            } else if ("microphone".equals(resource)) {
-                requiredPermissions.add(Manifest.permission.RECORD_AUDIO);
-            } else {
+        for (Object permission : permissions) {
+            if (!(permission instanceof String)
+                    || ((String) permission).isEmpty()) {
                 throw new IllegalArgumentException(
-                        "unsupported_webview_permission_resource"
+                        "invalid_webview_android_permission"
                 );
             }
+            requiredPermissions.add((String) permission);
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             result.success(true);

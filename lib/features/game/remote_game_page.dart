@@ -5,12 +5,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../core/developer/developer_event_hub.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
+import '../../core/capabilities/web_permission/capability_web_permission.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
+import '../../core/game_web/android_webview_file_selector.dart';
 import '../../core/game_web/local_app_sdk_server.dart';
 import '../../core/game_web/local_tunnel_gateway.dart';
 import '../../core/localization/platform_game_ui_assets.dart';
@@ -54,6 +57,8 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Object? _error;
   final int _windowsReloadKey = 0;
   late final WebViewMessageQueue _messageQueue;
+  final AndroidWebViewFileSelector _androidFileSelector =
+      const AndroidWebViewFileSelector();
   Future<void> Function(String)? _runWindowsJavaScript;
   Future<Object?> Function(String)? _evaluateWindowsJavaScript;
   String? _platformUiConfigurationKey;
@@ -166,6 +171,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
         nickname: widget.nickname,
+        webPermissionRole: AppWebPermissionRole.joiner,
         acceptRuntimeGameDeclaration: true,
         coreBaseUri: coreGateway.localBaseUri,
         playerSource: usesRelay ? 'server' : 'lan_app',
@@ -189,59 +195,65 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
 
   Future<void> _initialize() async {
     try {
-      final controller = WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setOnConsoleMessage((message) {
-          recordLocalWebViewConsole(
-            level: message.level.name,
-            message: message.message,
-          );
-        })
-        ..addJavaScriptChannel(
-          'PlaymeshAppBridge',
-          onMessageReceived: (message) {
-            unawaited(
-              _appBridge!.handleJavaScriptMessage(
-                message.message,
-                _sendAppMessage,
+      final controller =
+          WebViewController(
+              onPermissionRequest: (request) {
+                unawaited(_handleWebPermissionRequest(request));
+              },
+            )
+            ..setJavaScriptMode(JavaScriptMode.unrestricted)
+            ..setOnConsoleMessage((message) {
+              recordLocalWebViewConsole(
+                level: message.level.name,
+                message: message.message,
+              );
+            })
+            ..addJavaScriptChannel(
+              'PlaymeshAppBridge',
+              onMessageReceived: (message) {
+                unawaited(
+                  _appBridge!.handleJavaScriptMessage(
+                    message.message,
+                    _sendAppMessage,
+                  ),
+                );
+              },
+            )
+            ..setNavigationDelegate(
+              NavigationDelegate(
+                onPageStarted: (_) {
+                  _handleNavigationStarted();
+                },
+                onPageFinished: (_) {
+                  unawaited(
+                    _messageQueue
+                        .resume()
+                        .then((_) async {
+                          await _syncPlatformUiConfiguration();
+                          await _syncPerformanceVisible();
+                        })
+                        .catchError((Object error) {
+                          debugPrint('发送远程 WebView Bridge 启动消息失败: $error');
+                        }),
+                  );
+                },
+                onWebResourceError: (error) {
+                  recordLocalWebViewConsole(
+                    level: 'error',
+                    message:
+                        'Resource load failed: ${error.url ?? error.description}',
+                    href: error.url,
+                    eventType: 'resource.error',
+                  );
+                  if (error.isForMainFrame == true && mounted) {
+                    setState(() => _error = error.description);
+                  }
+                },
               ),
             );
-          },
-        )
-        ..setNavigationDelegate(
-          NavigationDelegate(
-            onPageStarted: (_) {
-              _resetTransientUiForLoad();
-              _messageQueue.pause(clearPending: true);
-              unawaited(_appBridge?.resetCapabilities());
-            },
-            onPageFinished: (_) {
-              unawaited(
-                _messageQueue
-                    .resume()
-                    .then((_) async {
-                      await _syncPlatformUiConfiguration();
-                      await _syncPerformanceVisible();
-                    })
-                    .catchError((Object error) {
-                      debugPrint('发送远程 WebView Bridge 启动消息失败: $error');
-                    }),
-              );
-            },
-            onWebResourceError: (error) {
-              recordLocalWebViewConsole(
-                level: 'error',
-                message:
-                    'Resource load failed: ${error.url ?? error.description}',
-                href: error.url,
-                eventType: 'resource.error',
-              );
-              if (error.isForMainFrame == true && mounted) {
-                setState(() => _error = error.description);
-              }
-            },
-          ),
-        );
+      if (controller.platform case final AndroidWebViewController android) {
+        await android.setOnShowFileSelector(_androidFileSelector.select);
+      }
       _controller = controller;
       await controller.loadRequest(_launchUri);
       if (mounted) setState(() {});
@@ -260,6 +272,31 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     final controller = _controller;
     if (controller == null) throw StateError('远程游戏 WebView 尚未创建');
     await controller.runJavaScript(script);
+  }
+
+  Future<void> _handleWebPermissionRequest(
+    WebViewPermissionRequest request,
+  ) async {
+    try {
+      final allowed = await _appBridge!.authorizeWebPermissions(
+        request.types.map((type) => type.name),
+        sourceUri: _localEntryUri,
+      );
+      if (allowed) {
+        await request.grant();
+      } else {
+        await request.deny();
+      }
+    } on Object catch (error) {
+      debugPrint('处理加入端游戏 WebView 权限请求失败: $error');
+      await request.deny();
+    }
+  }
+
+  void _handleNavigationStarted() {
+    _resetTransientUiForLoad();
+    _messageQueue.pause(clearPending: true);
+    unawaited(_appBridge?.resetCapabilities());
   }
 
   Future<void> _syncPlatformUiConfiguration() async {
@@ -346,6 +383,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         entryUri: _launchUri,
         title: context.tr('game.remote_title'),
         appBridge: appBridge,
+        onNavigationStarted: _handleNavigationStarted,
         onRunJavaScriptReady: (runJavaScript) {
           _runWindowsJavaScript = runJavaScript;
           unawaited(_syncPlatformUiConfiguration());

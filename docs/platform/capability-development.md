@@ -25,6 +25,9 @@ lib/core/capabilities/
   capability_registry.dart
   capability_runtime.dart
   default_capability_plugins.dart
+  web_permission/
+    capability_web_permission.dart
+    web_permission_platform_authorizer.dart
   {domain}/
     {domain}_capability_plugin.dart
   support/
@@ -83,7 +86,8 @@ lib/core/capabilities/
 ## 实例生命周期
 
 有公开方法或事件的原生适配能力使用下述实例协议。仅用于 WebView 权限声明、且
-描述符方法和事件均为空的能力不要求游戏创建实例；它们由 WebView 权限闸门消费。
+描述符方法和事件均为空的能力不要求游戏创建实例；它们由统一能力注册表按当前角色
+声明解析，并调用能力插件自己注册的 WebView 权限执行器。
 
 宿主 Bridge 固定使用：
 
@@ -106,6 +110,41 @@ app.capability.error
 
 共享原生资源时应使用引用计数或 Hub。最后一个实例释放后必须停止底层采样或设备占用。
 
+## WebView 权限执行器
+
+需要响应 App WebView 权限回调的插件同时实现 `CapabilityWebPermissionPlugin`。
+每个能力有且只有一个 `webPermissionExecutor`，其唯一键直接复用插件已经注册的
+`descriptor.code`，禁止再定义权限执行器 ID。`webPermissionResources` 只声明
+WebView 资源到该能力 code 的映射，例如摄像头为 `camera`、麦克风为 `microphone`、
+MIDI 为 `midiSysex`；资源名在整个平台能力注册表内必须唯一。
+
+统一层固定执行以下流程，页面 Widget、Windows WebView 和 Android Activity 均不得
+按能力 code 再写分支：
+
+```text
+WebView requested resources
+  -> AppWebViewBridge.authorizeWebPermissions(resources)
+  -> CapabilityRegistry 按 resource 解析已有能力 code
+  -> 统一检查 code 是否属于当前页面角色声明及插件是否可用
+  -> 按 code 分组并查找能力注册时绑定的唯一执行器
+  -> 每个 code 调用一次 authorize(context)
+  -> 全部成功才允许 WebView grant；任一未知、未声明、不可用、拒绝或异常均 deny
+```
+
+执行器不参与资源路由、声明选择或可用性判断，只负责收到 code 对应调用后的平台授权。
+上下文提供 Authority/加入端角色、当前投影后的声明、请求资源、来源和用户手势信息，
+供确有平台差异的授权实现使用。Android 危险权限字符串由对应插件通过
+`WebPermissionPlatformAuthorizer` 提交，原生通道只通用申请插件给出的权限列表，
+不能识别 `camera`、`microphone` 等能力名。iOS/macOS 用途说明、entitlement 和
+Android Manifest 仍属于系统静态声明，新增能力时必须同步配置。
+
+普通浏览器不进入 `AppWebViewBridge` 或该执行器链，完全使用浏览器自己的来源、安全
+策略和权限提示。
+
+主画面使用 `required`，单屏多人控制器使用 `controllerRequired`。Authority 分享
+网关先按页面入口完成角色投影，加入端 App Bridge 只保存投影后的运行时声明；统一
+权限层不得合并、回退或自行选择另一角色的声明。
+
 ## 完整注册流程
 
 新增能力必须走完以下步骤：
@@ -115,28 +154,43 @@ app.capability.error
    events 必须完整。
 2. 实现 `isAvailable`、`create(options)`、`test(timeout)` 和插件级 `dispose()`。
    `isAvailable == false` 必须代表真实平台不可用，不能返回假数据。
-3. `create()` 返回一个 `CapabilityInstance`；实例实现 `events`、
+3. 权限声明型能力同时实现 `CapabilityWebPermissionPlugin`，只在插件内注册资源名和
+   唯一平台授权执行器；执行器沿用 `descriptor.code`，不得另设 ID，也不得修改页面
+   Widget、Windows WebView 或公共权限 switch。
+4. `create()` 返回一个 `CapabilityInstance`；实例实现 `events`、
    `invoke(method, arguments)` 和幂等 `dispose()`。插件在 `invoke()` 内按方法名
    精确分支并校验参数。
-4. 在 `default_capability_plugins.dart` 的 `defaultCapabilityRegistrations` 增加一个
+5. 在 `default_capability_plugins.dart` 的 `defaultCapabilityRegistrations` 增加一个
    `DefaultCapabilityRegistration`。`descriptor` 指向插件的同一静态描述符，
    `create(dependencies)` 构造真实插件。只注册这一次。
-5. 需要共享平台服务时扩展 `DefaultCapabilityDependencies`，由
+6. 需要共享平台服务时扩展 `DefaultCapabilityDependencies`，由
    `createDefaultCapabilityRegistry()` 注入；不得让插件直接读取页面 Widget 或建立
    第二个全局能力表。
-6. 不新增 `app.sensor.*` 等设备专用 Bridge 命令。公开调用继续使用通用
+7. 不新增 `app.sensor.*` 等设备专用 Bridge 命令。公开调用继续使用通用
    `app.capability.create/invoke/dispose`，事件继续使用
    `app.capability.event/error`。
-7. 更新游戏作者文档和版本记录，并验证 App bootstrap、工作区能力列表、项目能力
+8. 更新游戏作者文档和版本记录，并验证 App bootstrap、工作区能力列表、项目能力
    设置、AI 提示词、能力自检和普通浏览器支持过滤都自动反映新插件。
 
 构造 `CapabilityRegistry` 时执行：
 
 ```text
 _plugins = { plugin.descriptor.code: plugin }
+_webPermissionCodeByResource = {
+  resource: plugin.descriptor.code
+  for plugin implements CapabilityWebPermissionPlugin
+  for resource in plugin.webPermissionResources
+}
+_webPermissionExecutorByCode = {
+  plugin.descriptor.code: plugin.webPermissionExecutor
+  for plugin implements CapabilityWebPermissionPlugin
+}
 
 _plugins.length != 输入 plugins.length
   => 失败："能力插件 code 不能重复"
+
+任一插件的 webPermissionResources 为空，或任一 resource 为空或重复
+  => 失败："WebView 权限资源不能为空或重复"
 ```
 
 因此两个插件的 `descriptor.code` 完全相等时启动即失败；大小写不同会被视为两个不同
@@ -404,14 +458,15 @@ Workspace 按能力 code 写死参数或测试逻辑。
 - 能力声明、用户本次确认、设备可用性三项全部满足后才能创建实例。
 - 用户确认不持久化；插件不能自行扩大到未声明能力。
 - `media.camera` 和 `device.midi` 没有方法或事件；`media.microphone` 另有原生语音
-  转文字方法。WebView 收到三者对应权限回调时必须逐项检查当前角色声明，未声明即
-  拒绝，不能一次放行未知资源。
+  转文字方法。三者分别在自己的插件中注册唯一 WebView 权限执行器；统一注册表收到
+  App WebView 权限回调时把资源映射为现有能力 code，完成当前角色声明和可用性检查后，
+  按 code 调用执行器，未声明或未知资源一律拒绝。
 - Android 摄像头和麦克风在声明检查通过后还必须申请系统运行时权限；用户拒绝时
   WebView 请求同样失败。iOS/macOS 必须配置用途说明和沙盒 entitlement。
 - 原生语音识别只适合命令和短句；插件必须转发部分、最终结果和声音级别，页面释放
   时取消仍在运行的识别。平台可能早于 `listenFor` 或 `pauseFor` 结束任务。
 - 加速度计、陀螺仪、设备方向等非敏感能力直接使用标准 Web API，不进入能力
-  注册表，也不由 Playmesh 权限闸门拦截。
+  注册表，也不由 Playmesh WebView 权限执行器处理。
 - 文件选择由 `<input type="file">` 的用户动作触发，宿主只返回用户当次选择的文件，
   不声明能力，也不允许静默读取文件。
 - 能力声明只用于敏感 WebView 权限和 Playmesh 已做多平台适配的能力，两者均按需
@@ -435,7 +490,7 @@ Workspace 按能力 code 写死参数或测试逻辑。
 
 1. 新建独立插件目录和实现。
 2. 完成描述符、Schema、实例、`test()` 与 `dispose()`；权限声明型插件允许方法和
-   事件为空，但每个能力仍使用独立插件，便于后续增加原生能力。
+   事件为空，但必须在自身注册 WebView 资源及唯一平台授权执行器。
 3. 在 `default_capability_plugins.dart` 注册一次。
 4. 检查 App Bridge 能否通过通用实例协议完成调用，不新增设备专用 Bridge 命令。
 5. 确认工作区能力列表、项目设置、能力测试和 Agent 注册表自动出现新插件。
@@ -450,6 +505,8 @@ Workspace 按能力 code 写死参数或测试逻辑。
 - 方法参数、事件和错误符合描述符。
 - 多实例共享资源不会重复开启或过早关闭底层设备。
 - `dispose()`、页面重载和退出都能释放资源。
-- App/浏览器、主画面/控制器角色隔离正确。
+- App Authority/加入端角色隔离正确；普通浏览器不进入执行器链。
+- WebView 权限资源无重复；未知、未声明、不可用和执行器拒绝均不能放行。
+- 本地端、加入端和 Windows 宿主不包含具体权限能力的 code/resource 分支。
 - 自检有超时、明确状态且无危险副作用。
 - Android/iOS/桌面支持状态与真实实现一致。

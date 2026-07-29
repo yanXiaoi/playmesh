@@ -5,6 +5,8 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../capability_plugin.dart';
+import '../web_permission/capability_web_permission.dart';
+import '../web_permission/web_permission_platform_authorizer.dart';
 
 typedef AudioSpeechResultCallback =
     void Function(AudioSpeechRecognitionResult result);
@@ -145,11 +147,16 @@ class AudioSpeechRecognitionResult {
 }
 
 /// 音频能力独立承载 Web 麦克风声明与原生语音转文字。
-class AudioCapabilityPlugin implements CapabilityPlugin {
-  AudioCapabilityPlugin({AudioSpeechRecognitionEngine? speechEngine})
-    : _speechEngine = speechEngine ?? NativeAudioSpeechRecognitionEngine();
+class AudioCapabilityPlugin
+    implements CapabilityPlugin, CapabilityWebPermissionPlugin {
+  AudioCapabilityPlugin({
+    AudioSpeechRecognitionEngine? speechEngine,
+    this.webPermissionAuthorizer =
+        const DefaultWebPermissionPlatformAuthorizer(),
+  }) : _speechEngine = speechEngine ?? NativeAudioSpeechRecognitionEngine();
 
   static const code = 'media.microphone';
+  static const webPermissionResource = 'microphone';
   static const capabilityDescriptor = CapabilityDescriptor(
     code: code,
     name: '麦克风与语音转文字',
@@ -246,11 +253,24 @@ class AudioCapabilityPlugin implements CapabilityPlugin {
   );
 
   final AudioSpeechRecognitionEngine _speechEngine;
+  final WebPermissionPlatformAuthorizer webPermissionAuthorizer;
+  @override
+  late final CapabilityWebPermissionExecutor webPermissionExecutor =
+      CapabilityWebPermissionExecutor(
+        authorize: (_) => webPermissionAuthorizer.authorize(
+          const WebPermissionPlatformRequest(
+            androidPermissions: ['android.permission.RECORD_AUDIO'],
+          ),
+        ),
+      );
   _AudioCapabilityInstance? _activeInstance;
   bool _initialized = false;
 
   @override
   CapabilityDescriptor get descriptor => capabilityDescriptor;
+
+  @override
+  List<String> get webPermissionResources => const [webPermissionResource];
 
   @override
   bool get isAvailable {

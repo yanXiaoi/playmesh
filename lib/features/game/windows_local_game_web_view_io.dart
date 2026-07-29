@@ -4,8 +4,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
-import '../../core/capabilities/audio/audio_capability_plugin.dart';
-import '../../core/capabilities/camera/camera_capability_plugin.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/localization/playmesh_localization.dart';
@@ -21,7 +19,6 @@ class WindowsLocalGameWebView extends StatefulWidget {
     this.bridge,
     this.appBridge,
     this.appSdkInputTakenOver = true,
-    this.declaredCapabilities = const [],
     this.onNavigationStarted,
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
@@ -33,7 +30,6 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
   final bool appSdkInputTakenOver;
-  final List<String> declaredCapabilities;
   final VoidCallback? onNavigationStarted;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
@@ -277,15 +273,14 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
     WebviewPermissionKind kind,
     bool isUserInitiated,
   ) async {
-    final capabilityCode = switch (kind) {
-      WebviewPermissionKind.camera => CameraCapabilityPlugin.code,
-      WebviewPermissionKind.microphone => AudioCapabilityPlugin.code,
-      _ => null,
-    };
-    if (capabilityCode == null) {
-      return WebviewPermissionDecision.none;
-    }
-    return widget.declaredCapabilities.contains(capabilityCode)
+    final allowed =
+        await widget.appBridge?.authorizeWebPermissions(
+          [kind.name],
+          sourceUri: Uri.tryParse(url),
+          isUserInitiated: isUserInitiated,
+        ) ??
+        false;
+    return allowed
         ? WebviewPermissionDecision.allow
         : WebviewPermissionDecision.deny;
   }

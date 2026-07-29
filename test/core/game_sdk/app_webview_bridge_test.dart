@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/capabilities/camera/camera_capability_plugin.dart';
+import 'package:playmesh/core/capabilities/capability_registry.dart';
 import 'package:playmesh/core/capabilities/vibration/vibration_capability_plugin.dart';
+import 'package:playmesh/core/capabilities/web_permission/web_permission_platform_authorizer.dart';
 import 'package:playmesh/core/game_sdk/app_webview_bridge.dart';
 import 'package:playmesh/core/platform/app_device_service.dart';
 import 'package:playmesh/models/game_summary.dart';
@@ -77,8 +80,41 @@ void main() {
 
     expect(device['declaredCapabilities'], ['device.vibration']);
     expect(device['capabilities'], ['device.vibration']);
+    expect(bridge.runtimeDeclaredCapabilities, ['device.vibration']);
     expect(runtime['coreBase'], 'http://127.0.0.1:45678/');
     expect(runtime['playerSource'], 'server');
+
+    await bridge.resetCapabilities();
+    expect(bridge.runtimeDeclaredCapabilities, isEmpty);
+  });
+
+  test('App Bridge 统一按远程页面运行时声明路由 WebView 权限', () async {
+    final bridge = AppWebViewBridge(
+      userId: 'u-web-permission',
+      nickname: '远程玩家',
+      acceptRuntimeGameDeclaration: true,
+      capabilityRegistry: CapabilityRegistry([
+        CameraCapabilityPlugin(
+          webPermissionAuthorizer: _AllowWebPermissionAuthorizer(),
+        ),
+      ]),
+    );
+    addTearDown(bridge.close);
+
+    expect(await bridge.authorizeWebPermissions(['camera']), isFalse);
+    await _command(
+      bridge,
+      'app.game.configure',
+      'configure-camera',
+      payload: {
+        'declaredCapabilities': ['media.camera'],
+      },
+    );
+    expect(await bridge.authorizeWebPermissions(['camera']), isTrue);
+    expect(await bridge.authorizeWebPermissions(['microphone']), isFalse);
+
+    await bridge.resetCapabilities();
+    expect(await bridge.authorizeWebPermissions(['camera']), isFalse);
   });
 
   test('未声明或未确认时拒绝创建插件实例', () async {
@@ -338,4 +374,9 @@ class _FakeVibrationDriver implements VibrationDriver {
   Future<void> cancel() async {
     cancelCount += 1;
   }
+}
+
+class _AllowWebPermissionAuthorizer implements WebPermissionPlatformAuthorizer {
+  @override
+  Future<bool> authorize(WebPermissionPlatformRequest request) async => true;
 }

@@ -4,14 +4,19 @@ import 'capability_plugin.dart';
 import 'capability_registry.dart';
 import 'midi/midi_capability_plugin.dart';
 import 'vibration/vibration_capability_plugin.dart';
+import 'web_permission/web_permission_platform_authorizer.dart';
 
 typedef DefaultCapabilityPluginFactory =
     CapabilityPlugin Function(DefaultCapabilityDependencies dependencies);
 
 class DefaultCapabilityDependencies {
-  const DefaultCapabilityDependencies({required this.vibrationDriver});
+  const DefaultCapabilityDependencies({
+    required this.vibrationDriver,
+    required this.webPermissionAuthorizer,
+  });
 
   final VibrationDriver vibrationDriver;
+  final WebPermissionPlatformAuthorizer webPermissionAuthorizer;
 }
 
 class DefaultCapabilityRegistration {
@@ -28,15 +33,21 @@ final defaultCapabilityRegistrations =
     List<DefaultCapabilityRegistration>.unmodifiable([
       DefaultCapabilityRegistration(
         descriptor: CameraCapabilityPlugin.capabilityDescriptor,
-        create: (_) => const CameraCapabilityPlugin(),
+        create: (dependencies) => CameraCapabilityPlugin(
+          webPermissionAuthorizer: dependencies.webPermissionAuthorizer,
+        ),
       ),
       DefaultCapabilityRegistration(
         descriptor: AudioCapabilityPlugin.capabilityDescriptor,
-        create: (_) => AudioCapabilityPlugin(),
+        create: (dependencies) => AudioCapabilityPlugin(
+          webPermissionAuthorizer: dependencies.webPermissionAuthorizer,
+        ),
       ),
       DefaultCapabilityRegistration(
         descriptor: MidiCapabilityPlugin.capabilityDescriptor,
-        create: (_) => const MidiCapabilityPlugin(),
+        create: (dependencies) => MidiCapabilityPlugin(
+          webPermissionAuthorizer: dependencies.webPermissionAuthorizer,
+        ),
       ),
       DefaultCapabilityRegistration(
         descriptor: VibrationCapabilityPlugin.capabilityDescriptor,
@@ -57,9 +68,13 @@ final defaultCapabilityDescriptorRegistry =
 
 CapabilityRegistry createDefaultCapabilityRegistry({
   VibrationDriver? vibrationDriver,
+  WebPermissionPlatformAuthorizer? webPermissionAuthorizer,
 }) {
   final dependencies = DefaultCapabilityDependencies(
     vibrationDriver: vibrationDriver ?? const NativeVibrationDriver(),
+    webPermissionAuthorizer:
+        webPermissionAuthorizer ??
+        const DefaultWebPermissionPlatformAuthorizer(),
   );
   return CapabilityRegistry(
     defaultCapabilityRegistrations.map(

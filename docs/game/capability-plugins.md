@@ -50,6 +50,11 @@ Playmesh 只要求游戏声明两类能力：
 | `media.microphone` | `navigator.mediaDevices.getUserMedia({audio: true})` | 声明后放行麦克风权限请求；另提供原生语音转文字 |
 | `device.midi` | `navigator.requestMIDIAccess({sysex: true})` | 声明后放行 MIDI SysEx 权限请求；当前 App 适配状态以注册表为准 |
 
+App 的本地游戏页和加入页使用同一个能力权限注册表。平台注册表按当前页面角色的
+`required` 或 `controllerRequired` 把请求资源映射为现有能力 code，再调用该能力
+注册的唯一平台授权执行器；所有请求资源都已声明、插件可用且平台授权成功时才放行，
+未知资源默认拒绝。普通浏览器不进入 App 权限执行链，仍由浏览器自身决定是否授权。
+
 示例：
 
 ```js

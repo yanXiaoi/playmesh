@@ -750,7 +750,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。`required` 用于主游戏页面，单屏多人可用 `controllerRequired` 独立声明控制器页面需求；能力 ID 按功能命名，不绑定 App 或浏览器实现，平台按运行角色和环境选择适配器。
 - 平台能力由 `lib/core/capabilities/` 下的插件注册表统一维护。每个能力拥有独立目录，并在同一插件中定义描述符、`apiVersion`、方法、事件、可用性、实例创建、自检与释放；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。Flutter 不支持运行时目录扫描，新增插件后只需在默认注册入口增加该插件，不再维护平行元数据或测试适配器。
 - 当前支持声明 `media.camera`、`media.microphone`、`device.midi` 和 `device.vibration`。文件缺失或 `required` 为空时不弹确认框；非空时主 SDK在 App 和浏览器每次加载游戏时展示全部所需能力，并等待用户“同意并进入”或“拒绝并退出”。当前平台不支持的能力显示“本平台暂不支持”，但不会阻止同意后进入。授权结果不持久化，也不写入权威主机。
-- 摄像头、麦克风和 MIDI 声明后可以直接使用标准 Web API，WebView 权限回调会拒绝未声明请求。`media.microphone@1.1.0` 另提供原生短语音转文字。描述符公开了方法或事件的原生适配能力通过 `playmesh.app.capabilities.create(code, options)` 创建实例，再以 `invoke/on/onError/dispose` 操作。
+- 摄像头、麦克风和 MIDI 声明后可以直接使用标准 Web API。App WebView 权限回调由统一能力注册表把资源映射为现有能力 code，校验当前角色声明和插件可用性后，按 code 调用该能力唯一的平台授权执行器；普通浏览器不进入该执行链。`media.microphone@1.1.0` 另提供原生短语音转文字。描述符公开了方法或事件的原生适配能力通过 `playmesh.app.capabilities.create(code, options)` 创建实例，再以 `invoke/on/onError/dispose` 操作。
 - `displayModes` 是单元素数组，必须且只能声明 `multi_screen` 或 `single_screen_multiplayer`。声明 `single_screen_multiplayer` 时，游戏包必须提供 `app/controller/index.html`。
 - `authority.entry` 声明权威处理端入口路径。支持多人联机的游戏必须提供该入口；单机游戏可以省略。入口必须位于游戏包内，安装时校验路径不能越界，且不能是可执行文件或外部网络地址。
 - `authority.entry` 指向的代码只由创建会话的 App 主机 Authority Runtime 加载，不会被普通玩家页面加载，也不会由 Go Core 解析。
@@ -779,10 +779,12 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 
 1. **资源访问**：外部浏览器能否通过 HTTP 读取 `app/index.html`、JS、CSS、图片。
 2. **网页标准能力**：浏览器自身允许网页使用的 DOM、键盘事件、触摸事件、运动传感器和文件选择。其中不经过宿主敏感权限回调的部分不由 Playmesh 能力声明控制。
-3. **Playmesh 平台能力**：WebView 敏感权限闸门，以及由 App/Go/Game SDK 提供的多平台适配、玩家身份、会话和输入路由。
+3. **Playmesh 平台能力**：由统一能力注册表按当前页面角色声明路由的 WebView 敏感
+   权限执行器，以及由 App/Go/Game SDK 提供的多平台适配、玩家身份、会话和输入路由。
 
-App WebView 对摄像头、麦克风和 MIDI SysEx 权限回调额外执行
-`capabilities.json` 声明检查，未声明即拒绝；声明通过后仍由系统权限和用户决定。
+App WebView 对摄像头、麦克风和 MIDI SysEx 权限回调额外执行统一能力检查：资源先
+映射为已有能力 code，再校验当前角色的 `capabilities.json` 声明和插件可用性，并按
+code 调用能力唯一执行器；未声明即拒绝，执行器通过后仍由系统权限和用户决定。
 加速度计、陀螺仪、设备方向、普通键盘事件和用户主动文件选择不进入能力声明。
 外部浏览器仍完全受自身安全策略、来源、设备支持和用户授权控制。
 

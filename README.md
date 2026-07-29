@@ -27,6 +27,8 @@ Playmesh 还把 AI 接入游戏开发全流程：平台会根据当前项目、�
 
 项目说明：本项目目前采用 AI 驱动的集中式开发模式。为保持架构和代码生成流程的一致性，
 暂不接受 Pull Request，欢迎通过 Issue 报告 Bug 或提出功能建议。
+## 本项目能做什么？
+年会小游戏、所有类型的网页单机/联机游戏、各种小工具等所有网页相关的都能运行
 
 ## 核心能力
 
@@ -216,12 +218,15 @@ Catalog、已审核下载与 Relay；`16669` 是只承载 `PLAYMESH_ADMIN_PATH` 
 脚本会在构建前生成 SDK，重新构建目标平台 Go Core，校验包内入口并输出 SHA-256。
 
 提交当前 `master` 的所有变更后，可使用当前 `pubspec.yaml` 的
-`MAJOR.MINOR.PATCH+BUILD` 一键构建并发布 GitHub Release：
+`MAJOR.MINOR.PATCH+BUILD` 一键构建，并同时发布 GitHub 与 Gitee Release：
 
 ```powershell
 # 首次使用先安装并登录 GitHub CLI
 winget install --id GitHub.cli
 gh auth login
+
+# 临时使用：Gitee 私人令牌只注入当前进程，不写入仓库
+$env:GITEE_ACCESS_TOKEN = '<具有 project 权限的私人令牌>'
 
 # 构建 Android 与 Windows，并发布 v{VERSION}-build{BUILD}
 .\tool\publish_github_release.ps1
@@ -229,13 +234,21 @@ gh auth login
 # 只发布某个平台
 .\tool\publish_github_release.ps1 -Target android
 .\tool\publish_github_release.ps1 -Target windows
+
+# GitHub 已成功而 Gitee 中途失败时，只重试 Gitee，不重新构建
+.\tool\publish_gitee_release.ps1 -Target all
 ```
 
 脚本要求工作树干净且当前分支为 `master`，会推送 `origin/master`、调用统一发布构建、
 生成 `SHA256SUMS.txt`，在 Release 正文链接到对应标签下的
-`docs/version/<版本号>.md`，再创建 GitHub Release 并上传产物。已有产物可使用
-`-SkipBuild`；只想创建草稿可加 `-Draft`。Android 默认要求正式签名，显式允许 Debug
-签名时还必须同时使用 `-Draft` 或 `-Prerelease`，避免误发成正式版本。
+`docs/version/<版本号>.md`，再创建两个平台的同名 Release 并上传同一批产物。Gitee
+仓库固定为 `yanxao/playmesh`；发布前会等待镜像包含本次提交，重复执行时会复用发行版
+并跳过同名附件。令牌也可以一次性保存在 Git 已忽略的
+`release/tools/gitee-token.txt`，以后无需每次设置环境变量。已有产物可使用
+`-SkipBuild`；GitHub 已成功时可单独执行
+`publish_gitee_release.ps1`。只想创建 GitHub 草稿可加 `-Draft`，草稿不会同步到
+Gitee；确需仅发布 GitHub 时可加 `-SkipGitee`。Android 默认要求正式签名，显式允许
+Debug 签名时还必须同时使用 `-Draft` 或 `-Prerelease`，避免误发成正式版本。
 
 签名、产物目录、工具链隔离和 Windows Ninja 构建说明见：
 

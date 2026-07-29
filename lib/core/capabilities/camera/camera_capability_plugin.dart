@@ -3,11 +3,18 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../capability_plugin.dart';
+import '../web_permission/capability_web_permission.dart';
+import '../web_permission/web_permission_platform_authorizer.dart';
 
-class CameraCapabilityPlugin implements CapabilityPlugin {
-  const CameraCapabilityPlugin();
+class CameraCapabilityPlugin
+    implements CapabilityPlugin, CapabilityWebPermissionPlugin {
+  CameraCapabilityPlugin({
+    this.webPermissionAuthorizer =
+        const DefaultWebPermissionPlatformAuthorizer(),
+  });
 
   static const code = 'media.camera';
+  static const webPermissionResource = 'camera';
   static const capabilityDescriptor = CapabilityDescriptor(
     code: code,
     name: '摄像头',
@@ -17,8 +24,22 @@ class CameraCapabilityPlugin implements CapabilityPlugin {
     events: [],
   );
 
+  final WebPermissionPlatformAuthorizer webPermissionAuthorizer;
+  @override
+  late final CapabilityWebPermissionExecutor webPermissionExecutor =
+      CapabilityWebPermissionExecutor(
+        authorize: (_) => webPermissionAuthorizer.authorize(
+          const WebPermissionPlatformRequest(
+            androidPermissions: ['android.permission.CAMERA'],
+          ),
+        ),
+      );
+
   @override
   CapabilityDescriptor get descriptor => capabilityDescriptor;
+
+  @override
+  List<String> get webPermissionResources => const [webPermissionResource];
 
   @override
   bool get isAvailable {

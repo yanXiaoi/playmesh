@@ -7,9 +7,13 @@ param(
   [switch]$AllowDebugSigning,
   [switch]$Draft,
   [switch]$Prerelease,
+  [switch]$SkipGitee,
   [string]$AndroidFlutter,
   [string]$Remote = 'origin',
-  [string]$Branch = 'master'
+  [string]$Branch = 'master',
+  [string]$GiteeRepository = 'yanxao/playmesh',
+  [ValidateRange(0, 1800)]
+  [int]$GiteeMirrorTimeoutSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,6 +22,20 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pubspecPath = Join-Path $repoRoot 'pubspec.yaml'
 $buildScript = Join-Path $PSScriptRoot 'build_release.ps1'
+$giteePublishScript =
+  Join-Path $PSScriptRoot 'publish_gitee_release.ps1'
+$publishToGitee = (-not $SkipGitee) -and (-not $Draft)
+$localGiteeTokenPath =
+  Join-Path $repoRoot 'release\tools\gitee-token.txt'
+$hasGiteeToken =
+  -not [string]::IsNullOrWhiteSpace($env:GITEE_ACCESS_TOKEN)
+if ((-not $hasGiteeToken) -and
+    (Test-Path -LiteralPath $localGiteeTokenPath -PathType Leaf)) {
+  $localGiteeToken =
+    (Get-Content -LiteralPath $localGiteeTokenPath -Raw -Encoding UTF8).Trim()
+  $hasGiteeToken = -not [string]::IsNullOrWhiteSpace($localGiteeToken)
+  $localGiteeToken = $null
+}
 
 function Invoke-CheckedCommand {
   param(
@@ -53,6 +71,15 @@ if (-not (Test-Path -LiteralPath $pubspecPath -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
   throw "Release build script was not found: $buildScript"
+}
+if ($publishToGitee -and
+    -not (Test-Path -LiteralPath $giteePublishScript -PathType Leaf)) {
+  throw "Gitee release script was not found: $giteePublishScript"
+}
+if ($publishToGitee -and (-not $hasGiteeToken)) {
+  throw 'Gitee credentials were not found. Create a personal access token ' +
+    'with the project scope, then set GITEE_ACCESS_TOKEN, save it to ' +
+    "$localGiteeTokenPath, or use -SkipGitee."
 }
 
 $gitCommand = Get-Command git -ErrorAction SilentlyContinue
@@ -225,6 +252,31 @@ try {
   Invoke-CheckedCommand `
     -Command $ghCommand.Source `
     -Arguments $releaseArguments
+
+  if ($Draft) {
+    Write-Output 'Skipping Gitee Release because this is a GitHub draft.'
+  } elseif (-not $SkipGitee) {
+    $giteeParameters = @{
+      Target = $Target
+      Repository = $GiteeRepository
+      CommitSha = $commitSha
+      MirrorTimeoutSeconds = $GiteeMirrorTimeoutSeconds
+    }
+    if ($Prerelease) {
+      $giteeParameters.Prerelease = $true
+    }
+    try {
+      & $giteePublishScript @giteeParameters
+      if (-not $?) {
+        throw 'Gitee release publishing failed.'
+      }
+    } catch {
+      throw "GitHub Release $tagName was published, but the Gitee " +
+        "Release failed. Retry without rebuilding:`n" +
+        "  .\tool\publish_gitee_release.ps1 -Target $Target`n" +
+        $_.Exception.Message
+    }
+  }
 
   Write-Output 'Published artifacts:'
   foreach ($artifact in $artifacts) {

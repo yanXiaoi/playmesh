@@ -44,6 +44,11 @@ Game Package
 - Game SDK 是游戏访问 Playmesh 原生适配能力的唯一入口，游戏页面不直接调用 Flutter、
   Go、原生桥接或任意端口。浏览器标准 API 可以直接使用；仅在 WebView 权限回调覆盖
   的敏感权限和 Playmesh 多平台适配能力需要写入 `capabilities.json`。
+- App WebView 敏感权限必须由统一能力注册表处理：统一层把资源解析为现有能力 code，
+  按当前页面角色声明检查 code 与插件可用性，再按 code 调用能力注册时绑定的唯一权限
+  执行器。执行器不得另设 ID，也不参与路由和声明判断，只实现自身平台授权。本地页、
+  加入页、Windows WebView 与 Android Activity 不得按 camera、microphone、MIDI 或
+  能力 code 建立第二套映射或 switch；普通浏览器不进入 App 原生权限执行链。
 - 游戏分享运行时采用严格的最小公开面，只允许提供 `/app/**`、`/bucket/**`、`/playmesh/**`，以及 SDK 在浏览器沙箱内确实无法替代的受控底层连接能力（例如当前游戏受控的 WebSocket Upgrade）。该清单是完整公开边界而非接口示例。新增平台功能时必须遵循“SDK 优先”原则，优先修改 Game SDK 或 App Bridge SDK，不得为接入便利新增分享 HTTP 业务接口；只有确属连接或传输层的能力才可增加底层入口，且必须固定绑定当前游戏和会话、在建连前鉴权、禁止任意目标地址，并同步补齐协议文档与回归测试。
 - SDK 分为公共游戏运行时 `playmesh.js` 与当前终端运行时 `playmesh-app.js`。前者在所有平台提供一致 API，游戏声明、会话、玩家、Authority、同步、性能和主机存储只来自 Authority 主机或受控 Game SDK Bridge；后者负责当前 Windows/Android/浏览器终端的平台环境、App 身份、设备能力、权限、全屏、输入、本机 Console 日志和平台覆盖层。App SDK 可以读取 Game SDK 公共数据用于展示，但禁止通过 App bootstrap、原生桥、URL 或全局变量复制游戏状态；Game SDK 也禁止伪造终端能力和本机日志。App WebView 与普通浏览器都由平台在主 SDK 前自动注入 App SDK，普通浏览器的原生能力 `isAvailable()` 为 false。日志只保留在当前设备，禁止经 Session 或游戏网关跨设备转发。
 - 游戏可以自带引擎或工具库，但必须放在自己的游戏包内并通过包校验流程管理；不得因为使用第三方引擎而绕过 SDK 的身份、存储和联机边界。
@@ -296,7 +301,7 @@ Android 与 iOS 的 `playmesh-library` 位于系统应用支持目录。Windows�
 
 ## 能力插件与 WebView 权限
 
-能力宿主采用有状态实例协议，不把所有能力约束为订阅。公开桥接命令固定为 `app.capability.create/invoke/dispose`，异步输出固定为 `app.capability.event/error`；公开 SDK 通过 `playmesh.app.capabilities.create()` 返回 `invoke/on/onError/dispose` 实例。具体方法和事件由插件 `apiVersion` 定义，录音、语音转写等能力可以要求用户主动调用 `start/stop`。仅用于 WebView 权限声明且方法、事件均为空的插件不要求游戏创建实例，但每个能力仍必须保留独立插件与执行器。
+能力宿主采用有状态实例协议，不把所有能力约束为订阅。公开桥接命令固定为 `app.capability.create/invoke/dispose`，异步输出固定为 `app.capability.event/error`；公开 SDK 通过 `playmesh.app.capabilities.create()` 返回 `invoke/on/onError/dispose` 实例。具体方法和事件由插件 `apiVersion` 定义，录音、语音转写等能力可以要求用户主动调用 `start/stop`。仅用于 WebView 权限声明且方法、事件均为空的插件不要求游戏创建实例，但每个能力仍必须保留独立插件和以该能力 code 注册的唯一权限执行器。
 
 当前调用链：
 
@@ -304,8 +309,9 @@ Android 与 iOS 的 `playmesh-library` 位于系统应用支持目录。Windows�
 capabilities.json：按需声明 media.camera / media.microphone / device.midi
   -> SDK 初始化：App/浏览器每次展示能力确认，拒绝则退出
   -> 游戏直接调用 getUserMedia() / requestMIDIAccess({sysex:true})
-  -> WebView 权限回调逐项核对当前角色声明
-  -> 未声明即拒绝；声明后继续系统权限流程
+  -> App WebView 权限回调把资源统一映射为能力 code
+  -> 统一层核对当前角色声明与插件可用性，按 code 调用唯一执行器
+  -> 未声明即拒绝；执行器拒绝或系统权限失败同样拒绝
 
 capabilities.json：声明 device.vibration
   -> capabilities.create('device.vibration', {})：创建实例

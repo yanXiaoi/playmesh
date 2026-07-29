@@ -9,6 +9,7 @@ import '../capabilities/capability_registry.dart';
 import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../capabilities/vibration/vibration_capability_plugin.dart';
+import '../capabilities/web_permission/capability_web_permission.dart';
 import '../platform/app_device_service.dart';
 import '../profile/user_profile_store.dart';
 import '../../models/game_summary.dart';
@@ -22,6 +23,7 @@ class AppWebViewBridge {
     this.acceptRuntimeGameDeclaration = false,
     this.coreBaseUri,
     this.playerSource = 'lan_app',
+    this.webPermissionRole = AppWebPermissionRole.authority,
     Map<String, Object?>? platformUiConfiguration,
     this.deviceService = const AppDeviceService(),
     VibrationDriver? vibrationDriver,
@@ -49,6 +51,7 @@ class AppWebViewBridge {
   final bool acceptRuntimeGameDeclaration;
   final Uri? coreBaseUri;
   final String playerSource;
+  final AppWebPermissionRole webPermissionRole;
   final AppDeviceService deviceService;
   final Future<void> Function()? onOpenSharePanel;
   final bool showShareAction;
@@ -60,6 +63,22 @@ class AppWebViewBridge {
   late List<String> _runtimeDeclaredCapabilities = List.unmodifiable(
     declaredCapabilities,
   );
+
+  List<String> get runtimeDeclaredCapabilities => _runtimeDeclaredCapabilities;
+
+  Future<bool> authorizeWebPermissions(
+    Iterable<String> resources, {
+    Uri? sourceUri,
+    bool? isUserInitiated,
+  }) {
+    return capabilityRegistry.authorizeWebPermissions(
+      resources: resources,
+      declaredCapabilities: _runtimeDeclaredCapabilities,
+      role: webPermissionRole,
+      sourceUri: sourceUri,
+      isUserInitiated: isUserInitiated,
+    );
+  }
 
   Future<void> handleJavaScriptMessage(
     String rawMessage,
@@ -287,7 +306,15 @@ class AppWebViewBridge {
   }
 
   Future<void> resetCapabilities() {
-    return _capabilityRuntime.reset();
+    final previousRuntime = _capabilityRuntime;
+    if (acceptRuntimeGameDeclaration) {
+      _runtimeDeclaredCapabilities = List.unmodifiable(declaredCapabilities);
+      _capabilityRuntime = CapabilityRuntime(
+        registry: capabilityRegistry,
+        declaredCapabilities: _runtimeDeclaredCapabilities,
+      );
+    }
+    return previousRuntime.reset();
   }
 
   Future<void> close() async {
