@@ -345,7 +345,7 @@ assert.deepEqual(
   Object.keys(window.playmesh.session.getCurrent().players[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-assert.equal(window.playmesh.version, "3.0.0");
+assert.equal(window.playmesh.version, "3.1.0");
 const unrelatedPlatformFocusTarget = { isConnected: true };
 window.document.activeElement = unrelatedPlatformFocusTarget;
 window.playmesh.__receive({ type: "platform.ui.restoreGameFocus" });

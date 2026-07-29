@@ -26,7 +26,7 @@ PLAYMESH 对话 AI 游戏开发提示
 - `dangerous=true` 的接口只在用户需求确实要求该操作时生成；执行时平台会暂停并请求开发者审批。
 
 【SDK 与能力】
-- 当前 Game SDK 版本字符串，当前为 3.0.0。
+- 当前 Game SDK 版本字符串，当前为 3.1.0。
 - 本提示随后附带同一次 SDK 构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`，它们是方法、参数、返回值、类型、版本和中文 JSDoc 的唯一事实源。不得臆造声明中不存在的成员。
 - `playmesh.storage.getBucket(name)` 返回 Bucket；JSON 数据保持私有，上传文件通过返回的 `/bucket/...` 地址在运行时读取。
 - `playmesh.binary` 只用于多人原始 Uint8Array 通信；禁止自行创建 WebSocket。

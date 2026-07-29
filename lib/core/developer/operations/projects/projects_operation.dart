@@ -24,6 +24,7 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
       'maxPlayers': {'type': 'integer'},
       'tags': {
         'type': 'array',
+        'maxItems': maxGameTagCount,
         'items': {'type': 'string'},
       },
       'requiredCapabilities': {

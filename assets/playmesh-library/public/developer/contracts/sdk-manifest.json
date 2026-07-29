@@ -1,5 +1,5 @@
 {
-  "version": "3.0.0",
+  "version": "3.1.0",
   "channelVersion": "3.0.0",
   "script": "/playmesh/sdk/v1/playmesh.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
@@ -142,7 +142,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "3.0.0"
+          "value": "3.1.0"
         },
         {
           "name": "ready",

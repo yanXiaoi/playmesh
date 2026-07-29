@@ -65,7 +65,7 @@ void main() {
             SdkFeatureRegistry.appSdkVersion,
           ),
     );
-    expect(SdkFeatureRegistry.gameSdkVersion, '3.0.0');
+    expect(SdkFeatureRegistry.gameSdkVersion, '3.1.0');
     expect(SdkFeatureRegistry.appSdkVersion, '3.0.0');
     expect(
       SdkFeatureRegistry.gameSdkReleases
@@ -77,7 +77,7 @@ void main() {
             ),
           )
           .toList(),
-      [('1.0.0', '3.0.0', '3.0.0')],
+      [('1.0.0', '3.1.0', '3.1.0')],
     );
     expect(
       SdkFeatureRegistry.appSdkReleases
@@ -99,7 +99,7 @@ void main() {
       SdkFeatureRegistry.appSdkReleases.single.commandNames,
       SdkFeatureRegistry.appCommandNames,
     );
-    expect(SdkFeatureRegistry.resolveGameSdkVersion('1.0.0'), '3.0.0');
+    expect(SdkFeatureRegistry.resolveGameSdkVersion('1.0.0'), '3.1.0');
     expect(SdkFeatureRegistry.resolveAppSdkVersion('1.0.0'), '3.0.0');
     expect(
       SdkFeatureRegistry.sdkFile('playmesh.js'),
@@ -137,10 +137,10 @@ void main() {
   test('版本选择拒绝未注册范围且兼容版仍从统一 Dart 源组装', () {
     expect(
       SdkFeatureRegistry.sdkFile('playmesh.js', version: '1.0.0'),
-      SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.0.0'),
+      SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.1.0'),
     );
     expect(
-      () => SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.0.1'),
+      () => SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.1.1'),
       throwsUnsupportedError,
     );
     expect(

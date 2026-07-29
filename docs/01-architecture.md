@@ -31,7 +31,7 @@ HTML Game Runtime
 
 ## 当前实现边界
 
-第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前工作树实现版本为 Playmesh App `3.0.0+23`，完整组件矩阵和发布状态见 `docs/version/README.md` 与 `docs/version/3.0.0.md`，本地实现落点见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能继续作为当前项目、SDK 或 Catalog 的生成基线。
+第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前工作树实现版本为 Playmesh App `3.1.0+24`，完整组件矩阵和发布状态见 `docs/version/README.md` 与 `docs/version/3.1.0.md`，本地实现基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能继续作为当前项目、SDK 或 Catalog 的生成基线。
 
 ```text
 已经完成：

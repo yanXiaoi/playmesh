@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:qr/qr.dart';
 
 import '../../models/game_capabilities.dart';
+import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../../models/local_game_entry.dart';
 import '../game_package/game_package_transfer_service.dart';

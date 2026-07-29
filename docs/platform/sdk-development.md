@@ -63,7 +63,7 @@ App WebView 从当前终端的本机回环入口加载 App SDK；普通浏览器
 
 ## 当前公开 SDK 方法
 
-当前 Game SDK 为 `3.0.0`，App Bridge SDK 为 `3.0.0`。下表是当前公开面；
+当前 Game SDK 为 `3.1.0`，App Bridge SDK 为 `3.0.0`。下表是当前公开面；
 精确参数、泛型、返回类型和中文 JSDoc 仍以注册表生成的 `playmesh.d.ts` 与
 `playmesh-app.d.ts` 为准。
 

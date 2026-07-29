@@ -367,6 +367,7 @@ function createPage(
       coreBase: "http://192.168.1.20:42000/",
       gameId: uiOptions.gameId || "com.playmesh.browser-test",
       gameName: uiOptions.gameName || "浏览器测试游戏",
+      tags: uiOptions.tags || ["派对", "本地多人"],
       joinCode: "ABC123",
       shareToken: "game-token",
       bucketEndpoint: "/bucket",
@@ -708,6 +709,7 @@ assert.equal(Object.isFrozen(firstPage.playmesh.gameInfo), true);
 const currentGameInfo = firstPage.playmesh.gameInfo.getCurrent();
 assert.equal(currentGameInfo.id, "com.playmesh.browser-test");
 assert.equal(currentGameInfo.name, "浏览器测试游戏");
+assert.deepEqual([...currentGameInfo.tags], ["派对", "本地多人"]);
 assert.equal(currentGameInfo.multiplayer, true);
 assert.equal(currentGameInfo.displayMode, "multi_screen");
 assert.deepEqual([...currentGameInfo.requiredCapabilities], []);

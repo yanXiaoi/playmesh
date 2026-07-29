@@ -28,10 +28,10 @@
 
 ## 当前基线
 
-- 当前工作树：App `3.0.0+23`、Game SDK `3.0.0`、App Bridge SDK `3.0.0`、
+- 当前工作树：App `3.1.0+24`、Game SDK `3.1.0`、App Bridge SDK `3.0.0`、
   Go Core `0.5.0`、Core 协议 `1.3.0`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、
   Developer API `2.3.0`、Developer CLI `1.4.0`
-- 当前发行详细日志：`docs/version/3.0.0.md`
+- 当前发行详细日志：`docs/version/3.1.0.md`
 - 当前开发临时日志：`docs/version/NEXT.md`（没有未发布变更时只记录发行基线）
 - 当前本地实现说明：`docs/implementation/playmesh-3.0.0-local-implementation.md`
 - 历史阶段终点：`docs/status/phase-06-complete.md`

@@ -172,10 +172,10 @@ Game Package
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `3.0.0+23` | `pubspec.yaml` |
+| Playmesh App | `3.1.0+24` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
-| Game SDK | `3.0.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
+| Game SDK | `3.1.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
 | App Bridge SDK | `3.0.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
 | Developer API / OpenAPI | `2.3.0` | Developer Gateway 契约 |
 | Developer CLI | `1.4.0` | `dev-cli/`、CLI User-Agent 与桌面平台构建规则 |

@@ -11,6 +11,7 @@ import '../../core/game_package/game_library_repository.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../models/game_summary.dart';
 import '../../ui/focus/playmesh_shortcuts.dart';
+import '../../ui/game_tags.dart';
 import '../../ui/playmesh_ui.dart';
 import 'game_detail_page.dart';
 
@@ -1132,6 +1133,10 @@ class _GameDetails extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ],
+                  if (game.tags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    GameTagList(tags: game.tags, compact: true),
                   ],
                   const SizedBox(height: 7),
                   Text(

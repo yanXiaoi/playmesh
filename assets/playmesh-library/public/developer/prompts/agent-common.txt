@@ -25,7 +25,7 @@ PLAYMESH API AGENT 游戏开发提示
 - 异步操作必须捕获并显示错误；console 日志由平台统一采集。
 
 【SDK 与能力】
-- 当前 Game SDK 版本字符串，当前为 3.0.0。
+- 当前 Game SDK 版本字符串，当前为 3.1.0。
 - 随后附带的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 是 SDK 接口的唯一事实源，不得臆造成员。
 - `playmesh.app` 只表示当前设备身份与硬件能力，不能替代权威 Game SDK。
 - 游戏项目自行维护业务国际化，平台不会翻译游戏 DOM、玩家昵称、标签或日志。在 `await playmesh.ready` 后可用只读 `playmesh.runtime.getLocale()` 选择游戏自己的语言资源：App WebView 返回当前实际显示 App 的语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`；不得读取 Authority 主机语言或平台内部词典。

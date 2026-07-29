@@ -169,6 +169,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
         gameInfo: {
           id: config.gameId,
           name: config.gameName,
+          tags: [...(config.tags || [])],
           multiplayer: false,
           displayMode: "solo",
           requiredCapabilities: [...(config.requiredCapabilities || [])],
@@ -251,6 +252,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       gameInfo: {
         id: joined.session.gameId,
         name: config.gameName,
+        tags: [...(config.tags || [])],
         multiplayer: true,
         displayMode: joined.session.displayMode || config.displayMode,
         requiredCapabilities: [...(config.requiredCapabilities || [])],

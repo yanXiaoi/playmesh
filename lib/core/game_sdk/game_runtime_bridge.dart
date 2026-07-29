@@ -14,6 +14,7 @@ class GameRuntimeBridge implements GameSdkBridge {
     this.connection, {
     required this.storage,
     this.gameName = 'Playmesh 游戏',
+    this.tags = const <String>[],
     this.requiredCapabilities = const <String>[],
   }) {
     _sessionSubscription = connection.messages.listen(
@@ -27,6 +28,7 @@ class GameRuntimeBridge implements GameSdkBridge {
   final GameSessionConnection connection;
   final GameStorageService storage;
   final String gameName;
+  final List<String> tags;
   final List<String> requiredCapabilities;
   final StreamController<String> _outbound = StreamController.broadcast();
   final StreamController<double> _fpsValues = StreamController.broadcast();
@@ -70,6 +72,7 @@ class GameRuntimeBridge implements GameSdkBridge {
           gameInfo: {
             'id': connection.snapshot.gameId,
             'name': gameName,
+            'tags': tags,
             'multiplayer': true,
             'displayMode': connection.snapshot.displayMode,
             'requiredCapabilities': requiredCapabilities,

@@ -128,6 +128,7 @@ void main() {
 
       expect(find.text('second game first / 原样'), findsOneWidget);
       expect(find.text('first game second / 原样'), findsOneWidget);
+      expect(find.text('API tag / 原样'), findsWidgets);
       expect(calls[first.id], [1, 2]);
       expect(calls[second.id], [1, 1]);
     },

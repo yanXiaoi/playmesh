@@ -132,6 +132,7 @@ void main() {
     expect(find.text('发布者：South Studio'), findsOneWidget);
     expect(find.text('v1.0.0 · 单机 · 单屏多人 · 横屏'), findsOneWidget);
     expect(find.text('v2.1.0 · 联机 · 多屏多人 · 竖屏'), findsOneWidget);
+    expect(find.text('party'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'party');
     await tester.pump(const Duration(milliseconds: 201));

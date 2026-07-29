@@ -1,6 +1,6 @@
 # Game SDK / App 能力插件 API
 
-本文记录 Game SDK `3.0.0` 与 App Bridge SDK `3.0.0` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 和 App SDK 都明确兼容 `1.0.0-3.0.0` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
+本文记录 Game SDK `3.1.0` 与 App Bridge SDK `3.0.0` 的最新公开 API。静态资源 URL 中的 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。App 运行时和各网关根据游戏清单版本从统一注册表选择兼容发行版，再组装 JS、`.d.ts` 与版本；当前 Game SDK 明确兼容 `1.0.0-3.1.0` 请求，App SDK 明确兼容 `1.0.0-3.0.0` 请求。未注册版本拒绝运行，不会静默切换。执行器内部以 `SdkVersionRange.last` 表示调用契约不变时持续支持后续已注册最新版；只有参数、消息、返回值、事件或错误语义不兼容时才按不重叠版本范围拆分执行器。正式构建再生成最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词和 CLI/IDEA 均使用最新注册表内容。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -52,7 +52,7 @@ Authority 面向游戏只公开 `/app/**`、`/bucket/**`、`/playmesh/**` 资源
 
 ```js
 await playmesh.ready;
-console.log(playmesh.version); // "3.0.0"
+console.log(playmesh.version); // "3.1.0"
 ```
 
 `playmesh.ready` 在 App WebView 中等待宿主 Bridge 注入。若当前页面角色在 `capabilities.json` 中对应的能力列表非空，主 SDK 会先在网页内显示隔离样式的能力确认弹窗；App 与浏览器每次加载都会重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
@@ -69,7 +69,7 @@ const info = playmesh.gameInfo.getCurrent();
 console.log(info.id, info.name, info.displayMode);
 ```
 
-返回值包含稳定 `id`、显示名称 `name`、`multiplayer`、`displayMode` 和当前页面角色的 `requiredCapabilities`。单机、Authority 主机、App 加入者和普通浏览器都使用同一接口；数据由当前 `playmesh.js` 运行时提供。`playmesh-app.js` 的 bootstrap 不包含 `game` 副本，平台游戏信息覆盖层也只读取此接口。
+返回值包含稳定 `id`、显示名称 `name`、最多 5 个清单 `tags`、`multiplayer`、`displayMode` 和当前页面角色的 `requiredCapabilities`。单机、Authority 主机、App 加入者和普通浏览器都使用同一接口；数据由当前 `playmesh.js` 运行时提供。`playmesh-app.js` 的 bootstrap 不包含 `game` 副本，平台游戏信息覆盖层也只读取此接口。
 
 能力确认、普通浏览器工具栏、昵称、信息与日志层都属于 Playmesh 平台 UI。它们的
 文字来自宿主 App 当前 locale 的统一 `app.json`，App WebView 会随 App 语言即时更新；

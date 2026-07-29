@@ -583,6 +583,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         connection,
         storage: storage,
         gameName: game.name,
+        tags: game.tags,
         requiredCapabilities: game.capabilities
             .requiredForRole(controller: _controllerRole)
             .toList(),
@@ -675,6 +676,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         userId: localUserId,
         nickname: localNickname,
         gameName: game.name,
+        tags: game.tags,
         requiredCapabilities: game.capabilities
             .requiredForRole(controller: _controllerRole)
             .toList(),
@@ -1019,6 +1021,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         controllerEntryPath: game.entry.controllerEntryPath,
         gameId: game.id,
         gameName: game.name,
+        tags: game.tags,
         gameSdkVersion: game.sdkVersion.isEmpty ? null : game.sdkVersion,
         appSdkVersion: game.appSdkVersion.isEmpty ? null : game.appSdkVersion,
         requiredCapabilities: game.capabilities.required.toList(),

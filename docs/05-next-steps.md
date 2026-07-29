@@ -12,10 +12,11 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前开发版本为 App `3.0.0+23`、Go Core
+归档基线，不再用于当前生成、运行或发布。当前开发版本为 App `3.1.0+24`、Go Core
 `0.5.0`、Core 协议 `1.3.0`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、
 Developer API / OpenAPI `2.3.0`、Developer CLI `1.4.0`，Game SDK 与 App Bridge
-SDK 均为 `3.0.0`，统一公开 `playmesh.app.ui` 游戏菜单与平台功能。第六阶段后
+Game SDK 为 `3.1.0`、App Bridge SDK 为 `3.0.0`，统一公开
+`playmesh.app.ui` 游戏菜单与平台功能。第六阶段后
 不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过
 `GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；
 App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和

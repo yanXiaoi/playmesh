@@ -44,6 +44,7 @@ const platformGameUiRequiredKeys = <String>{
   'common.clear',
   'info.title',
   'info.default_game',
+  'info.tags',
   'info.join_code',
   'info.solo_share',
   'info.game_id',

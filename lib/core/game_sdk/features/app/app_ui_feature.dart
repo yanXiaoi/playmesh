@@ -272,6 +272,11 @@ const appUiSdkSource = SdkSourceFragment(
     const runtimeInfo = await appUiRuntimeAdapter.getInfo();
     if (!runtimeInfo?.gameId || !runtimeInfo?.gameName) return null;
     const capabilities = runtimeInfo.requiredCapabilities || [];
+    const tags = Array.isArray(runtimeInfo.tags)
+      ? [...new Set(runtimeInfo.tags
+          .map((tag) => String(tag || "").trim())
+          .filter(Boolean))]
+      : [];
     const role = runtimeInfo.multiplayer === true
       ? runtimeInfo.isAuthority === true
         ? appUiText("info.role_authority", "主机")
@@ -331,6 +336,7 @@ const appUiSdkSource = SdkSourceFragment(
     ].filter(Boolean);
     return {
       gameName: runtimeInfo.gameName,
+      tags,
       rows,
     };
   }
@@ -413,6 +419,17 @@ const appUiSdkSource = SdkSourceFragment(
     const info = await appUiGameInfo();
     if (!info) return false;
     ui.gameName.textContent = info.gameName;
+    ui.gameTags.innerHTML = info.tags.map((tag) => `
+      <span class="game-tag" role="listitem">
+        <span class="game-tag-mark" aria-hidden="true">#</span>${escapeAppUiHtml(tag)}
+      </span>
+    `).join("");
+    ui.gameTagsWrap.hidden = info.tags.length === 0;
+    ui.gameTags.setAttribute(
+      "aria-label",
+      appUiText("info.tags", "标签"),
+    );
+    ui.gameTagsLabel.textContent = appUiText("info.tags", "标签");
     ui.gameDetail.innerHTML = info.rows.map((row) => `
       <div class="info-item${row.wide ? " wide" : ""}">
         <dt class="info-label">${escapeAppUiHtml(row.label)}</dt>
@@ -549,6 +566,7 @@ const appUiSdkSource = SdkSourceFragment(
       .menu-mark{position:relative;display:block;width:22px;transform:translateX(-2px);font:900 20px/1 system-ui}.menu-mark::after{content:"";position:absolute;left:15px;top:3px;width:7px;height:2px;border-radius:2px;background:currentColor;box-shadow:0 5px currentColor,0 10px currentColor}
       .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
       .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
+      .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
       [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
     ${menuButtonMarkup}
@@ -562,7 +580,7 @@ const appUiSdkSource = SdkSourceFragment(
       <button class="action info" data-action="info" type="button"><span class="icon" aria-hidden="true">ⓘ</span><span></span></button>
       <button class="action performance" data-action="performance" type="button" aria-pressed="false"><span class="icon" aria-hidden="true">◴</span><span></span></button>
     </nav><footer class="foot"><button class="action exit" data-action="exit" type="button"><span class="icon" aria-hidden="true">↩</span><span></span></button></footer></aside></div>
-    <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-close" type="button"></button></div></section></div>
+    <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-close" type="button"></button></div></section></div>
     <div class="dialog-layer logs-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="logs-title"></h2><pre class="logs-output" tabindex="0"></pre><div class="dialog-actions"><button class="logs-copy" type="button"></button><button class="logs-clear" type="button"></button><button class="logs-close" type="button"></button></div></section></div>
     <div class="performance-panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
     global.document.body.appendChild(host);
@@ -590,6 +608,9 @@ const appUiSdkSource = SdkSourceFragment(
       infoLayer: query(".info-layer"),
       infoTitle: query(".info-title"),
       gameName: query(".game-name"),
+      gameTagsWrap: query(".game-tags-wrap"),
+      gameTagsLabel: query(".game-tags-label"),
+      gameTags: query(".game-tags"),
       gameDetail: query(".game-detail"),
       infoClose: query(".info-close"),
       logsLayer: query(".logs-layer"),

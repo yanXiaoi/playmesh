@@ -13,6 +13,7 @@ Future<GameWebGateway> startGameWebGateway({
   String controllerEntryPath = 'app/controller/index.html',
   required String gameId,
   String gameName = 'Playmesh 游戏',
+  List<String> tags = const [],
   String? gameSdkVersion,
   String? appSdkVersion,
   List<String> requiredCapabilities = const [],

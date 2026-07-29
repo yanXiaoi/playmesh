@@ -10,6 +10,7 @@ import '../../core/game_package/game_library_local_metadata.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/version/semantic_version.dart';
 import '../../ui/focus/playmesh_shortcuts.dart';
+import '../../ui/game_tags.dart';
 import '../../ui/playmesh_ui.dart';
 
 class OnlineGameLibraryPage extends StatefulWidget {
@@ -1034,6 +1035,10 @@ class _OfferTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
+                  if (manifest.tags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    GameTagList(tags: manifest.tags, compact: true),
+                  ],
                 ],
               ),
             ),
@@ -1114,6 +1119,10 @@ class _AggregatedGameTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
+                    ],
+                    if (offer.manifest.tags.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      GameTagList(tags: offer.manifest.tags, compact: true),
                     ],
                     const SizedBox(height: 7),
                     Text(
@@ -1223,6 +1232,13 @@ class _VersionPickerDialog extends StatelessWidget {
               '${context.tr('common.publisher')}：'
               '${result.publisher.isEmpty ? context.tr('common.publisher_unknown') : result.publisher}',
             ),
+            if (result.representative.manifest.tags.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              GameTagList(
+                tags: result.representative.manifest.tags,
+                showHeading: true,
+              ),
+            ],
             const SizedBox(height: 14),
             for (final version in result.versions) ...[
               Text(

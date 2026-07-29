@@ -33,6 +33,24 @@ void main() {
     expect(manifest.controllerOrientation, GameOrientation.portrait);
   });
 
+  test('游戏标签最多允许五个', () {
+    final fiveTags = validManifest()..['tags'] = ['派对', '多人', '体感', '合作', '休闲'];
+    final sixTags = validManifest()
+      ..['tags'] = ['派对', '多人', '体感', '合作', '休闲', '竞速'];
+
+    expect(GameManifest.fromJson(fiveTags).tags, hasLength(maxGameTagCount));
+    expect(
+      () => GameManifest.fromJson(sixTags),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('最多只能包含 5 个标签'),
+        ),
+      ),
+    );
+  });
+
   test('未知字段静默忽略且已知字段投影写回', () {
     final json = validManifest()
       ..['permissions'] = ['keyboard']

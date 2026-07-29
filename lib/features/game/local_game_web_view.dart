@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import 'game_webview_exit.dart';
 import 'windows_local_game_web_view.dart';
 import '../../core/capabilities/web_permission/web_permission_gate.dart';
 import '../../core/developer/developer_run_controller.dart';
@@ -101,7 +102,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       declaredCapabilities: widget.declaredCapabilities,
       onOpenSharePanel: widget.onOpenSharePanel,
       onInputTakeover: _takeOverAppSdkInput,
-      onExitRequested: widget.onExitRequested,
+      onExitRequested: _exitFromAppGameMenu,
     );
     widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);
     _webPermissionGate = WebPermissionGate(
@@ -303,6 +304,17 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     _nativeExitOperation ??= callback().whenComplete(() {
       _nativeExitOperation = null;
     });
+  }
+
+  Future<void> _exitFromAppGameMenu() async {
+    final callback = widget.onExitRequested;
+    if (callback == null) return;
+    final controller = _controller;
+    await exitGameMenuWithBlankPage(
+      exit: callback,
+      loadRequest: controller?.loadRequest,
+      runJavaScript: _runWindowsJavaScript,
+    );
   }
 
   void _handleNativeSystemBack() {

@@ -204,6 +204,7 @@ Catalog、已审核下载与 Relay；`16669` 是只承载 `PLAYMESH_ADMIN_PATH` 
 - [在线游戏源与 Catalog API](docs/catalog-api.md)
 - [局域网与公共联机中转](docs/remote-game-relay.md)
 
+测试用公共中转：http://8.137.106.103:16668
 ## 构建与发布
 
 统一发布入口支持 `android`、`windows` 和 `all`：

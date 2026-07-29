@@ -71,7 +71,7 @@ game-package/
   "lastModifiedAt": 1784851200000,
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "3.0.0",
+  "sdkVersion": "3.1.0",
   "appSdkVersion": "3.0.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
@@ -97,7 +97,7 @@ game-package/
 | `lastModifiedAt` | 新发布必有，旧包可缺省 | 最后上传的 Unix 毫秒时间戳，只读；缺省由 App 外壳显示本地化“无”，有值时按设备本地时区显示 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `3.0.0` |
+| `sdkVersion` | 是 | `MAJOR.MINOR.PATCH`；Game SDK 当前为 `3.1.0` |
 | `appSdkVersion` | 否 | `MAJOR.MINOR.PATCH`；App Bridge SDK 当前为 `3.0.0`；CLI 发布时总会写入当前值 |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `controllerOrientation` | 单屏多人必填 | 控制器全屏方向；其他显示模式禁止声明 |

@@ -45,6 +45,8 @@ interface PlaymeshGameInfo {
   id: string;
   /** 面向玩家显示的游戏名称。 */
   name: string;
+  /** 游戏清单中声明的展示标签，最多 5 个。 */
+  tags: string[];
   /** 当前页面是否属于多人游戏。 */
   multiplayer: boolean;
   /** 游戏声明的显示模式；单机为 `solo`。 */
@@ -351,7 +353,7 @@ interface PlaymeshAppApi {
 /** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
 interface PlaymeshApi {
   /** 当前 Game SDK 版本。 */
-  readonly version: "3.0.0";
+  readonly version: "3.1.0";
   /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
   readonly ready: Promise<PlaymeshBootstrap>;
   /** 当前设备的 App Bridge 能力；普通浏览器中 `isAvailable()` 为 false。 */

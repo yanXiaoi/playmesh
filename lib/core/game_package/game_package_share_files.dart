@@ -38,7 +38,15 @@ final class GamePackageShareFiles {
       if (!_isInside(root.path, resolved)) {
         throw StateError('拒绝清理分享目录外路径：$resolved');
       }
-      if (_active.contains(_normalizedAbsolutePath(resolved))) continue;
+      final normalized = _normalizedAbsolutePath(resolved);
+      if (_active.contains(normalized) ||
+          entity is Directory &&
+              _active.any(
+                (path) =>
+                    path.startsWith('$normalized${Platform.pathSeparator}'),
+              )) {
+        continue;
+      }
       if (entity is File) {
         await entity.delete();
       } else if (entity is Directory) {
@@ -56,8 +64,12 @@ final class GamePackageShareFiles {
     final nonce =
         '${DateTime.now().toUtc().microsecondsSinceEpoch}-'
         '${_random.nextInt(1 << 32)}';
+    final leaseDirectory = Directory(
+      '${root.path}${Platform.pathSeparator}$nonce',
+    ).absolute;
+    await leaseDirectory.create();
     final file = File(
-      '${root.path}${Platform.pathSeparator}$nonce-'
+      '${leaseDirectory.path}${Platform.pathSeparator}'
       '${gamePackageShareFileName(game)}',
     ).absolute;
     if (!_isInside(root.path, file.path)) {
@@ -75,6 +87,13 @@ final class GamePackageShareFiles {
     }
     _active.remove(_normalizedAbsolutePath(target));
     if (await file.exists()) await file.delete();
+    final parent = file.parent.absolute;
+    if (_normalizedAbsolutePath(parent.parent.path) ==
+            _normalizedAbsolutePath(root) &&
+        await parent.exists() &&
+        await parent.list(followLinks: false).isEmpty) {
+      await parent.delete();
+    }
   }
 
   /// Marks a share consumer as finished. Platforms that can guarantee

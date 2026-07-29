@@ -7,7 +7,7 @@
 
 | 版本 | 文档 | 范围 |
 | --- | --- | --- |
-| Playmesh `3.0.0+23` | [本地功能实现说明](playmesh-3.0.0-local-implementation.md) | Catalog 2.0、本地数据 v2、工作区多源发布、Go Server 账号与治理、头像与 SDK、统一 App 国际化、主题、键盘/TV 与居中游戏菜单 |
+| Playmesh `3.1.0+24` | [3.0.0 本地功能实现基线](playmesh-3.0.0-local-implementation.md) | Catalog 2.0、本地数据 v2、工作区多源发布、Go Server 账号与治理、头像与 SDK、统一 App 国际化、主题、键盘/TV、主页 GitHub 入口、居中游戏菜单与退出 WebView 清理修复 |
 
 ## 使用规则
 

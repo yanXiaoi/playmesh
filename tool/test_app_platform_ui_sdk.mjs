@@ -28,6 +28,9 @@ const selectors = [
   ".info-layer",
   ".info-title",
   ".game-name",
+  ".game-tags-wrap",
+  ".game-tags-label",
+  ".game-tags",
   ".game-detail",
   ".info-close",
   ".logs-layer",
@@ -378,6 +381,7 @@ browserPage.window.playmeshApp.__registerRuntimeUi({
     return {
       gameId: "com.playmesh.browser-game",
       gameName: "浏览器游戏",
+      tags: ["派对", "本地多人"],
       requiredCapabilities: [],
       joinCode: null,
       multiplayer: false,
@@ -447,6 +451,10 @@ assert.equal(browserUi[".logs-copy"].__label.textContent, "已复制");
 browserUi[".logs-close"].click();
 await browserPage.window.playmeshApp.ui.openGameInfo();
 assert.equal(browserUi[".game-name"].textContent, "浏览器游戏");
+assert.equal(browserUi[".game-tags-wrap"].hidden, false);
+assert.equal(browserUi[".game-tags-label"].textContent, "标签");
+assert.equal(browserUi[".game-tags"].innerHTML.includes("派对"), true);
+assert.equal(browserUi[".game-tags"].innerHTML.includes("本地多人"), true);
 assert.equal(
   browserUi[".game-detail"].innerHTML.includes("com.playmesh.browser-game"),
   true,

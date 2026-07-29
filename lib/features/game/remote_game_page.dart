@@ -19,6 +19,7 @@ import '../../core/relay/relay_tunnel.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
+import 'game_webview_exit.dart';
 import 'windows_local_game_web_view.dart';
 
 class RemoteGamePage extends StatefulWidget {
@@ -171,7 +172,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         platformUiConfiguration: _platformUiConfiguration,
         onOpenSharePanel: _rejectShareFromRemote,
         showShareAction: false,
-        onExitRequested: _exitRemotePage,
+        onExitRequested: _exitFromAppGameMenu,
       );
       if (_usesFlutterWebView) {
         await _initialize();
@@ -445,6 +446,15 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     setState(() => _allowPop = true);
     await WidgetsBinding.instance.endOfFrame;
     if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _exitFromAppGameMenu() async {
+    final controller = _controller;
+    await exitGameMenuWithBlankPage(
+      exit: _exitRemotePage,
+      loadRequest: controller?.loadRequest,
+      runJavaScript: _runWindowsJavaScript,
+    );
   }
 
   Future<void> _rejectShareFromRemote() {

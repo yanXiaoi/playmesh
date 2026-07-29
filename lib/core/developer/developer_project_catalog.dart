@@ -324,9 +324,9 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (description.length > 500) {
       throw const FormatException('项目描述不能超过 500 个字符');
     }
-    if (draft.tags.length > 20 ||
+    if (draft.tags.length > maxGameTagCount ||
         draft.tags.any((tag) => tag.trim().isEmpty || tag.trim().length > 64)) {
-      throw const FormatException('标签最多 20 个，且每个标签长度必须为 1 到 64 个字符');
+      throw const FormatException('标签最多 5 个，且每个标签长度必须为 1 到 64 个字符');
     }
     for (final capability in draft.requiredCapabilities) {
       if (!defaultCapabilityDescriptorRegistry.containsKey(capability)) {

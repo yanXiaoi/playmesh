@@ -657,6 +657,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         return {
           gameId: gameInfo.id,
           gameName: gameInfo.name,
+          tags: [...(gameInfo.tags || [])],
           requiredCapabilities: [...gameInfo.requiredCapabilities],
           joinCode: session?.joinCode || null,
           multiplayer: gameInfo.multiplayer,

@@ -795,6 +795,40 @@ void main() {
       contains("toolbarRun.dataset.action=running?'restart':'run'"),
     );
   });
+
+  test('Project tree keeps collapsed directories while opening resources', () {
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+
+    expect(script, contains('treeCollapsedDirectories=new Set()'));
+    expect(
+      script,
+      contains(
+        "collapsed=treeCollapsedDirectories.has(child.path);"
+        "details.open=!collapsed",
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "if(details.open)treeCollapsedDirectories.delete(child.path);"
+        "else treeCollapsedDirectories.add(child.path)",
+      ),
+    );
+    expect(
+      script,
+      contains(
+        'treeCollapsedDirectories=new Set([...treeCollapsedDirectories]'
+        '.filter(path=>treeDirectories.has(path)))',
+      ),
+    );
+    expect(
+      script,
+      contains("activateEditorView({focus:true});await loadTreeOnly()"),
+      reason:
+          'Opening a resource may rebuild the tree, so expansion state must '
+          'survive loadTreeOnly.',
+    );
+  });
 }
 
 Map<String, String> _readMessages(String path) {

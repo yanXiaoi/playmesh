@@ -26,6 +26,7 @@ void main() {
     displayModeLabel: '多屏',
     displayMode: 'multi_screen',
     orientation: GameOrientation.landscape,
+    tags: const ['派对', '本地多人'],
     entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: '可运行'),
   );
 
@@ -89,6 +90,9 @@ void main() {
     expect(find.text('2.1.0'), findsOneWidget);
     expect(find.text('游戏 ID 已复制'), findsOneWidget);
     expect(find.text('最近打开'), findsOneWidget);
+    expect(find.text('标签'), findsOneWidget);
+    expect(find.text('派对'), findsOneWidget);
+    expect(find.text('本地多人'), findsOneWidget);
     final detailContext = tester.element(find.byType(GameDetailPage));
     final uploadedAt = _formatExpectedTimestamp(
       detailContext,

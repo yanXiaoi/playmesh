@@ -59,6 +59,8 @@ const (
 	maxRootIconBytes          = 2 << 20
 	maxRootIconEdge           = 8192
 	maxRootIconPixels   int64 = 4 * 1024 * 1024
+	maxGameTagCount           = 5
+	maxGameTagRunes           = 64
 )
 
 var (
@@ -952,15 +954,15 @@ func parseManifest(content []byte) (manifestSummary, []string) {
 		findings = append(findings, "main.json.remarks 过长")
 	}
 	tags, _ := manifest["tags"].([]any)
-	if len(tags) > 64 {
-		findings = append(findings, "main.json.tags 数量超过上限")
+	if len(tags) > maxGameTagCount {
+		findings = append(findings, "main.json.tags 最多只能包含 5 个标签")
 	}
 	tagValues := make([]string, 0, len(tags))
 	for _, value := range tags {
 		if text, ok := value.(string); ok && text != "" &&
-			len([]rune(text)) <= 64 && len(tagValues) < 64 {
+			len([]rune(text)) <= maxGameTagRunes && len(tagValues) < maxGameTagCount {
 			tagValues = append(tagValues, text)
-		} else if ok && len([]rune(text)) > 64 {
+		} else if ok && len([]rune(text)) > maxGameTagRunes {
 			findings = append(findings, "main.json.tags 含有过长标签")
 		}
 	}

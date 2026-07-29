@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/game_package/game_package_icon.dart';
 import '../../core/localization/playmesh_localization.dart';
@@ -25,12 +28,17 @@ class HomePage extends StatelessWidget {
     this.gameLibraryLoading = false,
     this.gameLibraryError,
     this.onRetryGameLibrary,
+    this.externalUrlLauncher,
   });
 
   static const profileHeroKey = Key('home-profile-hero');
   static const profileIdentityKey = Key('home-profile-identity');
   static const scanJoinKey = Key('home-scan-join');
+  static const githubKey = Key('home-github');
   static const gameLibraryLoadingKey = Key('home-game-library-loading');
+  static final githubRepositoryUri = Uri.parse(
+    'https://github.com/yanXiaoi/playmesh',
+  );
 
   static Key gameQuickLaunchKey(String gameId) =>
       ValueKey('home-game-quick-launch-$gameId');
@@ -44,6 +52,7 @@ class HomePage extends StatelessWidget {
   final bool gameLibraryLoading;
   final Object? gameLibraryError;
   final VoidCallback? onRetryGameLibrary;
+  final Future<bool> Function(Uri uri)? externalUrlLauncher;
 
   List<GameSummary> get _visibleGames {
     final featured = featuredGame;
@@ -106,25 +115,46 @@ class HomePage extends StatelessWidget {
 
     void openSettings() =>
         Navigator.of(context).pushNamed(SettingsPage.routeName);
+    void openGitHub() {
+      unawaited(() async {
+        final launcher = externalUrlLauncher;
+        var opened = false;
+        try {
+          opened = launcher != null
+              ? await launcher(githubRepositoryUri)
+              : await launchUrl(
+                  githubRepositoryUri,
+                  mode: LaunchMode.externalApplication,
+                );
+        } on Object catch (error) {
+          debugPrint('打开 GitHub 开源仓库失败: $error');
+        }
+        if (!opened && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(context.tr('home.github_open_failed'))),
+          );
+        }
+      }());
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!compactAppBar) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(7),
-                child: Image.asset(
-                  'assets/branding/playmesh-logo.png',
-                  width: 30,
-                  height: 30,
-                  excludeFromSemantics: true,
-                ),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: Image.asset(
+                'assets/branding/playmesh-logo.png',
+                width: 30,
+                height: 30,
+                excludeFromSemantics: true,
               ),
+            ),
+            if (!compactAppBar) ...[
               const SizedBox(width: 9),
+              const Text('Playmesh'),
             ],
-            const Text('Playmesh'),
           ],
         ),
         actions: [
@@ -135,11 +165,17 @@ class HomePage extends StatelessWidget {
             icon: const Icon(Icons.qr_code_scanner_rounded),
           ),
           IconButton(
+            key: githubKey,
+            tooltip: context.tr('home.github'),
+            onPressed: openGitHub,
+            icon: const FaIcon(FontAwesomeIcons.github, size: 22),
+          ),
+          IconButton(
             tooltip: context.tr('common.settings'),
             onPressed: openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: compactAppBar ? 0 : 8),
         ],
       ),
       body: PlaymeshBackground(

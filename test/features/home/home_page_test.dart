@@ -98,6 +98,8 @@ void main() {
     expect(find.textContaining('单屏多人'), findsOneWidget);
     expect(find.textContaining('竖屏'), findsOneWidget);
     expect(find.byKey(HomePage.scanJoinKey), findsOneWidget);
+    expect(find.byKey(HomePage.githubKey), findsOneWidget);
+    expect(find.byTooltip('GitHub 开源仓库'), findsOneWidget);
     expect(find.byTooltip('设置'), findsOneWidget);
 
     await tester.tap(find.byKey(HomePage.gameQuickLaunchKey(latest.id)));
@@ -136,7 +138,7 @@ void main() {
     expect(find.text('LOCAL_LIBRARY_ROUTE'), findsOneWidget);
   });
 
-  testWidgets('首页在 320dp 保持两项主入口和右上角扫码、设置', (tester) async {
+  testWidgets('首页在 320dp 保持两项主入口和右上角扫码、GitHub、设置', (tester) async {
     tester.view.physicalSize = const Size(320, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -155,8 +157,30 @@ void main() {
     await tester.ensureVisible(find.text('在线游戏库'));
     expect(find.text('在线游戏库'), findsOneWidget);
     expect(find.byKey(HomePage.scanJoinKey), findsOneWidget);
+    expect(find.byKey(HomePage.githubKey), findsOneWidget);
+    expect(find.byTooltip('GitHub 开源仓库'), findsOneWidget);
     expect(find.byTooltip('设置'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('主页 GitHub 图标使用外部浏览器打开开源仓库', (tester) async {
+    Uri? openedUri;
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: HomePage(
+          user: _user,
+          externalUrlLauncher: (uri) async {
+            openedUri = uri;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(HomePage.githubKey));
+    await tester.pump();
+
+    expect(openedUri, HomePage.githubRepositoryUri);
   });
 
   testWidgets('资料大卡不可点击，只有身份小卡进入资料页', (tester) async {

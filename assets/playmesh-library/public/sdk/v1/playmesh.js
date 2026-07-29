@@ -2,7 +2,7 @@
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "3.0.0";
+  const PLAYMESH_SDK_VERSION = "3.1.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -1467,6 +1467,7 @@
         gameInfo: {
           id: config.gameId,
           name: config.gameName,
+          tags: [...(config.tags || [])],
           multiplayer: false,
           displayMode: "solo",
           requiredCapabilities: [...(config.requiredCapabilities || [])],
@@ -1549,6 +1550,7 @@
       gameInfo: {
         id: joined.session.gameId,
         name: config.gameName,
+        tags: [...(config.tags || [])],
         multiplayer: true,
         displayMode: joined.session.displayMode || config.displayMode,
         requiredCapabilities: [...(config.requiredCapabilities || [])],
@@ -2945,6 +2947,7 @@
         return {
           gameId: gameInfo.id,
           gameName: gameInfo.name,
+          tags: [...(gameInfo.tags || [])],
           requiredCapabilities: [...gameInfo.requiredCapabilities],
           joinCode: session?.joinCode || null,
           multiplayer: gameInfo.multiplayer,

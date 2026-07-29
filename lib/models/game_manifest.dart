@@ -3,6 +3,8 @@ import 'game_id.dart';
 import '../core/game_sdk/sdk_feature_registry.dart';
 import '../core/version/semantic_version.dart';
 
+const maxGameTagCount = 5;
+
 enum GameMode {
   solo('solo'),
   multiplayer('multiplayer');
@@ -178,6 +180,9 @@ class GameManifest {
     }
 
     final tags = _optionalStringList(json, 'tags');
+    if (tags.length > maxGameTagCount) {
+      throw const FormatException('tags 最多只能包含 5 个标签');
+    }
 
     return GameManifest(
       id: id,

@@ -16,7 +16,7 @@ void main() {
     final second = await manager.create(_game);
     expect(await first.exists(), isFalse);
     expect(second.path, isNot(first.path));
-    expect(second.path, endsWith('Bad_Name_-v1.2.3.zip'));
+    expect(second.uri.pathSegments.last, 'Bad_Name_-v1.2.3.zip');
   });
 
   test('截断后再次移除 Windows 不接受的尾随点和空格', () {
@@ -57,7 +57,7 @@ void main() {
 
     final entries = await manager.directory.list(followLinks: false).toList();
     expect(entries, hasLength(1));
-    expect(entries.single.path, current!.path);
+    expect(entries.single.path, current!.parent.path);
   });
 
   test('App 重启后的新管理器会清理上次未消费完成的分享文件', () async {

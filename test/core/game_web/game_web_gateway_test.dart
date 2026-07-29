@@ -31,6 +31,7 @@ void main() {
       joinCode: 'ABC123',
       shareToken: 'share-token',
       gameName: '测试游戏',
+      tags: const ['派对', '本地多人'],
       gameSdkVersion: '1.4.2',
       appSdkVersion: '1.2.1',
       requiredCapabilities: const ['media.camera'],
@@ -88,6 +89,7 @@ void main() {
       controller.body,
       contains('"requiredCapabilities":["media.microphone"]'),
     );
+    expect(controller.body, contains('"tags":["派对","本地多人"]'));
     expect(controller.body, contains('"availableCapabilities":[]'));
     expect(controller.body, contains('/playmesh/sdk/v1/playmesh.js'));
     expect(

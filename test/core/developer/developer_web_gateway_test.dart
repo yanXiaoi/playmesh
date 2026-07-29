@@ -376,7 +376,7 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '3.0.0');
+    expect(statusJson['gameSdkVersion'], '3.1.0');
     expect(statusJson['appSdkVersion'], '3.0.0');
     expect(
       statusJson['gameSdkCompatibility'],
@@ -392,11 +392,11 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '3.0.0');
+    expect(sdkBundleJson['gameSdkVersion'], '3.1.0');
     expect(sdkBundleJson['appSdkVersion'], '3.0.0');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '3.0.0')),
+      contains(containsPair('bundleVersion', '3.1.0')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
@@ -437,10 +437,7 @@ void main() {
     expect(capabilityRegistry.statusCode, HttpStatus.ok);
     final capabilityItems =
         (jsonDecode(capabilityRegistry.body) as Map)['capabilities'] as List;
-    expect(
-      capabilityItems,
-      contains(containsPair('code', 'media.camera')),
-    );
+    expect(capabilityItems, contains(containsPair('code', 'media.camera')));
     expect(capabilityItems, everyElement(contains('appSupported')));
     expect(capabilityItems, everyElement(contains('htmlSupported')));
     expect(capabilityItems, everyElement(contains('apiVersion')));
@@ -473,10 +470,7 @@ void main() {
         '/dev/api/capability-tests/instances?token=custom-dev-token',
       ),
       headers: {'content-type': 'application/json'},
-      body: jsonEncode({
-        'code': 'device.midi',
-        'options': <String, Object?>{},
-      }),
+      body: jsonEncode({'code': 'device.midi', 'options': <String, Object?>{}}),
     );
     expect(createdCapabilityInstance.statusCode, HttpStatus.created);
     final createdCapabilityJson =
@@ -717,7 +711,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "3.0.0"'));
+    expect(aiPrompt.body, contains('readonly version: "3.1.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -758,7 +752,10 @@ void main() {
     expect(aiPrompt.body, contains('当前项目已声明的平台能力'));
     expect(aiPrompt.body, contains('未声明平台能力。'));
     expect(aiPrompt.body, contains('非敏感能力优先直接使用标准 Web API'));
-    expect(aiPrompt.body, contains('`media.camera`、`media.microphone`、`device.midi`'));
+    expect(
+      aiPrompt.body,
+      contains('`media.camera`、`media.microphone`、`device.midi`'),
+    );
     expect(aiPrompt.body, contains('`<input type="file">`'));
 
     final takeoverBaseUrl = baseUrls.first;
@@ -809,7 +806,10 @@ void main() {
     expect(agentPrompt.body, contains('"timeoutMs": 3000'));
     expect(agentPrompt.body, contains('capabilities.required: 未声明'));
     expect(agentPrompt.body, contains('非敏感能力直接使用标准 Web API'));
-    expect(agentPrompt.body, contains('`media.camera`、`media.microphone`、`device.midi`'));
+    expect(
+      agentPrompt.body,
+      contains('`media.camera`、`media.microphone`、`device.midi`'),
+    );
     expect(agentPrompt.body, contains('`<input type="file">`'));
     expect(agentPrompt.body, isNot(contains('平台统一能力注册表（code')));
     expect(agentPrompt.body, contains('entries.game: app/index.html'));
@@ -1611,17 +1611,11 @@ void main() {
       capabilityPrompt.body,
       contains('capabilities.required: media.camera'),
     );
-    expect(
-      capabilityPrompt.body,
-      isNot(contains('"code": "media.camera"')),
-    );
+    expect(capabilityPrompt.body, isNot(contains('"code": "media.camera"')));
     final capabilityChatPrompt = await http.get(endpoint('chat-prompt.txt'));
     expect(capabilityChatPrompt.statusCode, HttpStatus.ok);
     expect(capabilityChatPrompt.body, contains('当前项目已声明的平台能力'));
-    expect(
-      capabilityChatPrompt.body,
-      contains('"code": "media.camera"'),
-    );
+    expect(capabilityChatPrompt.body, contains('"code": "media.camera"'));
     expect(
       capabilityChatPrompt.body,
       isNot(contains('"code": "media.microphone"')),

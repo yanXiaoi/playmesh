@@ -11,6 +11,7 @@ import '../../core/game_package/game_package_icon.dart';
 import '../../core/game_package/game_package_share_files.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/storage/game_storage_service.dart';
+import '../../ui/game_tags.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
 
@@ -77,6 +78,10 @@ class GameDetailPage extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _GameHeader(game: game),
+                            if (game.tags.isNotEmpty) ...[
+                              const SizedBox(height: 18),
+                              GameTagList(tags: game.tags, showHeading: true),
+                            ],
                             const SizedBox(height: 24),
                             Text(
                               context.tr('game.description'),

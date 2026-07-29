@@ -47,6 +47,8 @@ interface PlaymeshGameInfo {
   id: string;
   /** 面向玩家显示的游戏名称。 */
   name: string;
+  /** 游戏清单中声明的展示标签，最多 5 个。 */
+  tags: string[];
   /** 当前页面是否属于多人游戏。 */
   multiplayer: boolean;
   /** 游戏声明的显示模式；单机为 `solo`。 */
@@ -479,7 +481,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "3.0.0";
+  const PLAYMESH_SDK_VERSION = "3.1.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -1944,6 +1946,7 @@ interface Window { playmesh: PlaymeshApi; }
         gameInfo: {
           id: config.gameId,
           name: config.gameName,
+          tags: [...(config.tags || [])],
           multiplayer: false,
           displayMode: "solo",
           requiredCapabilities: [...(config.requiredCapabilities || [])],
@@ -2026,6 +2029,7 @@ interface Window { playmesh: PlaymeshApi; }
       gameInfo: {
         id: joined.session.gameId,
         name: config.gameName,
+        tags: [...(config.tags || [])],
         multiplayer: true,
         displayMode: joined.session.displayMode || config.displayMode,
         requiredCapabilities: [...(config.requiredCapabilities || [])],
@@ -3422,6 +3426,7 @@ interface Window { playmesh: PlaymeshApi; }
         return {
           gameId: gameInfo.id,
           gameName: gameInfo.name,
+          tags: [...(gameInfo.tags || [])],
           requiredCapabilities: [...gameInfo.requiredCapabilities],
           joinCode: session?.joinCode || null,
           multiplayer: gameInfo.multiplayer,

@@ -27,6 +27,7 @@ Future<GameWebGateway> startGameWebGateway({
   String controllerEntryPath = 'app/controller/index.html',
   required String gameId,
   String gameName = 'Playmesh 游戏',
+  List<String> tags = const [],
   String? gameSdkVersion,
   String? appSdkVersion,
   List<String> requiredCapabilities = const [],
@@ -73,6 +74,7 @@ Future<GameWebGateway> startGameWebGateway({
     controllerEntryPath: controllerEntryPath,
     gameId: gameId,
     gameName: gameName,
+    tags: List.unmodifiable(tags),
     gameSdkVersion: resolvedGameSdkVersion,
     appSdkVersion: resolvedAppSdkVersion,
     platformUiAssets: platformUiAssets,
@@ -103,6 +105,7 @@ class _IoGameWebGateway implements GameWebGateway {
     required this.controllerEntryPath,
     required this.gameId,
     required this.gameName,
+    required this.tags,
     required this.gameSdkVersion,
     required this.appSdkVersion,
     required this.platformUiAssets,
@@ -126,6 +129,7 @@ class _IoGameWebGateway implements GameWebGateway {
   final String controllerEntryPath;
   final String gameId;
   final String gameName;
+  final List<String> tags;
   final String gameSdkVersion;
   final String appSdkVersion;
   final PlatformGameUiAssets platformUiAssets;
@@ -276,6 +280,7 @@ class _IoGameWebGateway implements GameWebGateway {
       'shareToken': shareToken,
       'gameId': gameId,
       'gameName': gameName,
+      'tags': tags,
       'orientation': _pageOrientation.manifestValue,
       'requiredCapabilities': _pageRequiredCapabilities,
       'availableCapabilities': defaultCapabilityDescriptors

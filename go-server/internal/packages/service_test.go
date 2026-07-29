@@ -40,6 +40,25 @@ func TestSafeRootIconRequiresCompletePngDecode(t *testing.T) {
 	}
 }
 
+func TestParseManifestLimitsTagsToFive(t *testing.T) {
+	_, fiveFindings := parseManifest([]byte(
+		`{"id":"com.example.five","name":"Five","version":"1.0.0",` +
+			`"tags":["one","two","three","four","five"]}`,
+	))
+	if len(fiveFindings) != 0 {
+		t.Fatalf("five tags must be accepted: %v", fiveFindings)
+	}
+
+	_, sixFindings := parseManifest([]byte(
+		`{"id":"com.example.six","name":"Six","version":"1.0.0",` +
+			`"tags":["one","two","three","four","five","six"]}`,
+	))
+	if len(sixFindings) != 1 ||
+		sixFindings[0] != "main.json.tags 最多只能包含 5 个标签" {
+		t.Fatalf("six tags must be rejected: %v", sixFindings)
+	}
+}
+
 func TestDeleteStoredFilesRemovesFilesAndIsRetrySafe(t *testing.T) {
 	root := t.TempDir()
 	archive := filepath.Join(root, "game.zip")

@@ -252,7 +252,7 @@ assert.deepEqual(sdkSchema.$defs.Player.properties.avatar.type, [
 ]);
 assert.equal("source" in sdkSchema.$defs.Player.properties, false);
 assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
-assert.equal(defaultGameManifest.sdkVersion, "3.0.0");
+assert.equal(defaultGameManifest.sdkVersion, "3.1.0");
 assert.equal("permissions" in defaultGameManifest, false);
 assert.equal("icon" in defaultGameManifest, false);
 assert.equal("permissions" in gameManifestSchema.properties, false);
