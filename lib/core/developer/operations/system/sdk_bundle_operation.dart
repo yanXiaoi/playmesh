@@ -24,9 +24,9 @@ class _SdkBundleOperation implements _DeveloperHttpOperation {
     Map<String, String> pathParameters,
   ) async {
     const names = [
-      'playmesh.js',
+      'playmesh-main.js',
       'playmesh-app.js',
-      'playmesh.d.ts',
+      'playmesh-main.d.ts',
       'playmesh-app.d.ts',
     ];
     final files = <String, String>{

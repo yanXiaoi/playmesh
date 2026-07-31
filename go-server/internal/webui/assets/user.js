@@ -131,6 +131,13 @@ function localizedError(error) {
   const code = error?.result?.code || error?.result?.error || "generic";
   return t(`error.${code}`, error?.result?.message || t("error.generic"));
 }
+
+function localizedUploadError(error) {
+  const summary = localizedError(error);
+  const detail = typeof error?.result?.message === "string"
+    ? error.result.message.trim() : "";
+  return detail && detail !== summary ? `${summary}：${detail}` : summary;
+}
 document.querySelectorAll("[data-copy-target]").forEach((button) =>
   button.addEventListener("click", () => copyValue(button.dataset.copyTarget)));
 
@@ -447,10 +454,10 @@ document.querySelector("#game-upload-form").addEventListener("submit", async (ev
     const highest = error.result?.currentHighestVersion;
     const message = highest
       ? t("uploads.error_with_highest", "", {
-        message: localizedError(error), version: highest
+        message: localizedUploadError(error), version: highest
       })
-      : localizedError(error);
-    window.PlaymeshMessage.error(message, 4200);
+      : localizedUploadError(error);
+    window.PlaymeshMessage.error(message, 8000);
   }
 });
 

@@ -3,20 +3,35 @@
 状态：开发基线
 适用版本：NEXT
 范围：App 运行时、游戏分享、在线游戏源、`go-server`
+当前协议：Relay `3.0.0`、Catalog `3.0.0`
 
 ## 1. 目标与破坏性边界
 
 Playmesh 在保留现有局域网联机能力的基础上，增加仅供 Playmesh App
 使用的公共服务器中转联机能力。
 
-本次是分享运行时的破坏性架构更新。旧的分享 `/api/*` 路由直接删除，不保留
-兼容分支、别名或迁移适配器。游戏包格式、Game SDK 游戏侧公共 API 和开发
-模板不变；AI 提示词只同步游戏必须遵守的传输抽象。已有游戏继续只通过 SDK
-访问平台能力，并从权威主机加载 `/app/**`、`/bucket/**` 和 `/playmesh/**`。
+Relay `2.0.0` 曾是分享运行时的破坏性架构更新：邀请密钥改放 URL fragment，
+公共中转改为 App 端到端加密传输，旧的分享 `/api/*` 业务路由被直接删除。
+这些是已经发布的历史事实，仍不恢复兼容分支、别名或迁移适配器。
 
-对游戏可观察到的变化只有：App 加入游戏时页面运行在本地回环 Origin 下，
-因此可以使用安全上下文允许的浏览器功能。普通局域网浏览器仍直接访问主机
-地址。
+当前 Relay `3.0.0` 是另一项破坏性更新：Authority 不再为外层物理 `app/`
+自动增加 URL 前缀，而是把它映射为 `/`；只保留 `/playmesh/**` 和
+`/bucket/**` 两个平台注册空间。清单中的入口相对于外层物理 `app/`，例如
+`index.html` 和 `controller/index.html`，邀请内保存的实际 URL 分别为
+`/index.html` 和 `/controller/index.html`。用户首段 `app` 仍是普通路径：
+入口 `app/index.html` 对应物理 `app/app/index.html` 和 URL `/app/index.html`，
+不会别名到外层 `app/index.html`。Relay 2.x 邀请及其 opaque token 因协议差异
+不能交给 3.0 运行时继续使用。
+
+当前清单必须显式声明 `entries.game`；单屏多人还必须显式声明
+`entries.controller`，多人必须显式声明 `authority.entry`。Relay 只转交这些实际
+清单入口，不提供模板路径回退。Relay 本身不新增游戏侧 API；当前游戏代码仍只通过
+Game SDK `4.0.0` 的 `playmesh.main.*` 和 App SDK `3.2.0` 的
+`playmesh.app.*` 访问平台能力。
+
+Relay 2.0 的传输架构对游戏可观察到的变化是：App 加入游戏时页面运行在本地
+回环 Origin 下，因此可以使用安全上下文允许的浏览器功能。普通局域网浏览器
+仍直接访问主机地址；Relay 3.0 另有上文所述的根 URL 入口变化。
 
 设计约束：
 
@@ -91,19 +106,21 @@ Playmesh 在保留现有局域网联机能力的基础上，增加仅供 Playmes
 局域网邀请固定为：
 
 ```text
-http://<authority-host>:<port>/<declared-app-entry>?channelId=<channelId>&token=<shareToken>
+http://<authority-host>:<port>/playmesh/join#inviteToken=<opaqueToken>
 ```
 
-其中 `<declared-app-entry>` 必须保留当前运行模式在 `main.json` 中声明的实际
-页面，例如游戏主页 `/app/index.html` 或控制器主页
-`/app/controller/index.html`；自定义嵌套入口也必须原样保留。链接只增加
-`channelId` 与当前分享 Token，不携带 Core 端口、联机码、游戏 ID、游戏名称或
-方向。Authority 同时校验入口路径、`channelId` 和 Token，再在返回 HTML 时注入
-权威 Game SDK 所需上下文。
+fragment 只携带不可猜的邀请凭据且不会进入首个 HTTP 请求。落地页用同源 POST
+交换短期 HttpOnly Cookie，随后重定向到当前运行模式在 `main.json` 中声明的实际
+根相对页面，例如 `/index.html` 或 `/controller/index.html`；自定义嵌套入口及其
+manifest 查询串在最终 URL 中保留，不存在任何平台查询覆盖键。链接不携带 Core
+端口、联机码、游戏 ID、游戏名称或方向。Authority 验证 Cookie 和精确入口后在
+返回 HTML 时注入 Game SDK 所需页面上下文。页面统一
+加载 Authority 提供的标准 App SDK；若位于 App WebView，SDK 通过原生 Bridge 调用
+Dart `app.bootstrap` 获取当前设备身份和能力，不使用额外 URL 参数切换 App 模式。
 
 同一个二维码：
 
-- Playmesh App 扫描后解析并保留同一个 `/app/**` 入口，在本地回环网关下加载。
+- Playmesh App 扫描后解析并保留同一个根 URL 入口，在本地回环网关下加载。
 - 普通浏览器打开后按原链接直接使用主机 Authority 地址。
 
 ### 3.2 服务器
@@ -133,10 +150,10 @@ https://relay.example/j/<tunnelId>#inviteToken=<opaqueToken>
 ```
 
 `tunnelId` 只用于定位临时隧道。`inviteToken` 由 App 本地解析，封装客户端
-Upgrade 路径、Authority 的实际 `/app/**` 入口、`channelId`、Join Capability、
-当前分享 Token 和端到端密钥；它不会进入 Go Server 的 HTTP 请求目标。
+Upgrade 路径、Authority 加入入口、邀请凭据、Join Capability 和端到端密钥；
+它不会进入 Go Server 的 HTTP 请求目标。
 `/j/**` 是 App 邀请标识，不是页面根路径或 Go Server 的数据面接口，页面中的
-`/app/**`、`/bucket/**`、`/playmesh/**` 不会拼接到 `/j/**` 之后。普通浏览器
+游戏根资源、`/bucket/**`、`/playmesh/**` 不会拼接到 `/j/**` 之后。普通浏览器
 打开该地址也不能获得游戏页面。
 
 ### 3.3 房间状态
@@ -159,9 +176,10 @@ Upgrade 路径、Authority 的实际 `/app/**` 入口、`channelId`、Join Capab
 封禁或计费依据。玩家按 Core `playerId` 去重，多条 HTTP、资源或 WebSocket
 连接不能重复计数。
 
-玩家延迟由当前玩家的权威 Game SDK 通过 Session WebSocket 探测 Core/Authority
-往返时间，再把结果报告给 Core 统一广播；Core 校验数值范围，但该值仍是客户端
-报告的展示数据，不能参与权威游戏规则。游戏源列表中的服务器延迟仅代表
+玩家延迟由每个页面当前客户端的 `playmesh-app.js` 通过该页面的 Session WebSocket
+探测 Core/Authority 往返时间，并只通过 `playmesh.app.performance.*` 暴露为本机
+展示数据；它不属于 `playmesh.main.*` 公共游戏状态，也不能参与权威游戏规则。
+游戏源列表中的服务器延迟仅代表
 `/apps/info` 请求耗时，两者不能混用。
 
 房间状态即使不在当前页签也持续订阅会话更新。页签标题实时显示当前玩家
@@ -179,13 +197,13 @@ GET /apps/info
 
 ```json
 {
-  "catalogApiVersion": "2.0.0",
+  "catalogApiVersion": "3.0.0",
   "name": "Playmesh 公共游戏源",
   "author": "服务器建造者",
   "homepage": "https://example.com",
   "supportsGameRelay": true,
   "relay": {
-    "protocolVersion": "2.0.0",
+    "protocolVersion": "3.0.0",
     "transport": "playmesh-tcp-upgrade",
     "publicBaseUrl": "https://relay.example.com",
     "hostPath": "/relay/v1/host",
@@ -205,9 +223,12 @@ Host 或当前请求头推导。外层是否使用 TLS 直接由 `publicBaseUrl`
 配置，App 用它作为主机动态连接池上限，不在客户端硬编码服务器容量。可选字段
 不存在时直接省略。
 
-Catalog `2.0.0` 的 `/apps/list` 对每个 `gameId` 只返回当前 latest offer；
-`/apps/download` 必须携带 `gameId + version`，图标使用同源独立 URL。Relay 只读取
-`/apps/info` 中的中转声明，不改变这些 Catalog 规则。
+Catalog `3.0.0` 的 `/apps/list` 对每个 `gameId` 只返回当前 latest offer；
+`/apps/download` 必须携带 `gameId + version`，图标使用同源独立 URL。下载包仍
+保留外层物理 `app/` 目录，offer 内的入口使用 `index.html` 这类根相对值，也可
+使用 `app/index.html` 指向其中的同名用户子目录。Relay 只读取 `/apps/info` 中的
+中转声明，不改变这些 Catalog 规则。客户端对 Catalog 和 Relay 都执行精确版本
+匹配；2.x 声明不会作为 3.0 源继续使用。
 
 ### 4.1 App 自带游戏源
 
@@ -215,9 +236,12 @@ App 自带的游戏库分享服务器不支持公共中转，声明固定为：
 
 ```json
 {
-  "catalogApiVersion": "2.0.0",
+  "catalogApiVersion": "3.0.0",
   "name": "{用户昵称}的游戏库",
-  "supportsGameRelay": false
+  "supportsGameRelay": false,
+  "userUpload": {
+    "supported": false
+  }
 }
 ```
 
@@ -228,13 +252,15 @@ App 自带的游戏库分享服务器不支持公共中转，声明固定为：
 游戏分享运行时采用严格的最小公开面，只允许向加入方提供：
 
 ```text
-/app/**
+外层物理 app/ 映射出的全部非保留根资源，例如 /index.html、/controller/**、/static/**、/app/**
 /bucket/**
 /playmesh/**
 SDK 无法替代的底层连接能力，例如当前游戏受控的 WebSocket Upgrade
 ```
 
-上述清单是 Authority 对加入方的完整公开边界，而不是接口示例。新增功能必须
+`/playmesh` 和 `/bucket` 是仅有的平台保留顶层命名空间。`/app/**` 仅在物理
+`app/app/**` 存在时作为普通游戏路径提供，不是外层目录的别名。上述清单是
+Authority 对加入方的完整公开边界，而不是接口示例。新增功能必须
 遵循“SDK 优先”原则：凡是能够由 Game SDK 或 App Bridge SDK 表达、校验和
 路由的能力，均应优先通过修改 SDK 实现，不得为了接入便利而新增分享 HTTP
 业务接口。只有受浏览器沙箱限制、确实无法由 SDK 替代，且本质上属于连接或
@@ -270,21 +296,22 @@ Session WebSocket 完成。`app-capabilities` 不再是 HTTP 接口，而是客�
 权威 Game SDK 必须来自主机：
 
 ```text
-/playmesh/sdk/v1/playmesh.js
+/playmesh/sdk/v1/playmesh-main.js
 ```
 
 它包含全局数据、游戏状态、会话协议和公共 SDK 契约。
 
-只有以下文件由加入方 App 本地提供：
+当前客户端 SDK 同样由 Authority 提供：
 
 ```text
 /playmesh/sdk/v1/playmesh-app.js
 ```
 
-它提供客户端本地 ID、昵称、能力和 App Bridge。LocalTunnelGateway 不解析
-HTTP；加入方 App 另行启动只绑定 `127.0.0.1`、只提供这一份脚本的本地静态
-入口，Authority HTML 引用该本机绝对地址。其他 `/playmesh/**` 全部来自权威
-主机。
+它提供统一的客户端 SDK 表面。普通浏览器没有原生 Bridge，按 HTML 模式运行；
+App WebView 检测到 `PlaymeshAppBridge` 或 `chrome.webview` 后，通过
+`app.bootstrap` 从 Dart 获取当前客户端身份、Core 回环地址、能力和设备上下文。
+不再启动本地 App SDK HTTP 服务，也不通过 URL 参数或绝对脚本地址切换 App
+模式。LocalTunnelGateway 仍只做原始 TCP 透传，不解析 HTTP。
 
 ## 7. LocalTunnelGateway
 
@@ -297,9 +324,9 @@ http://127.0.0.1:<local-port>
 本地不生成自签名证书。页面 LocalTunnelGateway 只负责监听回环端口、建立
 上游连接、双向复制、背压、取消、超时和关闭，不解析 HTTP、URL、Header、
 Cookie、Range、WebSocket 或 Game SDK。局域网 App 的 Core 回环端口在每条
-连接开始前执行一次固定的 `/playmesh/core` 受控 Upgrade；Authority 校验当前
-分享 Token 后只连接本局 Core。Upgrade 完成后同样只复制原始字节，不公开或
-接受任意 Host、端口与 URL。
+连接开始前执行一次固定的 `/playmesh/core` 受控 Upgrade；Dart 从邀请 fragment
+取得 `inviteToken` 并只在该 Upgrade Header 中提交，Authority 校验后只连接本局
+Core。Upgrade 完成后同样只复制原始字节，不公开或接受任意 Host、端口与 URL。
 
 传输驱动：
 
@@ -369,11 +396,14 @@ http[s]://relay.example/j/<tunnelId>#inviteToken=<opaqueToken>
 ```
 
 `opaqueToken` 只放在 URL fragment，内部封装客户端 Upgrade 路径、Authority
-实际 `/app/**` 入口、`channelId`、Join Capability、Authority 分享 Token 和
+加入入口、邀请凭据、Join Capability 和
 端到端密钥。fragment 不属于 HTTP 请求目标，不会随普通页面请求、创建隧道请求
 或 Upgrade 请求发送给中转服务器；客户端 App 在本地解析后只向真正的
-`/relay/v1/client` Upgrade 发送 `tunnelId` 和 Join Capability，再把真实入口
-恢复为 `http://127.0.0.1:{localPort}/app/...?...` 并从本机回环加载。即使 Go
+`/relay/v1/client` Upgrade 发送 `tunnelId` 和 Join Capability，再把受控加入入口
+恢复为
+`http://127.0.0.1:{localPort}/playmesh/join#inviteToken=<authorityInviteToken>`。
+WebView 在本机回环 Origin 下交换 HttpOnly Cookie，随后由 Authority 重定向到
+manifest 声明的实际页面及查询串。即使 Go
 Server 完全不受信任，它也拿不到页面入口、Authority 分享 Token 或端到端密钥。
 
 客户端不能提交 `targetHost`、`targetPort` 或 `targetURL`。
@@ -502,13 +532,19 @@ Authority 已提供的 Range、206、ETag 或缓存语义；这些 HTTP 能力�
 - 房间状态统一展示所有玩家的昵称、RTT、来源和连接状态。
 - 玩家来源正确区分服务器、局域网 App、局域网 HTML。
 - App 通过回环 Origin 运行，普通浏览器行为不变。
-- 局域网邀请保留 `main.json` 声明的实际 `/app/**` 入口，查询参数只含
-  `channelId + shareToken`；普通浏览器仍可直接加载并加入，App 解析同一链接后
-  在本地回环 Origin 下加载。
+- 局域网邀请通过 fragment 凭据交换 HttpOnly Cookie，再重定向到 `main.json`
+  声明的根相对入口及查询串；普通浏览器仍可直接加入，App 解析同一链接后在本地
+  回环 Origin 下执行相同握手。
 - 公共邀请只含 `tunnelId + fragment inviteToken`，浏览器误扫不会把
   `inviteToken` 发送给 Go Server。
 - 局域网链路不加密，公共中转数据始终端到端加密。
-- `playmesh.js` 始终来自 Authority，只有 `playmesh-app.js` 来自客户端。
+- `playmesh-main.js` 与 `playmesh-app.js` 都由 Authority 按清单 SDK 版本提供；当前
+  客户端只提供原生 App Bridge 与 Dart `app.bootstrap` 返回的平台上下文；两者
+  成对注入，旧 `playmesh.js` 不兼容。
 - Go Server 从未获得端点密钥，密码学上无法解密所转发的密文，因而也无法解析游戏协议。
 - Token 由全局中间件验证，白名单可配置。
-- 旧游戏包、SDK 公共契约和开发模板没有变化；AI 提示词仅增加传输透明、统一使用 SDK 的行为约束，并遵守最小披露原则。
+- Relay 与 Catalog 当前声明均为 `3.0.0`；旧 2.x 邀请和 opaque token 不兼容。
+  `app/...` 清单入口合法，并按原值解析到物理 `app/app/...` 与运行时 `/app/...`，
+  不提供指向外层 `app/...` 的别名。
+- Relay 不额外增加 Game/App SDK 公共 API；游戏包仍有物理 `app/`，开发模板和 AI
+  提示词显式声明根相对入口，并继续遵守最小披露原则。

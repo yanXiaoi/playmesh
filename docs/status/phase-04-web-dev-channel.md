@@ -23,7 +23,7 @@
 - 开发者链接与游戏分享链接使用一致的地址切换、二维码和复制交互，所有链接支持长按或拖选复制。
 - App 内置 WebView 与外部浏览器使用同一响应式工作区；移动端提供项目、编辑和运行视图，工作区不嵌入游戏主页面预览。
 - 项目直接位于统一 `playmesh-library/packages/{gameId}/` 游戏库，新建项目支持随机生成项目 ID；开发项目与普通游戏共用扫描、运行和删除流程。
-- 平台不内置游戏 Demo。默认项目骨架、工作区页面和 CodeMirror 均外置在 `playmesh-library/public/developer/`，Dart 不嵌入 HTML 或骨架模板。
+- 默认项目骨架、工作区页面和 CodeMirror 均属于开发工具资源，统一放在 `playmesh-library/public/developer/`；Dart 不嵌入 HTML 或骨架模板。
 - 工作区提供 IDEA 风格文件树、文本编辑、图片预览、二进制列出、上传、新建与删除文件/文件夹、Diff 和快速操作；`main.json` 由平台管理且禁止修改或删除，项目根 `app` 禁止删除。
 - 快速操作支持 `create_file`、`replace_file`、`insert_lines` 和 `replace_lines`，可预览 Diff 并按修订原子应用；创建与完整替换会递归创建缺失目录。
 - 项目级本地历史位于 `packages/{gameId}/cache/developer/local-history/`，使用初始基线加变更后快照，按 5 分钟窗口合并，支持文件、文件夹和工作区 Diff 与全量恢复。

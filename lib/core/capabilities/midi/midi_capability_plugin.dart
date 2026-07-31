@@ -20,6 +20,7 @@ class MidiCapabilityPlugin
     name: 'MIDI',
     description: '允许游戏通过标准 Web MIDI API 请求 MIDI SysEx，并为后续原生 MIDI 能力保留独立适配入口。',
     apiVersion: '1.0.0',
+    supportedPlatforms: [CapabilityPlatform.ANDROID],
     methods: [],
     events: [],
   );
@@ -49,16 +50,6 @@ class MidiCapabilityPlugin
       throw const FormatException('MIDI 能力当前不接受创建参数');
     }
     return _MidiCapabilityInstance();
-  }
-
-  @override
-  Future<CapabilityJson> test(Duration timeout) async {
-    if (!isAvailable) throw UnsupportedError('当前平台不支持 MIDI SysEx 权限回调');
-    return {
-      'available': true,
-      'permissionRequested': false,
-      'nativeMethods': const <String>[],
-    };
   }
 
   @override

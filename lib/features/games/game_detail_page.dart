@@ -36,7 +36,7 @@ Future<void> cleanupStaleGamePackageExport() async {
   try {
     await (await _mobileGamePackageShareFiles()).cleanup();
   } on Object {
-    // Startup cleanup is best effort. The next export repeats it before writing.
+    // 启动时的清理采用尽力而为策略；下次导出会在写入前再次清理。
   }
 }
 
@@ -142,18 +142,18 @@ class GameDetailPage extends StatelessWidget {
         child: FilledButton.icon(
           key: const ValueKey('game-detail-start'),
           autofocus: true,
-          onPressed: game.manifestError == null
-              ? () => Navigator.of(
-                  context,
-                ).pushNamed(GamePage.routeName, arguments: game)
+          onPressed: game.isRunnable
+              ? () => Navigator.of(context).pushNamed(
+                  GamePage.routeName,
+                  arguments: GameLaunchArguments(
+                    game: game,
+                    enterFullscreenOnLaunch: true,
+                  ),
+                )
               : null,
-          icon: Icon(
-            game.manifestError == null
-                ? Icons.play_arrow
-                : Icons.build_outlined,
-          ),
+          icon: Icon(game.isRunnable ? Icons.play_arrow : Icons.build_outlined),
           label: Text(
-            game.manifestError == null
+            game.isRunnable
                 ? context.tr('game.start')
                 : context.tr('game.fix_manifest'),
           ),
@@ -245,13 +245,12 @@ class GameDetailPage extends StatelessWidget {
       } finally {
         try {
           if (destination != null && shareFiles != null) {
-            // Android share sheets can return before the receiver opens the
-            // URI. Release the lease and let the next share/app startup remove
-            // the stale file instead of deleting it underneath the receiver.
+            // Android 分享面板可能在接收方打开 URI 前返回。先释放租约，
+            // 让下次分享或 App 启动时移除过期文件，避免在接收方使用期间删除。
             await shareFiles.complete(destination, deleteNow: false);
           }
         } on Object {
-          // The next startup/share cleanup retries without masking share errors.
+          // 下次启动或分享时会重试清理，且不掩盖分享错误。
         }
       }
       return;

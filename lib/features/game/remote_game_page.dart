@@ -14,7 +14,7 @@ import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_web/android_webview_file_selector.dart';
-import '../../core/game_web/local_app_sdk_server.dart';
+import '../../core/game_web/game_web_gateway_contract.dart';
 import '../../core/game_web/local_tunnel_gateway.dart';
 import '../../core/localization/platform_game_ui_assets.dart';
 import '../../core/localization/playmesh_localization.dart';
@@ -52,7 +52,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   AppWebViewBridge? _appBridge;
   LocalTunnelGateway? _webGateway;
   LocalTunnelGateway? _coreGateway;
-  LocalAppSdkServer? _localAppSdkServer;
   Uri? _localEntryUri;
   Object? _error;
   final int _windowsReloadKey = 0;
@@ -63,23 +62,10 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Future<Object?> Function(String)? _evaluateWindowsJavaScript;
   String? _platformUiConfigurationKey;
   Map<String, Object?>? _platformUiConfiguration;
-  bool _showPerformance = false;
   bool _allowPop = false;
   Future<void>? _nativeBackOperation;
 
-  Uri get _launchUri {
-    final base = _localEntryUri ?? widget.entryUri;
-    return base.replace(
-      queryParameters: {
-        ...base.queryParameters,
-        'playmeshApp': '1',
-        if (_localAppSdkServer case final sdkServer?)
-          'playmeshAppSdkUrl': sdkServer.scriptUri.toString(),
-        if (widget.nickname.trim().isNotEmpty)
-          'playmeshNickname': widget.nickname.trim(),
-      },
-    );
-  }
+  Uri get _launchUri => _localEntryUri ?? widget.entryUri;
 
   bool get _usesFlutterWebView => supportsPlatformWebView;
 
@@ -113,7 +99,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Future<void> _prepare() async {
     LocalTunnelGateway? webGateway;
     LocalTunnelGateway? coreGateway;
-    LocalAppSdkServer? appSdkServer;
     try {
       final entryUri = widget.entryUri;
       final usesRelay = _isRelayInvitation(entryUri);
@@ -123,7 +108,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
               : entryUri.scheme != 'http')) {
         throw const FormatException('App 游戏入口地址无效');
       }
-      appSdkServer = await startLocalAppSdkServer();
       if (usesRelay) {
         webGateway = await startRelayClientGateway(
           invitationUri: entryUri,
@@ -134,8 +118,12 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
           target: RelayTarget.core,
         );
       } else {
-        final shareToken = entryUri.queryParameters['token'];
-        if (shareToken == null || shareToken.isEmpty) {
+        final invitationFragment = _invitationFragment(entryUri);
+        final shareToken =
+            invitationFragment[playmeshGameInvitationTokenParameter];
+        if (invitationFragment.length != 1 ||
+            shareToken == null ||
+            shareToken.isEmpty) {
           throw const FormatException('局域网游戏邀请缺少 Token');
         }
         final authorityBaseUri = Uri(
@@ -154,19 +142,17 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         );
       }
       if (!mounted) {
-        await appSdkServer.close();
         await coreGateway.close();
         await webGateway.close();
         return;
       }
       _webGateway = webGateway;
       _coreGateway = coreGateway;
-      _localAppSdkServer = appSdkServer;
       _localEntryUri = usesRelay
           ? (webGateway as RelayClientGateway).localEntryUri
           : webGateway.localBaseUri.replace(
               path: entryUri.path,
-              queryParameters: entryUri.queryParameters,
+              fragment: entryUri.fragment,
             );
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
@@ -186,7 +172,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         setState(() {});
       }
     } on Object catch (error) {
-      await appSdkServer?.close();
       await coreGateway?.close();
       await webGateway?.close();
       if (mounted) setState(() => _error = error);
@@ -230,7 +215,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
                         .resume()
                         .then((_) async {
                           await _syncPlatformUiConfiguration();
-                          await _syncPerformanceVisible();
                         })
                         .catchError((Object error) {
                           debugPrint('发送远程 WebView Bridge 启动消息失败: $error');
@@ -263,9 +247,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   }
 
   Future<void> _sendAppMessage(String message) async {
-    await _messageQueue.add(
-      'window.playmeshApp && window.playmeshApp.__receive(${jsonEncode(message)});',
-    );
+    await _messageQueue.add(appSdkReceiveScript(message));
   }
 
   Future<void> _runJavaScript(String script) async {
@@ -294,7 +276,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   }
 
   void _handleNavigationStarted() {
-    _resetTransientUiForLoad();
     _messageQueue.pause(clearPending: true);
     unawaited(_appBridge?.resetCapabilities());
   }
@@ -309,9 +290,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         'configuration': configuration,
       }),
     );
-    final appScript =
-        'window.playmeshApp?.__configurePlatformUi?.('
-        '${jsonEncode(configuration)});';
+    final appScript = appSdkConfigurePlatformUiScript(configuration);
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       await _runWindowsJavaScript?.call('$appScript$script');
       return;
@@ -323,7 +302,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   void dispose() {
     _evaluateWindowsJavaScript = null;
     unawaited(_appBridge?.close());
-    unawaited(_localAppSdkServer?.close());
     unawaited(_coreGateway?.close());
     unawaited(_webGateway?.close());
     unawaited(
@@ -387,7 +365,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         onRunJavaScriptReady: (runJavaScript) {
           _runWindowsJavaScript = runJavaScript;
           unawaited(_syncPlatformUiConfiguration());
-          unawaited(_syncPerformanceVisible());
         },
         onEvaluateJavaScriptReady: (evaluateJavaScript) {
           _evaluateWindowsJavaScript = evaluateJavaScript;
@@ -408,30 +385,6 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         style: const TextStyle(color: Colors.white),
       ),
     );
-  }
-
-  Future<void> _syncPerformanceVisible() async {
-    final script =
-        'window.playmesh && window.playmesh.performance && '
-        'window.playmesh.performance.setVisible(${jsonEncode(_showPerformance)});';
-    try {
-      final runWindowsJavaScript = _runWindowsJavaScript;
-      if (runWindowsJavaScript != null) {
-        await runWindowsJavaScript(script);
-      } else if (_controller != null) {
-        await _controller!.runJavaScript(script);
-      }
-    } on Object catch (error) {
-      debugPrint('同步扫码加入页性能显示失败: $error');
-    }
-  }
-
-  void _resetTransientUiForLoad() {
-    if (!mounted) return;
-    setState(() {
-      _showPerformance = false;
-    });
-    unawaited(_syncPerformanceVisible());
   }
 
   KeyEventResult _handleNativeBackKey(FocusNode _, KeyEvent event) {
@@ -461,7 +414,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       final injectedHandler = widget.nativeBackHandler;
       if (injectedHandler != null && await injectedHandler()) return;
 
-      const script = 'Boolean(window.playmeshApp?.__handleNativeBack?.())';
+      final script = appSdkHandleNativeBackScript();
       final Object? handled;
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
         final evaluate = _evaluateWindowsJavaScript;
@@ -508,9 +461,19 @@ bool _isRelayInvitation(Uri value) {
   if (segments.length != 2 || segments.first != 'j') return false;
   if (value.fragment.isEmpty) return false;
   try {
-    return Uri.splitQueryString(value.fragment)['inviteToken']?.isNotEmpty ==
+    return parsePlaymeshInvitationFragment(
+          value.fragment,
+        )[playmeshGameInvitationTokenParameter]?.isNotEmpty ==
         true;
   } on FormatException {
     return false;
+  }
+}
+
+Map<String, String> _invitationFragment(Uri value) {
+  try {
+    return parsePlaymeshInvitationFragment(value.fragment);
+  } on FormatException {
+    throw const FormatException('游戏邀请凭据编码无效');
   }
 }

@@ -3,14 +3,11 @@ import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 
 void main() {
   test('主 SDK 在 App 与浏览器初始化前统一完成能力确认', () async {
-    final source = SdkFeatureRegistry.sdkFile('playmesh.js');
+    final source = SdkFeatureRegistry.sdkFile('playmesh-main.js');
 
     expect(source, contains('function requestCapabilityConsent'));
     expect(source, contains('function capabilityDisplayText'));
-    expect(
-      source,
-      contains('["media.camera", "capability.media.camera"]'),
-    );
+    expect(source, contains('["media.camera", "capability.media.camera"]'));
     expect(source, contains('name: definition?.name || capability'));
     expect(source, contains('description: definition?.description || ""'));
     expect(source, contains('platformHtml("capability.unsupported")'));

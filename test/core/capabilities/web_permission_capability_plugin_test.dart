@@ -17,7 +17,11 @@ void main() {
       webPermissionAuthorizer: authorizer,
     );
     final midi = MidiCapabilityPlugin(webPermissionAuthorizer: authorizer);
-    final registry = CapabilityRegistry([camera, microphone, midi]);
+    final registry = CapabilityRegistry([
+      camera,
+      microphone,
+      midi,
+    ], platform: CapabilityPlatform.ANDROID);
     addTearDown(registry.dispose);
 
     expect(
@@ -85,7 +89,7 @@ void main() {
           return true;
         },
       ),
-    ]);
+    ], platform: CapabilityPlatform.ANDROID);
     addTearDown(registry.dispose);
 
     expect(
@@ -140,7 +144,7 @@ void main() {
         resources: const ['midiSysex'],
         available: false,
       ),
-    ]);
+    ], platform: CapabilityPlatform.ANDROID);
     addTearDown(registry.dispose);
 
     expect(
@@ -174,6 +178,62 @@ void main() {
         role: AppWebPermissionRole.authority,
       ),
       isFalse,
+    );
+  });
+
+  test('注册表先按 supportedPlatforms 判断当前平台', () async {
+    var authorizations = 0;
+    final plugin = _FakePermissionPlugin(
+      code: 'android.only',
+      resources: const ['camera'],
+      authorize: (_) async {
+        authorizations += 1;
+        return true;
+      },
+    );
+    final registry = CapabilityRegistry([
+      plugin,
+    ], platform: CapabilityPlatform.WINDOWS);
+    addTearDown(registry.dispose);
+
+    expect(plugin.isAvailable, isTrue);
+    expect(registry.isPlatformSupported(plugin.descriptor), isFalse);
+    expect(registry.isPluginAvailable(plugin), isFalse);
+    expect(registry.isAvailable(plugin.descriptor.code), isFalse);
+    expect(
+      await registry.authorizeWebPermissions(
+        resources: const ['camera'],
+        declaredCapabilities: const ['android.only'],
+        role: AppWebPermissionRole.authority,
+      ),
+      isFalse,
+    );
+    expect(authorizations, 0);
+  });
+
+  test('注册表拒绝空或重复的平台列表', () {
+    expect(
+      () => CapabilityRegistry([
+        _FakePermissionPlugin(
+          code: 'empty-platforms',
+          resources: const ['camera'],
+          supportedPlatforms: const [],
+        ),
+      ]),
+      throwsArgumentError,
+    );
+    expect(
+      () => CapabilityRegistry([
+        _FakePermissionPlugin(
+          code: 'duplicate-platforms',
+          resources: const ['camera'],
+          supportedPlatforms: const [
+            CapabilityPlatform.ANDROID,
+            CapabilityPlatform.ANDROID,
+          ],
+        ),
+      ]),
+      throwsArgumentError,
     );
   });
 
@@ -235,12 +295,16 @@ class _FakePermissionPlugin
     required String code,
     required List<String> resources,
     this.available = true,
+    List<CapabilityPlatform> supportedPlatforms = const [
+      CapabilityPlatform.ANDROID,
+    ],
     CapabilityWebPermissionAuthorize? authorize,
   }) : descriptor = CapabilityDescriptor(
          code: code,
          name: code,
          description: code,
          apiVersion: '1.0.0',
+         supportedPlatforms: supportedPlatforms,
          methods: const [],
          events: const [],
        ),
@@ -266,9 +330,6 @@ class _FakePermissionPlugin
   @override
   Future<CapabilityInstance> create(CapabilityJson options) async =>
       _FakeCapabilityInstance();
-
-  @override
-  Future<CapabilityJson> test(Duration timeout) async => const {};
 
   @override
   Future<void> dispose() async {}

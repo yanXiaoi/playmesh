@@ -15,7 +15,7 @@ class _DeveloperOperationRegistry {
   }) : middleware = List.unmodifiable(middleware),
        executionMiddleware = List.unmodifiable(executionMiddleware);
 
-  static const catalogVersion = '2.3.0';
+  static const catalogVersion = '4.0.0';
 
   final List<_DeveloperHttpOperation> operations;
   final List<DeveloperOperationMiddleware> middleware;

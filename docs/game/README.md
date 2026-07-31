@@ -28,7 +28,8 @@ AI 开发与手工开发使用同一个项目目录、SDK、校验器、运行�
 
 - 在 IDEA、WebStorm、VS Code 等外部 IDE 中使用完整 `.d.ts` 和中文 JSDoc；
 - 从 App 拉取已有项目或创建新项目；
-- 使用 `playmesh-cli push/dev` 原子发布，并在目标 App WebView 中运行和跟随日志；
+- 使用 `playmesh-cli dev/run/logs/update` 分别执行开发代理、正式发布运行、日志附加和
+  集成更新；
 - 拉取损坏但仍有有效游戏 ID 的项目进行修复。
 
 CLI 命令的权威说明位于 [`dev-cli/README.md`](../../dev-cli/README.md)。
@@ -47,26 +48,30 @@ AI 提示词和操作审批。
    状态同步、Binary Channel、存储和性能。
 2. [游戏包与 main.json](package-format.md)：目录结构、清单、入口、能力声明、数据目录
    和导入导出边界。
-3. [Game SDK / App Bridge SDK](sdk-v1.md)：当前公开 API、类型、角色限制和错误语义。
+3. [Game SDK / App SDK](sdk-v1.md)：当前公开 API、类型、角色限制和错误语义。
 4. [游戏能力使用指南](capability-plugins.md)：如何直接使用非敏感 Web API，并按需在
    `capabilities.json` 中声明敏感权限或 Playmesh 多平台适配能力。
 5. [在线游戏源与 Catalog API](../catalog-api.md)：游戏源声明、搜索、下载与认证。
 
 ## 当前契约
 
-- SDK 稳定地址：`/playmesh/sdk/v1/playmesh.js`
-- 游戏公开资源：`/app/...`
+- 主 SDK 稳定地址：`/playmesh/sdk/v1/playmesh-main.js`
+- App SDK 稳定地址：`/playmesh/sdk/v1/playmesh-app.js`（由平台预先注入）
+- 游戏公开资源：物理 `app/` 直接映射到运行时 `/`
 - Bucket 上传文件：`/bucket/...`
 - 游戏包目录：`playmesh-library/packages/{gameId}/`
-- 游戏入口：`entries.game`，默认 `app/index.html`
-- 单屏多人控制器入口：`entries.controller`，默认 `app/controller/index.html`
-- 多人 Authority 入口：`authority.entry`
-- 实际 SDK 版本及兼容范围：以目标 App 的 SDK 注册表和开发者工作区状态为准
-- 游戏业务 locale：`playmesh.runtime.getLocale()`（只返回当前显示端 locale；
+- 游戏入口：`entries.game` 对所有游戏显式必填；默认模板写入 `index.html`
+- 单屏多人控制器入口：`entries.controller` 显式必填；默认模板写入
+  `controller/index.html`
+- 多人 Authority 入口：`authority.entry` 显式必填；默认模板写入
+  `static/js/service/index.js`
+- SDK 清单版本：`sdkVersion` 与 `appSdkVersion` 均必填，且必须分别为 `4.0.0`
+  与 `3.2.0`
+- 游戏业务 locale：`playmesh.app.runtime.getLocale()`（只返回当前显示端 locale；
   游戏自行提供翻译，不读取 App messages）
 
-URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。目标 App 会根据
-`main.json.sdkVersion/appSdkVersion` 选择兼容 SDK Bundle 和对应宿主执行器。
+URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。本次破坏性更新不解析
+旧 SDK 版本：目标 App 只接受 Game SDK `4.0.0` 与 App SDK `3.2.0`，旧值直接拒绝。
 
 ## 最小游戏
 
@@ -74,6 +79,7 @@ URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本
 packages/com.example.hello/
   main.json
   capabilities.json  # 可选
+  icon.png            # 可选
   app/
     index.html
 ```
@@ -83,10 +89,13 @@ packages/com.example.hello/
 <html lang="zh-CN">
   <body>
     <main id="game">Hello Playmesh</main>
-    <script src="/playmesh/sdk/v1/playmesh.js"></script>
+    <script src="/playmesh/sdk/v1/playmesh-main.js"></script>
     <script type="module">
-      await playmesh.ready;
-      console.log(playmesh.session.getCurrent());
+      const ready = await playmesh.ready;
+      console.log(
+        ready.main.session,
+        playmesh.app.runtime.getLocale(),
+      );
     </script>
   </body>
 </html>
@@ -97,8 +106,17 @@ packages/com.example.hello/
 
 ## 游戏代码必须遵守的边界
 
-- 只读取自身 `/app/...`、平台 `/playmesh/...` 和 SDK 返回的 `/bucket/...`。
-- 只通过 Game SDK 使用会话、玩家、联机、生命周期、存储和平台能力。
+- 只读取自身外层物理 `app/` 映射到运行时 `/` 的普通资源、平台
+  `/playmesh/...` 和 SDK 返回的 `/bucket/...`。用户首段 `app` 是普通资源路径：
+  物理 `app/app/**` 映射为 `/app/**`，不会别名到外层 `app/**`。
+- 只通过 `playmesh.main.*` 使用会话、玩家、联机、生命周期和存储；通过
+  `playmesh.app.*` 使用当前终端的 locale、性能和平台能力。
+- 面向游戏代码的唯一全局对象是 `window.playmesh`，其根级公开成员严格只有
+  `ready`、`main` 与 `app`。Game SDK `4.0.0` 的游戏域只位于
+  `playmesh.main.*`，App SDK `3.2.0` 的终端域只位于 `playmesh.app.*`；
+  `window.playmeshApp` 与公开 `__*` 内部桥接均不存在。`main.ready` 内部先等待
+  `app.ready`；根 `playmesh.ready` 只复用这条初始化链并返回 `{ main, app }`，
+  不保留其他旧根路径。
 - 不读取分享参数、内部 token、Core 地址、原生 Bridge 或 WebSocket 帧。
 - 不根据局域网、公共中转、浏览器或 App 加入方式分叉游戏协议。
 - 最终规则、分数和胜负由 Authority Runtime 决定，Go Core 只负责通用会话与路由。

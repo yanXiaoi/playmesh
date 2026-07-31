@@ -165,6 +165,21 @@ class DeveloperLocalHistoryStore {
     return List.unmodifiable(operations);
   }
 
+  Future<({bool initialized, Uint8List? bytes})> readBaselineFile(
+    Directory workspace,
+    String path,
+  ) async {
+    final baseline = _baselineDirectory(workspace);
+    if (!await baseline.exists()) {
+      return (initialized: false, bytes: null);
+    }
+    final file = File(_join(baseline.path, path));
+    return (
+      initialized: true,
+      bytes: await file.exists() ? await file.readAsBytes() : null,
+    );
+  }
+
   Future<DeveloperLocalHistoryDiff> diff(
     Directory workspace,
     String operationId,

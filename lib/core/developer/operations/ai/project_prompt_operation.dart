@@ -56,6 +56,16 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       throw const FormatException('main.json 必须是对象');
     }
     final manifest = Map<String, Object?>.from(decodedManifest);
+    _requirePromptManifestVersion(
+      manifest,
+      'sdkVersion',
+      SdkFeatureRegistry.gameSdkVersion,
+    );
+    _requirePromptManifestVersion(
+      manifest,
+      'appSdkVersion',
+      SdkFeatureRegistry.appSdkVersion,
+    );
     final modes = _stringValues(manifest['modes']);
     final displayModes = _stringValues(manifest['displayModes']);
     if (modes.length != 1 || displayModes.length != 1) {
@@ -72,12 +82,26 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       throw const FormatException('联机游戏未声明支持的显示模式');
     }
     final entries = manifest['entries'];
-    final gameEntry = entries is Map && entries['game'] is String
-        ? (entries['game'] as String).trim()
-        : 'app/index.html';
-    final controllerEntry = entries is Map && entries['controller'] is String
-        ? (entries['controller'] as String).trim()
-        : 'app/controller/index.html';
+    if (entries is! Map) {
+      throw const FormatException('main.json.entries 必须是对象');
+    }
+    final gameEntry = _requiredPromptManifestEntry(
+      entries,
+      'game',
+      'main.json.entries.game',
+    );
+    String? controllerEntry;
+    if (entries.containsKey('controller')) {
+      controllerEntry = _requiredPromptManifestEntry(
+        entries,
+        'controller',
+        'main.json.entries.controller',
+      );
+    } else if (isSingleScreen) {
+      throw const FormatException(
+        'single_screen_multiplayer 缺少 main.json.entries.controller',
+      );
+    }
     final authority = manifest['authority'];
     final authorityEntry = authority is Map && authority['entry'] is String
         ? (authority['entry'] as String).trim()
@@ -120,7 +144,7 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
           isSingleScreen ? 'single-screen-multiplayer' : 'multi-screen',
         ),
     ];
-    final gameSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh.d.ts');
+    final gameSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh-main.d.ts');
     final appSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh-app.d.ts');
     final allDirectories = [...await gateway.catalog.listDirectories(projectId)]
       ..sort();
@@ -160,9 +184,9 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       ..writeln('============================================================')
       ..writeln('统一 SDK TypeScript 声明（唯一游戏接口事实源）')
       ..writeln('============================================================')
-      ..writeln('===== BEGIN SDK DECLARATION: playmesh.d.ts =====')
+      ..writeln('===== BEGIN SDK DECLARATION: playmesh-main.d.ts =====')
       ..writeln(gameSdkDeclaration.trim())
-      ..writeln('===== END SDK DECLARATION: playmesh.d.ts =====')
+      ..writeln('===== END SDK DECLARATION: playmesh-main.d.ts =====')
       ..writeln()
       ..writeln('===== BEGIN SDK DECLARATION: playmesh-app.d.ts =====')
       ..writeln(appSdkDeclaration.trim())
@@ -175,7 +199,7 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       ..writeln('modes: ${modes.join(', ')}')
       ..writeln('displayModes: ${displayModes.join(', ')}')
       ..writeln('entries.game: $gameEntry')
-      ..writeln('entries.controller: $controllerEntry')
+      ..writeln('entries.controller: ${controllerEntry ?? '未声明'}')
       ..writeln('authority.entry: ${authorityEntry ?? '未声明'}')
       ..writeln(
         'capabilities.required: '
@@ -251,5 +275,27 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
     request.response.contentLength = bytes.length;
     request.response.add(bytes);
     await request.response.close();
+  }
+}
+
+String _requiredPromptManifestEntry(
+  Map<dynamic, dynamic> object,
+  String field,
+  String path,
+) {
+  final value = object[field];
+  if (value is! String || value.trim().isEmpty) {
+    throw FormatException('$path 必须显式声明为非空字符串');
+  }
+  return value.trim();
+}
+
+void _requirePromptManifestVersion(
+  Map<String, Object?> manifest,
+  String field,
+  String required,
+) {
+  if (manifest[field] != required) {
+    throw FormatException('main.json.$field 必须显式声明为 $required');
   }
 }

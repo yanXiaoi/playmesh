@@ -9,7 +9,7 @@ const appCapabilitySdkSource = SdkSourceFragment(
     if (!options || typeof options !== "object" || Array.isArray(options)) {
       throw new TypeError("能力 options 必须是对象");
     }
-    if (!bootstrap) throw new Error("请先等待 playmesh.ready");
+    if (!bootstrap) throw new Error("请先等待 playmesh.app.ready");
     if (!bootstrap.device?.declaredCapabilities?.includes(code)) {
       throw new Error(`当前游戏未在 capabilities.json 声明 ${code}`);
     }
@@ -55,6 +55,20 @@ const appCapabilitySdkSource = SdkSourceFragment(
         }
         listeners.add(callback);
         return () => listeners.delete(callback);
+      },
+      addEventListener(event, callback) {
+        if (!state.active) throw new Error("能力实例已释放");
+        if (typeof event !== "string" || !event) throw new TypeError("事件名称必须是非空字符串");
+        if (typeof callback !== "function") throw new TypeError("事件回调必须是函数");
+        let listeners = state.listeners.get(event);
+        if (!listeners) {
+          listeners = new Set();
+          state.listeners.set(event, listeners);
+        }
+        listeners.add(callback);
+      },
+      removeEventListener(event, callback) {
+        state.listeners.get(event)?.delete(callback);
       },
       onError(callback) {
         if (typeof callback !== "function") throw new TypeError("错误回调必须是函数");

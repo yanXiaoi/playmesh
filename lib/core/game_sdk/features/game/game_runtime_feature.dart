@@ -8,7 +8,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     const message = typeof rawMessage === "string" ? JSON.parse(rawMessage) : rawMessage;
     if (!message || typeof message !== "object") return;
     if (message.type === "platform.ui.restoreGameFocus") {
-      appSdk.__restoreGameContentFocus?.();
+      appInternalRuntime.restoreGameContentFocus?.();
       return;
     }
     if (message.type === "platform.ui.configure") {
@@ -22,11 +22,6 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       } catch (error) {
         global.console?.error?.("Playmesh platform UI localization update failed", error);
       }
-      return;
-    }
-    if (message.type === "performance.visibility") {
-      performanceVisible = message.visible !== false;
-      void renderPerformanceUi();
       return;
     }
     if (message.type === "sdk.bootstrap") {
@@ -52,7 +47,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       global.console?.info?.("Playmesh Game SDK 就绪", {
         mode: bootstrap.session ? "multiplayer" : "solo",
       });
-      void renderPerformanceUi();
+      configureClientPerformance();
       startLatencyProbes();
       if (bootstrap.session && !bootstrap.isAuthority) {
         void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
@@ -81,7 +76,6 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       });
       closeBinaryTransport("主会话连接已关闭");
       stopLatencyProbes();
-      setLatency(null);
       emit(lifecycleListeners, {
         state: message.type === "transport.closed" ? "closed" : "error",
         error: message.error,
@@ -137,7 +131,6 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       emitPlayerConnectionChanges(bootstrap.session, transport.session);
       bootstrap.session = transport.session;
       emit(sessionListeners, transport.session);
-      void renderPerformanceUi();
       startLatencyProbes();
     } else if (transport.type === "game.message") {
       const storageResponse = transport.payload?.__playmeshStorageResponse;
@@ -179,12 +172,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
         session: null,
       };
       emit(lifecycleListeners, { state: "ready" });
-      if (!appSdk.isAvailable()) {
-        void ensureBrowserNicknameUi().catch((error) => {
-          global.console?.warn?.("Playmesh 浏览器游戏菜单初始化失败", error);
-        });
-      }
-      void renderPerformanceUi();
+      configureClientPerformance();
       return bootstrap;
     }
     const appIdentity = appSdk.isAvailable()
@@ -205,8 +193,12 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     applyBrowserJoin(config, joined);
     try {
       await connectBrowserSocket(config, joined);
-      if (appSdk.isAvailable() && typeof appSdk.__syncAvatar === "function") {
-        appSdk.__syncAvatar(joined.session.id, joined.credential.token).catch((error) => {
+      if (appSdk.isAvailable() &&
+          typeof appInternalRuntime.syncAvatar === "function") {
+        appInternalRuntime.syncAvatar(
+          joined.session.id,
+          joined.credential.token,
+        ).catch((error) => {
           global.console?.warn?.("Playmesh App 头像同步失败，游戏将继续", error);
         });
       }
@@ -227,8 +219,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     }
     emit(sessionListeners, bootstrap.session);
     emit(lifecycleListeners, { state: "ready" });
-    mountBrowserNicknameControl().catch(() => {});
-    void renderPerformanceUi();
+    configureClientPerformance();
     startLatencyProbes();
     void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
     return bootstrap;
@@ -244,8 +235,8 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     if (joined.credential.reconnected) {
       previouslyConnectedPlayerIds.add(joined.credential.player.id);
     }
-    // The Core may publish the connected snapshot as soon as the socket opens.
-    // Seed bootstrap first so that an early session.state can update it safely.
+    // Core 可能在套接字打开后立即发布连接快照，因此先建立 bootstrap，
+    // 让提前到达的 session.state 可以安全更新它。
     bootstrap = {
       type: "sdk.bootstrap",
       sdkVersion: PLAYMESH_SDK_VERSION,
@@ -304,8 +295,7 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     const socket = new WebSocket(socketUrl);
     browserSocket = socket;
     let opened = false;
-    // Subscribe before awaiting open so the initial connected snapshot cannot
-    // pass between the open event and listener registration.
+    // 必须在等待打开前订阅，避免首个连接快照落在 open 事件与监听注册之间。
     socket.addEventListener("message", (event) => {
       receive({ type: "transport.message", message: JSON.parse(event.data) });
     });
@@ -370,8 +360,9 @@ const gameRuntimeSdkSource = SdkSourceFragment(
         const joined = await joinBrowser(browserConnectionConfig);
         applyBrowserJoin(browserConnectionConfig, joined);
         await connectBrowserSocket(browserConnectionConfig, joined);
-        if (appSdk.isAvailable() && typeof appSdk.__syncAvatar === "function") {
-          void appSdk.__syncAvatar(
+        if (appSdk.isAvailable() &&
+            typeof appInternalRuntime.syncAvatar === "function") {
+          void appInternalRuntime.syncAvatar(
             joined.session.id,
             joined.credential.token,
           ).catch(() => {});
@@ -399,58 +390,17 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     throw new Error("游戏页面已退出，停止主会话 WebSocket 重连");
   }
 
-  const emptyAppSdk = {
-    version: "__PLAYMESH_APP_SDK_VERSION__",
-    ready: Promise.resolve({
-      available: false,
-      identity: null,
-      device: { platform: "browser", capabilities: [] },
-    }),
-    isAvailable() { return false; },
-    __restoreGameContentFocus() {},
-    __requestExit() { return Promise.resolve(); },
-    __confirmCapabilities() { return Promise.resolve(); },
-    __configureRuntimeGame() { return emptyAppSdk.ready; },
-    identity: { getCurrent() { return null; } },
-    capabilities: {
-      getRegistry() { return []; },
-      getAvailable() { return []; },
-      getDeclared() { return []; },
-      create() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 能力插件宿主")); },
-    },
-    device: {
-      getPlatform() { return "browser"; },
-      setFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
-      onInput() { return function unsubscribe() {}; },
-    },
-    ui: {
-      initializeBrowser() { return false; },
-      configure() { return { fallbackUi: false, floatingButton: false }; },
-      restartGame() { global.location?.reload?.(); },
-      openSharePanel() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主")); },
-      showGameSidebar() { return Promise.resolve(false); },
-      openRuntimeLogs() { return Promise.resolve(false); },
-      enterFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
-      exitFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
-      openGameInfo() { return Promise.resolve(false); },
-      setPerformanceVisible() { return false; },
-      togglePerformance() { return false; },
-      exitGame() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主")); },
-    },
-  };
-  const appSdk = global.playmeshApp || emptyAppSdk;
-  const appPlatformUiConfigurationKey =
-    typeof Symbol === "function" && typeof Symbol.for === "function"
-      ? Symbol.for("playmesh.platform-ui.configuration")
-      : "__PLAYMESH_PLATFORM_UI_CONFIGURATION__";
+  const PLAYMESH_APP_INTERNAL_KEY =
+    Symbol.for("playmesh.app.internal.v1");
+  const appInternalRuntime = global[PLAYMESH_APP_INTERNAL_KEY];
+  const appSdk = appInternalRuntime?.publicApi;
+  if (!appInternalRuntime || !appSdk) {
+    throw new Error(
+      "Playmesh App SDK 未注入；playmesh-app.js 必须先于 playmesh-main.js 加载",
+    );
+  }
   function takeAppPlatformUiConfiguration() {
-    const configuration = global[appPlatformUiConfigurationKey] || null;
-    try {
-      delete global[appPlatformUiConfigurationKey];
-    } catch (_) {
-      // The host-owned value is still never copied into a public SDK result.
-    }
-    return configuration;
+    return appInternalRuntime.takePlatformUiConfiguration?.() || null;
   }
   let browserPlatformUiCatalog =
     global.__PLAYMESH_BROWSER__?._playmeshPlatformUi || null;
@@ -591,7 +541,6 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     platformUiTheme = effectivePlatformUiTheme(themeMode);
     refreshCapabilityConsentUi(capabilityConsentUi);
     refreshBrowserPlatformUi(browserNicknameUi);
-    refreshPerformancePlatformUi(performanceUi);
   }
 
   function platformUiSystemThemeChanged() {
@@ -599,7 +548,6 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     platformUiTheme = effectivePlatformUiTheme("system");
     refreshCapabilityConsentUi(capabilityConsentUi);
     refreshBrowserPlatformUi(browserNicknameUi);
-    refreshPerformancePlatformUi(performanceUi);
   }
   platformUiDarkModeQuery?.addEventListener?.(
     "change",
@@ -914,8 +862,9 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       global.setTimeout(() => focusPlatformUiControl(deny), 0);
     });
     if (decision === "allow") {
-      if (appSdk.isAvailable() && typeof appSdk.__confirmCapabilities === "function") {
-        await appSdk.__confirmCapabilities();
+      if (appSdk.isAvailable() &&
+          typeof appInternalRuntime.confirmCapabilities === "function") {
+        await appInternalRuntime.confirmCapabilities();
       }
       host.remove();
       capabilityConsentUi = null;
@@ -930,8 +879,9 @@ const gameRuntimeSdkSource = SdkSourceFragment(
     }
     const error = new Error("用户拒绝了当前游戏的能力请求");
     error.code = "capability_denied";
-    if (appSdk.isAvailable() && typeof appSdk.__requestExit === "function") {
-      await appSdk.__requestExit().catch(() => {});
+    if (appSdk.isAvailable() &&
+        typeof appInternalRuntime.requestExit === "function") {
+      await appInternalRuntime.requestExit().catch(() => {});
     } else if (global.history?.length > 1) {
       global.setTimeout(() => global.history.back(), 0);
     }

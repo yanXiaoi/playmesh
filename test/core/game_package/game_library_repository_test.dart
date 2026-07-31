@@ -79,7 +79,7 @@ void main() {
           orientation: GameOrientation.landscape,
           tags: ['arcade'],
           entry: LocalGameEntry(
-            assetPath: 'app/index.html',
+            gameEntryPath: 'index.html',
             statusLabel: 'SDK',
           ),
         ),
@@ -107,7 +107,7 @@ void main() {
       orientation: GameOrientation.landscape,
       manifestError: 'ÉCOLE ΩFault 解析失败',
       entry: LocalGameEntry(
-        assetPath: 'app/index.html',
+        gameEntryPath: 'index.html',
         statusLabel: 'manifest_repair_required',
       ),
     );
@@ -188,7 +188,7 @@ const _oldGame = GameSummary(
   displayModeLabel: '多屏模式',
   displayMode: 'multi_screen',
   orientation: GameOrientation.portrait,
-  entry: LocalGameEntry(assetPath: 'old/app/index.html', statusLabel: 'SDK'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'SDK'),
 );
 
 const _newGame = GameSummary(
@@ -203,7 +203,7 @@ const _newGame = GameSummary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
   tags: ['party'],
-  entry: LocalGameEntry(assetPath: 'new/app/index.html', statusLabel: 'SDK'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'SDK'),
 );
 
 GameSummary _indexedGame(int index) => GameSummary(
@@ -218,10 +218,7 @@ GameSummary _indexedGame(int index) => GameSummary(
   displayModeLabel: 'multi_screen',
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
-  entry: LocalGameEntry(
-    assetPath: 'game-$index/app/index.html',
-    statusLabel: 'ready',
-  ),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'ready'),
 );
 
 const _thirdGame = GameSummary(
@@ -235,5 +232,5 @@ const _thirdGame = GameSummary(
   displayModeLabel: '多屏模式',
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
-  entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: 'SDK'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'SDK'),
 );

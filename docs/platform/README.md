@@ -10,7 +10,7 @@ Gateway 的平台开发者。游戏作者只需要阅读 [`docs/game/`](../game/
    - 新增或修改传感器、震动、摄像头、麦克风、MIDI、USB 等平台能力。
    - 统一描述符、实例生命周期、权限、平台适配、自检和注册。
 2. [SDK 开发约定](sdk-development.md)
-   - 修改 Game SDK、App Bridge SDK、TypeScript/声明片段、宿主执行器和兼容发行版。
+   - 修改 Game SDK、App Bridge SDK、TypeScript/声明片段、宿主执行器和精确版本发行定义。
    - 保证运行逻辑、类型、版本、网关响应和生成产物来自同一注册表。
 3. [开发者工作区开发约定](developer-workspace-development.md)
    - 新增 Developer Operation、网页工作区功能、AI 审批、项目文件能力和后台行为。
@@ -36,10 +36,15 @@ Gateway 的平台开发者。游戏作者只需要阅读 [`docs/game/`](../game/
 公开契约、运行逻辑、生成物和文档不能各自维护一份：
 
 - 能力插件由插件描述符和实例实现驱动注册表、工作区、自检与 SDK。
-- SDK 由 Dart Feature 驱动 TypeScript、`.d.ts`、宿主执行器和兼容发行版。
+- SDK 由 Dart Feature 驱动 TypeScript、`.d.ts`、宿主执行器和精确版本发行定义。
 - Developer API 由 Operation Definition 驱动路由、OpenAPI、AI 目录和中间件。
 - App 内全部显示文案由 locale 对应的 `app.json` 驱动 Flutter、Developer
   Workspace 和平台注入 Web UI；网页只消费宿主解析后的命名空间投影。
+
+SDK 面向游戏开发者只提供唯一全局 `window.playmesh`，其根级公开成员严格只有
+`ready`、`main` 与 `app`。`window.playmeshApp` 和公开 `__*` 内部桥接均不存在；
+Game SDK/App SDK 的内部协作使用不可枚举的私有 `Symbol` runtime。网页性能浮层唯一
+由 App SDK 创建和维护，Game SDK 不创建浏览器性能 panel。
 
 ### App 所有的 Web UI
 

@@ -5,7 +5,7 @@ import '../version/semantic_version.dart';
 
 const defaultGameCatalogPort = 16668;
 const defaultOnlineGamePageSize = 5;
-const gameCatalogApiVersion = '2.0.0';
+const gameCatalogApiVersion = '3.0.0';
 
 class GameRelayDeclaration {
   const GameRelayDeclaration({
@@ -382,12 +382,14 @@ class CatalogGameOffer {
     required this.source,
     this.icon,
     this.catalogAuthor,
+    this.packageSizeBytes,
   });
 
   final GameManifest manifest;
   final OnlineGameSource source;
   final Uri? icon;
   final String? catalogAuthor;
+  final int? packageSizeBytes;
 
   String get publisher =>
       (catalogAuthor == null ? manifest.author : catalogAuthor!).trim();
@@ -401,6 +403,7 @@ class OnlineCatalogGame extends CatalogGameOffer {
     required super.source,
     super.icon,
     super.catalogAuthor,
+    super.packageSizeBytes,
   });
 }
 
@@ -657,7 +660,7 @@ class GameUpdateSourceError {
   final String sourceId;
   final String localSourceName;
 
-  /// Raw source/client diagnostic. This value is never an i18n key.
+  /// 原始来源或客户端诊断值，绝不是国际化 key。
   final String message;
 }
 

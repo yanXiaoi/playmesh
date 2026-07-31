@@ -209,6 +209,36 @@ func TestHandlerReturnsLatencyProbeFromAuthorityHost(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectsLegacyPerformanceMetricMessages(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+
+	for index, messageType := range []string{
+		"performance.fps",
+		"performance.latency",
+	} {
+		host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+			"gameId": "legacy-performance", "displayMode": "multi_screen",
+			"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+		})
+		connection := dial(t, server.URL, host)
+		readType(t, connection, "session.state")
+
+		writeWS(t, connection, map[string]any{
+			"type": messageType, "sequence": index + 1,
+			"payload": map[string]any{"fps": 60, "latencyMs": 20},
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _, err := connection.Read(ctx)
+		cancel()
+		connection.CloseNow()
+		if websocket.CloseStatus(err) != websocket.StatusUnsupportedData {
+			t.Fatalf("%s close status = %v, error = %v", messageType, websocket.CloseStatus(err), err)
+		}
+	}
+}
+
 func TestAuthorityDisconnectPausesRunningSession(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(NewHandler(NewStore(), logger))

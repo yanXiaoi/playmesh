@@ -71,6 +71,8 @@ val goCoreAar = file("libs/playmesh_core.aar")
 
 dependencies {
     implementation(files(goCoreAar))
+    implementation("com.google.ar:core:1.54.0")
+    implementation("io.github.webrtc-sdk:android:144.7559.09")
 }
 
 tasks.named("preBuild").configure {

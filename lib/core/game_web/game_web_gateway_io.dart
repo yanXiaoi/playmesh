@@ -8,23 +8,25 @@ import 'package:flutter/services.dart';
 import '../network/lan_endpoint_resolver.dart';
 import '../storage/game_bucket_http.dart';
 import '../storage/game_storage_service.dart';
-import '../../models/game_manifest.dart';
+import '../../models/game_package_layout.dart';
 import '../../models/game_summary.dart';
 import '../capabilities/default_capability_plugins.dart';
+import '../capabilities/capability_plugin.dart';
+import '../game_package/game_web_resource_provider_io.dart';
+import '../game_package/game_web_resource_source.dart';
 import '../game_sdk/sdk_feature_registry.dart';
 import '../localization/platform_game_ui_assets.dart';
 import 'game_web_gateway_contract.dart';
 import 'local_tunnel_gateway_contract.dart';
 
 Future<GameWebGateway> startGameWebGateway({
-  required String gameRootAssetPath,
-  String? gameRootFilePath,
+  required GameWebResourceSource source,
   required bool multiplayer,
   required String displayMode,
   required GameOrientation orientation,
   GameOrientation? controllerOrientation,
-  String gameEntryPath = 'app/index.html',
-  String controllerEntryPath = 'app/controller/index.html',
+  required String gameEntryPath,
+  String? controllerEntryPath,
   required String gameId,
   String gameName = 'Playmesh 游戏',
   List<String> tags = const [],
@@ -58,51 +60,74 @@ Future<GameWebGateway> startGameWebGateway({
     appSdkVersion,
   );
   final platformUiAssets = await PlatformGameUiAssets.load();
-  _appRelativeHtmlEntry(gameEntryPath, field: 'entries.game');
-  _appRelativeHtmlEntry(controllerEntryPath, field: 'entries.controller');
-  final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
-  final gateway = _IoGameWebGateway(
-    server: server,
-    channelId: _randomChannelId(),
-    gameRootAssetPath: gameRootAssetPath,
-    gameRootFilePath: gameRootFilePath,
-    multiplayer: multiplayer,
-    displayMode: displayMode,
-    orientation: orientation,
-    controllerOrientation: controllerOrientation,
-    gameEntryPath: gameEntryPath,
-    controllerEntryPath: controllerEntryPath,
-    gameId: gameId,
-    gameName: gameName,
-    tags: List.unmodifiable(tags),
-    gameSdkVersion: resolvedGameSdkVersion,
-    appSdkVersion: resolvedAppSdkVersion,
-    platformUiAssets: platformUiAssets,
-    requiredCapabilities: List.unmodifiable(requiredCapabilities),
-    controllerRequiredCapabilities: List.unmodifiable(
-      controllerRequiredCapabilities,
-    ),
-    coreEndpoint: coreEndpoint?.replace(path: '/', query: null, fragment: null),
-    joinCode: joinCode,
-    shareToken: shareToken,
-    storage: storage,
+  final normalizedGameEntry = _parseHtmlEntry(
+    gameEntryPath,
+    field: 'entries.game',
   );
-  gateway.listen();
-  return gateway;
+  final controllerPageRequired =
+      multiplayer && displayMode == 'single_screen_multiplayer';
+  final normalizedControllerEntry = controllerEntryPath == null
+      ? controllerPageRequired
+            ? throw const FormatException(
+                'single_screen_multiplayer 必须声明 entries.controller',
+              )
+            : null
+      : _parseHtmlEntry(controllerEntryPath, field: 'entries.controller');
+  final resourceProvider = await createGameWebResourceProvider(source);
+  try {
+    final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+    final gateway = _IoGameWebGateway(
+      server: server,
+      resourceProvider: resourceProvider,
+      validateRequestPaths: source.validateRequestPaths,
+      multiplayer: multiplayer,
+      displayMode: displayMode,
+      orientation: orientation,
+      controllerOrientation: controllerOrientation,
+      gameEntryPath: normalizedGameEntry.path,
+      gameEntryQuery: normalizedGameEntry.query,
+      controllerEntryPath: normalizedControllerEntry?.path,
+      controllerEntryQuery: normalizedControllerEntry?.query,
+      gameId: gameId,
+      gameName: gameName,
+      tags: List.unmodifiable(tags),
+      gameSdkVersion: resolvedGameSdkVersion,
+      appSdkVersion: resolvedAppSdkVersion,
+      platformUiAssets: platformUiAssets,
+      requiredCapabilities: List.unmodifiable(requiredCapabilities),
+      controllerRequiredCapabilities: List.unmodifiable(
+        controllerRequiredCapabilities,
+      ),
+      coreEndpoint: coreEndpoint?.replace(
+        path: '/',
+        query: null,
+        fragment: null,
+      ),
+      joinCode: joinCode,
+      shareToken: shareToken,
+      storage: storage,
+    );
+    gateway.listen();
+    return gateway;
+  } on Object {
+    await resourceProvider.close();
+    rethrow;
+  }
 }
 
 class _IoGameWebGateway implements GameWebGateway {
   _IoGameWebGateway({
     required this.server,
-    required this.channelId,
-    required this.gameRootAssetPath,
-    this.gameRootFilePath,
+    required this.resourceProvider,
+    required this.validateRequestPaths,
     required this.multiplayer,
     required this.displayMode,
     required this.orientation,
     required this.controllerOrientation,
     required this.gameEntryPath,
+    required this.gameEntryQuery,
     required this.controllerEntryPath,
+    required this.controllerEntryQuery,
     required this.gameId,
     required this.gameName,
     required this.tags,
@@ -118,15 +143,16 @@ class _IoGameWebGateway implements GameWebGateway {
   });
 
   final HttpServer server;
-  final String channelId;
-  final String gameRootAssetPath;
-  final String? gameRootFilePath;
+  final GameWebResourceProvider resourceProvider;
+  final bool validateRequestPaths;
   final bool multiplayer;
   final String displayMode;
   final GameOrientation orientation;
   final GameOrientation? controllerOrientation;
   final String gameEntryPath;
-  final String controllerEntryPath;
+  final String? gameEntryQuery;
+  final String? controllerEntryPath;
+  final String? controllerEntryQuery;
   final String gameId;
   final String gameName;
   final List<String> tags;
@@ -139,9 +165,15 @@ class _IoGameWebGateway implements GameWebGateway {
   final String? joinCode;
   final String shareToken;
   final GameStorageService storage;
+  final String invitationToken = _randomSessionToken();
+  final String browserSessionToken = _randomSessionToken();
+  bool _closed = false;
 
   @override
   int get port => server.port;
+
+  String get _browserSessionCookieName =>
+      'playmesh-game-session-${server.port}';
 
   void listen() {
     server.listen((request) async {
@@ -156,6 +188,20 @@ class _IoGameWebGateway implements GameWebGateway {
   }
 
   Future<void> _handle(HttpRequest request) async {
+    if (request.uri.path == playmeshGameInvitationPath) {
+      if (request.uri.hasQuery) {
+        await _text(request.response, HttpStatus.notFound, '页面不存在');
+        return;
+      }
+      if (request.method == 'GET') {
+        await _invitationPage(request.response);
+      } else if (request.method == 'POST') {
+        await _acceptInvitation(request);
+      } else {
+        await _text(request.response, HttpStatus.methodNotAllowed, '不支持的请求');
+      }
+      return;
+    }
     if (await handleGameBucketRequest(
       request,
       storage: storage,
@@ -163,10 +209,13 @@ class _IoGameWebGateway implements GameWebGateway {
     )) {
       return;
     }
-    final expectedEntryPath = '/$_pageEntryPath';
+    final expectedEntryPath = playmeshGamePackageLayout.webRequestPath(
+      _pageEntryPath,
+    );
     if (request.method == 'GET' && request.uri.path == expectedEntryPath) {
-      if (request.uri.queryParameters['channelId'] != channelId ||
-          request.uri.queryParameters['token'] != shareToken) {
+      if (!_hasBrowserSession(request) ||
+          (request.uri.hasQuery ? request.uri.query : null) !=
+              _normalizedPageEntryQuery) {
         await _text(request.response, HttpStatus.forbidden, '分享链接已失效');
         return;
       }
@@ -178,20 +227,109 @@ class _IoGameWebGateway implements GameWebGateway {
       return;
     }
     if (request.method == 'GET' &&
-        (request.uri.path.startsWith('/app/') ||
-            request.uri.path.startsWith('/playmesh/'))) {
+        request.uri.path != '/' &&
+        !_isBucketRequestPath(request.uri.path)) {
       await _asset(request);
       return;
     }
     await _text(request.response, HttpStatus.notFound, '页面不存在');
   }
 
+  Future<void> _invitationPage(HttpResponse response) async {
+    response.headers
+      ..contentType = ContentType.html
+      ..set(HttpHeaders.cacheControlHeader, 'no-store')
+      ..set('Referrer-Policy', 'no-referrer')
+      ..set(
+        'Content-Security-Policy',
+        "default-src 'none'; script-src 'unsafe-inline'; "
+            "connect-src 'self'; style-src 'unsafe-inline'",
+      );
+    response.write('''
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Playmesh</title>
+  <style>html,body{height:100%;margin:0;background:#111827;color:#f8fafc;font:15px system-ui}body{display:grid;place-items:center}p{max-width:32rem;padding:1.5rem;text-align:center}</style>
+</head>
+<body>
+  <p id="status">正在进入游戏…</p>
+  <script>
+  (async () => {
+    const status = document.getElementById("status");
+    try {
+      const fragment = new URLSearchParams(location.hash.slice(1));
+      const inviteToken = fragment.get("$playmeshGameInvitationTokenParameter");
+      history.replaceState(null, "", location.pathname);
+      if (!inviteToken) throw new Error("邀请凭据缺失");
+      const response = await fetch(location.pathname, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({"$playmeshGameInvitationTokenParameter": inviteToken}),
+        credentials: "same-origin"
+      });
+      const result = await response.json();
+      if (!response.ok || typeof result.entry !== "string") {
+        throw new Error(result.error || "邀请已失效");
+      }
+      location.replace(result.entry);
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : "邀请已失效";
+    }
+  })();
+  </script>
+</body>
+</html>
+''');
+    await response.close();
+  }
+
+  Future<void> _acceptInvitation(HttpRequest request) async {
+    if (request.headers.contentType?.mimeType != 'application/json' ||
+        request.contentLength < 0 ||
+        request.contentLength > 4096) {
+      await _jsonError(request.response, HttpStatus.badRequest, '邀请请求无效');
+      return;
+    }
+    try {
+      final body = await utf8.decoder.bind(request).join();
+      final decoded = jsonDecode(body);
+      if (decoded is! Map ||
+          decoded[playmeshGameInvitationTokenParameter] != invitationToken) {
+        await _jsonError(request.response, HttpStatus.forbidden, '邀请已失效');
+        return;
+      }
+    } on Object {
+      await _jsonError(request.response, HttpStatus.badRequest, '邀请请求无效');
+      return;
+    }
+    request.response.cookies.add(
+      Cookie(_browserSessionCookieName, browserSessionToken)
+        ..httpOnly = true
+        ..sameSite = SameSite.strict
+        ..path = '/',
+    );
+    request.response.headers
+      ..contentType = ContentType.json
+      ..set(HttpHeaders.cacheControlHeader, 'no-store');
+    request.response.write(jsonEncode({'entry': _pageEntryTarget}));
+    await request.response.close();
+  }
+
+  bool _hasBrowserSession(HttpRequest request) => request.cookies.any(
+    (cookie) =>
+        cookie.name == _browserSessionCookieName &&
+        cookie.value == browserSessionToken,
+  );
+
   Future<void> _coreTunnel(HttpRequest request) async {
     if (!multiplayer || coreEndpoint == null) {
       await _text(request.response, HttpStatus.notFound, '连接入口不存在');
       return;
     }
-    if (request.headers.value(playmeshShareTokenHeader) != shareToken) {
+    if (request.headers.value(playmeshShareTokenHeader) != invitationToken) {
       await _text(request.response, HttpStatus.forbidden, '分享链接已失效');
       return;
     }
@@ -236,24 +374,38 @@ class _IoGameWebGateway implements GameWebGateway {
 
   Future<void> _browserPage(HttpRequest request) async {
     final entryPath = multiplayer && displayMode == 'single_screen_multiplayer'
-        ? controllerEntryPath
+        ? controllerEntryPath!
         : gameEntryPath;
-    final relativePath = _appRelativeHtmlEntry(
-      entryPath,
-      field: entryPath == controllerEntryPath
-          ? 'entries.controller'
-          : 'entries.game',
-    );
-    var html = gameRootFilePath == null
-        ? await rootBundle.loadString('$gameRootAssetPath/$entryPath')
-        : await File(
-            '${gameRootFilePath!}${Platform.pathSeparator}app'
-            '${Platform.pathSeparator}${relativePath.replaceAll('/', Platform.pathSeparator)}',
-          ).readAsString();
-    final lastSeparator = relativePath.lastIndexOf('/');
+    final entryQuery = multiplayer && displayMode == 'single_screen_multiplayer'
+        ? controllerEntryQuery
+        : gameEntryQuery;
+    late final LoadedGameWebResource? entry;
+    try {
+      entry = await resourceProvider.read(entryPath, query: entryQuery);
+    } on GameWebResourceSessionExpired {
+      await _text(request.response, HttpStatus.gone, '开发资源会话已过期');
+      return;
+    }
+    if (entry == null) {
+      await _text(request.response, HttpStatus.notFound, '游戏入口不存在');
+      return;
+    }
+    late final String htmlSource;
+    try {
+      htmlSource = utf8.decode(entry.bytes);
+    } on FormatException {
+      await _text(
+        request.response,
+        HttpStatus.unprocessableEntity,
+        '游戏入口不是 UTF-8 HTML',
+      );
+      return;
+    }
+    var html = htmlSource;
+    final lastSeparator = entryPath.lastIndexOf('/');
     final basePath = lastSeparator < 0
-        ? '/app/'
-        : '/app/${relativePath.substring(0, lastSeparator + 1)}';
+        ? '/'
+        : '/${entryPath.substring(0, lastSeparator + 1)}';
     html = html.replaceFirst('<head>', '<head><base href="$basePath">');
     final browserConfig = jsonEncode({
       '_playmeshPlatformUi': {
@@ -284,30 +436,22 @@ class _IoGameWebGateway implements GameWebGateway {
       'orientation': _pageOrientation.manifestValue,
       'requiredCapabilities': _pageRequiredCapabilities,
       'availableCapabilities': defaultCapabilityDescriptors
-          .where((definition) => definition.htmlSupported)
+          .where(
+            (definition) =>
+                definition.supportsPlatform(CapabilityPlatform.HTML),
+          )
           .map((definition) => definition.code)
           .toList(),
       'capabilityRegistry': defaultCapabilityDescriptors
           .map((definition) => definition.toJson())
           .toList(),
       'bucketEndpoint': '/bucket',
-      if (request.uri.queryParameters['playmeshNickname'] != null)
-        'nickname': request.uri.queryParameters['playmeshNickname'],
     });
-    var appSdkSource = '/playmesh/sdk/v1/playmesh-app.js';
-    if (request.uri.queryParameters['playmeshApp'] == '1') {
-      final appSdkUri = _localAppSdkUri(
-        request.uri.queryParameters['playmeshAppSdkUrl'],
-      ).replace(queryParameters: {'version': appSdkVersion});
-      appSdkSource = const HtmlEscape(
-        HtmlEscapeMode.attribute,
-      ).convert(appSdkUri.toString());
-    }
     html = html.replaceFirst(
-      '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
+      '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>',
       '<script>window.__PLAYMESH_BROWSER__=$browserConfig;</script>'
-          '<script src="$appSdkSource"></script>'
-          '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
+          '<script src="/playmesh/sdk/v1/playmesh-app.js"></script>'
+          '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>',
     );
     await _html(request.response, html);
   }
@@ -324,56 +468,74 @@ class _IoGameWebGateway implements GameWebGateway {
 
   String get _pageEntryPath =>
       multiplayer && displayMode == 'single_screen_multiplayer'
-      ? controllerEntryPath
+      ? controllerEntryPath!
       : gameEntryPath;
+
+  String? get _pageEntryQuery =>
+      multiplayer && displayMode == 'single_screen_multiplayer'
+      ? controllerEntryQuery
+      : gameEntryQuery;
+
+  String? get _normalizedPageEntryQuery =>
+      _pageEntryQuery == null ? null : Uri(query: _pageEntryQuery).query;
+
+  String get _pageEntryTarget => Uri(
+    path: playmeshGamePackageLayout.webRequestPath(_pageEntryPath),
+    query: _pageEntryQuery,
+  ).toString();
 
   Future<void> _asset(HttpRequest request) async {
     final path = request.uri.path;
-    if (path.contains('..')) {
-      await _text(request.response, HttpStatus.forbidden, '资源访问被拒绝');
-      return;
-    }
-    if (path.startsWith('/app/') && gameRootFilePath != null) {
-      final relative = path.substring('/app/'.length);
-      final file = File(
-        '${gameRootFilePath!}${Platform.pathSeparator}app'
-        '${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}',
-      );
-      if (!await file.exists()) {
+    if (_isPlaymeshRequestPath(path)) {
+      if (!path.startsWith('/playmesh/')) {
         await _text(request.response, HttpStatus.notFound, '资源不存在');
         return;
       }
-      request.response.headers.contentType = _contentType(file.path);
-      await file.openRead().pipe(request.response);
-      return;
-    }
-    if (path.startsWith('/playmesh/')) {
       final liveSdk = SdkFeatureRegistry.sdkFileForPublicPath(
         path.substring('/playmesh/'.length),
         gameVersion: gameSdkVersion,
         appVersion: appSdkVersion,
       );
       if (liveSdk != null) {
-        request.response.headers.contentType = _contentType(path);
+        request.response.headers.contentType = gameWebResourceContentType(path);
         request.response.write(liveSdk);
         await request.response.close();
         return;
       }
+      final assetPath =
+          'assets/playmesh-library/public/'
+          '${path.substring('/playmesh/'.length)}';
+      try {
+        final data = await rootBundle.load(assetPath);
+        request.response.headers.contentType = gameWebResourceContentType(
+          assetPath,
+        );
+        request.response.add(
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        );
+        await request.response.close();
+      } on Object {
+        await _text(request.response, HttpStatus.notFound, '资源不存在');
+      }
+      return;
     }
-    final assetPath = path.startsWith('/app/')
-        ? '$gameRootAssetPath/app/${path.substring('/app/'.length)}'
-        : 'assets/playmesh-library/public/'
-              '${path.substring('/playmesh/'.length)}';
+
+    late final String? relativePath;
     try {
-      final data = await rootBundle.load(assetPath);
-      request.response.headers.contentType = _contentType(assetPath);
-      request.response.add(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      relativePath = gameWebResourceRequestPath(
+        request.uri,
+        validatePath: validateRequestPaths,
+        gatewayName: 'GameWebGateway',
       );
-      await request.response.close();
-    } on Object {
-      await _text(request.response, HttpStatus.notFound, '资源不存在');
+    } on FormatException {
+      await _text(request.response, HttpStatus.forbidden, '资源访问被拒绝');
+      return;
     }
+    if (relativePath == null) {
+      await _text(request.response, HttpStatus.notFound, '资源不存在');
+      return;
+    }
+    await resourceProvider.serve(request, relativePath);
   }
 
   @override
@@ -385,20 +547,33 @@ class _IoGameWebGateway implements GameWebGateway {
     return bases
         .map(
           (base) => base.replace(
-            path: '/$_pageEntryPath',
-            queryParameters: {'channelId': channelId, 'token': shareToken},
+            path: playmeshGameInvitationPath,
+            query: null,
+            fragment: Uri(
+              queryParameters: {
+                playmeshGameInvitationTokenParameter: invitationToken,
+              },
+            ).query,
           ),
         )
         .toList(growable: false);
   }
 
   @override
-  Future<void> close() => server.close(force: true);
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    try {
+      await server.close(force: true);
+    } finally {
+      await resourceProvider.close();
+    }
+  }
 }
 
-String _randomChannelId() {
+String _randomSessionToken() {
   final random = Random.secure();
-  final bytes = List<int>.generate(9, (_) => random.nextInt(256));
+  final bytes = List<int>.generate(24, (_) => random.nextInt(256));
   return base64Url.encode(bytes).replaceAll('=', '');
 }
 
@@ -456,30 +631,23 @@ Future<void> _bridgeSockets(Socket left, Socket right) async {
   right.destroy();
 }
 
-Uri _localAppSdkUri(String? value) {
-  final uri = value == null ? null : Uri.tryParse(value);
-  if (uri == null ||
-      uri.scheme != 'http' ||
-      uri.host != '127.0.0.1' ||
-      !uri.hasPort ||
-      uri.port < 1 ||
-      uri.port > 65535 ||
-      uri.path != '/playmesh-app.js' ||
-      uri.userInfo.isNotEmpty ||
-      uri.hasQuery ||
-      uri.hasFragment) {
-    throw const FormatException('App 加入必须提供有效的本地 playmesh-app.js 地址');
-  }
-  return uri;
-}
+GameWebEntryLocation _parseHtmlEntry(String path, {required String field}) =>
+    playmeshGamePackageLayout.parseWebEntry(
+      path,
+      field: field,
+      kind: GameWebEntryKind.html,
+    );
 
-String _appRelativeHtmlEntry(String path, {required String field}) {
-  final normalized = validateGamePackagePath(path, field: field);
-  if (!normalized.startsWith('app/') ||
-      !normalized.toLowerCase().endsWith('.html')) {
-    throw FormatException('$field 必须指向 app/ 内的 HTML 文件');
-  }
-  return normalized.substring('app/'.length);
+bool _isPlaymeshRequestPath(String path) =>
+    _isRuntimeRequestPath(path, 'playmesh');
+
+bool _isBucketRequestPath(String path) => _isRuntimeRequestPath(path, 'bucket');
+
+bool _isRuntimeRequestPath(String path, String namespace) {
+  if (!path.startsWith('/')) return false;
+  final relative = path.substring(1);
+  if (relative.isEmpty) return false;
+  return relative.split('/').first.toLowerCase() == namespace;
 }
 
 Future<void> _html(HttpResponse response, String body) async {
@@ -495,24 +663,13 @@ Future<void> _text(HttpResponse response, int status, String body) async {
   await response.close();
 }
 
-ContentType _contentType(String path) {
-  if (path.endsWith('.html')) {
-    return ContentType.html;
-  }
-  if (path.endsWith('.d.ts')) {
-    return ContentType.text;
-  }
-  if (path.endsWith('.js')) {
-    return ContentType('text', 'javascript', charset: 'utf-8');
-  }
-  if (path.endsWith('.css')) {
-    return ContentType('text', 'css', charset: 'utf-8');
-  }
-  if (path.endsWith('.json')) {
-    return ContentType.json;
-  }
-  if (path.endsWith('.png')) {
-    return ContentType('image', 'png');
-  }
-  return ContentType.binary;
+Future<void> _jsonError(
+  HttpResponse response,
+  int status,
+  String message,
+) async {
+  response.statusCode = status;
+  response.headers.contentType = ContentType.json;
+  response.write(jsonEncode({'error': message}));
+  await response.close();
 }

@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 
 import 'sdk_feature_registry.dart';
 
+import '../app_media/app_media_runtime.dart';
+import '../app_media/default_app_media_adapters.dart';
 import '../capabilities/capability_registry.dart';
 import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
@@ -28,6 +30,7 @@ class AppWebViewBridge {
     this.deviceService = const AppDeviceService(),
     VibrationDriver? vibrationDriver,
     CapabilityRegistry? capabilityRegistry,
+    AppMediaRuntime? mediaRuntime,
     this.onOpenSharePanel,
     bool? showShareAction,
     this.onInputTakeover,
@@ -35,10 +38,14 @@ class AppWebViewBridge {
   }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
          platformUiConfiguration,
        ),
-       showShareAction = showShareAction ?? onOpenSharePanel != null,
-       capabilityRegistry =
-           capabilityRegistry ??
-           createDefaultCapabilityRegistry(vibrationDriver: vibrationDriver) {
+       showShareAction = showShareAction ?? onOpenSharePanel != null {
+    this.mediaRuntime = mediaRuntime ?? createDefaultAppMediaRuntime();
+    this.capabilityRegistry =
+        capabilityRegistry ??
+        createDefaultCapabilityRegistry(
+          vibrationDriver: vibrationDriver,
+          mediaSourceBroker: this.mediaRuntime,
+        );
     _capabilityRuntime = CapabilityRuntime(
       registry: this.capabilityRegistry,
       declaredCapabilities: declaredCapabilities,
@@ -57,7 +64,8 @@ class AppWebViewBridge {
   final bool showShareAction;
   final void Function()? onInputTakeover;
   final Future<void> Function()? onExitRequested;
-  final CapabilityRegistry capabilityRegistry;
+  late final CapabilityRegistry capabilityRegistry;
+  late final AppMediaRuntime mediaRuntime;
   Map<String, Object?>? _platformUiConfiguration;
   late CapabilityRuntime _capabilityRuntime;
   late List<String> _runtimeDeclaredCapabilities = List.unmodifiable(
@@ -105,6 +113,7 @@ class AppWebViewBridge {
           configureRuntimeGame: _configureRuntimeGame,
           confirmCapabilities: _confirmCapabilities,
           capabilityRuntime: _capabilityRuntime,
+          mediaRuntime: mediaRuntime,
           sendCapabilityEvent: (message) => send(jsonEncode(message)),
           disposeCapability: _disposeCapability,
           setFullscreen: _fullscreen,
@@ -199,6 +208,7 @@ class AppWebViewBridge {
       normalizedCapabilities,
     )) {
       await _capabilityRuntime.reset();
+      await mediaRuntime.reset();
       _runtimeDeclaredCapabilities = normalizedCapabilities;
       _capabilityRuntime = CapabilityRuntime(
         registry: capabilityRegistry,
@@ -305,7 +315,7 @@ class AppWebViewBridge {
     return null;
   }
 
-  Future<void> resetCapabilities() {
+  Future<void> resetCapabilities() async {
     final previousRuntime = _capabilityRuntime;
     if (acceptRuntimeGameDeclaration) {
       _runtimeDeclaredCapabilities = List.unmodifiable(declaredCapabilities);
@@ -314,12 +324,14 @@ class AppWebViewBridge {
         declaredCapabilities: _runtimeDeclaredCapabilities,
       );
     }
-    return previousRuntime.reset();
+    await previousRuntime.reset();
+    await mediaRuntime.reset();
   }
 
   Future<void> close() async {
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
+    await mediaRuntime.dispose();
   }
 }
 

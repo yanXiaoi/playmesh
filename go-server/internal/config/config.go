@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	CatalogAPIVersion         = "2.0.0"
-	RelayProtocolVersion      = "2.0.0"
+	CatalogAPIVersion         = "3.0.0"
+	RelayProtocolVersion      = "3.0.0"
 	UserUploadProtocolVersion = "1.0.0"
 )
 
@@ -167,10 +167,10 @@ func Default() Config {
 			DatabasePath:                "data/playmesh-server.db",
 			GamesDirectory:              "data/games",
 			QuarantineDirectory:         "data/quarantine",
-			MaxUploadBytes:              64 << 20,
-			MaxExpandedBytes:            256 << 20,
-			MaxFileBytes:                64 << 20,
-			MaxFiles:                    4096,
+			MaxUploadBytes:              100 << 20,
+			MaxExpandedBytes:            512 << 20,
+			MaxFileBytes:                128 << 20,
+			MaxFiles:                    8000,
 			MaxCompressionRatio:         100,
 			MaxConcurrentScans:          4,
 			PublicUploadIntervalSeconds: 60,

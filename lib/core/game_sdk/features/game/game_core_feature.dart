@@ -22,7 +22,7 @@ interface PlaymeshPlayer {
   nickname: string;
   /** App 玩家同步成功后的同源头像路径；未同步及 HTML 玩家为 `null`。 */
   avatar: string | null;
-  /** 当前玩家在会话中的参与角色；Authority 资格仍以 `session.isAuthority()` 为准。 */
+  /** 当前玩家在会话中的参与角色；Authority 资格仍以 `playmesh.main.session.isAuthority()` 为准。 */
   role: "authority" | "authority_player" | "player";
   /** 玩家是否拥有在线连接；离线玩家可以保留在成员列表中等待重连。 */
   connected: boolean;
@@ -73,7 +73,7 @@ interface PlaymeshPlayerConnectionEvent {
   isCurrentPlayer: boolean;
 }
 
-/** `await playmesh.ready` 的初始化结果。 */
+/** `await playmesh.main.ready` 的初始化结果。 */
 interface PlaymeshBootstrap {
   /** 当前 Game SDK 版本。 */
   sdkVersion: string;
@@ -160,7 +160,7 @@ interface PlaymeshBinaryChannel {
   close(): Promise<void>;
 }
 
-/** `playmesh.sync` 发布的完整权威状态快照。 */
+/** `playmesh.main.sync` 发布的完整权威状态快照。 */
 interface PlaymeshSyncSnapshot<T = PlaymeshJson> {
   protocolVersion: 1;
   stateType: string;
@@ -197,7 +197,7 @@ interface PlaymeshSyncTickContext<T> {
   members: PlaymeshPlayer[];
 }
 
-/** 启动 Authority 状态同步的配置。只能在 `session.isAuthority()` 为 true 时调用。 */
+/** 启动 Authority 状态同步的配置。只能在 `playmesh.main.session.isAuthority()` 为 true 时调用。 */
 interface PlaymeshSyncAuthorityOptions<T> {
   /** 首个完整权威状态，必须可 JSON 序列化。 */
   initialState: T;
@@ -252,17 +252,41 @@ interface PlaymeshCapabilityEventDefinition {
   dataSchema: { [key: string]: PlaymeshJson };
 }
 
+type PlaymeshCapabilityPlatform = "WINDOWS" | "ANDROID" | "HTML";
+
 /** 全平台注册表中的能力插件元数据。 */
 interface PlaymeshCapabilityDefinition {
   code: string;
   name: string;
   description: string;
   apiVersion: string;
-  appSupported: boolean;
-  htmlSupported: boolean;
+  supportedPlatforms: PlaymeshCapabilityPlatform[];
   optionsSchema: { [key: string]: PlaymeshJson };
   methods: PlaymeshCapabilityMethodDefinition[];
   events: PlaymeshCapabilityEventDefinition[];
+}
+
+/** `await playmesh.app.ready` 返回的当前终端初始化结果。 */
+interface PlaymeshAppBootstrap {
+  /** 当前页面是否连接到 Playmesh App 原生 Bridge。 */
+  readonly available: boolean;
+  /** 当前 App Bridge SDK 版本。 */
+  readonly sdkVersion: "__PLAYMESH_APP_SDK_VERSION__";
+  /** App 自动注入的本机身份；普通浏览器为 `null`。 */
+  readonly identity: PlaymeshAppIdentity | null;
+  /** App 提供的受控运行环境；普通浏览器为 `null`。 */
+  readonly runtime: {
+    readonly coreBase?: string;
+    readonly playerSource?: string;
+  } | null;
+  /** 当前终端的能力插件注册表。 */
+  readonly capabilityRegistry: PlaymeshCapabilityDefinition[];
+  /** 当前终端的平台与本次页面能力声明。 */
+  readonly device: {
+    readonly platform: string;
+    readonly capabilities: string[];
+    readonly declaredCapabilities: string[];
+  };
 }
 
 /** 由 `playmesh.app.capabilities.create()` 创建的有状态能力实例。 */
@@ -272,11 +296,47 @@ interface PlaymeshCapabilityHandle {
   readonly apiVersion: string;
   invoke<T = PlaymeshJson>(method: string, args?: { [key: string]: PlaymeshJson }): Promise<T>;
   on(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): PlaymeshUnsubscribe;
+  /** DOM 风格的事件订阅别名；已有 `on()` 保持兼容。 */
+  addEventListener(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): void;
+  removeEventListener(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): void;
   onError(callback: (error: Error) => void): PlaymeshUnsubscribe;
   dispose(): Promise<void>;
 }
 
-/** `playmesh.storage.getBucket()` 返回的 Authority 主机存储分区。 */
+/** 由终端能力签发、只能交给 `playmesh.app.media.open()` 的实时媒体源。 */
+interface PlaymeshAppMediaSource {
+  readonly type: "playmesh.app.media-source";
+  readonly version: 1;
+  readonly id: string;
+  readonly kind: "video" | "audio" | "audio-video";
+  readonly protocol: string;
+  readonly live: true;
+  readonly [key: string]: PlaymeshJson;
+}
+
+interface PlaymeshAppMediaOpenOptions {
+  /** 取消仍在进行的媒体协商。 */
+  signal?: AbortSignal;
+}
+
+/** 当前 WebView 对一个终端媒体源的消费会话。 */
+interface PlaymeshAppMediaSession {
+  readonly id: string;
+  readonly source: PlaymeshAppMediaSource;
+  readonly stream: MediaStream;
+  readonly state: "opening" | "open" | "ended" | "failed";
+  close(): Promise<void>;
+}
+
+interface PlaymeshAppMediaApi {
+  /** 打开能力签发的媒体源；具体传输协议由已注册终端适配器处理。 @playmesh-completion playmesh.app.media.open */
+  open(
+    source: PlaymeshAppMediaSource,
+    options?: PlaymeshAppMediaOpenOptions,
+  ): Promise<PlaymeshAppMediaSession>;
+}
+
+/** `playmesh.main.storage.getBucket()` 返回的 Authority 主机存储分区。 */
 interface PlaymeshStorageBucket {
   /** 读取 key；不存在时返回 `null`。key 长度 1～128，只允许字母、数字、点、下划线和连字符。 */
   getData<T = PlaymeshJson>(key: string): Promise<T | null>;
@@ -328,13 +388,35 @@ interface PlaymeshAppUiApi {
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
   readonly version: "__PLAYMESH_APP_SDK_VERSION__";
-  /** App Bridge 完成身份和能力插件注册表注入后 resolve。 */
-  readonly ready: Promise<unknown>;
+  /** App Bridge 完成身份和能力插件注册表注入后 resolve；原生 Bridge 失败时 reject。 */
+  readonly ready: Promise<PlaymeshAppBootstrap>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
   isAvailable(): boolean;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
     getCurrent(): PlaymeshAppIdentity | null;
+  };
+  /** 当前客户端只读运行环境；不包含平台 UI 词典。 */
+  readonly runtime: {
+    /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.app.runtime.getLocale */
+    getLocale(): string;
+  };
+  /** 当前客户端游戏页的渲染与联机观测指标。不得用于权威玩法判定。 */
+  readonly performance: {
+    /** 返回当前页面最近 FPS；尚未形成统计窗口时返回 `null`。 @playmesh-completion playmesh.app.performance.getFps */
+    getFps(): number | null;
+    /** 订阅当前页面 FPS；注册后立即回调当前值。 @playmesh-completion playmesh.app.performance.onFps */
+    onFps(callback: (fps: number | null) => void): PlaymeshUnsubscribe;
+    /** 返回当前参与端到 Authority 的最近平滑 RTT 毫秒数；单机或 Authority 不在线时返回 `null`。 @playmesh-completion playmesh.app.performance.getLatency */
+    getLatency(): number | null;
+    /** 返回当前参与端最近延迟探测诊断数据；游戏规则不得依赖该数据判定胜负。 @playmesh-completion playmesh.app.performance.getLatencyDiagnostics */
+    getLatencyDiagnostics(): Record<string, unknown> | null;
+    /** 订阅当前参与端到 Authority 的延迟毫秒数。 @playmesh-completion playmesh.app.performance.onLatency */
+    onLatency(callback: (latency: number | null) => void): PlaymeshUnsubscribe;
+    /** 显示或隐藏当前客户端的 SDK 性能浮层。 @playmesh-completion playmesh.app.performance.setVisible */
+    setVisible(visible: boolean): void;
+    /** 当前页面在真实画面完成后报告一帧；返回最近 FPS。SDK 不会自行启动 RAF。 @playmesh-completion playmesh.app.performance.reportFrame */
+    reportFrame(timestamp?: number): number | null;
   };
   readonly capabilities: {
     /** 返回全平台注册表。 @playmesh-completion playmesh.app.capabilities.getRegistry */
@@ -346,6 +428,8 @@ interface PlaymeshAppApi {
     /** 创建一个有状态能力实例。 @playmesh-completion playmesh.app.capabilities.create */
     create(code: string, options?: { [key: string]: PlaymeshJson }): Promise<PlaymeshCapabilityHandle>;
   };
+  /** 当前终端的协议无关音视频消费入口。 */
+  readonly media: PlaymeshAppMediaApi;
   readonly device: {
     /** 返回宿主平台名称，例如 `android` 或 `windows`；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.device.getPlatform */
     getPlatform(): string | null;
@@ -358,57 +442,50 @@ interface PlaymeshAppApi {
   readonly ui: PlaymeshAppUiApi;
 }
 
-/** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
-interface PlaymeshApi {
+/** 游戏本体与对局公开 API。所有页面先等待 `playmesh.main.ready`。 */
+interface PlaymeshMainApi {
   /** 当前 Game SDK 版本。 */
   readonly version: "__PLAYMESH_SDK_VERSION__";
   /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
   readonly ready: Promise<PlaymeshBootstrap>;
-  /** 当前设备的 App Bridge 能力；普通浏览器中 `isAvailable()` 为 false。 */
-  readonly app: PlaymeshAppApi;
-  /** 当前游戏页面的只读运行环境信息；不包含平台 UI 词典。 */
-  readonly runtime: {
-    /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.runtime.getLocale */
-    getLocale(): string;
-  };
   /** 当前页面对应的游戏声明。 */
   readonly gameInfo: {
-    /** 返回 Game SDK 初始化后的只读游戏信息；尚未就绪时返回 `null`。 @playmesh-completion playmesh.gameInfo.getCurrent */
+    /** 返回 Game SDK 初始化后的只读游戏信息；尚未就绪时返回 `null`。 @playmesh-completion playmesh.main.gameInfo.getCurrent */
     getCurrent(): PlaymeshGameInfo | null;
   };
   /** 对局状态、Authority 身份和玩家成员事件。 */
   readonly session: {
-    /** 订阅会话快照；注册后若已就绪会立即回调。 @returns 取消订阅函数。 @playmesh-completion playmesh.session.onStateChange */
+    /** 订阅会话快照；注册后若已就绪会立即回调。 @returns 取消订阅函数。 @playmesh-completion playmesh.main.session.onStateChange */
     onStateChange(callback: (session: PlaymeshSessionSnapshot | null) => void): PlaymeshUnsubscribe;
-    /** 玩家第一次加入时回调。重连不会重复触发本事件。 @playmesh-completion playmesh.session.onPlayerJoin */
+    /** 玩家第一次加入时回调。重连不会重复触发本事件。 @playmesh-completion playmesh.main.session.onPlayerJoin */
     onPlayerJoin(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
-    /** 玩家连接断开时回调；成员可能仍留在会话中。 @playmesh-completion playmesh.session.onPlayerLeave */
+    /** 玩家连接断开时回调；成员可能仍留在会话中。 @playmesh-completion playmesh.main.session.onPlayerLeave */
     onPlayerLeave(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
-    /** 离线玩家使用相同 ID 恢复连接时回调。 @playmesh-completion playmesh.session.onPlayerReconnect */
+    /** 离线玩家使用相同 ID 恢复连接时回调。 @playmesh-completion playmesh.main.session.onPlayerReconnect */
     onPlayerReconnect(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
-    /** 当前页面是否是固定 Authority Client。不要根据 `players[0]` 推断。 @playmesh-completion playmesh.session.isAuthority */
+    /** 当前页面是否是固定 Authority Client。不要根据 `players[0]` 推断。 @playmesh-completion playmesh.main.session.isAuthority */
     isAuthority(): boolean;
-    /** 返回最近会话快照；单机分享页或尚未就绪时返回 `null`。 @playmesh-completion playmesh.session.getCurrent */
+    /** 返回最近会话快照；单机分享页或尚未就绪时返回 `null`。 @playmesh-completion playmesh.main.session.getCurrent */
     getCurrent(): PlaymeshSessionSnapshot | null;
-    /** 仅请求 Core 切换为运行状态；准备、倒计时和玩法条件由游戏 Authority 判断。 @playmesh-completion playmesh.session.start */
+    /** 仅请求 Core 切换为运行状态；准备、倒计时和玩法条件由游戏 Authority 判断。 @playmesh-completion playmesh.main.session.start */
     start(): Promise<PlaymeshSessionSnapshot>;
-    /** 仅在游戏规则确认结束后请求 Core 停止会话并清理离线成员；SDK 不判断胜负。 @playmesh-completion playmesh.session.finish */
+    /** 仅在游戏规则确认结束后请求 Core 停止会话并清理离线成员；SDK 不判断胜负。 @playmesh-completion playmesh.main.session.finish */
     finish(): Promise<PlaymeshSessionSnapshot>;
   };
   /** 当前参与玩家资料。 */
   readonly player: {
-    /** 返回当前玩家；公共 Authority 主屏和单机分享页返回 `null`。 @playmesh-completion playmesh.player.getCurrent */
+    /** 返回当前玩家；公共 Authority 主屏和单机分享页返回 `null`。 @playmesh-completion playmesh.main.player.getCurrent */
     getCurrent(): PlaymeshPlayer | null;
-    /** 修改当前玩家昵称，去除首尾空白后必须为 1～32 个字符。 @playmesh-completion playmesh.player.setNickname */
+    /** 修改当前玩家昵称，去除首尾空白后必须为 1～32 个字符。 @playmesh-completion playmesh.main.player.setNickname */
     setNickname(nickname: string): Promise<PlaymeshPlayer>;
   };
-  /** 自定义低层游戏消息。普通多人游戏优先使用 `playmesh.sync`。 */
+  /** 自定义低层游戏消息。普通多人游戏优先使用 `playmesh.main.sync`。 */
   readonly game: {
-    /** 向 Authority 提交 JSON 业务动作；发送者身份由平台附加。 @playmesh-completion playmesh.game.submitAction */
+    /** 向 Authority 提交 JSON 业务动作；发送者身份由平台附加。 @playmesh-completion playmesh.main.game.submitAction */
     submitAction(action: PlaymeshJson): Promise<unknown>;
-    /** 订阅 Authority 发给当前客户端的 JSON 消息。 @playmesh-completion playmesh.game.onMessage */
+    /** 订阅 Authority 发给当前客户端的 JSON 消息。 @playmesh-completion playmesh.main.game.onMessage */
     onMessage(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
-    /** `onMessage` 的兼容别名；新代码优先使用 `onMessage`。 @playmesh-completion playmesh.game.onEvent */
+    /** `onMessage` 的兼容别名；新代码优先使用 `onMessage`。 @playmesh-completion playmesh.main.game.onEvent */
     onEvent(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
   };
   /** 自定义 Authority 动作处理。只有 Authority Client 可以注册。 */
@@ -416,7 +493,7 @@ interface PlaymeshApi {
     /**
      * 注册权威动作处理器。规则、分数和胜负应在这里决定，不能信任动作中自报的身份。
      * @returns 取消注册函数。
-     * @playmesh-completion playmesh.authority.onService
+     * @playmesh-completion playmesh.main.authority.onService
      */
     onService(handler: (action: PlaymeshJson, context: PlaymeshAuthorityContext) => PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined | Promise<PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined>): PlaymeshUnsubscribe;
   };
@@ -424,59 +501,56 @@ interface PlaymeshApi {
   readonly binary: {
     /** Authority 在所有 Binary Channel 中使用的固定玩家 ID。 */
     readonly authorityPlayerId: "authority";
-    /** 创建逻辑 Channel；只有 Authority 可以调用。 @playmesh-completion playmesh.binary.createChannel */
+    /** 创建逻辑 Channel；只有 Authority 可以调用。 @playmesh-completion playmesh.main.binary.createChannel */
     createChannel(options: PlaymeshBinaryChannelOptions): Promise<PlaymeshBinaryChannel>;
-    /** 使用 Authority 分享的 Channel ID 加入逻辑 Channel。 @playmesh-completion playmesh.binary.joinChannel */
+    /** 使用 Authority 分享的 Channel ID 加入逻辑 Channel。 @playmesh-completion playmesh.main.binary.joinChannel */
     joinChannel(channelId: string): Promise<PlaymeshBinaryChannel>;
   };
   /** 完整权威状态同步、输入限频与快照订阅。 */
   readonly sync: {
-    /** 仅 Authority 启动状态同步；同一页面同时只能有一个同步 runtime。 @playmesh-completion playmesh.sync.startAuthority */
+    /** 仅 Authority 启动状态同步；同一页面同时只能有一个同步 runtime。 @playmesh-completion playmesh.main.sync.startAuthority */
     startAuthority<T = PlaymeshJson>(options: PlaymeshSyncAuthorityOptions<T>): PlaymeshSyncAuthorityController<T>;
-    /** 提交一次性语义输入，返回生成的 input ID。 @playmesh-completion playmesh.sync.submitAction */
+    /** 提交一次性语义输入，返回生成的 input ID。 @playmesh-completion playmesh.main.sync.submitAction */
     submitAction(payload: PlaymeshJson): Promise<string>;
-    /** 同一 key 只保留最新连续输入；`rateHz` 必须为 1～20。 @playmesh-completion playmesh.sync.submitState */
+    /** 同一 key 只保留最新连续输入；`rateHz` 必须为 1～20。 @playmesh-completion playmesh.main.sync.submitState */
     submitState(key: string, value: PlaymeshJson, options?: { rateHz?: number }): Promise<null>;
-    /** 请求 Authority 立即向当前玩家发送最新完整快照。 @playmesh-completion playmesh.sync.requestSnapshot */
+    /** 请求 Authority 立即向当前玩家发送最新完整快照。 @playmesh-completion playmesh.main.sync.requestSnapshot */
     requestSnapshot(): Promise<string>;
-    /** 返回最近完整快照；尚未收到时返回 `null`。 @playmesh-completion playmesh.sync.getSnapshot */
+    /** 返回最近完整快照；尚未收到时返回 `null`。 @playmesh-completion playmesh.main.sync.getSnapshot */
     getSnapshot<T = PlaymeshJson>(): PlaymeshSyncSnapshot<T> | null;
-    /** 订阅完整快照；已有快照时注册后立即回调。 @playmesh-completion playmesh.sync.observe */
+    /** 订阅完整快照；已有快照时注册后立即回调。 @playmesh-completion playmesh.main.sync.observe */
     observe<T = PlaymeshJson>(callback: (snapshot: PlaymeshSyncSnapshot<T>) => void): PlaymeshUnsubscribe;
   };
   /** WebView 暂停、恢复、退出和错误事件。 */
   readonly lifecycle: {
-    /** 订阅全部生命周期事件。 @playmesh-completion playmesh.lifecycle.onChange */
+    /** 订阅全部生命周期事件。 @playmesh-completion playmesh.main.lifecycle.onChange */
     onChange(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
-    /** 仅订阅暂停事件。 @playmesh-completion playmesh.lifecycle.onPause */
+    /** 仅订阅暂停事件。 @playmesh-completion playmesh.main.lifecycle.onPause */
     onPause(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
-    /** 仅订阅恢复事件。 @playmesh-completion playmesh.lifecycle.onResume */
+    /** 仅订阅恢复事件。 @playmesh-completion playmesh.main.lifecycle.onResume */
     onResume(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
-    /** 订阅退出事件；允许返回 Promise，宿主只会有限等待。 @playmesh-completion playmesh.lifecycle.onExit */
+    /** 订阅退出事件；允许返回 Promise，宿主只会有限等待。 @playmesh-completion playmesh.main.lifecycle.onExit */
     onExit(callback: (event: PlaymeshLifecycleEvent) => void | Promise<void>): PlaymeshUnsubscribe;
-  };
-  /** 游戏上报的 FPS、自动测量的多人 RTT 与 SDK 性能浮层。 */
-  readonly performance: {
-    /** 返回最近 FPS；尚未形成统计窗口时返回 `null`。 @playmesh-completion playmesh.performance.getFps */
-    getFps(): number | null;
-    /** 订阅 FPS；注册后立即回调当前值。 @playmesh-completion playmesh.performance.onFps */
-    onFps(callback: (fps: number | null) => void): PlaymeshUnsubscribe;
-    /** 返回最近平滑 RTT 毫秒数；单机或 Authority 不在线时返回 `null`。 @playmesh-completion playmesh.performance.getLatency */
-    getLatency(): number | null;
-    /** 返回最近延迟探测诊断数据；游戏规则不得依赖该数据判定胜负。 @playmesh-completion playmesh.performance.getLatencyDiagnostics */
-    getLatencyDiagnostics(): Record<string, unknown> | null;
-    /** 订阅延迟毫秒数。 @playmesh-completion playmesh.performance.onLatency */
-    onLatency(callback: (latency: number | null) => void): PlaymeshUnsubscribe;
-    /** 显示或隐藏 SDK 性能浮层。 @playmesh-completion playmesh.performance.setVisible */
-    setVisible(visible: boolean): void;
-    /** 在真实画面完成后报告一帧；返回最近 FPS。SDK 不会自行启动 RAF。 @playmesh-completion playmesh.performance.reportFrame */
-    reportFrame(timestamp?: number): number | null;
   };
   /** Authority 主机上的持久 JSON Bucket。浏览器和加入设备不建立独立副本。 */
   readonly storage: {
-    /** 获取 Bucket；名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。 @playmesh-completion playmesh.storage.getBucket */
+    /** 获取 Bucket；名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。 @playmesh-completion playmesh.main.storage.getBucket */
     getBucket(bucket: string): PlaymeshStorageBucket;
   };
+}
+
+interface PlaymeshReadyResult {
+  readonly main: PlaymeshBootstrap;
+  /** 与 `await playmesh.app.ready` 严格相同的稳定结果引用。 */
+  readonly app: PlaymeshAppBootstrap;
+}
+
+/** Playmesh 游戏页面的公开根对象；根级只提供聚合就绪状态及 main/app 分区。 */
+interface PlaymeshApi {
+  /** 复用 `playmesh.main.ready` 初始化链并返回游戏本体与当前客户端结果。 */
+  readonly ready: Promise<PlaymeshReadyResult>;
+  readonly main: PlaymeshMainApi;
+  readonly app: PlaymeshAppApi;
 }
 
 /** 游戏页面使用的全局 Playmesh SDK。 */
@@ -487,7 +561,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "3.1.0";
+  const PLAYMESH_SDK_VERSION = "4.0.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -509,9 +583,6 @@ interface Window { playmesh: PlaymeshApi; }
   const binaryPending = new Map();
   const binaryChannels = new Map();
   let browserNicknameUi = null;
-  let browserBackInterceptionInstalled = false;
-  let browserBackExitRequested = false;
-  let browserBackGuardUrl = null;
   let capabilityConsentUi = null;
   let transportSequence = 0;
   const pending = new Map();
@@ -527,20 +598,9 @@ interface Window { playmesh: PlaymeshApi; }
   const pauseListeners = new Set();
   const resumeListeners = new Set();
   const exitListeners = new Set();
-  const fpsListeners = new Set();
-  const latencyListeners = new Set();
   const syncListeners = new Set();
   const browserNicknameStorageKey = "playmesh.nickname.v1";
   const browserPlayerIdStorageKey = "playmesh.player-id.v1";
-  let currentFps = null;
-  let fpsFrameCount = 0;
-  let fpsWindowStartedAt = null;
-  let currentLatency = null;
-  let latencyDiagnostics = null;
-  let latencyTimer = null;
-  let latencyProbeSequence = 0;
-  let performanceVisible = false;
-  let performanceUi = null;
   let syncAuthorityRuntime = null;
   let currentSyncSnapshot = null;
   let syncInputSequence = 0;
@@ -583,8 +643,7 @@ interface Window { playmesh: PlaymeshApi; }
     });
     if (global.__PLAYMESH_BROWSER__ &&
         (command === "game.submitAction" ||
-          command === "performance.ping" ||
-          command === "performance.latency")) {
+          command === "performance.ping")) {
       return sendBrowserTransport(command, payload);
     }
     const send = global.PlaymeshBridge && global.PlaymeshBridge.postMessage
@@ -641,9 +700,7 @@ interface Window { playmesh: PlaymeshApi; }
     }
     const type = command === "game.submitAction"
       ? "game.action"
-      : command === "performance.latency"
-        ? "performance.latency"
-        : "session.ping";
+      : "session.ping";
     socket.send(JSON.stringify({
       type,
       sequence: ++transportSequence,

@@ -10,7 +10,8 @@
 它不是 App 内置的 Go Core，不运行 HTML 游戏，不执行 Authority 规则，也不负责
 计分、房间规则或游戏状态。
 
-当前 Catalog API 为 `2.0.0`，SQLite 只接受 schema v3。完整部署说明见
+当前 Catalog API 为 `3.0.0`，Relay 协议为 `3.0.0`，SQLite schema 为 v6。v6 在游戏记录中持久化规范化
+ZIP 的 `package_size_bytes`，避免列表请求重复读取包文件。完整部署说明见
 `go-server/README.md`，本轮实现说明见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
@@ -300,7 +301,7 @@ motion 下禁用非必要动画。
 重试；缺失文件视为已清理，流程幂等。审计表不得用会随游戏行删除的外键，最终删除
 后仍保留操作记录。
 
-schema v3 的审计事件必须同时保存稳定 `actor_identifier`：用户使用十进制用户 ID，
+当前 schema 的审计事件必须同时保存稳定 `actor_identifier`：用户使用十进制用户 ID，
 管理员使用 `.env` 配置的管理员用户名，后台恢复任务使用 `system`。审核、自动或
 手动上/下架、删除开始/完成及设置更新均保存角色、gameId/版本、`from`、`target`
 和时间；设置事件以 `_server` / `settings` 作为稳定资源标识。schema 采用破坏式

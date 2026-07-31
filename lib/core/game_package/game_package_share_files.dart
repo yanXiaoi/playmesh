@@ -96,9 +96,8 @@ final class GamePackageShareFiles {
     }
   }
 
-  /// Marks a share consumer as finished. Platforms that can guarantee
-  /// consumption should request immediate deletion; other platforms release
-  /// the lease so the next create/cleanup removes it.
+  /// 标记分享使用方已经结束。能保证消费完成的平台应请求立即删除；其他平台释放租约，
+  /// 由下次创建或清理操作删除文件。
   Future<void> complete(File file, {required bool deleteNow}) async {
     final target = file.absolute.path;
     _active.remove(_normalizedAbsolutePath(target));

@@ -10,7 +10,7 @@ void main() {
   test('宿主将 Game SDK 回包作为 JSON 对象注入 WebView', () {
     expect(
       gameSdkReceiveScript('{"type":"sdk.bootstrap","requestId":"ready-1"}'),
-      'window.playmesh && window.playmesh.__receive('
+      'window[Symbol.for("playmesh.main.internal.v1")]?.receive('
       '{"type":"sdk.bootstrap","requestId":"ready-1"});',
     );
   });

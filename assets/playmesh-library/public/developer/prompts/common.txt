@@ -12,29 +12,32 @@ PLAYMESH 对话 AI 游戏开发提示
 - `main.json` 不定义 `permissions` 或 `icon`；能力只通过同级 `capabilities.json`
   声明，列表图标只使用包根 `icon.png`，不得生成已移除字段。
 - `capabilities.json` 通过项目 capabilities API 管理，不通过普通文件 API 绕过校验。
-- 必须存在 `main.json.entries.game` 指向的完整 HTML 游戏入口；未声明时使用平台默认主入口。
-- 页面通过 `/playmesh/sdk/v1/playmesh.js` 引入 SDK，游戏资源使用 `/app/...`。
-- 修改游戏内容后按语义版本规则评估 `main.json.version`；`sdkVersion` 必须对应实际使用的 SDK。
+- `main.json.entries.game` 必须显式声明并指向真实存在的完整 HTML 游戏入口；`single_screen_multiplayer` 必须显式声明 `entries.controller`，`multiplayer` 必须显式声明 `authority.entry`，不得依赖任何未声明入口的默认或回退。
+- 页面通过 `/playmesh/sdk/v1/playmesh-main.js` 引入 SDK；游戏资源从 Web 根路径加载（例如 `/static/...`），对应物理文件仍放在包内 `app/`。
+- `entries.game`、`entries.controller` 和 `authority.entry` 都相对外层物理 `app/` 填写，不得带前导 `/`；首段 `app` 是普通用户目录，例如 `app/index.html` 对应物理 `app/app/index.html` 和运行时 `/app/index.html`。只有 `playmesh`、`bucket` 是平台保留首段。
+- 修改游戏内容后按语义版本规则评估 `main.json.version`；`sdkVersion` 与 `appSdkVersion` 都必须显式声明，并与随后附带的类型声明中的精确版本一致，不得省略、使用范围或回退旧版本。
 
 【安全与运行边界】
 - 所有 SDK 调用前必须 `await playmesh.ready`。
+- 顶层只使用聚合入口 `playmesh.ready` 以及 `playmesh.main`、`playmesh.app` 两个分区；会话、玩家、权威同步、生命周期和存储属于 `playmesh.main`，当前客户端的身份、设备、能力、媒体、语言、性能与 UI 属于 `playmesh.app`。不得调用旧的 `playmesh.session`、`playmesh.storage`、`playmesh.runtime` 等根级成员。
 - 不得直接访问 PlaymeshBridge、chrome.webview、Core HTTP、WebSocket、内部 token、玩家凭证、`data/`、`cache/` 或其他游戏包。
-- 二进制通信与运行时文件分别使用 `playmesh.binary` 和 Bucket upload。
+- 二进制通信与运行时文件分别使用 `playmesh.main.binary` 和 Bucket upload。
 - HTML/CSS/JavaScript 的所有本地资源引用必须存在；HTML、CSS、JS、MJS 必须是 UTF-8。
 - UI 必须适配 main.json 指定方向和手机触控，不能溢出、遮挡或依赖 hover 才能操作。
 - 异步操作必须捕获并显示错误；可以继续使用 console.log/info/warn/error/debug，平台会统一采集日志。
 - `dangerous=true` 的接口只在用户需求确实要求该操作时生成；执行时平台会暂停并请求开发者审批。
 
 【SDK 与能力】
-- 当前 Game SDK 版本字符串，当前为 3.1.0。
-- 本提示随后附带同一次 SDK 构建生成的完整 `playmesh.d.ts` 和 `playmesh-app.d.ts`，它们是方法、参数、返回值、类型、版本和中文 JSDoc 的唯一事实源。不得臆造声明中不存在的成员。
-- `playmesh.storage.getBucket(name)` 返回 Bucket；JSON 数据保持私有，上传文件通过返回的 `/bucket/...` 地址在运行时读取。
-- `playmesh.binary` 只用于多人原始 Uint8Array 通信；禁止自行创建 WebSocket。
+- 本提示随后附带同一次 SDK 构建生成的完整 `playmesh-main.d.ts` 和 `playmesh-app.d.ts`，它们是方法、参数、返回值、类型、版本和中文 JSDoc 的唯一事实源。不得臆造声明中不存在的成员。
+- `playmesh.main.storage.getBucket(name)` 返回 Bucket；JSON 数据保持私有，上传文件通过返回的 `/bucket/...` 地址在运行时读取。
+- `playmesh.main.binary` 只用于多人原始 Uint8Array 通信；禁止自行创建 WebSocket。
 - `playmesh.app` 表示当前设备身份与平台能力。等待 `playmesh.ready` 后，通过 `playmesh.app.capabilities.getRegistry/getDeclared/getAvailable` 读取状态；只有描述符公开了方法或事件的原生适配能力才用 `create(code, options)` 创建实例。
-- 游戏业务文案和资源由游戏项目自行维护国际化；平台不会翻译游戏 DOM、玩家昵称、标签、日志或其他动态内容。需要选择游戏自己的语言资源时，在 `await playmesh.ready` 后读取只读的 `playmesh.runtime.getLocale()`：App WebView 返回当前实际显示该页面的 App 语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`。不要尝试读取 Authority 主机语言或平台内部词典。
-- 非敏感能力优先直接使用标准 Web API，例如加速度计、陀螺仪和设备方向；用户主动触发的 `<input type="file">` 也不声明能力。项目根可选 `capabilities.json` 只按需声明 WebView 会拦截的敏感权限（`media.camera`、`media.microphone`、`device.midi`）和 Playmesh 已做多平台适配的能力（例如 `device.vibration`）；`required` 属于主画面，`controllerRequired` 只属于单屏多人控制器。
+- 游戏业务文案和资源由游戏项目自行维护国际化；平台不会翻译游戏 DOM、玩家昵称、标签、日志或其他动态内容。需要选择游戏自己的语言资源时，在 `await playmesh.ready` 后读取只读的 `playmesh.app.runtime.getLocale()`：App WebView 返回当前实际显示该页面的 App 语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`。不要尝试读取 Authority 主机语言或平台内部词典。
+- `playmesh.app.performance` 只反映当前客户端本地的 FPS、Session RTT 与性能浮层；不得把这些遥测值当作 Authority 状态、胜负判定或其他客户端的性能。
+- 非敏感能力优先直接使用标准 Web API，例如加速度计、陀螺仪和设备方向；用户主动触发的 `<input type="file">` 也不声明能力。项目根可选 `capabilities.json` 只按需声明 WebView 会拦截的敏感权限（`media.camera`、`media.microphone`、`device.midi`）和 Playmesh 已做原生适配的能力（例如 `device.vibration`、`sensor.pose6d`）；`required` 属于主画面，`controllerRequired` 只属于单屏多人控制器。
 - 摄像头、麦克风采集和 MIDI 声明后仍直接使用 `getUserMedia()` 或 `requestMIDIAccess({sysex:true})`。需要原生短语音识别时，按实时注册表创建 `media.microphone`，调用 `toText({localeId,listenFor,pauseFor})` 并监听 `textOnSoundLevelChange`、`textOnResult`；不要臆造描述符没有的方法，必须处理用户拒绝和平台不支持。
 - `device.vibration` 使用 `vibration` 插件适配；按实时注册表创建实例，`vibrate` 可用 `duration/pattern/repeat/intensities/amplitude/sharpness/preset` 全部参数，持续或重复震动用 `cancel` 停止。
+- `sensor.pose6d` 仅在实时注册表报告可用时创建；通过 `pose` 事件读取米制 XYZ、XYZW 四元数和跟踪状态。只有确实需要画面时才调用 `openVideo`，再把返回的不透明源交给 `playmesh.app.media.open()` 得到 `MediaStream`；不要自行创建 WebRTC、媒体 URL、端口或信令服务器，关闭 `AppMediaSession` 和能力实例。
 - `playmesh.app.ui` 提供平台统一的居中游戏菜单、分享、日志、全屏、信息、性能与退出能力。游戏自己的菜单按钮只能调用 `showGameSidebar()` 打开统一菜单；该兼容方法名不表示菜单仍位于侧边。不要调用不存在的 `hideGameSidebar()` 或 `onMenuRequest`；只有游戏完整实现替代 UI 时才使用 `configure({fallbackUi:false})` 关闭平台兜底。
 - SDK 只提供通信、存储、平台能力和受控会话状态切换。准备、倒计时、开始条件、回合推进、胜负与结束条件必须由游戏 Authority 判断；`session.start/finish` 只提交 Core 会话状态请求，不替游戏执行玩法规则。
 

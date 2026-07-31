@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const game = fs.readFileSync(
-  "assets/playmesh-library/public/sdk/v1/playmesh.d.ts",
+  "assets/playmesh-library/public/sdk/v1/playmesh-main.d.ts",
   "utf8",
 );
 const app = fs.readFileSync(
@@ -15,6 +15,14 @@ const gameRuntimeSource = fs.readFileSync(
 );
 const gameCoreSource = fs.readFileSync(
   "lib/core/game_sdk/features/game/game_core_feature.dart",
+  "utf8",
+);
+const gameStorageLifecycleSource = fs.readFileSync(
+  "lib/core/game_sdk/features/game/game_storage_lifecycle_feature.dart",
+  "utf8",
+);
+const appDeviceSource = fs.readFileSync(
+  "lib/core/game_sdk/features/app/app_device_feature.dart",
   "utf8",
 );
 const sdkRegistrySource = fs.readFileSync(
@@ -58,19 +66,55 @@ const developerSources = [
   ].map((path) => fs.readFileSync(path, "utf8")),
 ];
 
+assert(
+  fs.existsSync("assets/playmesh-library/public/sdk/v1/playmesh-main.js"),
+  "Game SDK JavaScript must be emitted as playmesh-main.js",
+);
+assert(
+  fs.existsSync("assets/playmesh-library/public/sdk/v1/playmesh-main.d.ts"),
+  "Game SDK declaration must be emitted as playmesh-main.d.ts",
+);
+assert(
+  !fs.existsSync("assets/playmesh-library/public/sdk/v1/playmesh.js"),
+  "breaking SDK update must not keep the legacy playmesh.js",
+);
+assert(
+  !fs.existsSync("assets/playmesh-library/public/sdk/v1/playmesh.d.ts"),
+  "breaking SDK update must not keep the legacy playmesh.d.ts",
+);
 assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符");
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
-assert.match(game, /readonly version: "3\.0\.0"/);
-assert.match(game, /readonly version: "3\.0\.0"/);
 assert.match(
   game,
-  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.0\.0";/,
+  /interface PlaymeshMainApi \{[\s\S]*?readonly version: "4\.0\.0";/,
+);
+assert.match(
+  game,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.2\.0";/,
 );
 assert.match(
   gameRuntimeSource,
-  /version: "__PLAYMESH_APP_SDK_VERSION__"/,
+  /Symbol\.for\("playmesh\.app\.internal\.v1"\)[\s\S]*?const appSdk = appInternalRuntime\?\.publicApi/,
 );
-assert(!gameRuntimeSource.includes("2.0.0-empty"));
+assert.match(gameRuntimeSource, /playmesh-app\.js 必须先于 playmesh-main\.js/);
+assert.doesNotMatch(gameRuntimeSource, /global\.playmeshApp/);
+assert.doesNotMatch(appDeviceSource, /global\.playmesh\s*=/);
+assert.match(
+  gameStorageLifecycleSource,
+  /main\.ready = \(async \(\) => \{\s*const appBootstrap = await appSdk\.ready;/,
+);
+assert.match(
+  gameStorageLifecycleSource,
+  /const ready = main\.ready\.then\(\s*\(mainBootstrap\) => Object\.freeze\(\{\s*main: mainBootstrap,\s*app: readyAppBootstrap,/,
+);
+assert.doesNotMatch(
+  gameStorageLifecycleSource,
+  /appBootstrap\s*=\s*await appInternalRuntime\.configureRuntimeGame/,
+);
+assert.doesNotMatch(
+  gameStorageLifecycleSource,
+  /Promise\.all\(\s*\[\s*main\.ready\s*,\s*appSdk\.ready/,
+);
 assert.match(
   gameCoreSource,
   /readonly version: "__PLAYMESH_APP_SDK_VERSION__"/,
@@ -92,13 +136,21 @@ assert.match(
   game,
   /interface PlaymeshGameInfo \{[\s\S]*id: string;[\s\S]*name: string;[\s\S]*multiplayer: boolean;[\s\S]*displayMode: PlaymeshDisplayMode;[\s\S]*requiredCapabilities: string\[\];/,
 );
+assert.match(game, /interface PlaymeshMainApi \{[\s\S]*?readonly gameInfo: \{/);
+assert.match(game, /getCurrent\(\): PlaymeshGameInfo \| null;/);
+assert.match(game, /capabilities\.create/);
+assert.match(game, /addEventListener\(event: string, callback:/);
+assert.match(game, /removeEventListener\(event: string, callback:/);
+assert.match(game, /interface PlaymeshAppMediaSource/);
 assert.match(
   game,
-  /readonly gameInfo: \{[\s\S]*getCurrent\(\): PlaymeshGameInfo \| null;/,
+  /open\([\s\S]*?source: PlaymeshAppMediaSource,[\s\S]*?options\?: PlaymeshAppMediaOpenOptions/,
 );
-assert.match(game, /capabilities\.create/);
 assert.doesNotMatch(game, /onDevice\(/);
-assert.match(app, /reference path="\.\/playmesh\.d\.ts"/);
+assert.match(app, /reference path="\.\/playmesh-main\.d\.ts"/);
+assert.doesNotMatch(app, /declare const playmesh:/);
+assert.doesNotMatch(app, /interface Window \{ playmesh:/);
+assert.doesNotMatch(app, /playmeshApp/);
 assert.match(
   game,
   /submitState\(key: string, value: PlaymeshJson, options\?: \{ rateHz\?: number \}\): Promise<null>/,
@@ -109,7 +161,45 @@ assert.match(game, /固定 Authority Client/);
 assert.match(game, /Authority 主机上的持久 JSON Bucket/);
 assert.match(game, /准备、倒计时和玩法条件由游戏 Authority 判断/);
 assert.match(game, /SDK 不判断胜负/);
-assert.match(game, /readonly runtime:[\s\S]*getLocale\(\): string/);
+assert.match(
+  game,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly runtime:[\s\S]*?getLocale\(\): string/,
+);
+assert.match(
+  game,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly performance:[\s\S]*?reportFrame\(timestamp\?: number\): number \| null/,
+);
+assert.match(
+  game,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly ready: Promise<PlaymeshAppBootstrap>;/,
+);
+assert.match(
+  game,
+  /interface PlaymeshReadyResult \{[\s\S]*?readonly main: PlaymeshBootstrap;[\s\S]*?readonly app: PlaymeshAppBootstrap;/,
+);
+const mainApi = game.match(/interface PlaymeshMainApi \{[\s\S]*?\n\}/)?.[0] ?? "";
+assert.doesNotMatch(mainApi, /readonly performance:/);
+assert.match(
+  game,
+  /interface PlaymeshApi \{[\s\S]*?readonly ready: Promise<PlaymeshReadyResult>;[\s\S]*?readonly main: PlaymeshMainApi;[\s\S]*?readonly app: PlaymeshAppApi;[\s\S]*?\}/,
+);
+const publicRootApi = game.match(/interface PlaymeshApi \{[\s\S]*?\n\}/)?.[0] ?? "";
+for (const removedRootMember of [
+  "version",
+  "gameInfo",
+  "session",
+  "player",
+  "game",
+  "authority",
+  "binary",
+  "sync",
+  "lifecycle",
+  "performance",
+  "storage",
+  "runtime",
+]) {
+  assert.doesNotMatch(publicRootApi, new RegExp(`readonly ${removedRootMember}:`));
+}
 assert.doesNotMatch(game, /_playmeshPlatformUi|platformUiMessages/);
 assert.match(
   game,
@@ -168,8 +258,13 @@ assert.match(game, /sendLatest\(data: Uint8Array\): Promise<void>/);
 assert.match(game, /sendLatest\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
 assert.match(game, /interface PlaymeshBinaryForwardContext[\s\S]*targetPlayerIds: string\[\]/);
 assert.doesNotMatch(game, /sendLast\(/);
-assert.match(app, /游戏业务使用 playmesh\.app/);
-assert.equal(sdkManifest.projectRules.appUrlRoot, "/app/");
+assert.equal(app.trim(), '/// <reference path="./playmesh-main.d.ts" />');
+assert.equal(sdkManifest.projectRules.appUrlRoot, "/");
+assert.equal(sdkManifest.script, "/playmesh/sdk/v1/playmesh-main.js");
+assert.equal(
+  sdkManifest.projectRules.sdkImport,
+  "/playmesh/sdk/v1/playmesh-main.js",
+);
 assert.equal("gameUrlRoot" in sdkManifest.projectRules, false);
 assert.equal(
   sdkSchema.$defs.BinaryForwardContext.properties.targetPlayerIds.type,
@@ -180,13 +275,13 @@ assert.equal(
   false,
 );
 const runtimeNamespace = sdkManifest.namespaces.find(
-  (namespace) => namespace.name === "playmesh.runtime",
+  (namespace) => namespace.name === "playmesh.app.runtime",
 );
 assert.equal(runtimeNamespace.members[0].name, "getLocale");
 assert.equal(runtimeNamespace.members[0].signature, "getLocale(): string");
 assert.match(runtimeNamespace.members[0].behavior, /fall back to zh$/);
 const gameInfoNamespace = sdkManifest.namespaces.find(
-  (namespace) => namespace.name === "playmesh.gameInfo",
+  (namespace) => namespace.name === "playmesh.main.gameInfo",
 );
 assert.equal(gameInfoNamespace.members[0].name, "getCurrent");
 assert.equal(
@@ -195,6 +290,17 @@ assert.equal(
 );
 const appNamespace = sdkManifest.namespaces.find(
   (namespace) => namespace.name === "playmesh.app",
+);
+const mainNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.main",
+);
+assert.equal(
+  mainNamespace.members.find((member) => member.name === "ready").type,
+  "Promise<PlaymeshBootstrap>",
+);
+assert.equal(
+  appNamespace.members.find((member) => member.name === "ready").type,
+  "Promise<PlaymeshAppBootstrap>",
 );
 const openSharePanel = appNamespace.members.find(
   (member) => member.name === "ui.openSharePanel",
@@ -224,7 +330,7 @@ for (const removedMemberName of [
   );
 }
 const authorityNamespace = sdkManifest.namespaces.find(
-  (namespace) => namespace.name === "playmesh.authority",
+  (namespace) => namespace.name === "playmesh.main.authority",
 );
 assert.equal(
   authorityNamespace.members.some((member) => member.name === "openSharePanel"),
@@ -236,10 +342,18 @@ assert.deepEqual(
   ["id", "name", "multiplayer", "displayMode", "requiredCapabilities"],
 );
 assert.equal(
-  sdkSchema.$defs.SdkBootstrap.properties.gameInfo.$ref,
+  sdkSchema.$defs.PlaymeshBootstrap.properties.gameInfo.$ref,
   "#/$defs/GameInfo",
 );
-assert(sdkSchema.$defs.SdkBootstrap.required.includes("gameInfo"));
+assert(sdkSchema.$defs.PlaymeshBootstrap.required.includes("gameInfo"));
+assert.equal(
+  sdkSchema.$defs.PlaymeshAppBootstrap.properties.sdkVersion.const,
+  "3.2.0",
+);
+assert.equal(
+  sdkSchema.$defs.PlaymeshReadyResult.properties.app.$ref,
+  "#/$defs/PlaymeshAppBootstrap",
+);
 assert.match("en-US", new RegExp(sdkSchema.$defs.RuntimeLocale.pattern));
 assert(sdkSchema.$defs.RuntimeLocale.examples.includes("zh"));
 assert.deepEqual(
@@ -252,7 +366,7 @@ assert.deepEqual(sdkSchema.$defs.Player.properties.avatar.type, [
 ]);
 assert.equal("source" in sdkSchema.$defs.Player.properties, false);
 assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
-assert.equal(defaultGameManifest.sdkVersion, "3.1.0");
+assert.equal(defaultGameManifest.sdkVersion, "4.0.0");
 assert.equal("permissions" in defaultGameManifest, false);
 assert.equal("icon" in defaultGameManifest, false);
 assert.equal("permissions" in gameManifestSchema.properties, false);
@@ -261,9 +375,19 @@ for (const source of developerSources) {
   assert(!source.includes("/game/"), "开发模板或提示词仍包含旧 /game/ 路径");
 }
 for (const source of promptSources) {
-  assert.match(source, /playmesh\.runtime\.getLocale\(\)/);
+  assert.match(source, /playmesh\.app\.runtime\.getLocale\(\)/);
   assert.match(source, /平台不会翻译游戏 DOM/);
   assert.match(source, /Authority 主机语言/);
+  assert.equal(
+    source.includes(defaultGameManifest.sdkVersion),
+    false,
+    "提示词不得复制 Game SDK 版本，版本事实源属于类型声明",
+  );
+  assert.equal(
+    source.includes(defaultGameManifest.appSdkVersion),
+    false,
+    "提示词不得复制 App SDK 版本，版本事实源属于类型声明",
+  );
 }
 
 const completionMarkers = game.match(/@playmesh-completion\s+[A-Za-z0-9_.]+/g) ?? [];

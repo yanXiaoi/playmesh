@@ -12,6 +12,7 @@ import '../capabilities/default_capability_plugins.dart';
 import '../../models/local_game_entry.dart';
 import '../game_package/game_library_repository.dart';
 import '../game_package/game_package_transfer_service.dart';
+import '../game_package/ordinary_web_package_importer.dart';
 import '../library/playmesh_library_root.dart';
 import 'developer_local_history.dart';
 import 'developer_project_validation.dart';
@@ -24,23 +25,18 @@ class DeveloperProject {
     required this.id,
     required this.name,
     required this.version,
-    required this.rootAssetPath,
-    required this.readOnly,
-    this.rootFilePath,
+    required this.rootFilePath,
   });
 
   final String id;
   final String name;
   final String version;
-  final String rootAssetPath;
-  final String? rootFilePath;
-  final bool readOnly;
+  final String rootFilePath;
 
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'version': version,
-    'readOnly': readOnly,
     'manifestReadOnly': false,
     'manifestIdReadOnly': true,
   };
@@ -215,10 +211,11 @@ abstract interface class DeveloperProjectCatalog {
 
   Future<DeveloperProjectValidationReport> validateProject(String projectId);
 
-  /// Deletes only the current game's persisted SDK data directory.
-  /// Project sources, cache and local history are preserved.
+  /// 只删除当前游戏持久化的 SDK 数据目录。
+  /// 项目源码、缓存和本地历史保持不变。
   Future<bool> clearGameData(String projectId);
 
+  /// 将已经保存的项目解析为可启动游戏；启动阶段不重复执行项目校验。
   Future<GameSummary> prepareGame(String projectId);
 }
 
@@ -228,9 +225,12 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     AssetBundle? bundle,
     Directory? workspaceRoot,
     GamePackageTransferService? packageTransfer,
+    OrdinaryWebPackageImporter? ordinaryWebPackageImporter,
   }) : bundle = bundle ?? rootBundle,
        _injectedWorkspaceRoot = workspaceRoot,
-       _packageTransfer = packageTransfer ?? GamePackageTransferService();
+       _packageTransfer = packageTransfer ?? GamePackageTransferService(),
+       _ordinaryWebPackageImporter =
+           ordinaryWebPackageImporter ?? const OrdinaryWebPackageImporter();
 
   static const _maxFileBytes = 2 * 1024 * 1024;
   static const _templateRoot =
@@ -240,26 +240,18 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
   final AssetBundle bundle;
   final Directory? _injectedWorkspaceRoot;
   final GamePackageTransferService _packageTransfer;
+  final OrdinaryWebPackageImporter _ordinaryWebPackageImporter;
   final DeveloperLocalHistoryStore _localHistory = DeveloperLocalHistoryStore();
   final DeveloperProjectValidator _validator =
       const DeveloperProjectValidator();
   Directory? _resolvedWorkspaceRoot;
-  Map<String, List<String>>? _assetFiles;
   final Map<String, int> _revisions = {};
 
   @override
   Future<List<DeveloperProject>> listProjects() async {
     if (repository.cachedGames.isEmpty) await repository.refresh();
     final projects = <DeveloperProject>[
-      for (final game in repository.cachedGames)
-        DeveloperProject(
-          id: game.id,
-          name: game.name,
-          version: game.version,
-          rootAssetPath: game.entry.packageRootAssetPath ?? _templateRoot,
-          rootFilePath: game.entry.packageRootFilePath,
-          readOnly: false,
-        ),
+      for (final game in repository.cachedGames) _installedProject(game),
     ];
     final known = projects.map((project) => project.id).toSet();
     for (final project in await _customProjects()) {
@@ -280,6 +272,28 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       author: author,
       lastModifiedAt: lastModifiedAt,
     );
+    return _publishValidatedPackage(package);
+  }
+
+  Future<GameSummary> publishOrdinaryWebPackage(
+    File source, {
+    required OrdinaryWebPackageConfiguration configuration,
+    required String author,
+    required DateTime lastModifiedAt,
+  }) async {
+    final converted = await _ordinaryWebPackageImporter.convert(
+      source,
+      configuration: configuration,
+      author: author,
+      lastModifiedAt: lastModifiedAt,
+    );
+    final package = _packageTransfer.validatePackageFiles(converted.files);
+    return _publishValidatedPackage(package);
+  }
+
+  Future<GameSummary> _publishValidatedPackage(
+    ValidatedGamePackage package,
+  ) async {
     final root = await _workspaceRoot();
     final target = Directory(
       '${root.path}${Platform.pathSeparator}${package.manifest.id}',
@@ -379,23 +393,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     );
     try {
       await staging.create(recursive: true);
-      final manifest = await AssetManifest.loadFromAssetBundle(bundle);
-      final prefix = '$_templateRoot/';
-      final assets = manifest
-          .listAssets()
-          .where((asset) => asset.startsWith(prefix))
-          .toList();
-      if (assets.isEmpty) throw StateError('默认项目模板不存在');
-      for (final asset in assets) {
-        final relative = asset.substring(prefix.length);
-        final data = await bundle.load(asset);
-        final file = _resolveFile(staging, relative);
-        await file.parent.create(recursive: true);
-        await file.writeAsBytes(
-          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-          flush: true,
-        );
-      }
+      await _copyProjectTemplate(staging);
       final manifestFile = _resolveFile(staging, 'main.json');
       final decoded = jsonDecode(await manifestFile.readAsString());
       if (decoded is! Map) throw StateError('默认项目模板清单无效');
@@ -452,8 +450,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       id: game.id,
       name: game.name,
       version: game.version,
-      rootAssetPath: _templateRoot,
-      readOnly: false,
+      rootFilePath: target.path,
     );
   }
 
@@ -515,8 +512,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       id: game.id,
       name: game.name,
       version: game.version,
-      rootAssetPath: _templateRoot,
-      readOnly: false,
+      rootFilePath: target.path,
     );
   }
 
@@ -833,18 +829,26 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (encoded.length > _maxFileBytes) {
       throw const FormatException('main.json 不能超过 2 MiB');
     }
-    _checkRevision(projectId, 'main.json', expectedRevision);
-    final temporary = File('${currentFile.path}.playmesh-tmp');
-    await temporary.writeAsBytes(encoded, flush: true);
-    if (await currentFile.exists()) await currentFile.delete();
-    await temporary.rename(currentFile.path);
-    _revisions.update(
-      _revisionKey(projectId, 'main.json'),
-      (value) => value + 1,
-      ifAbsent: () => 1,
+    return _localHistory.recordMutation(
+      workspace: workspace,
+      label: '更新项目设置',
+      path: 'main.json',
+      summaryCode: 'update_manifest',
+      action: () async {
+        _checkRevision(projectId, 'main.json', expectedRevision);
+        final temporary = File('${currentFile.path}.playmesh-tmp');
+        await temporary.writeAsBytes(encoded, flush: true);
+        if (await currentFile.exists()) await currentFile.delete();
+        await temporary.rename(currentFile.path);
+        _revisions.update(
+          _revisionKey(projectId, 'main.json'),
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+        repository.upsert(await _customGame(workspace));
+        return readFile(projectId, 'main.json');
+      },
     );
-    repository.upsert(await _customGame(workspace));
-    return readFile(projectId, 'main.json');
   }
 
   @override
@@ -1032,18 +1036,18 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
   @override
   Future<DeveloperFileDiff> diffFile(String projectId, String path) async {
     final normalized = _normalizePath(path);
-    final project = await _project(projectId);
+    final workspace = await _ensureWorkspace(projectId);
     final current = await readFile(projectId, normalized);
     if (!current.isText) throw const FormatException('仅文本文件支持 Diff');
-    var original = '';
-    try {
-      original = await bundle.loadString(
-        '${project.rootAssetPath}/$normalized',
-      );
-    } on Object {
-      // 新建文件没有原始资源。
-    }
     final currentText = utf8.decode(current.bytes);
+    final baseline = await _localHistory.readBaselineFile(
+      workspace,
+      normalized,
+    );
+    var original = currentText;
+    if (baseline.initialized) {
+      original = baseline.bytes == null ? '' : utf8.decode(baseline.bytes!);
+    }
     return DeveloperFileDiff(
       path: normalized,
       changed: original != currentText,
@@ -1133,16 +1137,12 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
 
   @override
   Future<GameSummary> prepareGame(String projectId) async {
-    final validation = await validateProject(projectId);
-    if (!validation.valid) {
-      throw DeveloperProjectValidationFailure(validation);
-    }
     final directory = await _ensureWorkspace(projectId);
-    final bundled = repository.cachedGames.where(
+    final installed = repository.cachedGames.where(
       (candidate) => candidate.id == projectId,
     );
-    if (bundled.isEmpty) return _customGame(directory);
-    final game = bundled.first;
+    if (installed.isEmpty) return _customGame(directory);
+    final game = installed.first;
     return GameSummary(
       id: game.id,
       name: game.name,
@@ -1162,11 +1162,9 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       tags: game.tags,
       capabilities: await _readCustomCapabilities(directory),
       entry: LocalGameEntry(
-        assetPath: game.entry.gameEntryPath,
         gameEntryPath: game.entry.gameEntryPath,
         controllerEntryPath: game.entry.controllerEntryPath,
         statusLabel: game.entry.statusLabel,
-        packageRootAssetPath: game.entry.packageRootAssetPath,
         packageRootFilePath: directory.path,
       ),
     );
@@ -1193,12 +1191,11 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
             id: manifest.id,
             name: manifest.name,
             version: manifest.version,
-            rootAssetPath: _templateRoot,
-            readOnly: false,
+            rootFilePath: entity.path,
           ),
         );
       } on Object {
-        // One broken custom project must not hide the remaining projects.
+        // 单个损坏项目不能阻止其他项目出现在工作区。
       }
     }
     return projects;
@@ -1271,11 +1268,9 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       tags: manifest.tags,
       capabilities: await _readCustomCapabilities(directory),
       entry: LocalGameEntry(
-        assetPath: manifest.entries.game,
         gameEntryPath: manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,
         statusLabel: 'Game SDK ${manifest.sdkVersion}',
-        packageRootAssetPath: _templateRoot,
         packageRootFilePath: directory.path,
       ),
     );
@@ -1320,28 +1315,21 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     if (await manifestFile.exists() && await appDirectory.exists()) {
       return directory;
     }
-    final sourcePath = project.rootFilePath;
-    if (sourcePath != null) {
-      final source = Directory(sourcePath);
-      if (await source.exists() &&
-          source.absolute.path != directory.absolute.path) {
-        await directory.create(recursive: true);
-        await _copyDirectoryContents(source, directory);
-        return directory;
-      }
+    final source = Directory(project.rootFilePath);
+    final sourceManifest = _resolveFile(source, 'main.json');
+    final sourceApp = _resolveDirectory(source, 'app');
+    final sourceAvailable =
+        await source.exists() &&
+        await sourceManifest.exists() &&
+        await sourceApp.exists();
+    if (!sourceAvailable) {
+      throw StateError('项目 ${project.id} 的已安装包目录不存在或不完整，请重新扫描或修复游戏包');
+    }
+    if (source.absolute.path == directory.absolute.path) {
+      throw StateError('项目 ${project.id} 的已安装包目录不完整，请修复游戏包后重新扫描');
     }
     await directory.create(recursive: true);
-    final files = await _sourceFiles(project);
-    for (final relative in files) {
-      final target = _resolveFile(directory, relative);
-      if (await target.exists()) continue;
-      final data = await bundle.load('${project.rootAssetPath}/$relative');
-      await target.parent.create(recursive: true);
-      await target.writeAsBytes(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-        flush: true,
-      );
-    }
+    await _copyDirectoryContents(source, directory);
     return directory;
   }
 
@@ -1394,21 +1382,40 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     return paths;
   }
 
-  Future<List<String>> _sourceFiles(DeveloperProject project) async {
-    final cache = _assetFiles ??= {};
-    final cached = cache[project.id];
-    if (cached != null) return cached;
+  Future<void> _copyProjectTemplate(Directory destination) async {
     final manifest = await AssetManifest.loadFromAssetBundle(bundle);
-    final prefix = '${project.rootAssetPath}/';
-    final files =
+    final prefix = '$_templateRoot/';
+    final assets =
         manifest
             .listAssets()
             .where((asset) => asset.startsWith(prefix))
-            .map((asset) => asset.substring(prefix.length))
-            .where((path) => path.isNotEmpty)
             .toList()
           ..sort();
-    return cache[project.id] = List.unmodifiable(files);
+    if (assets.isEmpty) throw StateError('默认项目模板不存在');
+    for (final asset in assets) {
+      final relative = asset.substring(prefix.length);
+      if (relative.isEmpty) continue;
+      final data = await bundle.load(asset);
+      final file = _resolveFile(destination, relative);
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        flush: true,
+      );
+    }
+  }
+
+  DeveloperProject _installedProject(GameSummary game) {
+    final rootFilePath = game.entry.packageRootFilePath;
+    if (rootFilePath == null || rootFilePath.trim().isEmpty) {
+      throw StateError('项目 ${game.id} 缺少已安装包目录，请重新扫描或修复游戏包');
+    }
+    return DeveloperProject(
+      id: game.id,
+      name: game.name,
+      version: game.version,
+      rootFilePath: rootFilePath,
+    );
   }
 
   ({String id, String name, String author}) _validateNewProjectIdentity({

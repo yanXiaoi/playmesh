@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/localization/playmesh_localization.dart';
+import '../../core/game_web/game_web_gateway_contract.dart';
 import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
 import 'remote_game_page.dart';
@@ -12,18 +13,17 @@ import 'remote_game_page.dart';
 class GameInvitation {
   const GameInvitation({
     required this.endpoint,
-    required this.channelId,
     required this.entryUri,
     required this.usesRelay,
   });
 
   final Uri endpoint;
-  final String channelId;
   final Uri entryUri;
   final bool usesRelay;
 
   static GameInvitation parse(String rawValue) {
-    final uri = Uri.tryParse(rawValue.trim());
+    final normalizedRawValue = rawValue.trim();
+    final uri = Uri.tryParse(normalizedRawValue);
     if (uri == null ||
         !{'http', 'https'}.contains(uri.scheme) ||
         uri.host.isEmpty ||
@@ -32,32 +32,23 @@ class GameInvitation {
     }
     final fragment = uri.fragment.isEmpty
         ? const <String, String>{}
-        : _fragmentParameters(uri.fragment);
-    final inviteToken = fragment['inviteToken'];
-    final shareToken = uri.queryParameters['token'];
-    final lanChannelId = uri.queryParameters['channelId'];
-    final usesRelay = inviteToken?.isNotEmpty == true;
-    late final String channelId;
+        : parsePlaymeshInvitationFragment(uri.fragment);
+    final inviteToken = fragment[playmeshGameInvitationTokenParameter];
+    final usesRelay =
+        uri.pathSegments.length == 2 && uri.pathSegments.first == 'j';
     if (usesRelay) {
-      if (uri.pathSegments.length != 2 ||
-          uri.pathSegments.first != 'j' ||
-          !_validChannelId(uri.pathSegments.last) ||
+      if (!_validInvitationId(uri.pathSegments.last) ||
           fragment.length != 1 ||
+          inviteToken?.isNotEmpty != true ||
           uri.hasQuery) {
         throw const FormatException('公共中转邀请只能携带 inviteToken');
       }
-      channelId = uri.pathSegments.last;
-    } else if (!_isLanGameEntryPath(uri) ||
-        uri.scheme != 'http' ||
-        !_validChannelId(lanChannelId ?? '') ||
-        shareToken?.isNotEmpty != true ||
-        uri.queryParametersAll.length != 2 ||
-        uri.queryParametersAll['channelId']?.length != 1 ||
-        uri.queryParametersAll['token']?.length != 1 ||
-        uri.hasFragment) {
-      throw const FormatException('局域网邀请必须使用游戏声明入口和当前分享凭证');
-    } else {
-      channelId = lanChannelId!;
+    } else if (uri.scheme != 'http' ||
+        uri.path != playmeshGameInvitationPath ||
+        uri.hasQuery ||
+        fragment.length != 1 ||
+        inviteToken?.isNotEmpty != true) {
+      throw const FormatException('局域网邀请必须使用受控加入入口');
     }
     return GameInvitation(
       endpoint: Uri(
@@ -65,36 +56,14 @@ class GameInvitation {
         host: uri.host,
         port: uri.hasPort ? uri.port : null,
       ),
-      channelId: channelId,
       entryUri: uri,
       usesRelay: usesRelay,
     );
   }
 }
 
-bool _validChannelId(String value) =>
+bool _validInvitationId(String value) =>
     RegExp(r'^[A-Za-z0-9_-]{6,128}$').hasMatch(value);
-
-bool _isLanGameEntryPath(Uri value) {
-  final segments = value.pathSegments;
-  return segments.length >= 2 &&
-      segments.first == 'app' &&
-      segments.last.toLowerCase().endsWith('.html') &&
-      segments
-          .skip(1)
-          .every(
-            (segment) =>
-                segment.isNotEmpty && segment != '.' && segment != '..',
-          );
-}
-
-Map<String, String> _fragmentParameters(String value) {
-  try {
-    return Uri.splitQueryString(value);
-  } on FormatException {
-    throw const FormatException('公共中转邀请的 inviteToken 编码无效');
-  }
-}
 
 class JoinGamePage extends StatefulWidget {
   const JoinGamePage({

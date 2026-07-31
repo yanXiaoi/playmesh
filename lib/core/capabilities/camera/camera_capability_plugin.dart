@@ -20,6 +20,10 @@ class CameraCapabilityPlugin
     name: '摄像头',
     description: '允许游戏通过标准 Web API 访问摄像头，并为后续原生摄像头能力保留独立适配入口。',
     apiVersion: '1.0.0',
+    supportedPlatforms: [
+      CapabilityPlatform.WINDOWS,
+      CapabilityPlatform.ANDROID,
+    ],
     methods: [],
     events: [],
   );
@@ -56,16 +60,6 @@ class CameraCapabilityPlugin
       throw const FormatException('摄像头能力当前不接受创建参数');
     }
     return _CameraCapabilityInstance();
-  }
-
-  @override
-  Future<CapabilityJson> test(Duration timeout) async {
-    if (!isAvailable) throw UnsupportedError('当前平台不支持摄像头能力');
-    return {
-      'available': true,
-      'permissionRequested': false,
-      'nativeMethods': const <String>[],
-    };
   }
 
   @override

@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
 
-import '../../core/game_package/asset_game_package_loader.dart';
+import '../../core/developer/developer_run_controller.dart';
+import '../../core/game_package/game_asset_gateway.dart';
+import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../models/game_summary.dart';
-import '../../core/game_sdk/game_sdk_bridge.dart';
-import '../../core/developer/developer_run_controller.dart';
 import 'local_game_web_view.dart';
 
-class GameLauncher extends StatefulWidget {
+class GameLauncher extends StatelessWidget {
   const GameLauncher({
     super.key,
     required this.game,
     required this.localUserId,
     required this.localNickname,
     this.bridge,
+    this.developerResourceSession,
     this.controllerRole = false,
     this.onOpenSharePanel,
     this.onExitRequested,
@@ -25,6 +26,7 @@ class GameLauncher extends StatefulWidget {
   final String localUserId;
   final String localNickname;
   final GameSdkBridge? bridge;
+  final DeveloperResourceSession? developerResourceSession;
   final bool controllerRole;
   final Future<void> Function()? onOpenSharePanel;
   final Future<void> Function()? onExitRequested;
@@ -33,77 +35,40 @@ class GameLauncher extends StatefulWidget {
   onJavaScriptExecutorChanged;
 
   @override
-  State<GameLauncher> createState() => _GameLauncherState();
-}
-
-class _GameLauncherState extends State<GameLauncher> {
-  Future<LoadedGamePackage?>? _loadOperation;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadOperation = _loadPackage();
-  }
-
-  Future<LoadedGamePackage?> _loadPackage() async {
-    if (widget.game.entry.packageRootFilePath != null) return null;
-    final packageRoot = widget.game.entry.packageRootAssetPath;
-    if (packageRoot == null) {
-      return null;
-    }
-    final package = await AssetGamePackageLoader().load(packageRoot);
-    if (package.manifest.id != widget.game.id) {
-      throw const FormatException('游戏库记录与 main.json 不一致');
-    }
-    return package;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<LoadedGamePackage?>(
-      future: _loadOperation,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _PackageFailure(error: snapshot.error!);
-        }
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          );
-        }
-        final fileRoot = widget.game.entry.packageRootFilePath;
-        final package = snapshot.data;
-        final assetPath = widget.controllerRole
-            ? fileRoot != null
-                  ? widget.game.entry.controllerEntryPath
-                  : package?.controllerEntryAssetPath ??
-                        widget.game.entry.controllerEntryPath
-            : fileRoot != null
-            ? widget.game.entry.gameEntryPath
-            : package?.appEntryAssetPath ?? widget.game.entry.assetPath;
-        return LocalGameWebView(
-          assetPath: assetPath,
-          gameRootAssetPath: fileRoot == null ? package?.rootAssetPath : null,
-          gameRootFilePath: fileRoot,
-          title: widget.game.name,
-          gameSdkVersion: widget.game.sdkVersion.isEmpty
-              ? null
-              : widget.game.sdkVersion,
-          appSdkVersion: widget.game.appSdkVersion.isEmpty
-              ? null
-              : widget.game.appSdkVersion,
-          bridge: widget.bridge,
-          localUserId: widget.localUserId,
-          localNickname: widget.localNickname,
-          declaredCapabilities: widget.game.capabilities
-              .requiredForRole(controller: widget.controllerRole)
-              .toList(),
-          onOpenSharePanel: widget.onOpenSharePanel,
-          onExitRequested: widget.onExitRequested,
-          onSystemBackHandlerChanged: widget.onSystemBackHandlerChanged,
-          onJavaScriptExecutorChanged: widget.onJavaScriptExecutorChanged,
-        );
+    final source = switch (developerResourceSession) {
+      final session? => DevelopmentGameWebResourceSource(
+        baseUri: session.resourceBaseUri,
+        credential: session.credential,
+        expiresAt: session.expiresAt,
+      ),
+      null => switch (game.entry.packageRootFilePath) {
+        final root? => InstalledGameWebResourceSource(packageRootPath: root),
+        null => null,
       },
+    };
+    if (source == null) {
+      return const _PackageFailure(error: FormatException('游戏缺少已安装包目录'));
+    }
+    final entryPath = controllerRole
+        ? game.entry.controllerEntryPath!
+        : game.entry.gameEntryPath;
+    return LocalGameWebView(
+      resourceSource: source,
+      entryPath: entryPath,
+      title: game.name,
+      gameSdkVersion: game.sdkVersion.isEmpty ? null : game.sdkVersion,
+      appSdkVersion: game.appSdkVersion.isEmpty ? null : game.appSdkVersion,
+      bridge: bridge,
+      localUserId: localUserId,
+      localNickname: localNickname,
+      declaredCapabilities: game.capabilities
+          .requiredForRole(controller: controllerRole)
+          .toList(),
+      onOpenSharePanel: onOpenSharePanel,
+      onExitRequested: onExitRequested,
+      onSystemBackHandlerChanged: onSystemBackHandlerChanged,
+      onJavaScriptExecutorChanged: onJavaScriptExecutorChanged,
     );
   }
 }

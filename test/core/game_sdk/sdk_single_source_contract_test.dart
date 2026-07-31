@@ -33,21 +33,19 @@ void main() {
           'SdkFeatureRegistry.sdkFileForPublicPath',
       'lib/core/game_web/game_web_gateway_io.dart':
           'SdkFeatureRegistry.sdkFileForPublicPath',
-      'lib/core/game_web/local_app_sdk_server_io.dart':
-          'SdkFeatureRegistry.sdkFile(',
       'lib/core/developer/operations/infrastructure/developer_http_support.dart':
           'SdkFeatureRegistry.sdkFileForPublicPath',
       'lib/core/developer/operations/system/sdk_bundle_operation.dart':
           'SdkFeatureRegistry.sdkFile(name)',
       'lib/core/developer/operations/ai/project_prompt_operation.dart':
-          "SdkFeatureRegistry.sdkFile('playmesh.d.ts')",
+          "SdkFeatureRegistry.sdkFile('playmesh-main.d.ts')",
       'lib/core/developer/operations/system/status_operation.dart':
           'SdkFeatureRegistry.gameSdkVersion',
       'lib/core/game_sdk/app_webview_bridge.dart':
           'SdkFeatureRegistry.dispatchApp',
       'lib/core/game_sdk/features/game/game_core_feature.dart':
           '_resolveCommandSdkVersion',
-      'lib/features/game/game_launcher.dart': 'widget.game.sdkVersion.isEmpty',
+      'lib/features/game/game_launcher.dart': 'game.sdkVersion.isEmpty',
       'lib/features/game/game_page.dart': 'game.sdkVersion.isEmpty',
     };
     for (final entry in requiredConsumers.entries) {

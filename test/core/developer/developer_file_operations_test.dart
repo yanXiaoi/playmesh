@@ -91,9 +91,11 @@ const _manifest = '''{
   "author": "Test Author",
   "lastModifiedAt": 1784851200000,
   "version": "1.0.0",
-  "sdkVersion": "1.1.0",
+  "sdkVersion": "4.0.0",
+  "appSdkVersion": "3.2.0",
   "orientation": "portrait",
   "modes": ["solo"],
   "displayModes": ["multi_screen"],
-  "players": {"min": 1, "max": 1}
+  "players": {"min": 1, "max": 1},
+  "entries": {"game": "index.html"}
 }''';

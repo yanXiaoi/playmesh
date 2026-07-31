@@ -39,6 +39,7 @@ class GameCatalogPublishSourceResult {
     required this.sourceId,
     required this.status,
     this.sourceName,
+    this.detail,
     this.retryAfter,
     this.currentHighestVersion,
   });
@@ -46,6 +47,7 @@ class GameCatalogPublishSourceResult {
   final String sourceId;
   final String? sourceName;
   final GameCatalogPublishStatus status;
+  final String? detail;
   final String? retryAfter;
   final String? currentHighestVersion;
 
@@ -56,6 +58,7 @@ class GameCatalogPublishSourceResult {
     'sourceId': sourceId,
     if (sourceName != null) 'sourceName': sourceName,
     'status': status.wireValue,
+    if (detail != null) 'detail': detail,
     if (retryAfter != null) 'retryAfter': retryAfter,
     if (currentHighestVersion != null)
       'currentHighestVersion': currentHighestVersion,
@@ -346,7 +349,11 @@ class GameCatalogPublisher {
     if (status == HttpStatus.badRequest ||
         status == HttpStatus.unprocessableEntity ||
         (status >= 400 && status < 500)) {
-      return _result(source, GameCatalogPublishStatus.packageValidationFailed);
+      return _result(
+        source,
+        GameCatalogPublishStatus.packageValidationFailed,
+        detail: _safeResponseDetail(source, payload['message']),
+      );
     }
     return _result(source, GameCatalogPublishStatus.networkFailed);
   }
@@ -371,12 +378,14 @@ class GameCatalogPublisher {
   GameCatalogPublishSourceResult _result(
     OnlineGameSource source,
     GameCatalogPublishStatus status, {
+    String? detail,
     String? retryAfter,
     String? currentHighestVersion,
   }) => GameCatalogPublishSourceResult(
     sourceId: source.id,
     sourceName: source.name,
     status: status,
+    detail: detail,
     retryAfter: retryAfter,
     currentHighestVersion: currentHighestVersion,
   );
@@ -399,7 +408,7 @@ class GameCatalogPublisher {
     try {
       callback(result);
     } on Object {
-      // Observers cannot interrupt an upload or expose its credentials.
+      // 观察者不能中断上传或暴露其凭据。
     }
   }
 
@@ -408,6 +417,22 @@ class GameCatalogPublisher {
       return null;
     }
     return value;
+  }
+
+  String? _safeResponseDetail(OnlineGameSource source, Object? value) {
+    if (value is! String) return null;
+    var normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.isEmpty) return null;
+    for (final secret in [source.uploadKey, source.token]) {
+      if (secret.isNotEmpty) {
+        normalized = normalized.replaceAll(secret, '[redacted]');
+      }
+    }
+    const maximumLength = 2048;
+    if (normalized.length > maximumLength) {
+      normalized = '${normalized.substring(0, maximumLength)}…';
+    }
+    return normalized;
   }
 
   String? _safeRetryAfter(String? value) {

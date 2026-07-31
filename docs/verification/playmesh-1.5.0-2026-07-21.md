@@ -23,7 +23,7 @@
 | App Bridge 身份/设备契约 | `node tool/test_app_bridge_sdk.mjs` | 通过 |
 | SDK 中文声明与精确签名 | `node tool/test_sdk_declarations.mjs` | 通过；检查中文 JSDoc、版本、补全标记、关键签名、`appUrlRoot`，并拒绝模板/提示词中的旧 `/game/` |
 | 桌面 CLI 跟随编译规则 | `node tool/test_desktop_cli_packaging.mjs` | 通过；检查 Windows/Linux CMake、macOS Build Phase、文件名与 Windows ZIP 必需项 |
-| Developer CLI 测试 | `go test -count=1 ./...`（`dev-cli/`） | 通过，最终复测 `ok playmesh.dev/cli 0.904s` |
+| Developer CLI 测试 | `go test -count=1 ./...`（`dev-cli/`） | 通过，最终复测 `ok github.com/yanXiaoi/playmesh/dev-cli 0.904s` |
 | Developer CLI 编译 | `go build -buildvcs=false -trimpath -ldflags "-s -w" -o playmesh-cli.exe .` | 通过 |
 | Flutter 静态分析 | `flutter analyze --no-pub` | 通过，`No issues found` |
 | JSON 契约解析 | Node 解析 OpenAPI、SDK Manifest、两个 Schema 与默认 main.json | 通过 |

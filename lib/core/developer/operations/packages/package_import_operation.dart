@@ -31,7 +31,7 @@ class _PackageImportOperation implements _DeveloperHttpOperation {
     await for (final chunk in request) {
       length += chunk.length;
       if (length > GamePackageTransferService.maxCompressedBytes) {
-        throw const FormatException('游戏包压缩文件不能超过 64 MiB');
+        throw const FormatException('游戏包压缩文件不能超过 100 MiB');
       }
       builder.add(chunk);
     }

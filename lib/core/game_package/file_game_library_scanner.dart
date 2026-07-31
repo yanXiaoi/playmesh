@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../models/game_manifest.dart';
 import '../../models/game_capabilities.dart';
+import '../../models/game_package_layout.dart';
 import '../../models/game_summary.dart';
 import '../../models/local_game_entry.dart';
 import '../library/playmesh_library_root.dart';
@@ -83,7 +84,7 @@ class FileGameLibraryScanner {
       return await _loadValidPackage(package, json, stats);
     } on Object catch (error) {
       debugPrint('游戏包 ${package.path} 清单待修复: $error');
-      return await _loadRecoverablePackage(package, json, error, stats);
+      return await _loadRepairOnlyPackage(package, json, error, stats);
     }
   }
 
@@ -106,21 +107,36 @@ class FileGameLibraryScanner {
         '游戏包目录名 $directoryId 与 main.json id ${manifest.id} 不一致',
       );
     }
-    final entry = _packageFile(package, manifest.entries.game);
+    final entry = _packageWebEntryFile(
+      package,
+      manifest.entries.game,
+      field: 'entries.game',
+      kind: GameWebEntryKind.html,
+    );
     if (!await entry.exists()) {
       throw FormatException('游戏包缺少 ${manifest.entries.game}');
     }
     if (manifest.displayModes.contains(
       GameDisplayMode.singleScreenMultiplayer,
     )) {
-      final controller = _packageFile(package, manifest.entries.controller);
+      final controller = _packageWebEntryFile(
+        package,
+        manifest.entries.controller!,
+        field: 'entries.controller',
+        kind: GameWebEntryKind.html,
+      );
       if (!await controller.exists()) {
         throw FormatException('游戏包缺少 ${manifest.entries.controller}');
       }
     }
     final authority = manifest.authority;
     if (authority != null &&
-        !await _packageFile(package, authority.entry).exists()) {
+        !await _packageWebEntryFile(
+          package,
+          authority.entry,
+          field: 'authority.entry',
+          kind: GameWebEntryKind.javaScript,
+        ).exists()) {
       throw FormatException('游戏包缺少 ${authority.entry}');
     }
     final displayMode = manifest.displayModes.first;
@@ -150,7 +166,6 @@ class FileGameLibraryScanner {
       tags: manifest.tags,
       capabilities: capabilities,
       entry: LocalGameEntry(
-        assetPath: manifest.entries.game,
         gameEntryPath: manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,
         statusLabel: 'Game SDK ${manifest.sdkVersion}',
@@ -159,7 +174,7 @@ class FileGameLibraryScanner {
     );
   }
 
-  Future<GameSummary> _loadRecoverablePackage(
+  Future<GameSummary> _loadRepairOnlyPackage(
     Directory package,
     Map<String, Object?> json,
     Object error,
@@ -183,14 +198,24 @@ class FileGameLibraryScanner {
         .toInt();
     final entries = json['entries'];
     final entryMap = entries is Map ? entries : const <Object?, Object?>{};
-    final gameEntry = _safePackageEntry(
+    // 这些路径只用于让损坏包可在修复界面中检查。
+    // `manifestError` keeps this summary out of every runnable/public path.
+    final repairDisplayGameEntry = _repairDisplayWebEntry(
       entryMap['game'],
-      fallback: 'app/index.html',
+      fallback: 'index.html',
+      kind: GameWebEntryKind.html,
     );
-    final controllerEntry = _safePackageEntry(
-      entryMap['controller'],
-      fallback: 'app/controller/index.html',
-    );
+    final repairDisplayControllerEntry =
+        displayMode == GameDisplayMode.singleScreenMultiplayer.manifestValue
+        ? _repairDisplayWebEntry(
+            entryMap['controller'],
+            fallback: 'controller/index.html',
+            kind: GameWebEntryKind.html,
+          )
+        : _optionalRepairDisplayWebEntry(
+            entryMap['controller'],
+            kind: GameWebEntryKind.html,
+          );
     final author = _nonEmptyString(json['author']) ?? '';
     final icon = File(
       '${package.path}${Platform.pathSeparator}$gamePackageIconName',
@@ -218,19 +243,32 @@ class FileGameLibraryScanner {
       controllerOrientation: controllerOrientation,
       tags: _stringList(json['tags']),
       entry: LocalGameEntry(
-        assetPath: gameEntry,
-        gameEntryPath: gameEntry,
-        controllerEntryPath: controllerEntry,
+        gameEntryPath: repairDisplayGameEntry,
+        controllerEntryPath: repairDisplayControllerEntry,
         statusLabel: 'manifest_repair_required',
         packageRootFilePath: package.path,
       ),
     );
   }
 
-  File _packageFile(Directory package, String manifestPath) => File(
+  File _packageWebFile(Directory package, String webPath) => File(
     '${package.path}${Platform.pathSeparator}'
-    '${manifestPath.replaceAll('/', Platform.pathSeparator)}',
+    '${playmeshGamePackageLayout.packagePathForWebPath(webPath).replaceAll('/', Platform.pathSeparator)}',
   );
+
+  File _packageWebEntryFile(
+    Directory package,
+    String entry, {
+    required String field,
+    required GameWebEntryKind kind,
+  }) {
+    final location = playmeshGamePackageLayout.parseWebEntry(
+      entry,
+      field: field,
+      kind: kind,
+    );
+    return _packageWebFile(package, location.path);
+  }
 
   Future<GameCapabilities> _readCapabilities(Directory package) async {
     final file = File(
@@ -277,17 +315,42 @@ GameOrientation? _safeOrientation(Object? value, {bool nullable = false}) {
   try {
     if (value is String) return GameOrientation.fromManifestValue(value);
   } on FormatException {
-    // Use a display-only fallback so the broken project remains repairable.
+    // 使用仅供显示的回退值，使损坏项目仍可修复。
   }
   return nullable ? null : GameOrientation.landscape;
 }
 
-String _safePackageEntry(Object? value, {required String fallback}) {
+String _repairDisplayWebEntry(
+  Object? value, {
+  required String fallback,
+  required GameWebEntryKind kind,
+}) {
   final path = _nonEmptyString(value);
   if (path == null) return fallback;
   try {
-    return validateGamePackagePath(path, field: 'entry');
+    return playmeshGamePackageLayout.validateWebEntry(
+      path,
+      field: 'entry',
+      kind: kind,
+    );
   } on FormatException {
     return fallback;
+  }
+}
+
+String? _optionalRepairDisplayWebEntry(
+  Object? value, {
+  required GameWebEntryKind kind,
+}) {
+  final path = _nonEmptyString(value);
+  if (path == null) return null;
+  try {
+    return playmeshGamePackageLayout.validateWebEntry(
+      path,
+      field: 'entry',
+      kind: kind,
+    );
+  } on FormatException {
+    return null;
   }
 }

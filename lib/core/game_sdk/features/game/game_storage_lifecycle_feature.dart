@@ -4,21 +4,9 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   id: 'game.storage-lifecycle',
   target: SdkSourceTarget.game,
   order: 70,
-  typeScript: r'''  const browserConsoleLogs = [];
-  const BROWSER_CONSOLE_LOG_LIMIT = 500;
-  let browserConsoleCaptureInstalled = false;
-  const playmesh = {
+  typeScript: r'''  const main = {
     version: PLAYMESH_SDK_VERSION,
     ready: null,
-    app: appSdk,
-    runtime: Object.freeze({
-      getLocale() {
-        if (!runtimeLocale) {
-          throw new Error("playmesh.runtime.getLocale requires await playmesh.ready");
-        }
-        return runtimeLocale;
-      },
-    }),
     gameInfo: Object.freeze({
       getCurrent() {
         const info = bootstrap?.gameInfo;
@@ -84,7 +72,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     },
     authority: {
       onService(handler) {
-        if (!playmesh.session.isAuthority()) {
+        if (!main.session.isAuthority()) {
           throw new Error("只有 Authority Client 可以注册权威服务");
         }
         authorityService = handler;
@@ -96,8 +84,8 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     binary: {
       authorityPlayerId: "authority",
       async createChannel(options) {
-        await playmesh.ready;
-        if (!playmesh.session.isAuthority()) {
+        await main.ready;
+        if (!main.session.isAuthority()) {
           throw new Error("只有 Authority 可以创建 Binary Channel");
         }
         const mode = binaryModeCode(options?.mode);
@@ -108,7 +96,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         return createBinaryChannelHandle(result.id, result.mode);
       },
       async joinChannel(channelId) {
-        await playmesh.ready;
+        await main.ready;
         const normalized = binaryChannelIdFromBytes(binaryChannelIdToBytes(channelId));
         const existing = binaryChannels.get(normalized);
         if (existing && !existing.closed) return existing.handle;
@@ -151,49 +139,6 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         return subscribe(exitListeners, callback);
       },
     },
-    performance: {
-      getFps() {
-        return currentFps;
-      },
-      onFps(callback) {
-        const unsubscribe = subscribe(fpsListeners, callback);
-        callback(currentFps);
-        return unsubscribe;
-      },
-      getLatency() {
-        return currentLatency;
-      },
-      getLatencyDiagnostics() {
-        return latencyDiagnostics && cloneJson(latencyDiagnostics, "延迟诊断");
-      },
-      onLatency(callback) {
-        const unsubscribe = subscribe(latencyListeners, callback);
-        callback(currentLatency);
-        return unsubscribe;
-      },
-      setVisible(visible) {
-        performanceVisible = visible !== false;
-        void renderPerformanceUi();
-      },
-      reportFrame(timestamp = global.performance?.now?.() || Date.now()) {
-        if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
-          throw new Error("无效的帧时间");
-        }
-        fpsFrameCount += 1;
-        fpsWindowStartedAt ??= timestamp;
-        const elapsed = timestamp - fpsWindowStartedAt;
-        if (elapsed < 1000) return currentFps;
-        currentFps = Math.round((fpsFrameCount * 1000) / elapsed);
-        fpsFrameCount = 0;
-        fpsWindowStartedAt = timestamp;
-        emit(fpsListeners, currentFps);
-        void renderPerformanceUi();
-        if (!global.__PLAYMESH_BROWSER__) {
-          post("performance.fps", { fps: currentFps }).catch(() => {});
-        }
-        return currentFps;
-      },
-    },
     storage: {
       getBucket(bucket) {
         validateStorageName(bucket, "bucket");
@@ -220,25 +165,33 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         };
       },
     },
-    __receive: receive,
   };
 
-  registerAppPlatformUiRuntime();
-  global.playmesh = playmesh;
-  global.console?.info?.("Playmesh Game SDK 注入成功", {
-    version: PLAYMESH_SDK_VERSION,
+  const PLAYMESH_MAIN_INTERNAL_KEY =
+    Symbol.for("playmesh.main.internal.v1");
+  Object.defineProperty(global, PLAYMESH_MAIN_INTERNAL_KEY, {
+    value: Object.freeze({ receive }),
+    configurable: true,
+    enumerable: false,
+    writable: false,
   });
+  registerAppPlatformUiRuntime();
   if (global.chrome && global.chrome.webview) {
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
   }
-  global.addEventListener?.("pagehide", () => markRuntimeExited("游戏页面已退出"));
-  playmesh.ready = appSdk.ready.then(async (initialAppBootstrap) => {
-    let appBootstrap = initialAppBootstrap;
+  global.addEventListener?.("pagehide", () => {
+    const refreshing = global.__playmeshDevelopmentRefreshRequested === true;
+    markRuntimeExited(refreshing ? "开发游戏页面正在重启" : "游戏页面已退出");
+  });
+  let readyAppBootstrap = null;
+  main.ready = (async () => {
+    const appBootstrap = await appSdk.ready;
+    readyAppBootstrap = appBootstrap;
     const runtimeGameDeclaration = global.__PLAYMESH_BROWSER__;
     if (runtimeGameDeclaration &&
         appSdk.isAvailable() &&
-        typeof appSdk.__configureRuntimeGame === "function") {
-      appBootstrap = await appSdk.__configureRuntimeGame({
+        typeof appInternalRuntime.configureRuntimeGame === "function") {
+      await appInternalRuntime.configureRuntimeGame({
         requiredCapabilities:
           runtimeGameDeclaration.requiredCapabilities || [],
       });
@@ -266,6 +219,20 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
             : {}),
         })
       : post("sdk.ready", {});
+  })();
+  const ready = main.ready.then(
+    (mainBootstrap) => Object.freeze({
+      main: mainBootstrap,
+      app: readyAppBootstrap,
+    }),
+  );
+  global.playmesh = Object.freeze({
+    ready,
+    main,
+    app: appSdk,
+  });
+  global.console?.info?.("Playmesh Game SDK 注入成功", {
+    version: PLAYMESH_SDK_VERSION,
   });
 
   async function connectBrowserFullscreen(config) {
@@ -297,7 +264,13 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       socket.close(1000, reason);
     }
     closeBinaryTransport(reason, true);
-    global.console?.info?.("Playmesh 游戏页面已退出，停止 WebSocket 重连", { reason });
+    stopLatencyProbes();
+    global.console?.info?.(
+      reason === "开发游戏页面正在重启"
+        ? "Playmesh 开发游戏页面正在重启，已停止旧页面 WebSocket 重连"
+        : "Playmesh 游戏页面已退出，停止 WebSocket 重连",
+      { reason },
+    );
   }
 
   async function lockBrowserOrientation(orientation) {
@@ -322,7 +295,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     if (!global.__PLAYMESH_BROWSER__) {
       return post(command, { bucket, key, value });
     }
-    await playmesh.ready;
+    await main.ready;
     const requestId = `browser-storage-${Date.now()}-${++browserStorageSequence}`;
     return new Promise((resolve, reject) => {
       const timer = global.setTimeout(() => {
@@ -356,7 +329,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   }
 
   async function storageUpload(bucket, file) {
-    await playmesh.ready;
+    await main.ready;
     if (!file || typeof file.name !== "string" || typeof file.size !== "number") {
       throw new Error("upload(file) 需要浏览器 File");
     }
@@ -412,7 +385,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     try {
       global.localStorage?.setItem(browserNicknameStorageKey, nickname);
     } catch (_) {
-      // Private browsing may reject storage; the current session can still continue.
+      // 隐私浏览可能拒绝持久化，但当前会话仍可继续。
     }
   }
 
@@ -421,7 +394,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       const cached = global.localStorage?.getItem(browserPlayerIdStorageKey);
       if (/^p_[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(cached || "")) return cached;
     } catch (_) {
-      // Continue with an in-memory identity when persistent storage is unavailable.
+      // 持久化不可用时继续使用内存身份。
     }
     const bytes = new Uint8Array(16);
     if (global.crypto?.getRandomValues) {
@@ -435,14 +408,14 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     try {
       global.localStorage?.setItem(browserPlayerIdStorageKey, playerId);
     } catch (_) {
-      // The current page can still join, but refresh cannot restore this identity.
+      // 当前页面仍可加入，但刷新后无法恢复这个身份。
     }
     return playerId;
   }
 
   async function updateBrowserNickname(value) {
     const nickname = validateNickname(value, true);
-    await playmesh.ready;
+    await main.ready;
     const config = global.__PLAYMESH_BROWSER__;
     const response = await fetch(new URL(
       `v1/sessions/${encodeURIComponent(bootstrap.session.id)}/players/me`,
@@ -475,20 +448,14 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     return null;
   }
 
-  async function mountBrowserNicknameControl() {
-    if (appSdk.isAvailable()) return;
-    const ui = await ensureBrowserNicknameUi();
-    if (!ui) return;
-    ui.button.hidden = false;
-    ui.button.onclick = () => {
-      closePlatformUiLayer(ui.infoOverlay, ui.info);
-      return openBrowserNicknameDialog({
-        required: false,
-        current: bootstrap?.player?.nickname || readBrowserNickname() || "",
-        returnFocus: ui.info,
-        submit: updateBrowserNickname,
-      });
-    };
+  async function editBrowserNickname() {
+    if (appSdk.isAvailable()) return false;
+    const value = await openBrowserNicknameDialog({
+      required: false,
+      current: bootstrap?.player?.nickname || readBrowserNickname() || "",
+      submit: updateBrowserNickname,
+    });
+    return value !== null;
   }
 
   async function openBrowserNicknameDialog(options) {
@@ -552,108 +519,22 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     });
   }
 
-  function formatBrowserConsoleValue(value) {
-    if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
-    if (typeof value === "string") return value;
-    if (typeof value === "bigint") return value.toString();
-    try {
-      const encoded = JSON.stringify(value);
-      return encoded === undefined ? String(value) : encoded;
-    } catch (_) {
-      return String(value);
-    }
-  }
-
-  function recordBrowserConsole(level, args, eventType = "console") {
-    browserConsoleLogs.push({
-      timestamp: Date.now(),
-      level,
-      eventType,
-      message: args.map(formatBrowserConsoleValue).join(" "),
-    });
-    if (browserConsoleLogs.length > BROWSER_CONSOLE_LOG_LIMIT) {
-      browserConsoleLogs.splice(0, browserConsoleLogs.length - BROWSER_CONSOLE_LOG_LIMIT);
-    }
-    if (browserNicknameUi?.logsOverlay && !browserNicknameUi.logsOverlay.hidden) {
-      renderBrowserConsoleLogs(browserNicknameUi);
-    }
-  }
-
-  function installBrowserConsoleCapture() {
-    if (!global.__PLAYMESH_BROWSER__ ||
-        appSdk.isAvailable() ||
-        browserConsoleCaptureInstalled ||
-        !global.console) {
-      return;
-    }
-    browserConsoleCaptureInstalled = true;
-    for (const level of ["log", "info", "warn", "error", "debug"]) {
-      const nativeMethod = typeof global.console[level] === "function"
-        ? global.console[level].bind(global.console)
-        : null;
-      if (!nativeMethod) continue;
-      global.console[level] = (...args) => {
-        nativeMethod(...args);
-        recordBrowserConsole(level, args);
-      };
-    }
-    global.addEventListener?.("error", (event) => {
-      const resource = event.target && event.target !== global
-        ? event.target.currentSrc || event.target.src || event.target.href
-        : null;
-      const error = event.error instanceof Error ? event.error : null;
-      recordBrowserConsole(
-        "error",
-        [resource ? `Resource load failed: ${resource}` : error || event.message],
-        resource ? "resource.error" : "uncaught.error",
-      );
-    }, true);
-    global.addEventListener?.("unhandledrejection", (event) => {
-      recordBrowserConsole("error", [event.reason], "unhandled.rejection");
-    });
-  }
-
-  function formatBrowserConsoleTimestamp(timestamp) {
-    const value = new Date(timestamp);
-    try {
-      return new Intl.DateTimeFormat(platformUiLocale || undefined, {
-        dateStyle: "short",
-        timeStyle: "medium",
-      }).format(value);
-    } catch (_) {
-      // Older WebViews keep the deterministic fallback below.
-    }
-    const pad = (part) => String(part).padStart(2, "0");
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ` +
-      `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
-  }
-
-  function renderBrowserConsoleLogs(ui) {
-    if (!ui?.logsOutput) return;
-    ui.logsOutput.textContent = browserConsoleLogs.length
-      ? browserConsoleLogs.map((entry) => {
-          const eventType = entry.eventType === "console" ? "" : ` [${entry.eventType}]`;
-          return `[${formatBrowserConsoleTimestamp(entry.timestamp)}] [${entry.level}]${eventType} ${entry.message}`;
-        }).join("\n")
-      : platformText("logs.empty");
-    ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
-  }
-
   function registerAppPlatformUiRuntime() {
-    if (typeof appSdk.__registerRuntimeUi !== "function") return;
-    appSdk.__registerRuntimeUi({
+    if (typeof appInternalRuntime.registerRuntimeUi !== "function") return;
+    appInternalRuntime.registerRuntimeUi({
       async reload() {
-        if (playmesh.session.isAuthority()) {
+        const multiplayer = main.gameInfo.getCurrent()?.multiplayer === true;
+        if (multiplayer && main.session.isAuthority()) {
           await post("session.reset", {});
         }
         global.location?.reload?.();
       },
       async getInfo() {
-        await playmesh.ready;
-        const gameInfo = playmesh.gameInfo.getCurrent();
+        await main.ready;
+        const gameInfo = main.gameInfo.getCurrent();
         if (!gameInfo) return null;
-        const session = playmesh.session.getCurrent();
-        const player = playmesh.player.getCurrent();
+        const session = main.session.getCurrent();
+        const player = main.player.getCurrent();
         return {
           gameId: gameInfo.id,
           gameName: gameInfo.name,
@@ -661,45 +542,21 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
           requiredCapabilities: [...gameInfo.requiredCapabilities],
           joinCode: session?.joinCode || null,
           multiplayer: gameInfo.multiplayer,
-          isAuthority: playmesh.session.isAuthority(),
+          isAuthority: main.session.isAuthority(),
           playerName: player?.nickname || null,
+          canEditNickname: !appSdk.isAvailable(),
           playerCount: Array.isArray(session?.players)
             ? session.players.length
             : null,
-          gameSdkVersion: playmesh.version,
+          gameSdkVersion: main.version,
           appSdkVersion: appSdk.version,
-          platform: playmesh.app.device.getPlatform() || "browser",
+          platform: appSdk.device.getPlatform() || "browser",
         };
       },
-      getPerformance() {
-        return {
-          fps: currentFps,
-          latency: currentLatency,
-          multiplayer: Boolean(bootstrap?.session),
-        };
-      },
-      setPerformanceVisible(visible) {
-        performanceVisible = visible === true;
+      editNickname() {
+        return editBrowserNickname();
       },
     });
-  }
-
-  function exitBrowserGameFromSidebar(ui) {
-    browserBackExitRequested = true;
-    ui.closeSidebar(false);
-    markRuntimeExited("用户从游戏菜单退出");
-    try {
-      if (browserBackInterceptionInstalled && global.history.length > 2) {
-        global.history.go(-2);
-        return;
-      }
-      global.close?.();
-      global.setTimeout(() => {
-        if (!global.closed) global.location?.replace?.("about:blank");
-      }, 0);
-    } catch (error) {
-      global.console?.warn?.("浏览器无法离开当前游戏页面", error);
-    }
   }
 
   async function ensureBrowserNicknameUi() {
@@ -710,82 +567,38 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     }
     const pageReturnFocus = global.document.activeElement || null;
     const host = global.document.createElement("div");
-    host.id = "playmesh-browser-profile";
+    host.id = "playmesh-browser-nickname-ui";
     host.setAttribute?.("lang", platformUiLocale);
     host.setAttribute?.("data-theme", platformUiTheme);
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>
-      :host{all:initial;--pm-surface:#121720eb;--pm-surface-solid:#20242b;--pm-surface-hover:#343b46;--pm-text:#f4f7fb;--pm-muted:#d5dbe4;--pm-border:#596272;--pm-soft-border:#ffffff35;--pm-divider:#ffffff18;--pm-overlay:#0008;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#0b0f15;--pm-log-text:#dbe5f0;--pm-focus:#78a6ff;--pm-error:#fda4af;font-family:system-ui,"Microsoft YaHei",sans-serif;letter-spacing:0;color-scheme:dark}
-      :host([data-theme="light"]){--pm-surface:#fffffff2;--pm-surface-solid:#ffffff;--pm-surface-hover:#e8edf3;--pm-text:#18212c;--pm-muted:#526071;--pm-border:#91a0b0;--pm-soft-border:#aab5c2;--pm-divider:#d5dde6;--pm-overlay:#dce3ecd9;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#f4f7fa;--pm-log-text:#1f2937;--pm-focus:#075dce;--pm-error:#a1122f;color-scheme:light}
+      :host{all:initial;--pm-surface:#20242b;--pm-hover:#343b46;--pm-text:#f4f7fb;--pm-border:#596272;--pm-overlay:#0008;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-focus:#78a6ff;--pm-error:#fda4af;font-family:system-ui,"Microsoft YaHei",sans-serif;color-scheme:dark}
+      :host([data-theme="light"]){--pm-surface:#fff;--pm-hover:#e8edf3;--pm-text:#18212c;--pm-border:#91a0b0;--pm-overlay:#dce3ecd9;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-focus:#075dce;--pm-error:#a1122f;color-scheme:light}
       button,input{box-sizing:border-box;font:inherit;letter-spacing:0}
-      .sidebar-layer{position:fixed;inset:0;z-index:2147483646;color:var(--pm-text)}
-      .sidebar-scrim{position:absolute;inset:0;width:100%;height:100%;padding:0;border:0;background:var(--pm-overlay);cursor:pointer}
-      .sidebar{box-sizing:border-box;position:absolute;right:0;top:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(88vw,360px);height:100%;height:100dvh;padding:max(16px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) 10px;border-left:1px solid var(--pm-border);background:var(--pm-surface-solid);box-shadow:-18px 0 42px #0006}
-      .sidebar-head{display:flex;align-items:center;gap:12px;padding:4px 10px 14px;border-bottom:1px solid var(--pm-divider)}
-      .sidebar-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#087f6d;color:#fff;font:800 18px/1 system-ui}
-      .sidebar-title{margin:0;color:var(--pm-text);font-size:20px;line-height:1.25;font-weight:800}
-      .sidebar-actions{min-height:0;overflow:auto;padding:8px 0}
-      .sidebar-action{display:flex;align-items:center;gap:13px;width:100%;min-height:52px;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--pm-text);font:700 15px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer}
-      .sidebar-action:hover{background:var(--pm-surface-hover)}.sidebar-action:focus-visible,.sidebar-scrim:focus-visible,.actions button:focus-visible,.logs-head button:focus-visible,.logs-output:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}
-      .sidebar-action.continue{background:#087f6d;color:#fff}.sidebar-action.exit{color:var(--pm-error)}
-      .sidebar-icon{display:grid;place-items:center;flex:0 0 24px;width:24px;font:800 19px/1 system-ui}
-      .sidebar-foot{padding-top:8px;border-top:1px solid var(--pm-divider)}
-      .panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483645;display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);font:700 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
       .overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}
-      .sidebar-layer[hidden],.overlay[hidden],.panel[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden],.logs-overlay[hidden]{display:none}
-      form,.info-card{box-sizing:border-box;width:min(100%,380px);max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}
+      .overlay[hidden]{display:none}
+      form{box-sizing:border-box;width:min(100%,380px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 16px 40px #0005}
       h2{margin:0 0 16px;font-size:20px;line-height:1.3;letter-spacing:0}
       label{display:block;margin-bottom:6px;font-size:14px;font-weight:700}
       input{width:100%;height:44px;padding:8px 10px;border:1px solid var(--pm-border);border-radius:6px;color:var(--pm-field-text);background:var(--pm-field-bg)}
       .error{min-height:20px;margin:6px 0;color:var(--pm-error);font-size:13px}
       .actions{display:flex;justify-content:flex-end;gap:8px}
-      .actions button{height:40px;padding:0 14px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}
+      .actions button{height:40px;padding:0 14px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-hover);color:var(--pm-text);cursor:pointer}
       .actions .save{border-color:#10b981;background:#0f766e;color:#fff;font-weight:700}
-      .info-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}.info-card p{margin:8px 0;color:var(--pm-muted);line-height:1.6}.info-card strong{color:var(--pm-text)}.info-card .actions{margin-top:18px}
-      .logs-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:14px;background:var(--pm-overlay)}.logs-card{box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,760px);height:min(78vh,620px);height:min(78dvh,620px);padding:16px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}.logs-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}.logs-head h2{flex:1;margin:0}.logs-head button{height:36px;padding:0 12px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}.logs-output{min-width:0;min-height:0;margin:0;padding:10px;overflow:auto;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-log-bg);color:var(--pm-log-text);white-space:pre-wrap;word-break:break-word;user-select:text;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.logs-card .actions{margin-top:10px}
+      .actions button:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}
       button:disabled{cursor:wait;opacity:.65}
-      @media (orientation:landscape){.sidebar{width:min(46vw,420px)}.sidebar-head{padding-bottom:10px}.sidebar-actions{padding:5px 0}.sidebar-action{min-height:46px}.sidebar-foot{padding-top:5px}}
     </style>
-    <div class="sidebar-layer" hidden>
-      <button class="sidebar-scrim" type="button" aria-label="${platformHtml("sidebar.continue")}" tabindex="-1"></button>
-      <aside class="sidebar" role="dialog" aria-modal="true" aria-labelledby="playmesh-sidebar-title">
-        <header class="sidebar-head"><span class="sidebar-mark" aria-hidden="true">P</span><h2 class="sidebar-title" id="playmesh-sidebar-title">${platformHtml("sidebar.title")}</h2></header>
-        <nav class="sidebar-actions">
-          <button class="sidebar-action continue" type="button"><span class="sidebar-icon" aria-hidden="true">▶</span><span>${platformHtml("sidebar.continue")}</span></button>
-          <button class="sidebar-action reload" type="button"><span class="sidebar-icon" aria-hidden="true">↻</span><span>${platformHtml("sidebar.restart")}</span></button>
-          <button class="sidebar-action logs" type="button"><span class="sidebar-icon" aria-hidden="true">≡</span><span>${platformHtml("sidebar.logs")}</span></button>
-          <button class="sidebar-action enter-fullscreen" type="button"><span class="sidebar-icon" aria-hidden="true">⛶</span><span>${platformHtml("sidebar.enter_fullscreen")}</span></button>
-          <button class="sidebar-action exit-fullscreen" type="button"><span class="sidebar-icon" aria-hidden="true">⊡</span><span>${platformHtml("sidebar.exit_fullscreen")}</span></button>
-          <button class="sidebar-action info" type="button"><span class="sidebar-icon" aria-hidden="true">ⓘ</span><span>${platformHtml("sidebar.info")}</span></button>
-          <button class="sidebar-action performance" type="button" aria-pressed="false"><span class="sidebar-icon" aria-hidden="true">◴</span><span>${platformHtml("sidebar.performance")}</span></button>
-        </nav>
-        <footer class="sidebar-foot"><button class="sidebar-action exit" type="button"><span class="sidebar-icon" aria-hidden="true">↩</span><span>${platformHtml("sidebar.exit")}</span></button></footer>
-      </aside>
-    </div>
-    <div class="panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>
     <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-nickname-title" hidden>
       <form><h2 id="playmesh-nickname-title"></h2><label class="nickname-label" for="nickname">${platformHtml("nickname.label")}</label>
       <input id="nickname" maxlength="32" autocomplete="nickname" required>
       <div class="error" role="alert"></div><div class="actions">
       <button class="close" type="button" aria-label="${platformHtml("common.cancel")}">${platformHtml("common.cancel")}</button><button class="save" type="submit" aria-label="${platformHtml("common.save")}">${platformHtml("common.save")}</button>
       </div></form>
-    </div>
-    <div class="info-overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-info-title" hidden><div class="info-card"><h2 class="info-title" id="playmesh-info-title">${platformHtml("info.title")}</h2><p class="game-name"></p><p class="session-info"></p><div class="actions"><button class="edit" type="button" aria-label="${platformHtml("nickname.edit_action")}" hidden>${platformHtml("nickname.edit_action")}</button><button class="info-close" type="button" aria-label="${platformHtml("common.close")}">${platformHtml("common.close")}</button></div></div></div>
-    <div class="logs-overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-logs-title" hidden><div class="logs-card"><div class="logs-head"><h2 class="logs-title" id="playmesh-logs-title">${platformHtml("logs.title")}</h2><button class="logs-clear" type="button" aria-label="${platformHtml("common.clear")}">${platformHtml("common.clear")}</button></div><pre class="logs-output" tabindex="0" aria-live="polite">${platformHtml("logs.empty")}</pre><div class="actions"><button class="logs-close" type="button" aria-label="${platformHtml("common.close")}">${platformHtml("common.close")}</button></div></div></div>`;
+    </div>`;
     global.document.body.appendChild(host);
     browserNicknameUi = {
       host,
       pageReturnFocus,
-      sidebarLayer: root.querySelector(".sidebar-layer"),
-      sidebar: root.querySelector(".sidebar"),
-      sidebarTitle: root.querySelector(".sidebar-title"),
-      sidebarScrim: root.querySelector(".sidebar-scrim"),
-      continueButton: root.querySelector(".continue"),
-      panel: root.querySelector(".panel"),
-      fps: root.querySelector(".fps"),
-      latency: root.querySelector(".latency"),
-      performanceButton: root.querySelector(".performance"),
-      button: root.querySelector(".edit"),
       overlay: root.querySelector(".overlay"),
       form: root.querySelector("form"),
       title: root.querySelector("h2"),
@@ -794,22 +607,6 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       error: root.querySelector(".error"),
       close: root.querySelector(".close"),
       submit: root.querySelector(".save"),
-      reload: root.querySelector(".reload"),
-      enterFullscreen: root.querySelector(".enter-fullscreen"),
-      exitFullscreen: root.querySelector(".exit-fullscreen"),
-      info: root.querySelector(".info"),
-      exit: root.querySelector(".exit"),
-      logs: root.querySelector(".logs"),
-      infoOverlay: root.querySelector(".info-overlay"),
-      infoClose: root.querySelector(".info-close"),
-      infoTitle: root.querySelector(".info-title"),
-      gameName: root.querySelector(".game-name"),
-      sessionInfo: root.querySelector(".session-info"),
-      logsOverlay: root.querySelector(".logs-overlay"),
-      logsOutput: root.querySelector(".logs-output"),
-      logsTitle: root.querySelector(".logs-title"),
-      logsClear: root.querySelector(".logs-clear"),
-      logsClose: root.querySelector(".logs-close"),
     };
     const ui = browserNicknameUi;
     global.document.addEventListener?.("focusin", (event) => {
@@ -817,95 +614,6 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         ui.pageReturnFocus = event.target;
       }
     }, true);
-    const sidebarControls = () => [
-      ui.continueButton,
-      ui.reload,
-      ui.logs,
-      ui.enterFullscreen,
-      ui.exitFullscreen,
-      ui.info,
-      ui.performanceButton,
-      ui.exit,
-    ];
-    const closeBrowserSidebar = (restoreFocus = true) => {
-      ui.sidebarLayer.hidden = true;
-      if (restoreFocus) focusPlatformUiControl(ui.pageReturnFocus);
-    };
-    const openBrowserSidebar = () => {
-      const activeElement = global.document.activeElement;
-      if (activeElement && activeElement !== host) ui.pageReturnFocus = activeElement;
-      ui.sidebarLayer.hidden = false;
-      const first = setPlatformUiRovingTabStop(
-        sidebarControls(),
-        ui.continueButton,
-      );
-      focusPlatformUiControl(first);
-    };
-    ui.openSidebar = openBrowserSidebar;
-    ui.closeSidebar = closeBrowserSidebar;
-    ui.continueButton.onclick = () => closeBrowserSidebar();
-    ui.sidebarScrim.onclick = () => closeBrowserSidebar();
-    ui.reload.onclick = () => {
-      closeBrowserSidebar(false);
-      global.location?.reload?.();
-    };
-    ui.performanceButton.onclick = () => {
-      performanceVisible = !performanceVisible;
-      void renderPerformanceUi();
-      closeBrowserSidebar();
-    };
-    ui.enterFullscreen.onclick = async () => {
-      closeBrowserSidebar(false);
-      try {
-        await requestBrowserFullscreen(browserConnectionConfig?.orientation);
-      } catch (error) {
-        global.console?.warn?.("浏览器全屏或方向锁定不可用，请手动调整", error);
-      }
-    };
-    ui.exitFullscreen.onclick = () => {
-      closeBrowserSidebar(false);
-      if (global.document.fullscreenElement) {
-        Promise.resolve(global.document.exitFullscreen?.()).catch(() => {});
-      }
-    };
-    ui.info.onclick = () => {
-      const config = global.__PLAYMESH_BROWSER__ || {};
-      ui.infoTitle.textContent = platformText("info.title");
-      ui.gameName.textContent =
-        config.gameName || platformText("info.default_game");
-      ui.sessionInfo.textContent = bootstrap?.session?.joinCode
-        ? platformText("info.join_code", {
-            joinCode: bootstrap.session.joinCode,
-          })
-        : platformText("info.solo_share");
-      closeBrowserSidebar(false);
-      openPlatformUiLayer(ui.infoOverlay, ui.infoClose, ui.pageReturnFocus);
-    };
-    ui.logs.onclick = () => {
-      renderBrowserConsoleLogs(ui);
-      closeBrowserSidebar(false);
-      openPlatformUiLayer(ui.logsOverlay, ui.logsClose, ui.pageReturnFocus);
-    };
-    ui.infoClose.onclick = () => {
-      closePlatformUiLayer(ui.infoOverlay, ui.pageReturnFocus);
-    };
-    ui.logsClear.onclick = () => {
-      browserConsoleLogs.length = 0;
-      renderBrowserConsoleLogs(ui);
-    };
-    ui.logsClose.onclick = () => {
-      closePlatformUiLayer(ui.logsOverlay, ui.pageReturnFocus);
-    };
-    ui.exit.onclick = () => exitBrowserGameFromSidebar(ui);
-    installPlatformUiKeyboardNavigation(
-      ui.sidebar,
-      sidebarControls,
-      {
-        trap: true,
-        roving: true,
-        onBack: () => closeBrowserSidebar(),
-      },
-    );
     installPlatformUiKeyboardNavigation(
       ui.overlay,
       () => [ui.input, ui.close, ui.submit],
@@ -914,24 +622,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         onBack: () => ui.onNicknameBack?.(),
       },
     );
-    installPlatformUiKeyboardNavigation(
-      ui.infoOverlay,
-      () => [ui.button, ui.infoClose],
-      {
-        trap: true,
-        onBack: () => ui.infoClose.onclick(),
-      },
-    );
-    installPlatformUiKeyboardNavigation(
-      ui.logsOverlay,
-      () => [ui.logsClear, ui.logsOutput, ui.logsClose],
-      {
-        trap: true,
-        onBack: () => ui.logsClose.onclick(),
-      },
-    );
     refreshBrowserPlatformUi(ui);
-    performanceUi = browserNicknameUi;
     return browserNicknameUi;
   }
 
@@ -943,34 +634,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     if (visible) element.textContent = label;
   }
 
-  function setSidebarActionLabel(element, key) {
-    if (!element) return;
-    const label = platformText(key);
-    element.setAttribute?.("aria-label", label);
-    element.setAttribute?.("title", label);
-    const text = element.querySelector?.("span:last-child");
-    if (text) text.textContent = label;
-  }
-
   function refreshBrowserPlatformUi(ui) {
     if (!ui) return;
     ui.host?.setAttribute?.("data-theme", platformUiTheme);
     ui.host?.setAttribute?.("lang", platformUiLocale);
-    if (ui.sidebarTitle) {
-      ui.sidebarTitle.textContent = platformText("sidebar.title");
-    }
-    setPlatformControlLabel(ui.sidebarScrim, "sidebar.continue");
-    setSidebarActionLabel(ui.continueButton, "sidebar.continue");
-    setSidebarActionLabel(ui.reload, "sidebar.restart");
-    setSidebarActionLabel(ui.logs, "sidebar.logs");
-    setSidebarActionLabel(ui.enterFullscreen, "sidebar.enter_fullscreen");
-    setSidebarActionLabel(ui.exitFullscreen, "sidebar.exit_fullscreen");
-    setSidebarActionLabel(ui.info, "sidebar.info");
-    setSidebarActionLabel(ui.performanceButton, "sidebar.performance");
-    setSidebarActionLabel(ui.exit, "sidebar.exit");
-    setPlatformControlLabel(ui.button, "nickname.edit_action", {
-      visible: true,
-    });
     if (ui.nicknameLabel) {
       ui.nicknameLabel.textContent = platformText("nickname.label");
     }
@@ -981,24 +648,6 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     }
     setPlatformControlLabel(ui.close, "common.cancel", { visible: true });
     setPlatformControlLabel(ui.submit, "common.save", { visible: true });
-    if (ui.infoTitle) ui.infoTitle.textContent = platformText("info.title");
-    setPlatformControlLabel(ui.infoClose, "common.close", { visible: true });
-    if (ui.logsTitle) ui.logsTitle.textContent = platformText("logs.title");
-    setPlatformControlLabel(ui.logsClear, "common.clear", { visible: true });
-    setPlatformControlLabel(ui.logsClose, "common.close", { visible: true });
-    const config = global.__PLAYMESH_BROWSER__ || {};
-    if (ui.gameName) {
-      ui.gameName.textContent =
-        config.gameName || platformText("info.default_game");
-    }
-    if (ui.sessionInfo) {
-      ui.sessionInfo.textContent = bootstrap?.session?.joinCode
-        ? platformText("info.join_code", {
-            joinCode: bootstrap.session.joinCode,
-          })
-        : platformText("info.solo_share");
-    }
-    if (!ui.logsOverlay.hidden) renderBrowserConsoleLogs(ui);
   }
 
   function validateStorageName(value, field) {

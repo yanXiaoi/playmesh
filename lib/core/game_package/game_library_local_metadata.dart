@@ -37,7 +37,7 @@ final class GameLibraryUsageStats {
   };
 }
 
-/// App-local usage state, never included in game packages or Catalog payloads.
+/// 仅供 App 本地使用的状态，绝不进入游戏包或 Catalog 载荷。
 class GameLibraryLocalMetadataStore {
   GameLibraryLocalMetadataStore({
     Directory? libraryRoot,

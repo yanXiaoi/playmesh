@@ -11,9 +11,8 @@ const maxGamePackageIconBytes = 2 * 1024 * 1024;
 const maxGamePackageIconPixels = 4 * 1024 * 1024;
 const _maxDecodedIconBytes = 32 * 1024 * 1024;
 
-/// A file-backed image provider whose cache identity follows the actual icon
-/// file revision. Package upgrades keep the required root path `icon.png`, so a
-/// plain [FileImage] would otherwise return pixels cached for the old file.
+/// 基于文件的图片 Provider，缓存标识随实际图标文件修订状态变化。包升级仍使用固定根路径
+/// `icon.png`，普通 [FileImage] 否则会返回旧文件的缓存像素。
 @immutable
 final class GamePackageIconImageProvider
     extends ImageProvider<GamePackageIconImageProvider> {

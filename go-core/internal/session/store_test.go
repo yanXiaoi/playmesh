@@ -1,6 +1,8 @@
 package session
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -191,7 +193,7 @@ func TestResetAndBrowserRefreshCreateFreshPlayer(t *testing.T) {
 	}
 }
 
-func TestPlayerSourceAndLatencyRemainInUnifiedRoomSnapshot(t *testing.T) {
+func TestPlayerSourceRemainsInUnifiedRoomSnapshotWithoutPerformanceState(t *testing.T) {
 	store := NewStore()
 	snapshot, _, err := store.Create(CreateInput{
 		GameID: "room-status", DisplayMode: "single_screen_multiplayer",
@@ -213,19 +215,23 @@ func TestPlayerSourceAndLatencyRemainInUnifiedRoomSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.TryConnect(record, guest.Player.ID)
-	latency := 42
-	withLatency := store.SetLatency(record, guest.Player.ID, &latency)
-	if len(withLatency.Players) != 1 ||
-		withLatency.Players[0].Source != "server" ||
-		withLatency.Players[0].LatencyMS == nil ||
-		*withLatency.Players[0].LatencyMS != latency {
-		t.Fatalf("room status player = %#v", withLatency.Players)
+	connected, ok := store.TryConnect(record, guest.Player.ID)
+	if !ok ||
+		len(connected.Players) != 1 ||
+		connected.Players[0].Source != "server" ||
+		!connected.Players[0].Connected {
+		t.Fatalf("room status player = %#v", connected.Players)
+	}
+	encoded, err := json.Marshal(connected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`"latencyMs"`)) {
+		t.Fatalf("session snapshot leaked performance state: %s", encoded)
 	}
 	disconnected := store.SetConnected(record, guest.Player.ID, false)
 	if len(disconnected.Players) != 1 ||
 		disconnected.Players[0].Connected ||
-		disconnected.Players[0].LatencyMS != nil ||
 		disconnected.Players[0].Source != "server" {
 		t.Fatalf("disconnected room status player = %#v", disconnected.Players)
 	}

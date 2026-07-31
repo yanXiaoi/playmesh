@@ -100,6 +100,7 @@ class VibrationCapabilityPlugin implements CapabilityPlugin {
     name: '震动反馈',
     description: '通过 vibration 插件触发或取消当前设备的跨平台震动。',
     apiVersion: '2.0.0',
+    supportedPlatforms: [CapabilityPlatform.ANDROID],
     optionsSchema: {'type': 'object', 'additionalProperties': false},
     methods: [
       CapabilityMethodDescriptor(
@@ -161,6 +162,9 @@ class VibrationCapabilityPlugin implements CapabilityPlugin {
       throw const FormatException('震动能力不接受创建参数');
     }
     if (!isAvailable) throw UnsupportedError('当前平台不支持 vibration 插件');
+    if (!await driver.hasVibrator()) {
+      throw UnsupportedError('当前设备没有可用振动器');
+    }
     late final _VibrationCapabilityInstance instance;
     instance = _VibrationCapabilityInstance(
       driver,
@@ -168,23 +172,6 @@ class VibrationCapabilityPlugin implements CapabilityPlugin {
     );
     _instances.add(instance);
     return instance;
-  }
-
-  @override
-  Future<CapabilityJson> test(Duration timeout) async {
-    if (!isAvailable) throw UnsupportedError('当前平台不支持 vibration 插件');
-    final results = await Future.wait([
-      driver.hasVibrator(),
-      driver.hasAmplitudeControl(),
-      driver.hasCustomVibrationsSupport(),
-    ]).timeout(timeout);
-    return {
-      'available': results[0],
-      'hasAmplitudeControl': results[1],
-      'hasCustomVibrationsSupport': results[2],
-      'presets': supportedPresets,
-      'sideEffectExecuted': false,
-    };
   }
 
   @override

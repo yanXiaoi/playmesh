@@ -1,26 +1,55 @@
 // @ts-ignore
 const PLAYMESH_APP_DECLARATION = String.raw`
-/// <reference path="./playmesh.d.ts" />
-
-/** App WebView 自动注入的底层对象。游戏业务使用 playmesh.app。 */
-declare const playmeshApp: PlaymeshAppApi;
-interface Window { playmeshApp: PlaymeshAppApi; }
+/// <reference path="./playmesh-main.d.ts" />
 `;
 
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "3.0.0";
-  const PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY =
-    typeof Symbol === "function" && typeof Symbol.for === "function"
-      ? Symbol.for("playmesh.platform-ui.configuration")
-      : "__PLAYMESH_PLATFORM_UI_CONFIGURATION__";
+  const PLAYMESH_APP_SDK_VERSION = "3.2.0";
+  const PLAYMESH_APP_INTERNAL_KEY =
+    Symbol.for("playmesh.app.internal.v1");
 
   let sequence = 0;
   let bootstrap = null;
+  let appRuntimeLocale = null;
+  let appPlatformUiConfiguration = null;
   const pending = new Map();
   const inputListeners = new Set();
   const capabilityInstances = new Map();
+
+  function normalizeAppRuntimeLocale(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim();
+    return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(normalized)
+      ? normalized
+      : null;
+  }
+
+  function browserAppRuntimeLocale() {
+    try {
+      const candidates = [
+        ...(Array.isArray(global.navigator?.languages)
+          ? global.navigator.languages
+          : []),
+        global.navigator?.language,
+      ];
+      for (const candidate of candidates) {
+        const locale = normalizeAppRuntimeLocale(candidate);
+        if (locale) return locale;
+      }
+    } catch (_) {
+      // 受限浏览器上下文可能禁止访问 navigator。
+    }
+    return "zh";
+  }
+
+  function updateAppRuntimeLocale(configuration) {
+    appRuntimeLocale = bootstrap?.available === true
+      ? normalizeAppRuntimeLocale(configuration?.locale) ||
+        browserAppRuntimeLocale()
+      : browserAppRuntimeLocale();
+  }
 
   function nativeSender() {
     if (global.PlaymeshAppBridge?.postMessage) {
@@ -105,7 +134,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     if (!options || typeof options !== "object" || Array.isArray(options)) {
       throw new TypeError("能力 options 必须是对象");
     }
-    if (!bootstrap) throw new Error("请先等待 playmesh.ready");
+    if (!bootstrap) throw new Error("请先等待 playmesh.app.ready");
     if (!bootstrap.device?.declaredCapabilities?.includes(code)) {
       throw new Error(`当前游戏未在 capabilities.json 声明 ${code}`);
     }
@@ -152,6 +181,20 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         listeners.add(callback);
         return () => listeners.delete(callback);
       },
+      addEventListener(event, callback) {
+        if (!state.active) throw new Error("能力实例已释放");
+        if (typeof event !== "string" || !event) throw new TypeError("事件名称必须是非空字符串");
+        if (typeof callback !== "function") throw new TypeError("事件回调必须是函数");
+        let listeners = state.listeners.get(event);
+        if (!listeners) {
+          listeners = new Set();
+          state.listeners.set(event, listeners);
+        }
+        listeners.add(callback);
+      },
+      removeEventListener(event, callback) {
+        state.listeners.get(event)?.delete(callback);
+      },
       onError(callback) {
         if (typeof callback !== "function") throw new TypeError("错误回调必须是函数");
         state.errorListeners.add(callback);
@@ -168,12 +211,362 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     });
   }
 
+  const appMediaAdapters = new Map();
+  const appMediaSessions = new Map();
+
+  function registerAppMediaAdapter(protocol, adapter) {
+    if (typeof protocol !== "string" || !protocol) {
+      throw new TypeError("媒体协议必须是非空字符串");
+    }
+    if (!adapter || typeof adapter.open !== "function") {
+      throw new TypeError(`媒体协议 ${protocol} 没有实现 open`);
+    }
+    if (appMediaAdapters.has(protocol)) {
+      throw new Error(`媒体协议重复注册: ${protocol}`);
+    }
+    appMediaAdapters.set(protocol, Object.freeze(adapter));
+  }
+
+  function validateAppMediaSource(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source) ||
+        source.type !== "playmesh.app.media-source" ||
+        source.version !== 1 ||
+        typeof source.id !== "string" || !source.id ||
+        typeof source.kind !== "string" || !source.kind ||
+        typeof source.protocol !== "string" || !source.protocol ||
+        source.live !== true) {
+      throw new TypeError("媒体源描述符无效");
+    }
+  }
+
+  async function openAppMedia(source, options = {}) {
+    validateAppMediaSource(source);
+    if (!options || typeof options !== "object" || Array.isArray(options)) {
+      throw new TypeError("媒体打开参数必须是对象");
+    }
+    if (options.signal !== undefined &&
+        (typeof global.AbortSignal !== "function" ||
+         !(options.signal instanceof global.AbortSignal))) {
+      throw new TypeError("signal 必须是 AbortSignal");
+    }
+    if (options.signal?.aborted) throw new DOMException("操作已取消", "AbortError");
+    const adapter = appMediaAdapters.get(source.protocol);
+    if (!adapter) throw new Error(`当前 App SDK 不支持媒体协议 ${source.protocol}`);
+    const session = await adapter.open(clone(source), options);
+    if (!session || typeof session.id !== "string" || !session.id ||
+        typeof global.MediaStream !== "function" ||
+        !(session.stream instanceof global.MediaStream) ||
+        typeof session.close !== "function") {
+      try {
+        await session?.close?.();
+      } catch (_) {}
+      throw new Error(`媒体协议 ${source.protocol} 返回了无效会话`);
+    }
+    appMediaSessions.set(session.id, session);
+    let active = true;
+    return Object.freeze({
+      id: session.id,
+      source: clone(source),
+      stream: session.stream,
+      get state() {
+        return active ? (session.state || "open") : "ended";
+      },
+      async close() {
+        if (!active) return;
+        active = false;
+        appMediaSessions.delete(session.id);
+        await session.close();
+      },
+    });
+  }
+
+  global.addEventListener?.("pagehide", () => {
+    const sessions = [...appMediaSessions.values()];
+    appMediaSessions.clear();
+    for (const session of sessions) {
+      try {
+        session.close({ notifyHost: false });
+      } catch (_) {}
+    }
+  });
+
+  function waitForAppMediaIceGathering(peer, timeoutMs = 8000) {
+    if (peer.iceGatheringState === "complete") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = global.setTimeout(() => {
+        cleanup();
+        reject(new Error("WebRTC ICE 收集超时"));
+      }, timeoutMs);
+      const onChange = () => {
+        if (peer.iceGatheringState !== "complete") return;
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        global.clearTimeout(timer);
+        peer.removeEventListener("icegatheringstatechange", onChange);
+      };
+      peer.addEventListener("icegatheringstatechange", onChange);
+    });
+  }
+
+  function waitForAppMediaTrack(peer, stream, timeoutMs = 10000) {
+    let cancel = () => {};
+    const promise = new Promise((resolve, reject) => {
+      const timer = global.setTimeout(() => {
+        cleanup();
+        reject(new Error("WebRTC 媒体轨道建立超时"));
+      }, timeoutMs);
+      const onTrack = (event) => {
+        if (!stream.getTracks().some((track) => track.id === event.track.id)) {
+          stream.addTrack(event.track);
+        }
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        global.clearTimeout(timer);
+        peer.removeEventListener("track", onTrack);
+      };
+      cancel = cleanup;
+      peer.addEventListener("track", onTrack);
+    });
+    return { promise, cancel: () => cancel() };
+  }
+
+  registerAppMediaAdapter("webrtc", {
+    async open(source, options) {
+      if (typeof global.RTCPeerConnection !== "function" ||
+          typeof global.MediaStream !== "function") {
+        throw new Error("当前 WebView 不支持 WebRTC MediaStream");
+      }
+      const peer = new global.RTCPeerConnection({ iceServers: [] });
+      const stream = new global.MediaStream();
+      let hostSessionId = null;
+      let closed = false;
+      let state = "opening";
+      const trackWait = waitForAppMediaTrack(peer, stream);
+      const abort = () => {
+        peer.close();
+      };
+      options.signal?.addEventListener("abort", abort, { once: true });
+      try {
+        if (source.kind === "video" || source.kind === "audio-video") {
+          peer.addTransceiver("video", { direction: "recvonly" });
+        }
+        if (source.kind === "audio" || source.kind === "audio-video") {
+          peer.addTransceiver("audio", { direction: "recvonly" });
+        }
+        await peer.setLocalDescription(await peer.createOffer());
+        await waitForAppMediaIceGathering(peer);
+        if (options.signal?.aborted) throw new DOMException("操作已取消", "AbortError");
+        const opened = await request("app.media.open", {
+          source,
+          adapterOptions: {
+            offer: {
+              type: peer.localDescription.type,
+              sdp: peer.localDescription.sdp,
+            },
+          },
+        });
+        hostSessionId = opened?.sessionId;
+        if (typeof hostSessionId !== "string" || !hostSessionId ||
+            opened?.protocol !== "webrtc" ||
+            !opened.answer || typeof opened.answer.sdp !== "string") {
+          throw new Error("WebRTC 宿主返回了无效应答");
+        }
+        await peer.setRemoteDescription(opened.answer);
+        await trackWait.promise;
+        state = "open";
+      } catch (error) {
+        state = "failed";
+        trackWait.cancel();
+        peer.close();
+        if (hostSessionId) {
+          try {
+            await request("app.media.close", { sessionId: hostSessionId });
+          } catch (_) {}
+        }
+        throw error;
+      } finally {
+        options.signal?.removeEventListener("abort", abort);
+      }
+      return {
+        id: hostSessionId,
+        stream,
+        get state() {
+          return state;
+        },
+        async close(closeOptions = {}) {
+          if (closed) return;
+          closed = true;
+          state = "ended";
+          for (const track of stream.getTracks()) track.stop();
+          peer.close();
+          if (closeOptions.notifyHost !== false) {
+            await request("app.media.close", { sessionId: hostSessionId });
+          }
+        },
+      };
+    },
+  });
+
+  let appPerformanceMultiplayer = false;
+  let appPerformanceFps = null;
+  let appPerformanceFrameCount = 0;
+  let appPerformanceWindowStartedAt = null;
+  let appPerformanceLatency = null;
+  let appPerformanceLatencyDiagnostics = null;
+  let appPerformanceLatencyTimer = null;
+  let appPerformanceProbeSequence = 0;
+  let appPerformanceSendLatencyProbe = null;
+  const appPerformanceFpsListeners = new Set();
+  const appPerformanceLatencyListeners = new Set();
+
+  function emitAppPerformance(listeners, value) {
+    for (const listener of [...listeners]) listener(value);
+  }
+
+  function refreshAppPerformanceUi() {
+    refreshAppUiPerformance();
+  }
+
+  function configureAppRuntimePerformance(context) {
+    const multiplayer = context?.multiplayer === true;
+    appPerformanceMultiplayer = multiplayer;
+    appPerformanceSendLatencyProbe =
+      typeof context?.sendLatencyProbe === "function"
+        ? context.sendLatencyProbe
+        : null;
+    if (!multiplayer || !appPerformanceSendLatencyProbe) {
+      stopAppRuntimeLatencyProbes();
+      resetAppRuntimeLatency();
+    } else if (!appPerformanceLatencyTimer) {
+      sendAppRuntimeLatencyProbe();
+      appPerformanceLatencyTimer = global.setInterval(
+        sendAppRuntimeLatencyProbe,
+        3000,
+      );
+      appPerformanceLatencyTimer?.unref?.();
+    }
+    refreshAppPerformanceUi();
+  }
+
+  function sendAppRuntimeLatencyProbe() {
+    if (!appPerformanceMultiplayer || !appPerformanceSendLatencyProbe) return;
+    const clientSentAt = Date.now();
+    const payload = {
+      probeId:
+        `latency-${clientSentAt}-${++appPerformanceProbeSequence}`,
+      clientSentAt,
+    };
+    try {
+      Promise.resolve(appPerformanceSendLatencyProbe(payload)).catch(() => {});
+    } catch (_) {
+      // 单次探测失败不得中断游戏或本地性能浮层。
+    }
+  }
+
+  function stopAppRuntimeLatencyProbes() {
+    if (appPerformanceLatencyTimer) {
+      global.clearInterval(appPerformanceLatencyTimer);
+    }
+    appPerformanceLatencyTimer = null;
+    appPerformanceSendLatencyProbe = null;
+  }
+
+  function resetAppRuntimeLatency() {
+    appPerformanceLatency = null;
+    appPerformanceLatencyDiagnostics = null;
+    emitAppPerformance(appPerformanceLatencyListeners, null);
+    refreshAppPerformanceUi();
+  }
+
+  function recordAppRuntimeLatencyPong(payload) {
+    const receivedAt = Date.now();
+    const sentAt = Number(payload?.clientSentAt);
+    if (!Number.isFinite(sentAt) || sentAt > receivedAt) return;
+    if (payload.authorityAvailable !== true) {
+      appPerformanceLatency = null;
+      appPerformanceLatencyDiagnostics = {
+        probeId: payload.probeId || null,
+        clientSentAt: sentAt,
+        serverReceivedAt: payload.serverReceivedAt || null,
+        serverSentAt: payload.serverSentAt || null,
+        receivedAt,
+        authorityAvailable: false,
+      };
+    } else {
+      const rawRttMs = Math.max(0, receivedAt - sentAt);
+      const smoothed = appPerformanceLatency == null
+        ? rawRttMs
+        : (appPerformanceLatency * 0.75) + (rawRttMs * 0.25);
+      appPerformanceLatency = Math.max(0, Math.round(smoothed));
+      appPerformanceLatencyDiagnostics = {
+        probeId: payload.probeId || null,
+        clientSentAt: sentAt,
+        serverReceivedAt: payload.serverReceivedAt || null,
+        serverSentAt: payload.serverSentAt || null,
+        receivedAt,
+        authorityAvailable: true,
+        rawRttMs,
+      };
+    }
+    emitAppPerformance(
+      appPerformanceLatencyListeners,
+      appPerformanceLatency,
+    );
+    refreshAppPerformanceUi();
+  }
+
+  function reportAppPerformanceFrame(
+    timestamp = global.performance?.now?.() || Date.now(),
+  ) {
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+      throw new TypeError("timestamp 必须是有限数值");
+    }
+    appPerformanceFrameCount += 1;
+    appPerformanceWindowStartedAt ??= timestamp;
+    const elapsed = timestamp - appPerformanceWindowStartedAt;
+    if (elapsed < 1000) return appPerformanceFps;
+    appPerformanceFps = Math.max(
+      0,
+      Math.round((appPerformanceFrameCount * 1000) / elapsed),
+    );
+    appPerformanceFrameCount = 0;
+    appPerformanceWindowStartedAt = timestamp;
+    emitAppPerformance(appPerformanceFpsListeners, appPerformanceFps);
+    refreshAppPerformanceUi();
+    return appPerformanceFps;
+  }
+
+  function subscribeAppPerformance(listeners, callback, currentValue) {
+    if (typeof callback !== "function") {
+      throw new TypeError("callback 必须是函数");
+    }
+    listeners.add(callback);
+    callback(currentValue);
+    return function unsubscribe() {
+      listeners.delete(callback);
+    };
+  }
+
+  function appPerformanceSnapshot() {
+    return {
+      fps: appPerformanceFps,
+      latency: appPerformanceLatency,
+      multiplayer: appPerformanceMultiplayer,
+    };
+  }
+
+
   let appUiReturnFocus = null;
   let appUiFocusCapturePending = false;
   let appFallbackUi = null;
   let appUiConfiguration = null;
   let appUiRuntimeAdapter = null;
   let appUiKeyboardInstalled = false;
+  let appUiTogglePending = false;
   let appUiConsoleCaptureInstalled = false;
   let appUiPerformanceVisible = false;
   let appUiRenderTimer = null;
@@ -287,7 +680,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         returnFocus.focus({ preventScroll: true });
         if (documentObject?.activeElement === returnFocus) return;
       } catch (_) {
-        // Fall through to the game document.
+        // 平台 UI 未消费时继续交给游戏文档处理。
       }
     }
     const gameDocumentTarget =
@@ -302,7 +695,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       }
       gameDocumentTarget.focus({ preventScroll: true });
     } catch (_) {
-      // The document may no longer be focusable while it is unloading.
+      // 页面卸载期间游戏文档可能已经无法恢复焦点。
     } finally {
       if (previousTabIndex == null) {
         gameDocumentTarget.removeAttribute?.("tabindex");
@@ -312,12 +705,15 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     }
   }
 
-  function appUiText(key, fallback) {
+  function appUiText(key) {
     const messages = appUiConfiguration?.messages;
     const value = messages && typeof messages[key] === "string"
       ? messages[key]
       : null;
-    return value || fallback;
+    if (!value) {
+      throw new Error(`平台 UI 本地化消息不可用: ${key}`);
+    }
+    return value;
   }
 
   function resolveAppUiConfiguration(configuration) {
@@ -327,9 +723,19 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       (item) => item && typeof item === "object" &&
         typeof item.locale === "string",
     );
+    let browserLocales = [];
+    try {
+      browserLocales = [
+        ...(Array.isArray(global.navigator?.languages)
+          ? global.navigator.languages
+          : []),
+        global.navigator?.language,
+      ];
+    } catch (_) {
+      // 受限浏览器上下文可能禁止访问 navigator。
+    }
     const candidates = [
-      ...(global.navigator?.languages || []),
-      global.navigator?.language,
+      ...browserLocales,
       configuration.fallbackLocale,
     ].filter((value) => typeof value === "string" && value);
     let selected = null;
@@ -419,7 +825,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
           const time = new Date(entry.timestamp).toLocaleTimeString();
           return `[${time}] [${entry.level.toUpperCase()}] ${entry.message}`;
         }).join("\n")
-      : appUiText("logs.empty", "暂无运行日志");
+      : appUiText("logs.empty");
     output.scrollTop = output.scrollHeight;
   }
 
@@ -442,58 +848,58 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       : [];
     const role = runtimeInfo.multiplayer === true
       ? runtimeInfo.isAuthority === true
-        ? appUiText("info.role_authority", "主机")
-        : appUiText("info.role_player", "加入者")
-      : appUiText("info.role_solo", "单机");
+        ? appUiText("info.role_authority")
+        : appUiText("info.role_player")
+      : appUiText("info.role_solo");
     const gameId = runtimeInfo.gameId;
     const rows = [
       gameId
         ? {
-            label: appUiText("info.game_id", "Game ID"),
+            label: appUiText("info.game_id"),
             value: gameId,
             code: true,
             wide: true,
           }
         : null,
-      { label: appUiText("info.role", "运行角色"), value: role },
+      { label: appUiText("info.role"), value: role },
       runtimeInfo.joinCode
         ? {
-            label: appUiText("info.join_code_label", "加入码"),
+            label: appUiText("info.join_code_label"),
             value: runtimeInfo.joinCode,
             code: true,
           }
         : null,
       runtimeInfo.playerName
         ? {
-            label: appUiText("info.player", "当前玩家"),
+            label: appUiText("info.player"),
             value: runtimeInfo.playerName,
           }
         : null,
       Number.isFinite(runtimeInfo.playerCount)
         ? {
-            label: appUiText("info.players", "在线玩家"),
+            label: appUiText("info.players"),
             value: String(runtimeInfo.playerCount),
           }
         : null,
       {
-        label: appUiText("info.platform", "运行平台"),
+        label: appUiText("info.platform"),
         value: runtimeInfo.platform,
       },
       runtimeInfo.gameSdkVersion
         ? {
-            label: appUiText("info.game_sdk", "Game SDK"),
+            label: appUiText("info.game_sdk"),
             value: runtimeInfo.gameSdkVersion,
           }
         : null,
       {
-        label: appUiText("info.app_sdk", "App SDK"),
+        label: appUiText("info.app_sdk"),
         value: runtimeInfo.appSdkVersion,
       },
       {
-        label: appUiText("info.capabilities", "声明能力"),
+        label: appUiText("info.capabilities"),
         value: Array.isArray(capabilities) && capabilities.length
           ? capabilities.join(" · ")
-          : appUiText("info.none", "无"),
+          : appUiText("info.none"),
         wide: true,
       },
     ].filter(Boolean);
@@ -501,13 +907,17 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       gameName: runtimeInfo.gameName,
       tags,
       rows,
+      canEditNickname:
+        runtimeInfo.canEditNickname === true &&
+        Boolean(runtimeInfo.playerName) &&
+        typeof appUiRuntimeAdapter?.editNickname === "function",
     };
   }
 
   function refreshAppUiPerformance() {
     const ui = appFallbackUi;
     if (!ui?.performancePanel) return;
-    const metrics = appUiRuntimeAdapter?.getPerformance?.() || {};
+    const metrics = appPerformanceSnapshot();
     ui.performancePanel.hidden = !appUiPerformanceVisible;
     ui.performanceButton?.setAttribute?.(
       "aria-pressed",
@@ -518,7 +928,6 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       appUiPerformanceVisible
         ? "sidebar.performance_hide"
         : "sidebar.performance",
-      appUiPerformanceVisible ? "关闭性能信息" : "显示性能信息",
     );
     ui.fps.textContent =
       typeof metrics.fps === "number" ? `${Math.round(metrics.fps)} FPS` : "-- FPS";
@@ -531,7 +940,6 @@ interface Window { playmeshApp: PlaymeshAppApi; }
 
   function setAppUiPerformanceVisible(visible) {
     appUiPerformanceVisible = visible === true;
-    appUiRuntimeAdapter?.setPerformanceVisible?.(appUiPerformanceVisible);
     refreshAppUiPerformance();
     return appUiPerformanceVisible;
   }
@@ -590,15 +998,16 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     ui.gameTagsWrap.hidden = info.tags.length === 0;
     ui.gameTags.setAttribute(
       "aria-label",
-      appUiText("info.tags", "标签"),
+      appUiText("info.tags"),
     );
-    ui.gameTagsLabel.textContent = appUiText("info.tags", "标签");
+    ui.gameTagsLabel.textContent = appUiText("info.tags");
     ui.gameDetail.innerHTML = info.rows.map((row) => `
       <div class="info-item${row.wide ? " wide" : ""}">
         <dt class="info-label">${escapeAppUiHtml(row.label)}</dt>
         <dd class="info-value${row.code ? " code" : ""}">${escapeAppUiHtml(row.value)}</dd>
       </div>
     `).join("");
+    ui.infoEdit.hidden = !info.canEditNickname;
     ui.infoLayer.hidden = false;
     ui.infoClose.focus?.({ preventScroll: true });
     return true;
@@ -728,7 +1137,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       .menu-fab::before{content:"";position:absolute;inset:-2px;z-index:-1;border:1px solid #36cbb266;border-radius:16px 0 0 16px;animation:menu-breathe 2.8s ease-in-out infinite;pointer-events:none}.menu-fab.detached::before{border-radius:16px}.menu-fab.detached:hover{transform:translateY(-2px)}.menu-fab:active{transform:scale(.96)}.menu-fab.dragging{cursor:grabbing;transform:none;transition:none}.menu-fab:focus-visible,.dialog button:focus-visible,.logs-output:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.action:focus-visible{outline:0;background:var(--pm-hover);box-shadow:inset 0 0 0 2px var(--pm-focus-ring)}
       .menu-mark{position:relative;display:block;width:22px;transform:translateX(-2px);font:900 20px/1 system-ui}.menu-mark::after{content:"";position:absolute;left:15px;top:3px;width:7px;height:2px;border-radius:2px;background:currentColor;box-shadow:0 5px currentColor,0 10px currentColor}
       .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
-      .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
+      .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
       .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
       [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
@@ -743,7 +1152,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       <button class="action info" data-action="info" type="button"><span class="icon" aria-hidden="true">ⓘ</span><span></span></button>
       <button class="action performance" data-action="performance" type="button" aria-pressed="false"><span class="icon" aria-hidden="true">◴</span><span></span></button>
     </nav><footer class="foot"><button class="action exit" data-action="exit" type="button"><span class="icon" aria-hidden="true">↩</span><span></span></button></footer></aside></div>
-    <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-close" type="button"></button></div></section></div>
+    <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-edit" type="button" hidden></button><button class="info-close" type="button"></button></div></section></div>
     <div class="dialog-layer logs-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="logs-title"></h2><pre class="logs-output" tabindex="0"></pre><div class="dialog-actions"><button class="logs-copy" type="button"></button><button class="logs-clear" type="button"></button><button class="logs-close" type="button"></button></div></section></div>
     <div class="performance-panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
     global.document.body.appendChild(host);
@@ -775,6 +1184,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       gameTagsLabel: query(".game-tags-label"),
       gameTags: query(".game-tags"),
       gameDetail: query(".game-detail"),
+      infoEdit: query(".info-edit"),
       infoClose: query(".info-close"),
       logsLayer: query(".logs-layer"),
       logsTitle: query(".logs-title"),
@@ -818,6 +1228,16 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         restoreAppUiReturnFocus();
       }
     };
+    ui.infoEdit.onclick = async () => {
+      ui.infoLayer.hidden = true;
+      try {
+        await appUiRuntimeAdapter?.editNickname?.();
+      } catch (error) {
+        global.console?.warn?.("Playmesh 浏览器昵称修改失败", error);
+      }
+      if (!ui.layer.hidden) void openAppUiGameInfo();
+      else restoreAppUiReturnFocus();
+    };
     ui.logsClear.onclick = () => {
       appUiConsoleLogs.length = 0;
       renderAppUiLogs();
@@ -826,9 +1246,9 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       try {
         const copied = await copyAppUiRuntimeLogs();
         if (!copied) throw new Error("当前环境不支持复制");
-        setAppUiControlLabel(ui.logsCopy, "logs.copied", "已复制");
+        setAppUiControlLabel(ui.logsCopy, "logs.copied");
         global.setTimeout?.(() => {
-          setAppUiControlLabel(ui.logsCopy, "logs.copy", "复制全部");
+          setAppUiControlLabel(ui.logsCopy, "logs.copy");
         }, 1200);
       } catch (error) {
         global.console?.warn?.("Playmesh 运行日志复制失败", error);
@@ -933,9 +1353,9 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     return ui;
   }
 
-  function setAppUiControlLabel(element, key, fallback, updateVisibleText = true) {
+  function setAppUiControlLabel(element, key, updateVisibleText = true) {
     if (!element) return;
-    const label = appUiText(key, fallback);
+    const label = appUiText(key);
     element.setAttribute?.("aria-label", label);
     element.setAttribute?.("title", label);
     if (!updateVisibleText) return;
@@ -949,29 +1369,26 @@ interface Window { playmeshApp: PlaymeshAppApi; }
     if (!ui) return;
     ui.host.setAttribute?.("lang", appUiConfiguration?.locale || "zh-CN");
     ui.host.setAttribute?.("data-theme", appUiConfiguration?.theme || "dark");
-    ui.title.textContent = appUiText("sidebar.title", "游戏菜单");
-    setAppUiControlLabel(ui.menuButton, "sidebar.title", "游戏菜单", false);
-    setAppUiControlLabel(ui.continueButton, "sidebar.continue", "继续游戏");
-    setAppUiControlLabel(ui.restart, "sidebar.restart", "重新开始");
-    setAppUiControlLabel(ui.share, "sidebar.share", "分享/邀请");
-    setAppUiControlLabel(ui.logs, "sidebar.logs", "运行日志");
+    ui.title.textContent = appUiText("sidebar.title");
+    setAppUiControlLabel(ui.menuButton, "sidebar.title", false);
+    setAppUiControlLabel(ui.continueButton, "sidebar.continue");
+    setAppUiControlLabel(ui.restart, "sidebar.restart");
+    setAppUiControlLabel(ui.share, "sidebar.share");
+    setAppUiControlLabel(ui.logs, "sidebar.logs");
     setAppUiControlLabel(
       ui.enterFullscreen,
       "sidebar.enter_fullscreen",
-      "进入全屏",
     );
     setAppUiControlLabel(
       ui.exitFullscreen,
       "sidebar.exit_fullscreen",
-      "退出全屏",
     );
-    setAppUiControlLabel(ui.info, "sidebar.info", "游戏信息");
+    setAppUiControlLabel(ui.info, "sidebar.info");
     setAppUiControlLabel(
       ui.performanceButton,
       "sidebar.performance",
-      "显示性能信息",
     );
-    setAppUiControlLabel(ui.exit, "sidebar.exit", "退出游戏");
+    setAppUiControlLabel(ui.exit, "sidebar.exit");
     ui.share.hidden = !appUiActionEnabled("share", false);
     ui.restart.hidden = !appUiActionEnabled("restart");
     ui.logs.hidden = !appUiActionEnabled("logs");
@@ -989,12 +1406,13 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         !appUiOptions.floatingButton ||
         !ui.layer.hidden;
     }
-    ui.infoTitle.textContent = appUiText("info.title", "游戏信息");
-    ui.logsTitle.textContent = appUiText("logs.title", "运行日志");
-    setAppUiControlLabel(ui.logsCopy, "logs.copy", "复制全部");
-    setAppUiControlLabel(ui.infoClose, "common.close", "关闭");
-    setAppUiControlLabel(ui.logsClear, "common.clear", "清空");
-    setAppUiControlLabel(ui.logsClose, "common.close", "关闭");
+    ui.infoTitle.textContent = appUiText("info.title");
+    ui.logsTitle.textContent = appUiText("logs.title");
+    setAppUiControlLabel(ui.logsCopy, "logs.copy");
+    setAppUiControlLabel(ui.infoEdit, "nickname.edit_action");
+    setAppUiControlLabel(ui.infoClose, "common.close");
+    setAppUiControlLabel(ui.logsClear, "common.clear");
+    setAppUiControlLabel(ui.logsClose, "common.close");
   }
 
   async function showAppGameSidebar() {
@@ -1067,7 +1485,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
   async function setAppUiFullscreen(enabled) {
     try {
       if (bootstrap?.available === true) {
-        await global.playmeshApp?.device?.setFullscreen?.(enabled);
+        await publicAppApi.device.setFullscreen(enabled);
       } else if (enabled) {
         await global.document?.documentElement?.requestFullscreen?.();
       } else if (global.document?.fullscreenElement) {
@@ -1152,64 +1570,31 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       event.preventDefault?.();
       event.stopPropagation?.();
       event.stopImmediatePropagation?.();
+      if (!appUiConfiguration?.messages) {
+        // 原生 bootstrap 返回前先记录切换意图，避免 UI 为抢首键引入硬编码文案。
+        appUiTogglePending = !appUiTogglePending;
+        return;
+      }
       void toggleAppGameSidebar();
     }, true);
   }
 
   function initializeAppPlatformUi(configuration) {
     appUiConfiguration = resolveAppUiConfiguration(configuration);
+    updateAppRuntimeLocale(appUiConfiguration);
     installAppUiConsoleCapture();
     installAppUiKeyboardInterception();
     if (appUiOptions.fallbackUi) scheduleAppFallbackUi();
     refreshAppFallbackUi();
+    if (appUiTogglePending && appUiConfiguration?.messages) {
+      appUiTogglePending = false;
+      void toggleAppGameSidebar();
+    }
   }
 
 
-  const playmeshApp = {
+  const publicAppApi = {
     version: PLAYMESH_APP_SDK_VERSION,
-    ready: null,
-    __requestExit() {
-      return exitAppUiGame();
-    },
-    __restoreGameContentFocus() {
-      restoreAppUiReturnFocus();
-    },
-    __handleNativeBack() {
-      return handleAppUiNativeBack();
-    },
-    __syncAvatar(sessionId, credentialToken) {
-      return request("app.identity.syncAvatar", { sessionId, credentialToken });
-    },
-    __confirmCapabilities() {
-      return request("app.capabilities.confirm");
-    },
-    __configureRuntimeGame(declaration) {
-      return request("app.game.configure", {
-        declaredCapabilities: [
-          ...(declaration?.requiredCapabilities || []),
-        ],
-      }).then((environment) => {
-        bootstrap = {
-          ...bootstrap,
-          capabilityRegistry: clone(environment?.capabilityRegistry || []),
-          device: clone(environment?.device || bootstrap?.device),
-        };
-        return clone(bootstrap);
-      });
-    },
-    __registerRuntimeUi(adapter) {
-      registerAppUiRuntimeAdapter(adapter);
-    },
-    __refreshRuntimeUi() {
-      refreshAppFallbackUi();
-      refreshAppUiPerformance();
-    },
-    __configurePlatformUi(configuration) {
-      initializeAppPlatformUi({
-        ...(configuration || {}),
-        actions: appUiConfiguration?.actions,
-      });
-    },
     isAvailable() {
       return bootstrap?.available === true;
     },
@@ -1218,6 +1603,47 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         return bootstrap ? clone(bootstrap.identity) : null;
       },
     },
+    runtime: Object.freeze({
+      getLocale() {
+        if (!appRuntimeLocale) {
+          throw new Error(
+            "playmesh.app.runtime.getLocale requires await playmesh.app.ready",
+          );
+        }
+        return appRuntimeLocale;
+      },
+    }),
+    performance: Object.freeze({
+      getFps() {
+        return appPerformanceFps;
+      },
+      onFps(callback) {
+        return subscribeAppPerformance(
+          appPerformanceFpsListeners,
+          callback,
+          appPerformanceFps,
+        );
+      },
+      getLatency() {
+        return appPerformanceLatency;
+      },
+      getLatencyDiagnostics() {
+        return clone(appPerformanceLatencyDiagnostics);
+      },
+      onLatency(callback) {
+        return subscribeAppPerformance(
+          appPerformanceLatencyListeners,
+          callback,
+          appPerformanceLatency,
+        );
+      },
+      setVisible(visible) {
+        setAppUiPerformanceVisible(visible === true);
+      },
+      reportFrame(timestamp) {
+        return reportAppPerformanceFrame(timestamp);
+      },
+    }),
     capabilities: {
       getRegistry() {
         return bootstrap ? clone(bootstrap.capabilityRegistry || []) : [];
@@ -1229,6 +1655,9 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         return bootstrap ? [...(bootstrap.device?.declaredCapabilities || [])] : [];
       },
       create: createCapability,
+    },
+    media: {
+      open: openAppMedia,
     },
     device: {
       getPlatform() {
@@ -1275,7 +1704,7 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       },
       enterFullscreen(orientation) {
         if (bootstrap?.available === true) {
-          return playmeshApp.device.setFullscreen(true, orientation);
+          return publicAppApi.device.setFullscreen(true, orientation);
         }
         return setAppUiFullscreen(true);
       },
@@ -1295,10 +1724,98 @@ interface Window { playmeshApp: PlaymeshAppApi; }
         return exitAppUiGame();
       },
     },
-    __receive: receive,
   };
 
-  global.playmeshApp = playmeshApp;
+  // ready 对外只暴露一个稳定只读视图；远程 App 的运行时能力配置会更新内部
+  // bootstrap，但不会替换开发者已经取得的 ready 结果引用。
+  const appBootstrapResult = Object.freeze({
+    get available() {
+      return bootstrap?.available === true;
+    },
+    get sdkVersion() {
+      return bootstrap?.sdkVersion || PLAYMESH_APP_SDK_VERSION;
+    },
+    get identity() {
+      return clone(bootstrap?.identity ?? null);
+    },
+    get runtime() {
+      return clone(bootstrap?.runtime ?? null);
+    },
+    get capabilityRegistry() {
+      return clone(bootstrap?.capabilityRegistry || []);
+    },
+    get device() {
+      return clone(bootstrap?.device || {
+        platform: "browser",
+        capabilities: [],
+        declaredCapabilities: [],
+      });
+    },
+  });
+
+  const appInternalRuntime = Object.freeze({
+    publicApi: publicAppApi,
+    receive,
+    requestExit() {
+      return exitAppUiGame();
+    },
+    restoreGameContentFocus() {
+      restoreAppUiReturnFocus();
+    },
+    handleNativeBack() {
+      return handleAppUiNativeBack();
+    },
+    syncAvatar(sessionId, credentialToken) {
+      return request("app.identity.syncAvatar", { sessionId, credentialToken });
+    },
+    confirmCapabilities() {
+      return request("app.capabilities.confirm");
+    },
+    configureRuntimeGame(declaration) {
+      return request("app.game.configure", {
+        declaredCapabilities: [
+          ...(declaration?.requiredCapabilities || []),
+        ],
+      }).then((environment) => {
+        bootstrap = {
+          ...bootstrap,
+          capabilityRegistry: clone(environment?.capabilityRegistry || []),
+          device: clone(environment?.device || bootstrap?.device),
+        };
+        return appBootstrapResult;
+      });
+    },
+    configureRuntimePerformance(context) {
+      configureAppRuntimePerformance(context);
+    },
+    recordRuntimeLatencyPong(payload) {
+      recordAppRuntimeLatencyPong(payload);
+    },
+    registerRuntimeUi(adapter) {
+      registerAppUiRuntimeAdapter(adapter);
+    },
+    refreshRuntimeUi() {
+      refreshAppFallbackUi();
+      refreshAppUiPerformance();
+    },
+    configurePlatformUi(configuration) {
+      initializeAppPlatformUi({
+        ...(configuration || {}),
+        actions: appUiConfiguration?.actions,
+      });
+    },
+    takePlatformUiConfiguration() {
+      const configuration = appPlatformUiConfiguration;
+      appPlatformUiConfiguration = null;
+      return clone(configuration);
+    },
+  });
+  Object.defineProperty(global, PLAYMESH_APP_INTERNAL_KEY, {
+    value: appInternalRuntime,
+    configurable: true,
+    enumerable: false,
+    writable: false,
+  });
   installAppUiConsoleCapture();
   global.console?.info?.(
     `Playmesh App SDK 注入成功 ${JSON.stringify({
@@ -1320,38 +1837,45 @@ interface Window { playmeshApp: PlaymeshAppApi; }
       appInputTakeoverRequested = false;
     });
   }
-  playmeshApp.ready = request("app.bootstrap").then((result) => {
-    const privateUi = result?._playmeshPlatformUi;
-    if (privateUi && typeof privateUi === "object") {
-      Object.defineProperty(global, PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY, {
-        value: clone(privateUi),
-        configurable: true,
-        enumerable: false,
-        writable: false,
-      });
-    } else {
-      delete global[PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY];
-    }
-    bootstrap = result && typeof result === "object"
-      ? { ...result }
-      : result;
-    if (bootstrap && typeof bootstrap === "object") {
-      delete bootstrap._playmeshPlatformUi;
-    }
-    initializeAppPlatformUi(privateUi);
-    requestAppInputTakeover();
-    global.console?.info?.("Playmesh App SDK 就绪");
-    return clone(bootstrap);
-  }).catch((error) => {
-    delete global[PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY];
-    bootstrap = {
-      available: false,
-      identity: null,
-      capabilityRegistry: [],
-      device: { platform: "browser", capabilities: [], declaredCapabilities: [] },
-      error: error?.message || String(error),
-    };
-    initializeAppPlatformUi(runtimePlatformUi);
-    return clone(bootstrap);
+  const appReady = nativeSender() === null
+    ? Promise.resolve().then(() => {
+      // 普通浏览器没有原生 Bridge，属于预期降级；存在 Bridge 时的任何失败必须 reject。
+      bootstrap = {
+        available: false,
+        sdkVersion: PLAYMESH_APP_SDK_VERSION,
+        identity: null,
+        runtime: null,
+        capabilityRegistry: [],
+        device: {
+          platform: "browser",
+          capabilities: [],
+          declaredCapabilities: [],
+        },
+      };
+      appPlatformUiConfiguration = null;
+      initializeAppPlatformUi(runtimePlatformUi);
+      global.console?.info?.("Playmesh App SDK 就绪");
+      return appBootstrapResult;
+    })
+    : request("app.bootstrap").then((result) => {
+      const privateUi = result?._playmeshPlatformUi;
+      appPlatformUiConfiguration =
+        privateUi && typeof privateUi === "object" ? clone(privateUi) : null;
+      bootstrap = result && typeof result === "object"
+        ? { ...result }
+        : result;
+      if (bootstrap && typeof bootstrap === "object") {
+        delete bootstrap._playmeshPlatformUi;
+      }
+      initializeAppPlatformUi(privateUi);
+      requestAppInputTakeover();
+      global.console?.info?.("Playmesh App SDK 就绪");
+      return appBootstrapResult;
+    });
+  Object.defineProperty(publicAppApi, "ready", {
+    value: appReady,
+    enumerable: true,
+    writable: false,
   });
+  Object.freeze(publicAppApi);
 })(window);

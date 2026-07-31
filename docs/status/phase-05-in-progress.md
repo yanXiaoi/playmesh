@@ -23,7 +23,7 @@
 ```text
 main.json
   -> GameManifest 解析 entries.game / entries.controller / authority.entry
-  -> AssetGamePackageLoader 或 FileGameLibraryScanner 校验文件
+  -> FileGameLibraryScanner 校验正式安装包文件
   -> GameSummary.LocalGameEntry 保存解析后的入口
   -> GameLauncher / GameWebGateway 按 displayMode 和角色选择页面
   -> 当前包 app/ 受控资源映射

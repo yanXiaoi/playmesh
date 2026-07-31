@@ -12,9 +12,14 @@ import '../../core/developer/webview_console_capture.dart';
 import 'windows_local_game_web_view.dart';
 
 class StandaloneHtmlPage extends StatefulWidget {
-  const StandaloneHtmlPage({super.key, required this.filePath});
+  const StandaloneHtmlPage({
+    super.key,
+    required this.filePath,
+    required this.enterFullscreenOnLaunch,
+  });
 
   final String filePath;
+  final bool enterFullscreenOnLaunch;
 
   @override
   State<StandaloneHtmlPage> createState() => _StandaloneHtmlPageState();
@@ -36,9 +41,11 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
   void initState() {
     super.initState();
     developerEventHub.beginRuntime();
-    unawaited(
-      const AppDeviceService().setFullscreen(true).catchError((Object _) {}),
-    );
+    if (widget.enterFullscreenOnLaunch) {
+      unawaited(
+        const AppDeviceService().setFullscreen(true).catchError((Object _) {}),
+      );
+    }
     if (_usesFlutterWebView) unawaited(_initialize());
   }
 

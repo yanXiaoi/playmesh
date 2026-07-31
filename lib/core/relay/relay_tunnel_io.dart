@@ -7,11 +7,12 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
 
+import '../game_web/game_web_gateway_contract.dart';
 import 'relay_tunnel_contract.dart';
 
 const _protocolMagic = <int>[0x50, 0x4d, 0x52, 0x31];
-const _inviteTokenVersion = 2;
-const _inviteTokenParameter = 'inviteToken';
+const _inviteTokenVersion = 4;
+const _inviteTokenParameter = playmeshGameInvitationTokenParameter;
 const _invitePathPrefix = 'j';
 const _saltLength = 16;
 const _macLength = 16;
@@ -54,7 +55,6 @@ Future<RelayHostSession> startRelayHostSession({
     authorityWebBaseUri: authorityWebBaseUri,
     authorityCoreBaseUri: authorityCoreBaseUri,
     authorityEntryPath: authorityEntry.path,
-    channelId: authorityEntry.channelId,
     shareToken: authorityEntry.shareToken,
     maxConnectionsPerTunnel: maxConnectionsPerTunnel,
   );
@@ -108,7 +108,6 @@ class _RelayClientConfiguration {
     required this.joinCapability,
     required this.sharedSecret,
     required this.authorityEntryPath,
-    required this.channelId,
     required this.shareToken,
   });
 
@@ -120,7 +119,7 @@ class _RelayClientConfiguration {
         invitationUri.hasQuery) {
       throw const FormatException('公共中转邀请路径无效');
     }
-    final fragment = Uri.splitQueryString(invitationUri.fragment);
+    final fragment = parsePlaymeshInvitationFragment(invitationUri.fragment);
     if (fragment.length != 1 ||
         fragment[_inviteTokenParameter]?.trim().isNotEmpty != true) {
       throw const FormatException('公共中转邀请缺少 inviteToken');
@@ -140,7 +139,6 @@ class _RelayClientConfiguration {
       joinCapability: payload.joinCapability,
       sharedSecret: payload.sharedSecret,
       authorityEntryPath: payload.authorityEntryPath,
-      channelId: payload.channelId,
       shareToken: payload.shareToken,
     );
   }
@@ -151,7 +149,6 @@ class _RelayClientConfiguration {
   final String joinCapability;
   final Uint8List sharedSecret;
   final String authorityEntryPath;
-  final String channelId;
   final String shareToken;
 }
 
@@ -160,7 +157,6 @@ class _InviteTokenPayload {
     required this.clientPath,
     required this.joinCapability,
     required this.authorityEntryPath,
-    required this.channelId,
     required this.shareToken,
     required this.sharedSecret,
   });
@@ -168,7 +164,6 @@ class _InviteTokenPayload {
   final String clientPath;
   final String joinCapability;
   final String authorityEntryPath;
-  final String channelId;
   final String shareToken;
   final Uint8List sharedSecret;
 }
@@ -184,7 +179,6 @@ class _IoRelayHostSession implements RelayHostSession {
     required this.authorityWebBaseUri,
     required this.authorityCoreBaseUri,
     required this.authorityEntryPath,
-    required this.channelId,
     required this.shareToken,
     required this.maxConnectionsPerTunnel,
   });
@@ -198,7 +192,6 @@ class _IoRelayHostSession implements RelayHostSession {
   final Uri authorityWebBaseUri;
   final Uri authorityCoreBaseUri;
   final String authorityEntryPath;
-  final String channelId;
   final String shareToken;
   final int maxConnectionsPerTunnel;
   final StreamController<RelayConnectionStatus> _statuses =
@@ -223,7 +216,6 @@ class _IoRelayHostSession implements RelayHostSession {
             clientPath: clientPath,
             joinCapability: credentials.joinCapability,
             authorityEntryPath: authorityEntryPath,
-            channelId: channelId,
             shareToken: shareToken,
             sharedSecret: sharedSecret,
           ),
@@ -437,13 +429,16 @@ class _IoRelayClientGateway implements RelayClientGateway {
       Uri(scheme: 'http', host: '127.0.0.1', port: server.port);
 
   @override
-  Uri get localEntryUri => localBaseUri.replace(
-    path: configuration.authorityEntryPath,
-    queryParameters: {
-      'channelId': configuration.channelId,
-      'token': configuration.shareToken,
-    },
-  );
+  Uri get localEntryUri {
+    return localBaseUri.replace(
+      path: configuration.authorityEntryPath,
+      fragment: Uri(
+        queryParameters: {
+          playmeshGameInvitationTokenParameter: configuration.shareToken,
+        },
+      ).query,
+    );
+  }
 
   void start() {
     _subscription = server.listen(
@@ -825,18 +820,18 @@ String _encodeInviteToken(_InviteTokenPayload payload) {
   final clientPath = utf8.encode(payload.clientPath);
   final joinCapability = utf8.encode(payload.joinCapability);
   final authorityEntryPath = utf8.encode(payload.authorityEntryPath);
-  final channelId = utf8.encode(payload.channelId);
   final shareToken = utf8.encode(payload.shareToken);
   for (final MapEntry(:key, :value) in {
     'clientPath': clientPath,
     'joinCapability': joinCapability,
-    'authorityEntryPath': authorityEntryPath,
-    'channelId': channelId,
     'shareToken': shareToken,
   }.entries) {
     if (value.isEmpty || value.length > 255) {
       throw FormatException('$key 的编码长度必须在 1 到 255 字节之间');
     }
+  }
+  if (authorityEntryPath.isEmpty || authorityEntryPath.length > 0xffff) {
+    throw const FormatException('authorityEntryPath 的编码长度必须在 1 到 65535 字节之间');
   }
   if (payload.sharedSecret.length != 32) {
     throw const FormatException('公共中转端到端密钥长度无效');
@@ -845,13 +840,12 @@ String _encodeInviteToken(_InviteTokenPayload payload) {
     _inviteTokenVersion,
     clientPath.length,
     joinCapability.length,
-    authorityEntryPath.length,
-    channelId.length,
+    authorityEntryPath.length >> 8,
+    authorityEntryPath.length & 0xff,
     shareToken.length,
     ...clientPath,
     ...joinCapability,
     ...authorityEntryPath,
-    ...channelId,
     ...shareToken,
     ...payload.sharedSecret,
   ];
@@ -867,21 +861,18 @@ _InviteTokenPayload _decodeInviteToken(String value) {
     }
     final clientPathLength = bytes[1];
     final capabilityLength = bytes[2];
-    final authorityEntryPathLength = bytes[3];
-    final channelIdLength = bytes[4];
+    final authorityEntryPathLength = (bytes[3] << 8) | bytes[4];
     final shareTokenLength = bytes[5];
     final expectedLength =
         6 +
         clientPathLength +
         capabilityLength +
         authorityEntryPathLength +
-        channelIdLength +
         shareTokenLength +
         32;
     if (clientPathLength < 1 ||
         capabilityLength < 1 ||
         authorityEntryPathLength < 1 ||
-        channelIdLength < 1 ||
         shareTokenLength < 1 ||
         bytes.length != expectedLength) {
       throw const FormatException('公共中转 inviteToken 长度无效');
@@ -896,14 +887,12 @@ _InviteTokenPayload _decodeInviteToken(String value) {
     final clientPath = readString(clientPathLength);
     final joinCapability = readString(capabilityLength);
     final authorityEntryPath = readString(authorityEntryPathLength);
-    final channelId = readString(channelIdLength);
     final shareToken = readString(shareTokenLength);
     final sharedSecret = Uint8List.fromList(bytes.sublist(offset));
     return _InviteTokenPayload(
       clientPath: clientPath,
       joinCapability: joinCapability,
       authorityEntryPath: authorityEntryPath,
-      channelId: channelId,
       shareToken: shareToken,
       sharedSecret: sharedSecret,
     );
@@ -927,36 +916,24 @@ String _requiredString(Map<String, Object?> json, String key) {
   return value.trim();
 }
 
-({String path, String channelId, String shareToken}) _parseAuthorityEntryUri(
-  Uri value,
-) {
-  final channelValues = value.queryParametersAll['channelId'];
-  final tokenValues = value.queryParametersAll['token'];
-  final segments = value.pathSegments;
+({String path, String shareToken}) _parseAuthorityEntryUri(Uri value) {
+  late final Map<String, String> fragment;
+  try {
+    fragment = parsePlaymeshInvitationFragment(value.fragment);
+  } on FormatException {
+    throw const FormatException('公共中转缺少有效的 Authority 游戏入口');
+  }
+  final shareToken = fragment[playmeshGameInvitationTokenParameter];
   if (value.scheme != 'http' ||
       value.host.isEmpty ||
       value.userInfo.isNotEmpty ||
-      value.hasFragment ||
-      value.queryParametersAll.length != 2 ||
-      channelValues?.length != 1 ||
-      tokenValues?.length != 1 ||
-      segments.length < 2 ||
-      segments.first != 'app' ||
-      !segments.last.toLowerCase().endsWith('.html') ||
-      segments
-          .skip(1)
-          .any(
-            (segment) => segment.isEmpty || segment == '.' || segment == '..',
-          )) {
+      value.path != playmeshGameInvitationPath ||
+      value.hasQuery ||
+      fragment.length != 1 ||
+      shareToken?.trim().isNotEmpty != true) {
     throw const FormatException('公共中转缺少有效的 Authority 游戏入口');
   }
-  final channelId = channelValues!.single.trim();
-  final shareToken = tokenValues!.single.trim();
-  if (!RegExp(r'^[A-Za-z0-9_-]{6,128}$').hasMatch(channelId) ||
-      shareToken.isEmpty) {
-    throw const FormatException('公共中转缺少有效的 Authority 分享凭证');
-  }
-  return (path: value.path, channelId: channelId, shareToken: shareToken);
+  return (path: playmeshGameInvitationPath, shareToken: shareToken!.trim());
 }
 
 void _validateServerBase(Uri value) {

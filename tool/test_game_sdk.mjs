@@ -5,6 +5,9 @@ import vm from "node:vm";
 const commands = [];
 const binaryFrames = [];
 const uploads = [];
+const appInternalKey = Symbol.for("playmesh.app.internal.v1");
+const mainInternalKey = Symbol.for("playmesh.main.internal.v1");
+const receiveMain = (message) => window[mainInternalKey].receive(message);
 const binaryChannelBytes = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
 const localizationManifest = JSON.parse(
   fs.readFileSync(
@@ -172,6 +175,74 @@ const gameFocusTarget = {
     window.document.activeElement = this;
   },
 };
+const appReadyBootstrap = {
+  available: true,
+  sdkVersion: "3.2.0",
+  capabilityRegistry: [],
+  device: {
+    platform: "windows",
+    capabilities: [],
+    declaredCapabilities: [],
+  },
+};
+let appReadyThenCount = 0;
+let resolveAppReady;
+const appReadyPromise = new Promise((resolve) => {
+  resolveAppReady = resolve;
+});
+const appReadyThenable = {
+  then(resolve, reject) {
+    appReadyThenCount += 1;
+    return appReadyPromise.then(resolve, reject);
+  },
+};
+const appPublicApi = {
+  version: "3.2.0",
+  ready: appReadyThenable,
+  isAvailable() {
+    return true;
+  },
+  runtime: Object.freeze({
+    getLocale() {
+      return "zh-CN";
+    },
+  }),
+  capabilities: {
+    getRegistry() {
+      return [];
+    },
+    getAvailable() {
+      return [];
+    },
+    getDeclared() {
+      return [];
+    },
+  },
+  device: {
+    getPlatform() {
+      return "windows";
+    },
+    setFullscreen() {
+      return Promise.resolve();
+    },
+    onInput() {
+      return () => {};
+    },
+  },
+};
+let appPlatformUiConfiguration = {
+  locale: localizationManifest.defaultLocale,
+  messages: localizationMessages.get(localizationManifest.defaultLocale),
+};
+const appInternalRuntime = {
+  publicApi: appPublicApi,
+  takePlatformUiConfiguration() {
+    const value = appPlatformUiConfiguration;
+    appPlatformUiConfiguration = null;
+    return value;
+  },
+  restoreGameContentFocus() {},
+};
 
 globalThis.window = {
   setInterval,
@@ -211,55 +282,16 @@ globalThis.window = {
     body: gameDocumentBody,
     documentElement: { isConnected: true },
   },
-  [Symbol.for("playmesh.platform-ui.configuration")]: {
-    locale: localizationManifest.defaultLocale,
-    messages: localizationMessages.get(localizationManifest.defaultLocale),
-  },
-  playmeshApp: {
-    ready: Promise.resolve({
-      available: true,
-      capabilityRegistry: [],
-      device: {
-        platform: "windows",
-        capabilities: [],
-        declaredCapabilities: [],
-      },
-    }),
-    isAvailable() {
-      return true;
-    },
-    capabilities: {
-      getRegistry() {
-        return [];
-      },
-      getAvailable() {
-        return [];
-      },
-      getDeclared() {
-        return [];
-      },
-    },
-    device: {
-      getPlatform() {
-        return "windows";
-      },
-      setFullscreen() {
-        return Promise.resolve();
-      },
-      onInput() {
-        return () => {};
-      },
-    },
-  },
+  [appInternalKey]: appInternalRuntime,
   PlaymeshBridge: {
     postMessage(message) {
       const command = JSON.parse(message);
       commands.push(command);
       if (command.command === "sdk.ready") {
-        window.playmesh.__receive(JSON.stringify({
+        receiveMain(JSON.stringify({
           type: "sdk.bootstrap",
           requestId: command.requestId,
-          sdkVersion: "1.0.0",
+          sdkVersion: "4.0.0",
           isAuthority: true,
           player: null,
           binaryTransport: { url: "ws://127.0.0.1/binary?token=secret" },
@@ -279,10 +311,10 @@ globalThis.window = {
           },
         }));
       } else if (command.command === "performance.ping") {
-        window.playmesh.__receive({
+        receiveMain({
           type: "command.result", requestId: command.requestId, result: null,
         });
-        window.playmesh.__receive({
+        receiveMain({
           type: "transport.message",
           message: {
             type: "session.pong",
@@ -295,16 +327,16 @@ globalThis.window = {
           },
         });
       } else if (command.command === "authority.result") {
-        window.playmesh.__receive({
+        receiveMain({
           type: "command.result", requestId: command.requestId, result: null,
         });
-      } else if (command.command === "lifecycle.complete" || command.command === "performance.latency") {
-        window.playmesh.__receive({
+      } else if (command.command === "lifecycle.complete") {
+        receiveMain({
           type: "command.result", requestId: command.requestId, result: null,
         });
       } else if (command.command === "session.finish") {
-        const current = window.playmesh.session.getCurrent();
-        window.playmesh.__receive({
+        const current = window.playmesh.main.session.getCurrent();
+        receiveMain({
           type: "command.result",
           requestId: command.requestId,
           result: {
@@ -322,53 +354,67 @@ globalThis.window = {
   },
 };
 
-const source = fs.readFileSync(new URL("../assets/playmesh-library/public/sdk/v1/playmesh.js", import.meta.url), "utf8");
-vm.runInThisContext(source, { filename: "playmesh.js" });
+const source = fs.readFileSync(new URL("../assets/playmesh-library/public/sdk/v1/playmesh-main.js", import.meta.url), "utf8");
+vm.runInThisContext(source, { filename: "playmesh-main.js" });
 
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(appReadyThenCount, 1);
+assert.equal(
+  commands.length,
+  0,
+  "main initialization must not start before playmesh.app.ready",
+);
+resolveAppReady(appReadyBootstrap);
 await new Promise((resolve) => setTimeout(resolve, 0));
 const readyCommand = commands.shift();
 assert.equal(readyCommand.command, "sdk.ready");
 const sdkBootstrap = await window.playmesh.ready;
+assert.equal(
+  appReadyThenCount,
+  1,
+  "playmesh.ready must reuse main.ready's single app.ready dependency",
+);
+assert.strictEqual(
+  sdkBootstrap.app,
+  appReadyBootstrap,
+  "playmesh.ready.app must be the exact playmesh.app.ready result",
+);
 assert.equal(sdkBootstrap.binaryTransport, undefined);
 assert.equal(JSON.stringify(sdkBootstrap).includes("toolbar.expand"), false);
-assert.equal(window.playmesh.runtime.getLocale(), "zh-CN");
-assert.equal("messages" in window.playmesh.runtime, false);
-assert.equal(
-  Symbol.for("playmesh.platform-ui.configuration") in window,
-  false,
-  "App platform UI messages must be consumed from private bootstrap state",
-);
-assert.equal(window.playmesh.session.isAuthority(), true);
-assert.equal(window.playmesh.player.getCurrent(), null);
-assert.equal(window.playmesh.session.getCurrent().joinCode, "ABC123");
+assert.equal(window.playmesh.app.runtime.getLocale(), "zh-CN");
+assert.equal("messages" in window.playmesh.app.runtime, false);
+assert.equal(window.playmeshApp, undefined);
+assert.equal(Object.getOwnPropertyDescriptor(window, mainInternalKey).enumerable, false);
+assert.deepEqual(Object.keys(window.playmesh.main).filter((key) => key.startsWith("__")), []);
+assert.equal(window.playmesh.main.session.isAuthority(), true);
+assert.equal(window.playmesh.main.player.getCurrent(), null);
+assert.equal(window.playmesh.main.session.getCurrent().joinCode, "ABC123");
 assert.deepEqual(
-  Object.keys(window.playmesh.session.getCurrent().players[0]).sort(),
+  Object.keys(window.playmesh.main.session.getCurrent().players[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-assert.equal(window.playmesh.version, "3.1.0");
+assert.equal(window.playmesh.main.version, "4.0.0");
+assert.deepEqual(Object.keys(window.playmesh).sort(), ["app", "main", "ready"]);
+assert.equal(sdkBootstrap.main.sdkVersion, "4.0.0");
+assert.equal(sdkBootstrap.app.sdkVersion, "3.2.0");
 const unrelatedPlatformFocusTarget = { isConnected: true };
 window.document.activeElement = unrelatedPlatformFocusTarget;
-window.playmesh.__receive({ type: "platform.ui.restoreGameFocus" });
+receiveMain({ type: "platform.ui.restoreGameFocus" });
 assert.equal(
   window.document.activeElement,
   unrelatedPlatformFocusTarget,
   "a host restore without an SDK share capture must not steal focus",
 );
-const finishedSession = await window.playmesh.session.finish();
+const finishedSession = await window.playmesh.main.session.finish();
 assert.equal(finishedSession.state, "stopped");
 assert.equal("source" in finishedSession.players[0], false);
 assert.equal("latencyMs" in finishedSession.players[0], false);
-assert.equal(window.playmesh.performance.getLatency() >= 0, true);
-assert.equal(
-  window.playmesh.performance.getLatencyDiagnostics().authorityAvailable,
-  true,
-);
 await assert.rejects(
-  window.playmesh.player.setNickname("App 玩家"),
+  window.playmesh.main.player.setNickname("App 玩家"),
   /仅适用于浏览器玩家/,
 );
 
-const binaryChannel = await window.playmesh.binary.createChannel({
+const binaryChannel = await window.playmesh.main.binary.createChannel({
   mode: "authority",
 });
 assert.equal(binaryChannel.mode, "authority");
@@ -477,24 +523,12 @@ assert.deepEqual(parseBinarySend(newBinarySends[0]), {
   payload: [10],
 });
 
-let reportedFps = null;
-window.playmesh.performance.onFps((fps) => { reportedFps = fps; });
-for (let frame = 0; frame <= 60; frame += 1) {
-  window.playmesh.performance.reportFrame(frame * (1000 / 60));
-}
-assert.equal(reportedFps >= 60, true);
-const fpsCommand = commands.findLast((command) => command.command === "performance.fps");
-assert.equal(fpsCommand.payload.fps, reportedFps);
-window.playmesh.__receive({
-  type: "command.result", requestId: fpsCommand.requestId, result: null,
-});
-
 let pauseCalls = 0;
-window.playmesh.lifecycle.onPause(() => { pauseCalls += 1; });
-window.playmesh.__receive({ type: "lifecycle.event", event: "pause" });
+window.playmesh.main.lifecycle.onPause(() => { pauseCalls += 1; });
+receiveMain({ type: "lifecycle.event", event: "pause" });
 assert.equal(pauseCalls, 1);
 
-const bucket = window.playmesh.storage.getBucket("fishing_save");
+const bucket = window.playmesh.main.storage.getBucket("fishing_save");
 assert.equal(bucket.flush, undefined);
 const uploadedUrl = await bucket.upload(
   new MockFile(Uint8Array.from([0, 255, 7]), "snapshot.bin"),
@@ -507,35 +541,35 @@ const setOperation = bucket.setData("coins", 9);
 const setCommand = commands.findLast((command) => command.command === "storage.set");
 assert.equal(setCommand.payload.bucket, "fishing_save");
 assert.equal(setCommand.payload.value, 9);
-window.playmesh.__receive({
+receiveMain({
   type: "command.result", requestId: setCommand.requestId, result: null,
 });
 await setOperation;
-assert.throws(() => window.playmesh.storage.getBucket("../save"), /无效的 bucket/);
-assert.throws(() => window.playmesh.storage.getBucket("bad.bucket"), /无效的 bucket/);
-assert.throws(() => window.playmesh.storage.getBucket("_save"), /无效的 bucket/);
-assert.throws(() => window.playmesh.storage.getBucket("-save"), /无效的 bucket/);
-assert.throws(() => window.playmesh.storage.getBucket("存档"), /无效的 bucket/);
-assert.throws(() => window.playmesh.storage.getBucket("save\n"), /无效的 bucket/);
-assert.throws(() => window.playmesh.storage.getBucket(`a${"b".repeat(64)}`), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket("../save"), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket("bad.bucket"), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket("_save"), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket("-save"), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket("存档"), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket("save\n"), /无效的 bucket/);
+assert.throws(() => window.playmesh.main.storage.getBucket(`a${"b".repeat(64)}`), /无效的 bucket/);
 
 let received = null;
-window.playmesh.game.onMessage((message) => { received = message; });
-window.playmesh.__receive({
+window.playmesh.main.game.onMessage((message) => { received = message; });
+receiveMain({
   type: "transport.message",
   message: { type: "game.message", payload: { type: "answer.result", correct: true } },
 });
 assert.equal(received.correct, true);
 
 let authorityContext = null;
-window.playmesh.authority.onService((action, context) => {
+window.playmesh.main.authority.onService((action, context) => {
   authorityContext = context;
   return {
     targetPlayerIds: [context.senderPlayerId],
     message: { type: "echo", action },
   };
 });
-window.playmesh.__receive({
+receiveMain({
   type: "transport.message",
   message: {
     type: "authority.action", senderPlayerId: "p-guest", payload: { type: "ping" },
@@ -564,7 +598,7 @@ assert.deepEqual(
   ["avatar", "connected", "id", "nickname", "role"],
 );
 
-const syncController = window.playmesh.sync.startAuthority({
+const syncController = window.playmesh.main.sync.startAuthority({
   initialState: { score: 0 },
   tickRate: 1,
   onInput(input, context) {
@@ -573,8 +607,8 @@ const syncController = window.playmesh.sync.startAuthority({
   },
 });
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(window.playmesh.sync.getSnapshot().state.score, 0);
-window.playmesh.__receive({
+assert.equal(window.playmesh.main.sync.getSnapshot().state.score, 0);
+receiveMain({
   type: "transport.message",
   message: {
     type: "authority.action",
@@ -593,7 +627,7 @@ window.playmesh.__receive({
 await new Promise((resolve) => setTimeout(resolve, 0));
 await syncController.publish();
 assert.equal(syncController.getState().score, 3);
-assert.equal(window.playmesh.sync.getSnapshot().state.score, 3);
+assert.equal(window.playmesh.main.sync.getSnapshot().state.score, 3);
 syncController.stop();
 const disconnectedBinarySocket = MockWebSocket.last;
 disconnectedBinarySocket.close();
@@ -603,7 +637,7 @@ while (MockWebSocket.last === disconnectedBinarySocket) {
 await binaryChannel.send("p-guest", new Uint8Array([11]));
 assert.equal(MockWebSocket.instances.length >= 2, true);
 
-window.playmesh.__receive({
+receiveMain({
   type: "lifecycle.event",
   event: "exit",
   requestId: "test-exit",

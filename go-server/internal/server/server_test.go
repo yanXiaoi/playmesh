@@ -68,8 +68,8 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	if declaration["supportsGameRelay"] != true {
 		t.Fatalf("声明 = %#v", declaration)
 	}
-	if declaration["catalogApiVersion"] != "2.0.0" ||
-		response.Header.Get("X-Playmesh-Catalog-Version") != "2.0.0" {
+	if declaration["catalogApiVersion"] != "3.0.0" ||
+		response.Header.Get("X-Playmesh-Catalog-Version") != "3.0.0" {
 		t.Fatalf(
 			"Catalog 版本 = body:%#v header:%q",
 			declaration["catalogApiVersion"],
@@ -87,7 +87,7 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 	if relay["publicBaseUrl"] != "https://relay.example.com" {
 		t.Fatalf("公共中转地址 = %#v", relay["publicBaseUrl"])
 	}
-	if relay["protocolVersion"] != "2.0.0" {
+	if relay["protocolVersion"] != "3.0.0" {
 		t.Fatalf("中转协议版本 = %#v", relay["protocolVersion"])
 	}
 	if relay["maxConnectionsPerTunnel"] != float64(cfg.Relay.MaxConnectionsPerTunnel) {

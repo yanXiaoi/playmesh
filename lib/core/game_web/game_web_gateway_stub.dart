@@ -1,16 +1,16 @@
 import 'game_web_gateway_contract.dart';
+import '../game_package/game_web_resource_source.dart';
 import '../storage/game_storage_service.dart';
 import '../../models/game_summary.dart';
 
 Future<GameWebGateway> startGameWebGateway({
-  required String gameRootAssetPath,
-  String? gameRootFilePath,
+  required GameWebResourceSource source,
   required bool multiplayer,
   required String displayMode,
   required GameOrientation orientation,
   GameOrientation? controllerOrientation,
-  String gameEntryPath = 'app/index.html',
-  String controllerEntryPath = 'app/controller/index.html',
+  required String gameEntryPath,
+  String? controllerEntryPath,
   required String gameId,
   String gameName = 'Playmesh 游戏',
   List<String> tags = const [],

@@ -94,6 +94,7 @@ class DeveloperPublishSourceResult {
     required this.sourceId,
     required this.status,
     this.sourceName,
+    this.detail,
     this.retryAfter,
     this.currentHighestVersion,
   });
@@ -101,6 +102,7 @@ class DeveloperPublishSourceResult {
   final String sourceId;
   final String? sourceName;
   final String status;
+  final String? detail;
   final String? retryAfter;
   final String? currentHighestVersion;
 
@@ -110,6 +112,7 @@ class DeveloperPublishSourceResult {
     'sourceId': sourceId,
     if (sourceName != null) 'sourceName': sourceName,
     'status': status,
+    if (detail != null) 'detail': detail,
     if (retryAfter != null) 'retryAfter': retryAfter,
     if (currentHighestVersion != null)
       'currentHighestVersion': currentHighestVersion,

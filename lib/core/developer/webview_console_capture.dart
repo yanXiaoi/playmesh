@@ -40,7 +40,7 @@ const String windowsWebViewConsoleCaptureScript = r'''
         },
       }));
     } catch (_) {
-      // Console capture must never affect the page.
+      // 控制台捕获绝不能影响页面。
     }
   }
 

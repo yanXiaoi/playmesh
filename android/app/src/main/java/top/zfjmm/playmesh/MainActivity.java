@@ -43,6 +43,8 @@ public class MainActivity extends FlutterActivity {
 
     private MethodChannel openFileChannel;
     private MethodChannel.Result pendingWebPermissionResult;
+    private Pose6dNativeHost pose6dNativeHost;
+    private WebRtcAppMediaNativeHost webRtcAppMediaNativeHost;
     private static volatile boolean activityAttached;
     private static volatile boolean activityResumed;
     private static volatile boolean windowFocused;
@@ -64,6 +66,16 @@ public class MainActivity extends FlutterActivity {
         super.configureFlutterEngine(flutterEngine);
         FlutterEngineCache.getInstance().put(FLUTTER_ENGINE_ID, flutterEngine);
         activityAttached = true;
+        pose6dNativeHost = new Pose6dNativeHost(
+                this,
+                flutterEngine.getDartExecutor().getBinaryMessenger()
+        );
+        webRtcAppMediaNativeHost = new WebRtcAppMediaNativeHost(
+                getApplicationContext(),
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
+                pose6dNativeHost
+        );
+        pose6dNativeHost.setCameraFrameConsumer(webRtcAppMediaNativeHost);
 
         new MethodChannel(
                 flutterEngine.getDartExecutor().getBinaryMessenger(),
@@ -287,12 +299,14 @@ public class MainActivity extends FlutterActivity {
         super.onResume();
         activityAttached = true;
         activityResumed = true;
+        if (pose6dNativeHost != null) pose6dNativeHost.onActivityResume();
     }
 
     @Override
     protected void onPause() {
         activityResumed = false;
         windowFocused = false;
+        if (pose6dNativeHost != null) pose6dNativeHost.onActivityPause();
         super.onPause();
     }
 
@@ -407,6 +421,14 @@ public class MainActivity extends FlutterActivity {
         activityAttached = false;
         activityResumed = false;
         windowFocused = false;
+        if (webRtcAppMediaNativeHost != null) {
+            webRtcAppMediaNativeHost.dispose();
+            webRtcAppMediaNativeHost = null;
+        }
+        if (pose6dNativeHost != null) {
+            pose6dNativeHost.dispose();
+            pose6dNativeHost = null;
+        }
         if (pendingWebPermissionResult != null) {
             pendingWebPermissionResult.error(
                     "webview_permission_activity_destroyed",

@@ -249,6 +249,7 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 		Status:           store.StatusPending,
 		OriginalFilename: "dynamic.zip",
 		StoredPath:       "packages/com.example.dynamic/1.2.3.zip",
+		PackageSizeBytes: 987654,
 		ManifestJSON:     `{"id":"com.example.dynamic","version":"1.2.3","author":"上传时昵称"}`,
 		ScanStatus:       "clean",
 		ScanReport:       "{}",
@@ -313,6 +314,7 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 			Name    string `json:"name"`
 			Author  string `json:"author"`
 			Remarks string `json:"remarks"`
+			Size    int64  `json:"packageSizeBytes"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(english.Body.Bytes(), &payload); err != nil {
@@ -322,8 +324,38 @@ func TestAPIPayloadIgnoresAcceptLanguageAndKeepsDynamicValuesVerbatim(
 		payload.Data[0].ID != "com.example.dynamic" ||
 		payload.Data[0].Name != "用户自定义 Game 名称" ||
 		payload.Data[0].Author != "更新后 Publisher en-GB" ||
-		payload.Data[0].Remarks != "API 原样 description" {
+		payload.Data[0].Remarks != "API 原样 description" ||
+		payload.Data[0].Size != 987654 {
 		t.Fatalf("动态字段被改写 = %#v", payload.Data)
+	}
+
+	catalogRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/apps/list?page=1&size=12",
+		nil,
+	)
+	catalogRequest.Header.Set(
+		"Authorization",
+		"Bearer test-source-secret-at-least-32-bytes",
+	)
+	catalogResponse := httptest.NewRecorder()
+	app.Engine.ServeHTTP(catalogResponse, catalogRequest)
+	if catalogResponse.Code != http.StatusOK {
+		t.Fatalf(
+			"Catalog API 状态 = %d, body = %s",
+			catalogResponse.Code,
+			catalogResponse.Body.String(),
+		)
+	}
+	var catalogPayload struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(catalogResponse.Body.Bytes(), &catalogPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalogPayload.Data) != 1 ||
+		catalogPayload.Data[0]["packageSizeBytes"] != float64(987654) {
+		t.Fatalf("Catalog 游戏包大小 = %#v", catalogPayload.Data)
 	}
 
 	requestInvalidToken := func(language string) *httptest.ResponseRecorder {

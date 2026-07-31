@@ -1,10 +1,9 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://playmesh.local/schemas/game-manifest.json",
+  "$id": "game-manifest.json",
   "title": "Playmesh main.json",
   "type": "object",
   "additionalProperties": true,
-  "required": ["id", "name", "version", "sdkVersion", "orientation", "modes", "displayModes", "players"],
+  "required": ["id", "name", "version", "sdkVersion", "appSdkVersion", "orientation", "modes", "displayModes", "players", "entries"],
   "properties": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
     "name": { "type": "string", "minLength": 1 },
@@ -12,8 +11,8 @@
     "lastModifiedAt": { "type": "integer", "minimum": 0, "readOnly": true, "description": "Optional Unix epoch milliseconds; presentation of a missing value belongs to the localized App shell." },
     "remarks": { "type": "string" },
     "version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
-    "sdkVersion": { "type": "string", "pattern": "^[12]\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
-    "appSdkVersion": { "type": "string", "pattern": "^[12]\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
+    "sdkVersion": { "type": "string", "const": "4.0.0" },
+    "appSdkVersion": { "type": "string", "const": "3.2.0" },
     "orientation": { "enum": ["landscape", "portrait"] },
     "controllerOrientation": { "enum": ["landscape", "portrait"] },
     "modes": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "enum": ["solo", "multiplayer"] } },
@@ -30,13 +29,10 @@
     "entries": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["game"],
       "properties": {
         "game": { "$ref": "#/$defs/htmlEntry" },
         "controller": { "$ref": "#/$defs/htmlEntry" }
-      },
-      "default": {
-        "game": "app/index.html",
-        "controller": "app/controller/index.html"
       }
     },
     "authority": {
@@ -56,7 +52,10 @@
       "if": { "properties": { "displayModes": { "contains": { "const": "single_screen_multiplayer" } } }, "required": ["displayModes"] },
       "then": {
         "required": ["controllerOrientation"],
-        "description": "controllerOrientation and entries.controller or its default app/controller/index.html must exist"
+        "properties": {
+          "entries": { "required": ["controller"] }
+        },
+        "description": "single_screen_multiplayer requires explicit controllerOrientation and entries.controller declarations"
       },
       "else": { "not": { "required": ["controllerOrientation"] } }
     }
@@ -64,19 +63,35 @@
   "$defs": {
     "packagePath": {
       "type": "string",
-      "pattern": "^app/(?:[^/]+/)*[^/]+$",
-      "not": { "pattern": "(^|/)\\.{1,2}(/|$)|[\\\\?#]" }
+      "pattern": "^(?:[^/]+/)*[^/]+$",
+      "not": {
+        "anyOf": [
+          { "pattern": "^(?:[Pp][Ll][Aa][Yy][Mm][Ee][Ss][Hh]|[Bb][Uu][Cc][Kk][Ee][Tt])(?:/|$)" },
+          { "pattern": "(^|/)\\.{1,2}(/|$)|[\\\\%?#]" },
+          { "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:" }
+        ]
+      }
     },
     "htmlEntry": {
+      "type": "string",
+      "description": "Unencoded relative HTML path with an optional query string. Parameter-segment order, duplicate keys, and encoded-value semantics are preserved; a runtime URI may normalize percent-escape hex digits to uppercase. Fragments and external URLs are forbidden.",
       "allOf": [
-        { "$ref": "#/$defs/packagePath" },
-        { "pattern": "\\.html$" }
+        { "pattern": "^(?:[^/?#]+/)*[^/?#]+\\.[Hh][Tt][Mm][Ll](?:\\?(?:%[0-9A-Fa-f]{2}|[^%\\s#])+)?$" },
+        {
+          "not": {
+            "anyOf": [
+              { "pattern": "^(?:[Pp][Ll][Aa][Yy][Mm][Ee][Ss][Hh]|[Bb][Uu][Cc][Kk][Ee][Tt])(?:/|$)" },
+              { "pattern": "(^|/)\\.{1,2}(?:/|\\?|$)|[\\\\#]|^[^?]*%" },
+              { "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:" }
+            ]
+          }
+        }
       ]
     },
     "javascriptEntry": {
       "allOf": [
         { "$ref": "#/$defs/packagePath" },
-        { "pattern": "\\.(?:js|mjs)$" }
+        { "pattern": "\\.(?:[Jj][Ss]|[Mm][Jj][Ss])$" }
       ]
     }
   }

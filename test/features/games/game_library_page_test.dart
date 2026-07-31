@@ -24,7 +24,7 @@ const _alpha = GameSummary(
   displayModeLabel: '单屏',
   displayMode: 'single_screen_multiplayer',
   orientation: GameOrientation.landscape,
-  entry: LocalGameEntry(assetPath: 'alpha', statusLabel: 'Ready'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'Ready'),
 );
 
 const _beta = GameSummary(
@@ -40,7 +40,7 @@ const _beta = GameSummary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.portrait,
   tags: ['party'],
-  entry: LocalGameEntry(assetPath: 'beta', statusLabel: 'Ready'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'Ready'),
 );
 
 GameSummary _numberedGame(int number) => GameSummary(
@@ -55,7 +55,7 @@ GameSummary _numberedGame(int number) => GameSummary(
   displayModeLabel: 'Single',
   displayMode: 'single_screen_multiplayer',
   orientation: GameOrientation.landscape,
-  entry: LocalGameEntry(assetPath: 'local-$number', statusLabel: 'Ready'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'Ready'),
 );
 
 GameLibraryQueryResult _queryResult(
@@ -131,7 +131,7 @@ void main() {
     expect(find.text('发布者：North Studio'), findsOneWidget);
     expect(find.text('发布者：South Studio'), findsOneWidget);
     expect(find.text('v1.0.0 · 单机 · 单屏多人 · 横屏'), findsOneWidget);
-    expect(find.text('v2.1.0 · 联机 · 多屏多人 · 竖屏'), findsOneWidget);
+    expect(find.text('v2.1.0 · 多人 · 多屏多人 · 竖屏'), findsOneWidget);
     expect(find.text('party'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'party');
@@ -547,14 +547,14 @@ OnlineCatalogGame _updateOffer({
       lastModifiedAt: DateTime.utc(2026, 7, 26),
       remarks: 'API description / 原样',
       version: version,
-      sdkVersion: '1.0.0',
-      appSdkVersion: '1.0.0',
+      sdkVersion: '4.0.0',
+      appSdkVersion: '3.2.0',
       orientation: GameOrientation.landscape,
       modes: const {GameMode.solo},
       displayModes: const {GameDisplayMode.singleScreenMultiplayer},
       players: const GamePlayerLimits(min: 1, max: 1),
       tags: const ['API tag / 原样'],
-      entries: const GameEntriesManifest(game: 'app/index.html'),
+      entries: const GameEntriesManifest(game: 'index.html'),
     ),
   );
 }

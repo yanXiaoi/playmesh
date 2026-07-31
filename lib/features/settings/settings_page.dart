@@ -65,7 +65,10 @@ class _SettingsPageState extends State<SettingsPage> {
       text: defaultDeveloperPort.toString(),
     );
     _developerTokenController = TextEditingController();
-    _refreshStatus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_refreshStatus());
+    });
     unawaited(_initializeDeveloperMode());
   }
 
@@ -142,7 +145,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _refreshStatus() async {
-    if (!_isLoading || _result == null) {
+    if (!_isLoading) {
       setState(() => _isLoading = true);
     }
 

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/app_media/app_media_adapter.dart';
+import 'package:playmesh/core/app_media/app_media_runtime.dart';
 import 'package:playmesh/core/capabilities/camera/camera_capability_plugin.dart';
 import 'package:playmesh/core/capabilities/capability_registry.dart';
 import 'package:playmesh/core/capabilities/vibration/vibration_capability_plugin.dart';
@@ -33,7 +35,7 @@ void main() {
     expect(identity['userId'], 'u-current-app');
     expect(device['capabilities'], ['device.vibration']);
     expect(device['declaredCapabilities'], ['device.vibration']);
-    expect(registry, hasLength(4));
+    expect(registry, hasLength(5));
     expect(registry, everyElement(contains('methods')));
     expect(
       registry.where(
@@ -198,6 +200,52 @@ void main() {
     );
     expect(cancel['type'], 'app.command.result');
     expect(vibrationDriver.cancelCount, 1);
+  });
+
+  test('App 媒体命令只转交独立 adapterOptions 并映射公共会话', () async {
+    final adapter = _FakeAppMediaAdapter();
+    final mediaRuntime = AppMediaRuntime([adapter]);
+    final bridge = AppWebViewBridge(
+      userId: 'u-media',
+      nickname: '媒体玩家',
+      mediaRuntime: mediaRuntime,
+    );
+    addTearDown(bridge.close);
+    final source = await mediaRuntime.createSource(
+      producer: 'sensor.pose6d',
+      kind: 'video',
+      sourceOptions: const {'fps': 30},
+    );
+
+    final opened = await _command(
+      bridge,
+      'app.media.open',
+      'open-media',
+      payload: {
+        'source': source,
+        'adapterOptions': {
+          'offer': {'type': 'offer', 'sdp': 'browser-offer'},
+        },
+      },
+    );
+    final result = opened['result']! as Map<String, Object?>;
+
+    expect(opened['type'], 'app.command.result');
+    expect(result['protocol'], 'fake');
+    expect(result['sessionId'], startsWith('media-session-'));
+    expect(adapter.openOptions, {
+      'offer': {'type': 'offer', 'sdp': 'browser-offer'},
+    });
+    expect(source, isNot(contains('offer')));
+
+    final closed = await _command(
+      bridge,
+      'app.media.close',
+      'close-media',
+      payload: {'sessionId': result['sessionId']},
+    );
+    expect(closed['type'], 'app.command.result');
+    expect(adapter.closedSessions, ['private-session']);
   });
 
   test('网页请求退出时通知宿主', () async {
@@ -379,4 +427,53 @@ class _FakeVibrationDriver implements VibrationDriver {
 class _AllowWebPermissionAuthorizer implements WebPermissionPlatformAuthorizer {
   @override
   Future<bool> authorize(WebPermissionPlatformRequest request) async => true;
+}
+
+class _FakeAppMediaAdapter implements AppMediaAdapter {
+  AppMediaJson? openOptions;
+  final List<String> closedSessions = [];
+
+  @override
+  String get protocol => 'fake';
+
+  @override
+  int get priority => 1;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  bool supportsProducer(String producer, String kind) =>
+      producer == 'sensor.pose6d' && kind == 'video';
+
+  @override
+  Future<AppMediaAdapterSource> createSource(
+    AppMediaSourceRequest request,
+  ) async => const AppMediaAdapterSource(id: 'private-source');
+
+  @override
+  Future<AppMediaAdapterSession> open(
+    AppMediaAdapterSource source,
+    AppMediaJson adapterOptions,
+  ) async {
+    openOptions = adapterOptions;
+    return const AppMediaAdapterSession(
+      id: 'private-session',
+      answer: {'type': 'answer', 'sdp': 'host-answer'},
+    );
+  }
+
+  @override
+  Future<void> close(String sessionId) async {
+    closedSessions.add(sessionId);
+  }
+
+  @override
+  Future<void> releaseSource(String sourceId) async {}
+
+  @override
+  Future<AppMediaJson> test(Duration timeout) async => const {};
+
+  @override
+  Future<void> dispose() async {}
 }

@@ -24,9 +24,8 @@ import '../../models/user_profile.dart';
 class LocalGameWebView extends StatefulWidget {
   const LocalGameWebView({
     super.key,
-    required this.assetPath,
-    this.gameRootAssetPath,
-    this.gameRootFilePath,
+    required this.resourceSource,
+    required this.entryPath,
     required this.title,
     this.gameSdkVersion,
     this.appSdkVersion,
@@ -40,9 +39,8 @@ class LocalGameWebView extends StatefulWidget {
     this.onJavaScriptExecutorChanged,
   });
 
-  final String assetPath;
-  final String? gameRootAssetPath;
-  final String? gameRootFilePath;
+  final GameWebResourceSource resourceSource;
+  final String entryPath;
   final String title;
   final String? gameSdkVersion;
   final String? appSdkVersion;
@@ -86,6 +84,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   int _androidWebViewFocusAttempts = 0;
   Timer? _androidWebViewFocusRetryTimer;
   Future<void>? _nativeExitOperation;
+  int _initializationGeneration = 0;
 
   bool get _canUsePlatformWebView {
     return supportsPlatformWebView;
@@ -111,7 +110,8 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     if (!supportsGateway) {
       return;
     }
-    unawaited(_initialize());
+    final generation = ++_initializationGeneration;
+    unawaited(_initialize(generation));
   }
 
   @override
@@ -146,17 +146,21 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     unawaited(_sendPlatformUiConfiguration());
   }
 
-  Future<void> _initialize() async {
+  Future<void> _initialize(int generation) async {
     try {
       final storage = await widget.bridge?.ensureStorage();
+      if (!mounted || generation != _initializationGeneration) return;
       final gateway = await startGameAssetGateway(
-        gameRootAssetPath: widget.gameRootAssetPath,
-        gameRootFilePath: widget.gameRootFilePath,
-        entryAssetPath: widget.assetPath,
+        source: widget.resourceSource,
+        entryPath: widget.entryPath,
         gameSdkVersion: widget.gameSdkVersion,
         appSdkVersion: widget.appSdkVersion,
         storage: storage,
       );
+      if (!mounted || generation != _initializationGeneration) {
+        await gateway.close();
+        return;
+      }
       _assetGateway = gateway;
       _entryUri = gateway.entryUri;
       if (defaultTargetPlatform == TargetPlatform.windows) {
@@ -227,6 +231,13 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
             );
       if (controller.platform case final AndroidWebViewController android) {
         await android.setOnShowFileSelector(_androidFileSelector.select);
+        if (!mounted || generation != _initializationGeneration) {
+          if (identical(_assetGateway, gateway)) {
+            _assetGateway = null;
+          }
+          await gateway.close();
+          return;
+        }
       }
       _controller = controller;
       _bridgeSubscription = widget.bridge?.outboundMessages.listen(
@@ -249,9 +260,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
   }
 
   Future<void> _sendAppMessage(String message) async {
-    await _messageQueue.add(
-      'window.playmeshApp && window.playmeshApp.__receive(${jsonEncode(message)});',
-    );
+    await _messageQueue.add(appSdkReceiveScript(message));
   }
 
   void _takeOverAppSdkInput() {
@@ -411,9 +420,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
 
   Future<void> _forwardAndroidBackToAppSdk() async {
     try {
-      final handled = await _evaluateJavaScript(
-        'Boolean(window.playmeshApp?.__handleNativeBack?.())',
-      );
+      final handled = await _evaluateJavaScript(appSdkHandleNativeBackScript());
       if (handled == true || handled.toString() == 'true') return;
     } on Object catch (error) {
       debugPrint('Android 系统返回未能交给 App SDK: $error');
@@ -457,9 +464,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         'configuration': configuration,
       }),
     );
-    final appScript =
-        'window.playmeshApp?.__configurePlatformUi?.('
-        '${jsonEncode(configuration)});';
+    final appScript = appSdkConfigurePlatformUiScript(configuration);
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       await _runWindowsJavaScript?.call('$appScript$script');
       return;
@@ -481,6 +486,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
 
   @override
   void dispose() {
+    _initializationGeneration += 1;
     widget.onSystemBackHandlerChanged?.call(null);
     widget.onJavaScriptExecutorChanged?.call(null);
     _runWindowsJavaScript = null;
@@ -489,7 +495,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     _androidWebViewFocusScopeNode.dispose();
     unawaited(_appBridge.close());
     unawaited(_bridgeSubscription?.cancel());
-    unawaited(_assetGateway?.close());
+    final assetGateway = _assetGateway;
+    _assetGateway = null;
+    unawaited(assetGateway?.close());
     super.dispose();
   }
 
@@ -503,11 +511,11 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     Widget content = useWindowsWebView
         ? entryUri == null || _loadFailed
               ? _WebViewFallback(
-                  assetPath: widget.assetPath,
+                  assetPath: widget.entryPath,
                   title: widget.title,
                 )
               : WindowsLocalGameWebView(
-                  assetPath: widget.assetPath,
+                  assetPath: widget.entryPath,
                   entryUri: entryUri,
                   title: widget.title,
                   bridge: widget.bridge,
@@ -523,7 +531,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   },
                 )
         : controller == null || _loadFailed
-        ? _WebViewFallback(assetPath: widget.assetPath, title: widget.title)
+        ? _WebViewFallback(assetPath: widget.entryPath, title: widget.title)
         : FocusScope(
             node: _androidWebViewFocusScopeNode,
             child: WebViewWidget(controller: controller),

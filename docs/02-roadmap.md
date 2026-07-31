@@ -9,7 +9,7 @@
 - Flutter 首页、用户资料页、游戏库、游戏详情页、游戏页、设置页。
 - 游戏详情页提供“开始游戏”按钮并进入独立游戏页。
 - 使用假数据完成页面导航和状态展示。
-- WebView 加载 App 内置静态 HTML 页面。
+- WebView 加载阶段一占位 HTML 页面。
 - 游戏页默认最大化显示 WebView，主机与 App 扫码加入页提供一致的可拖动、可展开/收纳悬浮工具坞。
 - 游戏页工具坞支持返回和刷新游戏，不再提供独立退出按钮；主机分享入口外置为一级操作，普通浏览器由 SDK 模拟没有 App 返回/退出能力的相关功能区。
 - Windows 使用 WebView2 加载打包后的本地 HTML 游戏资源。
@@ -20,7 +20,7 @@
 
 - App 能进入 Playmesh 首页。
 - 基础页面可以导航。
-- WebView 能加载内置静态页面。
+- WebView 能加载阶段一占位 HTML 页面。
 - “开始游戏”能进入独立游戏页。
 - WebView 占据主要空间，悬浮工具坞可拖动和收纳，不持续遮挡主要内容。
 - `flutter test` 通过。
@@ -55,18 +55,19 @@
 
 ### SDK 范围
 
-- `playmesh.session`：会话、连接状态、玩家列表和事件。
-- `playmesh.player`：当前玩家身份和状态。
-- `playmesh.input`：按键、摇杆、触屏和控制器输入。
-- `playmesh.sensor`：权限、订阅、限频和资源释放。
-- `playmesh.lifecycle`：加载、暂停、恢复、退出和断线。
-- `playmesh.game`：游戏动作、状态、回合和阶段。
-- 权威服务适配：向 AI 提供统一的 `playmesh.game.submitAction`、`playmesh.game.onMessage`、`playmesh.authority.onService` 和目标玩家 ID 列表返回模型，隐藏 Go Core 的转发细节。
+- `playmesh.main.session`：会话、连接状态、玩家列表和事件。
+- `playmesh.main.player`：当前玩家身份和状态。
+- `playmesh.main.input`：按键、摇杆、触屏和控制器输入。
+- `playmesh.main.sensor`：权限、订阅、限频和资源释放。
+- `playmesh.main.lifecycle`：加载、暂停、恢复、退出和断线。
+- `playmesh.main.game`：游戏动作、状态、回合和阶段。
+- 权威服务适配：向 AI 提供统一的 `playmesh.main.game.submitAction`、`playmesh.main.game.onMessage`、`playmesh.main.authority.onService` 和目标玩家 ID 列表返回模型，隐藏 Go Core 的转发细节。
 - 代码分层：玩家运行层、权威处理层和共享纯数据层必须有独立入口和依赖边界。
 - 项目模板：新建联机项目自动生成已接通 SDK 的 `main.json` 和 `app/`，控制器、`service`、`shared` 与静态资源都位于 `app/` 内，AI 只填充游戏规则和界面。
 - 游戏存储：SDK 提供按 `gameId + bucket` 隔离的 `getBucket(bucket).getData/setData/removeData/clearData` API，每个 Bucket 对应开始游戏设备上的 `packages/{gameId}/data/{bucket}.json`；平台不生成 `{userId}` 层，开发者自行组织 Bucket 内的数据。浏览器通过受本局 token 保护的主机接口访问，其他 App 玩家通过会话路由到 Authority 主机，加入设备不保留独立副本。Bucket 必须以字母或数字开头，只能包含字母、数字、下划线和连字符，最长 64 个字符。主机使用内存缓存和延迟批量持久化，游戏详情页可以单独清除该数据，卸载游戏时直接删除整个 `packages/{gameId}/` 目录。
-- 性能显示：FPS 和联机延迟由 SDK 在网页内部自动创建并显示；App 运行时由 App 悬浮工具坞控制开关，普通浏览器由 SDK 自己提供可收纳悬浮组件，并在其中提供昵称修改。游戏代码不创建性能组件。
-- 游戏库：平台不内置游戏 Demo；开发者工作区新建项目直接进入统一 `packages/{gameId}/` 目录。
+- 性能显示：FPS 和联机延迟的唯一网页浮层由 App SDK 创建并显示；App 运行时由 App 悬浮工具坞控制开关，普通浏览器由 App SDK 提供可收纳悬浮组件，并在其中提供昵称修改。Game SDK 不创建浏览器性能 panel，游戏代码也不创建性能组件。
+- 游戏库：开发者工作区新建项目与用户导入项目直接进入统一
+  `packages/{gameId}/` 目录，并共用已安装资源流程。
 
 所有游戏联机通讯必须经由 SDK。游戏页面不得创建 WebSocket、访问 Go 地址或自行定义联机连接；App 在 Game SDK 与 Go Core WS 之间中转。SDK 负责易用性、重连、状态合并和传感器限频，Go Core 只负责通用连接、会话和消息转发。创建会话时必须把当前 App 游戏运行端登记为独立的 `authorityClientId`：大屏主机不属于 `players`；普通多屏主机可同时作为 Player，但 Authority 与玩家进入顺序无关。
 
@@ -94,7 +95,8 @@
 - 只读 `main.json`、游戏包校验和开发副本加载。
 - 工作区运行按钮请求 App 启动主游戏页，并展示控制器联机二维码与链接；不嵌入主页面预览。
 - 完整 SDK Manifest、Game/Session/Player/Authority/Lifecycle Schema、事件日志和结构化错误。
-- 按单机、普通多屏和单屏多人分别提供最小 SDK 方法契约、页面拓扑和数据流说明；平台不内置可执行游戏 Demo。
+- 按单机、普通多屏和单屏多人分别提供最小 SDK 方法契约、页面拓扑和数据流说明；
+  默认模板只用于创建进入统一游戏库的项目。
 - 项目结构化校验、运行前拦截和可定位到文件行列的诊断。
 - OpenAPI、JSON Schema、SDK Manifest、接口请求示例，以及按项目类型生成的对话提示词和 Agent 提示词。
 - AI 直接读取接口文档并调用项目、校验、运行、SSE 和日志 API；不建设测试会话、虚拟玩家或设备模拟层。
@@ -124,7 +126,7 @@
 
 范围：
 
-- 新增 SDK 状态同步层，例如 `playmesh.sync` 或等价命名，具体 API 在实施前通过 SDK 文档确定。
+- 新增 SDK 状态同步层，例如 `playmesh.main.sync` 或等价命名，具体 API 在实施前通过 SDK 文档确定。
 - SDK 提供 Authority tick 调度、固定或可配置 tick rate、`dt`、权威状态版本号和快照序号。
 - SDK 提供动作型输入与状态型输入的高层接口：可靠动作进入权威逻辑；摇杆、位置意图、传感器等连续输入由 SDK 限频、合并，并允许丢弃旧值。
 - 游戏/AI 负责定义游戏状态结构、处理玩家输入、推进玩法规则、碰撞或命中等业务判断；SDK 负责把权威状态按版本同步给目标页面。
@@ -133,14 +135,21 @@
 - 断线、刷新或重连后，客户端必须能请求或接收最新权威状态，不依赖旧页面内存。
 - Go Core 仍保持通用会话和路由职责，不写入具体游戏规则；状态同步的业务语义由 SDK 和 Authority Runtime 承接。
 - 默认联机项目模板升级为状态同步模板：AI 只填写实体状态、输入处理、tick 规则和 UI 渲染区域，不需要手写 WebSocket、目标分发、快照版本或重连恢复。
-- 游戏包允许在 `main.json` 中自定义运行入口路径。字段已经确定为 `entries.game`、`entries.controller` 与 `authority.entry`；该能力不把任意 HTML ZIP 变成应用可安装包。
-- 自定义入口必须保留现有默认值：普通游戏首页默认 `app/index.html`，控制器首页默认 `app/controller/index.html`，权威 JS 默认继续使用当前模板约定的 `app/static/js/service/index.js` 或已有 `authority.entry`。未显式声明时旧游戏和默认模板行为不变。
+- 游戏包允许在 `main.json` 中自定义运行入口路径。字段已经确定为 `entries.game`、`entries.controller` 与 `authority.entry`；游戏库本地导入可把包含 HTML 的普通 ZIP 经用户确认和安全转换后生成标准包。
+- 默认模板在清单中显式写入相对于外层物理 `app/` 的入口：普通游戏首页
+  `index.html`、控制器首页 `controller/index.html`、多人权威 JS
+  `static/js/service/index.js`。游戏可以改成其他合法包内路径，但不得省略当前模式
+  要求的入口。`app` 是合法首段，例如 `app/index.html` 对应物理
+  `app/app/index.html` 和运行时 `/app/index.html`；只有 `playmesh`、`bucket` 是
+  平台保留首段。
 - 自定义入口只能指向当前游戏包 `app/` 内的 HTML/JS 文件，必须经过路径穿越、文件存在性、模式匹配和角色权限校验；不得指向 `data/`、`cache/`、其他游戏包、平台私有文件或外部网络 URL。
 - 运行时必须按当前 `displayMode` 选择入口：普通多屏使用游戏首页，大屏控制端使用控制器首页，Authority Runtime 使用权威 JS。自定义入口只改变加载哪个包内文件，不改变 SDK 身份、会话、存储、状态同步和安全边界。
-- 完整 HTML 小游戏统一通过开发者工作区上传到现有项目，上传后支持 ZIP 解压、移动、复制与粘贴；应用游戏库不提供独立 HTML 导入口，只安装根目录含 `main.json` 的 Playmesh 包。
+- 完整 HTML 小游戏既可通过开发者工作区上传整理，也可从游戏库导入普通网页 ZIP。普通 ZIP 必须至少包含一个 HTML，全部内容迁入 `app/`；原相对路径、已有根路径、外部 URL 和二进制内容保持不变，再生成 `main.json` 并经过标准包校验。
 - SDK Manifest、JSON Schema、OpenAPI、最小数据流示例和开发者工作区必须暴露状态同步能力，使 AI 能按正式契约生成和修改项目。
-- SDK 自动捕获并上报心跳、可靠动作确认或权威响应中的时间信息，游戏代码不需要手动调用延迟上报接口。
-- 延迟显示与 FPS 使用相同的左上角 SDK 网页悬浮层、显示位置和同一个开关；App 运行时开关位于 App 悬浮工具坞，普通浏览器开关位于 SDK 自己创建的悬浮组件。
+- App SDK 每 3 秒调度带唯一 probe ID 的受控会话探针并在本地平滑 RTT；Game SDK
+  只发送 ping 和转交原始 pong，Dart 只提供既有会话 transport，不保存或上报性能
+  指标。游戏代码没有手动延迟上报接口。
+- 延迟显示与 FPS 使用同一个由 App SDK 创建的左上角网页悬浮层、显示位置和开关；App 运行时开关位于 App 悬浮工具坞，普通浏览器开关位于 App SDK 创建的悬浮组件。Game SDK 不保留旧浏览器性能 panel。
 - 单人游戏不显示延迟信息；多人游戏根据当前会话配置显示当前玩家到权威端并收到返回的往返耗时。
 - 延迟单位使用毫秒，并显示最近值或短时间窗口内的平滑值；无有效样本时显示 `-- ms`。
 - 延迟统计必须区分本地处理、App/SDK 桥接和权威端往返，避免把页面渲染耗时误报为网络延迟；第一版对外只显示最终联机往返值，详细拆分留给诊断日志。
@@ -157,10 +166,10 @@ AI 心智负担要求：
 
 - 实施第五阶段任何 SDK/API/模板改动时，必须同步更新所有相关项目文档、SDK 文档和 AI 提示词文档。
 - 至少检查并更新：`docs/00-context.md`、`docs/01-architecture.md`、`docs/02-roadmap.md`、`docs/05-next-steps.md`、`docs/06-engineering-standards.md`、`docs/game/README.md`、`docs/game/development-guide.md`、`docs/game/sdk-v1.md`、`docs/game/web-dev-channel.md`、`assets/playmesh-library/public/developer/contracts/sdk-manifest.json`、`assets/playmesh-library/public/developer/contracts/schemas/sdk-v1.json` 和 `assets/playmesh-library/public/developer/prompts/`。Developer OpenAPI 必须由运行时操作注册表生成，不维护静态副本。
-- 如果新增 `playmesh.sync` 或等价能力导致 SDK 版本、模板结构或 AI 可读契约变化，
+- 如果新增 `playmesh.main.sync` 或等价能力导致 SDK 版本、模板结构或 AI 可读契约变化，
   必须更新当前契约，并同步更新最小数据流说明和开发者工作区校验规则。默认模板与
-  AI 契约只暴露最新版；运行时由 Dart 注册表按游戏清单版本保留明确的 SDK 兼容发行，
-  不通过静态文件或旁路适配历史版本。
+  AI 契约只暴露当前版本；运行时由 Dart 注册表精确接受 Game SDK `4.0.0` 与 App
+  Bridge SDK `3.2.0`，旧清单版本直接拒绝，不通过静态文件、版本回退或旁路适配历史版本。
 
 验收：
 
@@ -168,8 +177,12 @@ AI 心智负担要求：
 - 多人状态同步示例能展示玩家输入进入 Authority、Authority tick 更新权威状态、SDK 分发快照、客户端按快照渲染的完整链路。
 - 断线、刷新或重连后，客户端不会依赖旧内存状态，能够恢复到最新权威状态或明确进入不可恢复状态。
 - SDK、模板、Schema、Manifest、OpenAPI、AI 提示词和最小示例对同一套状态同步概念命名一致。
-- 当前模板未声明自定义入口时按 `app/index.html`、`app/controller/index.html` 和当前 `authority.entry` 默认值运行；不为历史模板保留专用分支。
-- 在开发者工作区上传并整理完整 HTML 小游戏后，项目可以使用默认入口或已声明的自定义入口启动；应用导入继续严格要求 Playmesh 包根结构。
+- 当前模板必须显式声明 `entries.game`；单屏多人模板同时显式声明
+  `entries.controller`，多人模板显式声明 `authority.entry`。模板生成的路径解析到
+  物理 `app/`，运行时不为缺失入口或历史模板保留默认值和专用分支。
+- 在开发者工作区上传整理或由游戏库转换普通网页 ZIP 后，项目都使用标准
+  `main.json + 可选 capabilities.json + 可选 icon.png + app/` 结构运行；已带
+  `main.json` 的包继续执行严格导入，不降级覆盖无效清单。
 - 自定义控制器首页和权威 JS 能按 `displayMode` 与角色正确加载；非法路径、缺失文件、越界路径和外部 URL 在项目校验阶段被拦截并给出可定位错误。
 - SDK 在多人游戏中自动产生延迟样本，游戏代码不需要添加埋点。
 - 单人游戏不显示延迟。
@@ -190,8 +203,12 @@ AI 心智负担要求：
 - Android 接收系统“打开方式”和分享文件。Playmesh 压缩包进入导入校验；单个 HTML 在不注入 SDK、存储和联机能力的独立 WebView 中运行。
 - Android 游戏包导出通过系统分享/保存能力交付，导入成功后的异步 UI 更新不再产生伪失败提示。
 - 移动端开发工作区收口顶部操作、二级菜单、弹层边界、项目搜索选择和文档跳转，并减少页面与开发者模式切换时的阻塞感。
-- Game SDK 与 App Bridge SDK 分层：`playmesh.js` 使用 Authority 主机的日志、联机和存储；`playmesh-app.js` 只提供当前设备的 App 身份与已授权硬件能力。
-- App 玩家身份自动注入；普通浏览器不加载 `playmesh-app.js`，主 SDK 提供安全空实现，并将随机玩家 ID 与昵称持久化到浏览器 `localStorage`。
+- Game SDK 与 App Bridge SDK 分层：`playmesh-main.js` 提供 Authority 主机拥有的
+  `playmesh.main.*` 游戏、联机和存储域；`playmesh-app.js` 提供当前设备拥有的
+  `playmesh.app.*` 身份、locale 与已授权硬件能力。旧 `playmesh.js` 不兼容。
+- 两个 SDK 在 App WebView 与普通浏览器中成对注入；普通浏览器的 App 原生能力明确
+  不可用，但仍由 App SDK 提供网页覆盖层。`main.ready` 内部先等待 `app.ready`；
+  根 `playmesh.ready` 只复用这条初始化链并返回 `{main, app}`。
 - 同一玩家 ID 同时只允许一个在线 WebSocket。旧连接断开后允许同 ID 重连；SDK 暴露玩家首次加入、离开和重连事件。
 - 会话仅在 `running`/`paused` 时保留离线成员；`session.finish()` 进入 `stopped` 并清理离线成员，重新开始或重置同样清理旧局成员。
 - 所有界面与工具区完成移动端响应式和轻量切换动效，版本、文档、机器契约与 AI 提示词同步归档。
@@ -228,6 +245,10 @@ AI 心智负担要求：
 游戏包必须支持被用户分享。分享能力属于用户安装库和运行时的通用能力，不由具体游戏重复实现。支持以下方式：
 
 游戏库不要求额外注册游戏。开发者工作区项目和用户导入的游戏都位于 `playmesh-library/packages/{gameId}/`，使用同一套扫描、校验和索引流程。导入完成后只保留解压后的游戏目录和安装元数据，不长期保留原始压缩包。分享时从当前目录临时重新生成压缩包，分享完成后删除临时文件。
+
+在线游戏源使用 ZIP 实际字节数描述可下载包；持久服务器在接收时保存大小，App
+临时分发源可以等响应生成后通过 `Content-Length` 提供。下载交互明确区分准备游戏包、
+传输和校验安装三个阶段，传输阶段按 1024 进位展示总大小、实时速率和已下载/总量。
 
 ### 链接分享
 

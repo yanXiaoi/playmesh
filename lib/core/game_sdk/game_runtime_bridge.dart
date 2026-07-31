@@ -31,8 +31,6 @@ class GameRuntimeBridge implements GameSdkBridge {
   final List<String> tags;
   final List<String> requiredCapabilities;
   final StreamController<String> _outbound = StreamController.broadcast();
-  final StreamController<double> _fpsValues = StreamController.broadcast();
-  final StreamController<double?> _latencyValues = StreamController.broadcast();
   final Map<String, Completer<void>> _lifecycleOperations = {};
   final Map<String, String?> _remoteStorageRequests = {};
   int _lifecycleSequence = 0;
@@ -41,10 +39,6 @@ class GameRuntimeBridge implements GameSdkBridge {
 
   @override
   Stream<String> get outboundMessages => _outbound.stream;
-  @override
-  Stream<double> get fpsValues => _fpsValues.stream;
-  @override
-  Stream<double?> get latencyValues => _latencyValues.stream;
 
   @override
   Future<GameStorageService> ensureStorage() => Future.value(storage);
@@ -78,12 +72,6 @@ class GameRuntimeBridge implements GameSdkBridge {
             'requiredCapabilities': requiredCapabilities,
           },
           ensureStorage: ensureStorage,
-          emitFps: (value) {
-            if (!_fpsValues.isClosed) _fpsValues.add(value);
-          },
-          emitLatency: (value) {
-            if (!_latencyValues.isClosed) _latencyValues.add(value);
-          },
           completeLifecycle: (lifecycleRequestId) {
             final operation = _lifecycleOperations.remove(lifecycleRequestId);
             if (operation == null || operation.isCompleted) return false;
@@ -320,11 +308,6 @@ class GameRuntimeBridge implements GameSdkBridge {
   }
 
   @override
-  void setPerformanceVisible(bool visible) {
-    _send({'type': 'performance.visibility', 'visible': visible});
-  }
-
-  @override
   void restoreGameContentFocus() {
     _send({'type': 'platform.ui.restoreGameFocus'});
   }
@@ -345,8 +328,6 @@ class GameRuntimeBridge implements GameSdkBridge {
     await storage.close();
     await _sessionSubscription.cancel();
     await connection.close();
-    await _fpsValues.close();
-    await _latencyValues.close();
     await _outbound.close();
   }
 }

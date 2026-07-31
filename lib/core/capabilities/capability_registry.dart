@@ -2,7 +2,10 @@ import 'capability_plugin.dart';
 import 'web_permission/capability_web_permission.dart';
 
 class CapabilityRegistry {
-  factory CapabilityRegistry(Iterable<CapabilityPlugin> plugins) {
+  factory CapabilityRegistry(
+    Iterable<CapabilityPlugin> plugins, {
+    CapabilityPlatform? platform,
+  }) {
     final pluginList = List<CapabilityPlugin>.of(plugins);
     final pluginMap = <String, CapabilityPlugin>{};
     final webPermissionCodeByResource = <String, String>{};
@@ -12,6 +15,11 @@ class CapabilityRegistry {
       final code = plugin.descriptor.code;
       if (code.isEmpty || pluginMap.containsKey(code)) {
         throw ArgumentError('能力插件 code 不能为空或重复');
+      }
+      final supportedPlatforms = plugin.descriptor.supportedPlatforms;
+      if (supportedPlatforms.isEmpty ||
+          supportedPlatforms.toSet().length != supportedPlatforms.length) {
+        throw ArgumentError('能力 $code 的 supportedPlatforms 不能为空或重复');
       }
       pluginMap[code] = plugin;
       if (plugin case final CapabilityWebPermissionPlugin permissionPlugin) {
@@ -34,6 +42,7 @@ class CapabilityRegistry {
     }
     return CapabilityRegistry._(
       pluginMap: pluginMap,
+      platform: platform ?? currentCapabilityPlatform,
       webPermissionCodeByResource: webPermissionCodeByResource,
       webPermissionExecutorByCode: webPermissionExecutorByCode,
     );
@@ -41,6 +50,7 @@ class CapabilityRegistry {
 
   CapabilityRegistry._({
     required Map<String, CapabilityPlugin> pluginMap,
+    required this.platform,
     required Map<String, String> webPermissionCodeByResource,
     required Map<String, CapabilityWebPermissionExecutor>
     webPermissionExecutorByCode,
@@ -53,6 +63,7 @@ class CapabilityRegistry {
        );
 
   final Map<String, CapabilityPlugin> _plugins;
+  final CapabilityPlatform? platform;
   final Map<String, String> _webPermissionCodeByResource;
   final Map<String, CapabilityWebPermissionExecutor>
   _webPermissionExecutorByCode;
@@ -67,6 +78,19 @@ class CapabilityRegistry {
   CapabilityDescriptor? descriptor(String code) => _plugins[code]?.descriptor;
 
   bool contains(String code) => _plugins.containsKey(code);
+
+  bool isPlatformSupported(CapabilityDescriptor descriptor) {
+    final current = platform;
+    return current != null && descriptor.supportsPlatform(current);
+  }
+
+  bool isPluginAvailable(CapabilityPlugin plugin) =>
+      isPlatformSupported(plugin.descriptor) && plugin.isAvailable;
+
+  bool isAvailable(String code) {
+    final plugin = _plugins[code];
+    return plugin != null && isPluginAvailable(plugin);
+  }
 
   String? webPermissionCapabilityCode(String resource) =>
       _webPermissionCodeByResource[resource];
@@ -87,7 +111,7 @@ class CapabilityRegistry {
       final plugin = code == null ? null : _plugins[code];
       if (code == null ||
           plugin == null ||
-          !plugin.isAvailable ||
+          !isPluginAvailable(plugin) ||
           !declared.contains(code)) {
         return false;
       }

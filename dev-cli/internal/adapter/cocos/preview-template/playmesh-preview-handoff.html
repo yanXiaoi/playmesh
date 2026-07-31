@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Playmesh 自动预览</title>
+  <style>
+    html,body{height:100%;margin:0;background:#101311;color:#f3f7f4}
+    body{display:grid;place-items:center;padding:1.5rem;box-sizing:border-box;font-family:system-ui,sans-serif}
+    main{width:min(32rem,calc(100vw - 3rem))}
+    h1{margin:0 0 .75rem;font-size:1.4rem;font-weight:650;line-height:1.35}
+    p{margin:0;color:#b8c2ba;font-size:1rem;line-height:1.6;overflow-wrap:anywhere}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>正在交给 Playmesh App 运行</h1>
+    <p id="playmesh-preview-status">正在建立安全开发会话。本浏览器仅负责触发，不会渲染游戏。</p>
+  </main>
+  <script src="/playmesh-preview-handoff.js"></script>
+</body>
+</html>

@@ -6,27 +6,56 @@ const appCoreSdkSource = SdkSourceFragment(
   order: 10,
   typeScript: r'''// @ts-ignore
 const PLAYMESH_APP_DECLARATION = String.raw`
-/// <reference path="./playmesh.d.ts" />
-
-/** App WebView 自动注入的底层对象。游戏业务使用 playmesh.app。 */
-declare const playmeshApp: PlaymeshAppApi;
-interface Window { playmeshApp: PlaymeshAppApi; }
+/// <reference path="./playmesh-main.d.ts" />
 `;
 
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "3.0.0";
-  const PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY =
-    typeof Symbol === "function" && typeof Symbol.for === "function"
-      ? Symbol.for("playmesh.platform-ui.configuration")
-      : "__PLAYMESH_PLATFORM_UI_CONFIGURATION__";
+  const PLAYMESH_APP_SDK_VERSION = "3.2.0";
+  const PLAYMESH_APP_INTERNAL_KEY =
+    Symbol.for("playmesh.app.internal.v1");
 
   let sequence = 0;
   let bootstrap = null;
+  let appRuntimeLocale = null;
+  let appPlatformUiConfiguration = null;
   const pending = new Map();
   const inputListeners = new Set();
   const capabilityInstances = new Map();
+
+  function normalizeAppRuntimeLocale(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim();
+    return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(normalized)
+      ? normalized
+      : null;
+  }
+
+  function browserAppRuntimeLocale() {
+    try {
+      const candidates = [
+        ...(Array.isArray(global.navigator?.languages)
+          ? global.navigator.languages
+          : []),
+        global.navigator?.language,
+      ];
+      for (const candidate of candidates) {
+        const locale = normalizeAppRuntimeLocale(candidate);
+        if (locale) return locale;
+      }
+    } catch (_) {
+      // 受限浏览器上下文可能禁止访问 navigator。
+    }
+    return "zh";
+  }
+
+  function updateAppRuntimeLocale(configuration) {
+    appRuntimeLocale = bootstrap?.available === true
+      ? normalizeAppRuntimeLocale(configuration?.locale) ||
+        browserAppRuntimeLocale()
+      : browserAppRuntimeLocale();
+  }
 
   function nativeSender() {
     if (global.PlaymeshAppBridge?.postMessage) {

@@ -44,7 +44,8 @@ void main() {
 
       final appSource = SdkFeatureRegistry.sdkFile('playmesh-app.js');
       expect(appSource, contains('delete bootstrap._playmeshPlatformUi'));
-      expect(appSource, contains('return clone(bootstrap)'));
+      expect(appSource, contains('const appBootstrapResult = Object.freeze'));
+      expect(appSource, contains('return appBootstrapResult'));
       expect(
         SdkFeatureRegistry.sdkFile('playmesh-app.d.ts'),
         isNot(contains('_playmeshPlatformUi')),
@@ -53,10 +54,11 @@ void main() {
   );
 
   test(
-    'Game SDK exposes locale only and keeps platform UI messages private',
+    'SDK exposes locale through app only and keeps platform UI messages private',
     () {
-      final source = SdkFeatureRegistry.sdkFile('playmesh.js');
-      final declaration = SdkFeatureRegistry.sdkFile('playmesh.d.ts');
+      final source = SdkFeatureRegistry.sdkFile('playmesh-main.js');
+      final appSource = SdkFeatureRegistry.sdkFile('playmesh-app.js');
+      final declaration = SdkFeatureRegistry.sdkFile('playmesh-main.d.ts');
 
       expect(source, contains('message.type === "platform.ui.configure"'));
       expect(source, contains('configurePlatformUi('));
@@ -71,10 +73,11 @@ void main() {
       expect(source, contains('"zh-CN"'));
       expect(source, isNot(contains('readPlatformUiJson')));
       expect(source, isNot(contains('/playmesh/localization/')));
-      expect(source, contains('platformHtml("sidebar.title")'));
+      expect(source, isNot(contains('platformHtml("sidebar.title")')));
+      expect(appSource, contains('appUiText("sidebar.title")'));
       expect(
-        source,
-        contains('setSidebarActionLabel(ui.reload, "sidebar.restart")'),
+        appSource,
+        contains('setAppUiControlLabel(ui.restart, "sidebar.restart")'),
       );
       expect(source, contains('platformText("nickname.invalid")'));
       expect(source, contains('platformText("nickname.update_failed")'));
@@ -82,7 +85,8 @@ void main() {
       expect(source, isNot(contains('title="展开游戏工具"')));
       expect(source, isNot(contains('>拒绝并退出<')));
       expect(source, isNot(contains('>暂无运行日志<')));
-      expect(source, contains('getLocale()'));
+      expect(source, isNot(contains('getLocale()')));
+      expect(appSource, contains('getLocale()'));
       expect(declaration, contains('readonly runtime:'));
       expect(declaration, contains('getLocale(): string'));
       expect(declaration, isNot(contains('platform.ui.configure')));

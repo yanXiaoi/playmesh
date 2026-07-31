@@ -7,6 +7,65 @@ const source = fs.readFileSync(
   "utf8",
 );
 const commands = [];
+const latencyIntervals = [];
+const clearedLatencyIntervals = [];
+const appInternalKey = Symbol.for("playmesh.app.internal.v1");
+class FakeMediaStream {
+  constructor() {
+    this.tracks = [];
+  }
+
+  getTracks() {
+    return [...this.tracks];
+  }
+
+  addTrack(track) {
+    this.tracks.push(track);
+  }
+}
+
+class FakePeerConnection {
+  constructor(configuration) {
+    this.configuration = configuration;
+    this.iceGatheringState = "complete";
+    this.listeners = new Map();
+    this.transceivers = [];
+    this.localDescription = null;
+    this.closed = false;
+  }
+
+  addEventListener(type, listener) {
+    this.listeners.set(type, listener);
+  }
+
+  removeEventListener(type, listener) {
+    if (this.listeners.get(type) === listener) this.listeners.delete(type);
+  }
+
+  addTransceiver(kind, options) {
+    this.transceivers.push({ kind, options });
+  }
+
+  async createOffer() {
+    return { type: "offer", sdp: "browser-offer" };
+  }
+
+  async setLocalDescription(description) {
+    this.localDescription = description;
+  }
+
+  async setRemoteDescription(description) {
+    this.remoteDescription = description;
+    queueMicrotask(() => this.listeners.get("track")?.({
+      track: { id: "video-track-1", stop() {} },
+    }));
+  }
+
+  close() {
+    this.closed = true;
+  }
+}
+
 const gameDocumentBody = {
   isConnected: true,
   tabIndex: -1,
@@ -24,8 +83,22 @@ const window = {
   queueMicrotask,
   setTimeout,
   clearTimeout,
+  setInterval(callback, delay) {
+    const handle = {
+      callback,
+      delay,
+      unref() {},
+    };
+    latencyIntervals.push(handle);
+    return handle;
+  },
+  clearInterval(handle) {
+    clearedLatencyIntervals.push(handle);
+  },
   addEventListener() {},
   __PLAYMESH_APP_OPTIONS__: { fallbackUi: false },
+  MediaStream: FakeMediaStream,
+  RTCPeerConnection: FakePeerConnection,
   navigator: { userActivation: { isActive: true } },
   document: {
     activeElement: gameFocusTarget,
@@ -44,7 +117,7 @@ const window = {
             messages: { "sidebar.title": "Game menu" },
           },
           available: true,
-          sdkVersion: "3.0.0",
+          sdkVersion: "3.2.0",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
@@ -90,8 +163,14 @@ const window = {
           code: command.payload.code,
           apiVersion: "1.0.0",
         };
+      } else if (command.command === "app.media.open") {
+        result = {
+          sessionId: "media-session-1",
+          protocol: "webrtc",
+          answer: { type: "answer", sdp: "host-answer" },
+        };
       }
-      queueMicrotask(() => window.playmeshApp.__receive({
+      queueMicrotask(() => window[appInternalKey].receive({
         type: "app.command.result",
         requestId: command.requestId,
         result,
@@ -102,66 +181,156 @@ const window = {
 window.window = window;
 vm.runInNewContext(source, window, { filename: "playmesh-app.js" });
 
-const publicBootstrap = await window.playmeshApp.ready;
+const appInternal = window[appInternalKey];
+const app = appInternal.publicApi;
+assert.equal(window.playmesh, undefined);
+assert.equal(window.playmeshApp, undefined);
+assert.equal(Object.getOwnPropertyDescriptor(window, appInternalKey).enumerable, false);
+assert.deepEqual(Object.keys(app).filter((key) => key.startsWith("__")), []);
+const publicBootstrap = await app.ready;
 assert.equal("_playmeshPlatformUi" in publicBootstrap, false);
 assert.equal("game" in publicBootstrap, false);
 assert.deepEqual(
   commands.find((item) => item.command === "app.bootstrap").payload,
   {},
 );
-assert.equal("__getPlatformUiConfiguration" in window.playmeshApp, false);
+assert.equal("__getPlatformUiConfiguration" in app, false);
 assert.deepEqual(
   JSON.parse(
-    JSON.stringify(
-      window[Symbol.for("playmesh.platform-ui.configuration")],
-    ),
+    JSON.stringify(appInternal.takePlatformUiConfiguration()),
   ),
   {
     locale: "en-US",
     messages: { "sidebar.title": "Game menu" },
   },
 );
-assert.equal(window.playmeshApp.version, "3.0.0");
-assert.equal(window.playmeshApp.isAvailable(), true);
+assert.equal(app.version, "3.2.0");
+assert.equal(app.isAvailable(), true);
+assert.equal(app.runtime.getLocale(), "en-US");
+assert.equal(app.performance.getFps(), null);
+let reportedFps = null;
+app.performance.onFps((fps) => {
+  reportedFps = fps;
+});
+for (let frame = 0; frame <= 60; frame += 1) {
+  app.performance.reportFrame(frame * (1000 / 60));
+}
+assert.equal(reportedFps >= 60, true);
+const latencyProbes = [];
+appInternal.configureRuntimePerformance({
+  multiplayer: true,
+  sendLatencyProbe(payload) {
+    latencyProbes.push(payload);
+  },
+});
+assert.equal(latencyIntervals.length, 1);
+assert.equal(latencyIntervals[0].delay, 3000);
+assert.equal(latencyProbes.length, 1);
+latencyIntervals[0].callback();
+assert.equal(latencyProbes.length, 2);
+assert.match(latencyProbes[0].probeId, /^latency-\d+-1$/);
+assert.match(latencyProbes[1].probeId, /^latency-\d+-2$/);
+appInternal.recordRuntimeLatencyPong({
+  probeId: "probe-local",
+  clientSentAt: Date.now() - 20,
+  serverReceivedAt: Date.now() - 10,
+  serverSentAt: Date.now() - 5,
+  authorityAvailable: true,
+});
+assert.equal(app.performance.getLatency() >= 0, true);
+assert.equal(
+  app.performance.getLatencyDiagnostics().authorityAvailable,
+  true,
+);
+assert.equal(
+  commands.some((item) => item.command === "performance.fps"),
+  false,
+);
+assert.equal(
+  commands.some((item) => item.command === "performance.latency"),
+  false,
+);
+appInternal.configureRuntimePerformance({ multiplayer: false });
+assert.deepEqual(clearedLatencyIntervals, latencyIntervals);
 assert.deepEqual(
-  JSON.parse(JSON.stringify(window.playmeshApp.identity.getCurrent())),
+  JSON.parse(JSON.stringify(app.identity.getCurrent())),
   { userId: "u-current-app", nickname: "本机玩家", source: "playmesh_app" },
 );
 assert.deepEqual(
-  [...window.playmeshApp.capabilities.getAvailable()],
+  [...app.capabilities.getAvailable()],
   ["media.camera", "device.vibration"],
 );
 assert.deepEqual(
-  [...window.playmeshApp.capabilities.getDeclared()],
+  [...app.capabilities.getDeclared()],
   ["media.camera", "device.vibration"],
 );
-await window.playmeshApp.__configureRuntimeGame({
+const configuredBootstrap = await appInternal.configureRuntimeGame({
   requiredCapabilities: ["device.vibration"],
 });
+assert.strictEqual(
+  configuredBootstrap,
+  publicBootstrap,
+  "App SDK 运行时配置必须原位更新同一个公开 ready 结果",
+);
 assert.deepEqual(
   commands.find((item) => item.command === "app.game.configure").payload,
   { declaredCapabilities: ["device.vibration"] },
 );
 assert.deepEqual(
-  [...window.playmeshApp.capabilities.getDeclared()],
+  JSON.parse(JSON.stringify(publicBootstrap.device.declaredCapabilities)),
+  ["device.vibration"],
+);
+assert.deepEqual(
+  [...app.capabilities.getDeclared()],
   ["device.vibration"],
 );
 
-const capability = await window.playmeshApp.capabilities.create(
+const capability = await app.capabilities.create(
   "device.vibration",
   {},
 );
 await capability.invoke("vibrate", { duration: 250, amplitude: 128 });
 await capability.dispose();
 
-const vibration = await window.playmeshApp.capabilities.create("device.vibration");
+const vibration = await app.capabilities.create("device.vibration");
 await vibration.invoke("vibrate", {
   pattern: [0, 100, 50, 200],
   intensities: [0, 128, 0, 255],
 });
 await vibration.invoke("cancel", {});
 await vibration.dispose();
-await window.playmeshApp.device.setFullscreen(true, "portrait");
+
+const mediaSource = {
+  type: "playmesh.app.media-source",
+  version: 1,
+  id: "media-source-1",
+  kind: "video",
+  protocol: "webrtc",
+  live: true,
+};
+const mediaSession = await app.media.open(mediaSource);
+assert.equal(mediaSession.id, "media-session-1");
+assert.equal(mediaSession.state, "open");
+assert.equal(mediaSession.stream.getTracks().length, 1);
+const mediaOpen = commands.find((item) => item.command === "app.media.open");
+assert.deepEqual(
+  JSON.parse(JSON.stringify(mediaOpen.payload.source)),
+  mediaSource,
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(mediaOpen.payload.adapterOptions)),
+  { offer: { type: "offer", sdp: "browser-offer" } },
+);
+assert.equal("offer" in mediaOpen.payload.source, false);
+await mediaSession.close();
+assert.equal(
+  commands.some((item) =>
+    item.command === "app.media.close" &&
+    item.payload.sessionId === "media-session-1"),
+  true,
+);
+
+await app.device.setFullscreen(true, "portrait");
 assert.deepEqual(
   commands.find((item) => item.command === "app.device.fullscreen").payload,
   { enabled: true, orientation: "portrait" },
@@ -170,16 +339,16 @@ assert.equal(commands.some((item) => item.command === "app.capability.create"), 
 assert.equal(commands.some((item) => item.command === "app.capability.invoke"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.dispose"), true);
 
-await window.playmeshApp.ui.openSharePanel();
+await app.ui.openSharePanel();
 assert.deepEqual(
   commands.findLast((item) => item.command === "app.ui.openSharePanel").payload,
   { userActivation: true },
 );
-assert.equal(window.playmeshApp.hideGameSidebar, undefined);
-assert.equal(window.playmeshApp.onMenuRequest, undefined);
-assert.equal(await window.playmeshApp.ui.showGameSidebar(), false);
+assert.equal(app.hideGameSidebar, undefined);
+assert.equal(app.onMenuRequest, undefined);
+assert.equal(await app.ui.showGameSidebar(), false);
 assert.deepEqual(
-  JSON.parse(JSON.stringify(window.playmeshApp.ui.configure({ fallbackUi: false }))),
+  JSON.parse(JSON.stringify(app.ui.configure({ fallbackUi: false }))),
   { fallbackUi: false, floatingButton: true },
 );
 for (const methodName of [
@@ -196,13 +365,78 @@ for (const methodName of [
   "togglePerformance",
   "exitGame",
 ]) {
-  assert.equal(window.playmeshApp[methodName], undefined);
-  assert.equal(typeof window.playmeshApp.ui[methodName], "function");
+  assert.equal(app[methodName], undefined);
+  assert.equal(typeof app.ui[methodName], "function");
 }
-assert.equal(window.playmeshApp.ui.initializeBrowser(), false);
+assert.equal(app.ui.initializeBrowser(), false);
 
-await window.playmeshApp.ui.exitGame();
+await app.ui.exitGame();
 assert.equal(commands.some((item) => item.command === "app.game.exit"), true);
-await window.playmeshApp.__requestExit();
+await appInternal.requestExit();
+
+function createBootstrapContractWindow(onCommand) {
+  const isolatedConsole = {
+    debug() {},
+    info() {},
+    log() {},
+    warn() {},
+    error() {},
+  };
+  const isolated = {
+    console: isolatedConsole,
+    queueMicrotask,
+    setTimeout,
+    clearTimeout,
+    setInterval() {
+      return { unref() {} };
+    },
+    clearInterval() {},
+    addEventListener() {},
+    __PLAYMESH_APP_OPTIONS__: { fallbackUi: false },
+    navigator: { languages: ["zh-CN"], language: "zh-CN" },
+    document: {
+      activeElement: null,
+      body: null,
+      documentElement: { isConnected: true },
+      addEventListener() {},
+    },
+  };
+  if (onCommand) {
+    isolated.PlaymeshAppBridge = {
+      postMessage(rawMessage) {
+        onCommand(isolated, JSON.parse(rawMessage));
+      },
+    };
+  }
+  isolated.window = isolated;
+  vm.runInNewContext(source, isolated, { filename: "playmesh-app.js" });
+  return isolated;
+}
+
+const browserWindow = createBootstrapContractWindow();
+const browserApp = browserWindow[appInternalKey].publicApi;
+const browserBootstrap = await browserApp.ready;
+assert.equal(browserWindow.playmesh, undefined);
+assert.equal(browserBootstrap.available, false);
+assert.equal(browserBootstrap.sdkVersion, "3.2.0");
+assert.equal(browserBootstrap.identity, null);
+
+const failedBridgeWindow = createBootstrapContractWindow(
+  (isolated, command) => {
+    queueMicrotask(() => isolated[appInternalKey].receive({
+      type: "app.command.error",
+      requestId: command.requestId,
+      code: "bootstrap_failed",
+      error: "原生 bootstrap 失败",
+    }));
+  },
+);
+await assert.rejects(
+  failedBridgeWindow[appInternalKey].publicApi.ready,
+  (error) =>
+    error?.code === "bootstrap_failed" &&
+    error.message === "原生 bootstrap 失败",
+);
+assert.equal(failedBridgeWindow.playmesh, undefined);
 
 console.log("Playmesh App capability plugin bridge contract passed");

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/capabilities/capability_plugin.dart';
 import 'package:playmesh/core/capabilities/default_capability_plugins.dart';
 import 'package:playmesh/models/game_capabilities.dart';
 
@@ -94,8 +95,14 @@ void main() {
       final permission = defaultCapabilityDescriptorRegistry[code]!;
       expect(permission.methods, isEmpty);
       expect(permission.events, isEmpty);
-      expect(permission.appSupported, isTrue);
-      expect(permission.htmlSupported, isFalse);
+      expect(
+        permission.supportedPlatforms,
+        contains(CapabilityPlatform.ANDROID),
+      );
+      expect(
+        permission.supportedPlatforms,
+        isNot(contains(CapabilityPlatform.HTML)),
+      );
     }
     final audio = defaultCapabilityDescriptorRegistry['media.microphone']!;
     expect(audio.apiVersion, '1.1.0');
@@ -104,8 +111,10 @@ void main() {
       'textOnSoundLevelChange',
       'textOnResult',
     ]);
-    expect(audio.appSupported, isTrue);
-    expect(audio.htmlSupported, isFalse);
+    expect(audio.supportedPlatforms, [
+      CapabilityPlatform.WINDOWS,
+      CapabilityPlatform.ANDROID,
+    ]);
 
     final vibration = defaultCapabilityDescriptorRegistry['device.vibration']!;
     expect(vibration.name, '震动反馈');
@@ -115,5 +124,12 @@ void main() {
       'cancel',
     ]);
     expect(vibration.events, isEmpty);
+    expect(vibration.supportedPlatforms, [CapabilityPlatform.ANDROID]);
+
+    final pose = defaultCapabilityDescriptorRegistry['sensor.pose6d']!;
+    expect(pose.supportedPlatforms, [CapabilityPlatform.ANDROID]);
+    expect(pose.toJson()['supportedPlatforms'], ['ANDROID']);
+    expect(pose.toJson(), isNot(contains('appSupported')));
+    expect(pose.toJson(), isNot(contains('htmlSupported')));
   });
 }

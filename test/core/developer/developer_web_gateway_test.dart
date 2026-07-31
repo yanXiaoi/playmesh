@@ -13,7 +13,6 @@ import 'package:playmesh/core/developer/developer_project_catalog.dart';
 import 'package:playmesh/core/developer/developer_preferences.dart';
 import 'package:playmesh/core/developer/developer_run_controller.dart';
 import 'package:playmesh/core/developer/developer_web_gateway.dart';
-import 'package:playmesh/core/game_package/asset_game_library_scanner.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
@@ -376,15 +375,15 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '3.1.0');
-    expect(statusJson['appSdkVersion'], '3.0.0');
+    expect(statusJson['gameSdkVersion'], '4.0.0');
+    expect(statusJson['appSdkVersion'], '3.2.0');
     expect(
       statusJson['gameSdkCompatibility'],
-      contains(containsPair('minimumRequestedVersion', '1.0.0')),
+      contains(containsPair('minimumRequestedVersion', '4.0.0')),
     );
     expect(
       statusJson['appSdkCompatibility'],
-      contains(containsPair('maximumRequestedVersion', '3.0.0')),
+      contains(containsPair('maximumRequestedVersion', '3.2.0')),
     );
 
     final sdkBundle = await http.get(
@@ -392,29 +391,29 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '3.1.0');
-    expect(sdkBundleJson['appSdkVersion'], '3.0.0');
+    expect(sdkBundleJson['gameSdkVersion'], '4.0.0');
+    expect(sdkBundleJson['appSdkVersion'], '3.2.0');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '3.1.0')),
+      contains(containsPair('bundleVersion', '4.0.0')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
-      contains(containsPair('bundleVersion', '3.0.0')),
+      contains(containsPair('bundleVersion', '3.2.0')),
     );
     expect(
       (sdkBundleJson['files'] as Map).keys,
       containsAll([
-        'playmesh.js',
+        'playmesh-main.js',
         'playmesh-app.js',
-        'playmesh.d.ts',
+        'playmesh-main.d.ts',
         'playmesh-app.d.ts',
       ]),
     );
     for (final name in const [
-      'playmesh.js',
+      'playmesh-main.js',
       'playmesh-app.js',
-      'playmesh.d.ts',
+      'playmesh-main.d.ts',
       'playmesh-app.d.ts',
     ]) {
       expect(
@@ -426,10 +425,10 @@ void main() {
       );
     }
     final publicSdk = await http.get(
-      base.resolve('/playmesh/sdk/v1/playmesh.js?token=custom-dev-token'),
+      base.resolve('/playmesh/sdk/v1/playmesh-main.js?token=custom-dev-token'),
     );
     expect(publicSdk.statusCode, HttpStatus.ok);
-    expect(publicSdk.body, SdkFeatureRegistry.sdkFile('playmesh.js'));
+    expect(publicSdk.body, SdkFeatureRegistry.sdkFile('playmesh-main.js'));
 
     final capabilityRegistry = await http.get(
       base.resolve('/dev/api/capabilities?token=custom-dev-token'),
@@ -438,8 +437,9 @@ void main() {
     final capabilityItems =
         (jsonDecode(capabilityRegistry.body) as Map)['capabilities'] as List;
     expect(capabilityItems, contains(containsPair('code', 'media.camera')));
-    expect(capabilityItems, everyElement(contains('appSupported')));
-    expect(capabilityItems, everyElement(contains('htmlSupported')));
+    expect(capabilityItems, everyElement(contains('supportedPlatforms')));
+    expect(capabilityItems, everyElement(isNot(contains('appSupported'))));
+    expect(capabilityItems, everyElement(isNot(contains('htmlSupported'))));
     expect(capabilityItems, everyElement(contains('apiVersion')));
     expect(capabilityItems, everyElement(contains('optionsSchema')));
     expect(capabilityItems, everyElement(contains('methods')));
@@ -709,29 +709,32 @@ void main() {
     expect(aiPrompt.body, contains('统一 SDK TypeScript 声明（唯一游戏接口事实源）'));
     expect(
       aiPrompt.body,
-      contains('===== BEGIN SDK DECLARATION: playmesh.d.ts ====='),
+      contains('===== BEGIN SDK DECLARATION: playmesh-main.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "3.1.0"'));
+    expect(aiPrompt.body, contains('readonly version: "4.0.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('playmesh.session.getCurrent()'));
-    expect(aiPrompt.body, contains('playmesh.player.getCurrent()'));
-    expect(aiPrompt.body, contains('playmesh.sync.submitAction(input)'));
-    expect(aiPrompt.body, contains('playmesh.sync.startAuthority(options)'));
-    expect(aiPrompt.body, contains('playmesh.sync.observe'));
+    expect(aiPrompt.body, contains('playmesh.main.session.getCurrent()'));
+    expect(aiPrompt.body, contains('playmesh.main.player.getCurrent()'));
+    expect(aiPrompt.body, contains('playmesh.main.sync.submitAction(input)'));
+    expect(
+      aiPrompt.body,
+      contains('playmesh.main.sync.startAuthority(options)'),
+    );
+    expect(aiPrompt.body, contains('playmesh.main.sync.observe'));
     expect(aiPrompt.body, contains('isAvailable(): boolean'));
     expect(aiPrompt.body, contains('playmesh.app.capabilities.create'));
     expect(aiPrompt.body, contains('onPlayerReconnect(callback)'));
-    expect(aiPrompt.body, contains('playmesh.session.finish()'));
+    expect(aiPrompt.body, contains('playmesh.main.session.finish()'));
     expect(
       aiPrompt.body,
       contains('state: "lobby" | "running" | "paused" | "stopped"'),
     );
     expect(aiPrompt.body, contains('manifest API'));
     expect(aiPrompt.body, contains('绝对不能修改 `id`'));
-    expect(aiPrompt.body, contains('entries.game: app/index.html'));
+    expect(aiPrompt.body, contains('entries.game: index.html'));
     expect(aiPrompt.body, contains('- [file] app/index.html'));
     expect(aiPrompt.body, contains('按需读取项目文件'));
     expect(aiPrompt.body, contains('本提示词不预载任何项目文件内容'));
@@ -795,7 +798,7 @@ void main() {
     expect(agentPrompt.body, contains('不必维持 SSE'));
     expect(agentPrompt.body, contains('isAvailable(): boolean'));
     expect(agentPrompt.body, contains('onPlayerReconnect(callback)'));
-    expect(agentPrompt.body, contains('playmesh.session.finish()'));
+    expect(agentPrompt.body, contains('playmesh.main.session.finish()'));
     expect(agentPrompt.body, contains('manifest API'));
     expect(agentPrompt.body, contains('`id`、`author`、`lastModifiedAt` 不可修改'));
     expect(agentPrompt.body, contains('/dev/api/projects/demo/manifest'));
@@ -812,7 +815,7 @@ void main() {
     );
     expect(agentPrompt.body, contains('`<input type="file">`'));
     expect(agentPrompt.body, isNot(contains('平台统一能力注册表（code')));
-    expect(agentPrompt.body, contains('entries.game: app/index.html'));
+    expect(agentPrompt.body, contains('entries.game: index.html'));
     expect(agentPrompt.body, contains('- [file] app/index.html'));
     expect(agentPrompt.body, contains('按需读取项目文件'));
     expect(agentPrompt.body, contains('本提示词不预载任何项目文件内容'));
@@ -858,7 +861,7 @@ void main() {
     final commonTemplate = commonTemplates.cast<Map>().firstWhere(
       (item) => item['id'] == 'common',
     );
-    expect(commonTemplate['content'], isNot(contains('playmesh.sync')));
+    expect(commonTemplate['content'], isNot(contains('playmesh.main.sync')));
     final modeTemplates =
         templateCategories.firstWhere(
               (category) => category['id'] == 'mode',
@@ -869,7 +872,7 @@ void main() {
     );
     expect(
       soloTemplate['content'],
-      contains('playmesh.authority 或 playmesh.sync'),
+      contains('playmesh.main.authority 或 playmesh.main.sync'),
     );
     final customized = await http.put(
       base.resolve(
@@ -994,7 +997,7 @@ void main() {
       base.resolve('/dev/sdk-manifest.json?token=custom-dev-token'),
     );
     expect(sdkManifest.statusCode, HttpStatus.ok);
-    expect(sdkManifest.body, contains('playmesh.authority'));
+    expect(sdkManifest.body, contains('playmesh.main.authority'));
     expect(sdkManifest.body, contains('capabilities.getDeclared'));
     expect(sdkManifest.body, contains('capabilityConsent'));
 
@@ -1009,6 +1012,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/validate'));
     expect(paths, contains('/dev/api/projects/{projectId}/run/restart'));
     expect(paths, contains('/dev/api/projects/{projectId}/run/stop'));
+    expect(paths, contains('/dev/api/projects/{projectId}/development'));
     expect(paths, contains('/dev/api/projects/{projectId}/webview/javascript'));
     expect(paths, contains('/dev/api/projects/{projectId}/data'));
     expect(paths, contains('/dev/api/logs'));
@@ -1027,7 +1031,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '2.3.0');
+    expect((openApiJson['info'] as Map)['version'], '4.0.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );
@@ -1190,7 +1194,7 @@ void main() {
           displayMode: 'multi_screen',
           orientation: GameOrientation.landscape,
           entry: LocalGameEntry(
-            assetPath: 'app/index.html',
+            gameEntryPath: 'index.html',
             statusLabel: 'Game SDK 1.0.0',
             packageRootFilePath: source.path,
           ),
@@ -1204,18 +1208,90 @@ void main() {
 
     final projects = await catalog.listProjects();
     expect(projects.map((project) => project.id), ['com.example.library']);
+    expect(projects.single.rootFilePath, source.path);
+    expect(projects.single.toJson(), isNot(contains('readOnly')));
     expect(
       await catalog.listFiles('com.example.library'),
       contains('app/index.html'),
     );
   });
 
-  test('从外置模板创建项目并通过受控接口编辑 main.json', () async {
+  test('已安装项目缺少包目录时给出明确修复错误', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'playmesh-missing-project-root-',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
+    final catalog = GameLibraryDeveloperProjectCatalog(
+      GameLibraryRepository(
+        () async => const <GameSummary>[],
+        initialGames: [
+          _installedDeveloperGame(
+            id: 'com.example.missing-root',
+            packageRootFilePath: null,
+          ),
+        ],
+      ),
+      workspaceRoot: workspace,
+    );
+
+    await expectLater(
+      catalog.listProjects(),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('缺少已安装包目录'),
+        ),
+      ),
+    );
+  });
+
+  test('已安装项目目录不存在时拒绝用默认模板替代', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'playmesh-incomplete-project-root-',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
+    final missingSource = Directory(
+      '${workspace.path}${Platform.pathSeparator}missing-source',
+    );
+    final project = _installedDeveloperGame(
+      id: 'com.example.missing-source',
+      packageRootFilePath: missingSource.path,
+    );
+    final catalog = GameLibraryDeveloperProjectCatalog(
+      GameLibraryRepository(
+        () async => const <GameSummary>[],
+        initialGames: [project],
+      ),
+      workspaceRoot: workspace,
+    );
+
+    expect(
+      (await catalog.listProjects()).single.rootFilePath,
+      missingSource.path,
+    );
+    await expectLater(
+      catalog.listFiles(project.id),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('已安装包目录不存在或不完整'),
+        ),
+      ),
+    );
+    final materialized = Directory(
+      '${workspace.path}${Platform.pathSeparator}${project.id}',
+    );
+    expect(await materialized.exists(), isFalse);
+  });
+
+  test('从默认模板创建项目并通过受控接口编辑 main.json', () async {
     final workspace = await Directory.systemTemp.createTemp(
       'playmesh-new-project-',
     );
     addTearDown(() => workspace.delete(recursive: true));
-    final repository = GameLibraryRepository(AssetGameLibraryScanner().scan);
+    final repository = GameLibraryRepository(() async => const <GameSummary>[]);
     final catalog = GameLibraryDeveloperProjectCatalog(
       repository,
       workspaceRoot: workspace,
@@ -1255,6 +1331,15 @@ void main() {
     expect(utf8.decode(capabilities.bytes), contains('media.camera'));
     expect(manifest.readOnly, isTrue);
     expect(repository.cachedGames.map((game) => game.id), contains(project.id));
+    final initialIndex = utf8.decode(
+      (await catalog.readFile(project.id, 'app/index.html')).bytes,
+    );
+    final unchangedIndexDiff = await catalog.diffFile(
+      project.id,
+      'app/index.html',
+    );
+    expect(unchangedIndexDiff.changed, isFalse);
+    expect(unchangedIndexDiff.original, initialIndex);
     await expectLater(
       catalog.deleteDirectory(project.id, 'app'),
       throwsA(isA<FormatException>()),
@@ -1286,6 +1371,23 @@ void main() {
     );
     expect(utf8.decode(updatedManifest.bytes), isNot(contains('"icon"')));
     expect(utf8.decode(updatedManifest.bytes), isNot(contains('"redundant"')));
+    final manifestDiff = await catalog.diffFile(project.id, 'main.json');
+    expect(manifestDiff.changed, isTrue);
+    expect(manifestDiff.original, contains('"name": "Created Game"'));
+    expect(manifestDiff.current, contains('"name": "Updated Game"'));
+    final changedIndex = '$initialIndex\n<!-- workspace diff baseline -->\n';
+    await catalog.writeFile(
+      project.id,
+      'app/index.html',
+      utf8.encode(changedIndex),
+    );
+    final changedIndexDiff = await catalog.diffFile(
+      project.id,
+      'app/index.html',
+    );
+    expect(changedIndexDiff.changed, isTrue);
+    expect(changedIndexDiff.original, initialIndex);
+    expect(changedIndexDiff.current, changedIndex);
     expect(
       repository.cachedGames.singleWhere((game) => game.id == project.id).name,
       'Updated Game',
@@ -1414,9 +1516,10 @@ void main() {
       invalid.diagnostics.map((item) => item.code),
       contains('authority_entry_missing'),
     );
-    await expectLater(
-      catalog.prepareGame(project.id),
-      throwsA(isA<DeveloperProjectValidationFailure>()),
+    expect(
+      await catalog.prepareGame(project.id),
+      isA<GameSummary>(),
+      reason: '启动只读取已保存项目，不应再次执行全量项目校验',
     );
   });
 
@@ -1425,7 +1528,7 @@ void main() {
       'playmesh-copy-project-',
     );
     addTearDown(() => workspace.delete(recursive: true));
-    final repository = GameLibraryRepository(AssetGameLibraryScanner().scan);
+    final repository = GameLibraryRepository(() async => const <GameSummary>[]);
     final catalog = GameLibraryDeveloperProjectCatalog(
       repository,
       workspaceRoot: workspace,
@@ -1537,7 +1640,7 @@ void main() {
       'playmesh-manifest-api-',
     );
     addTearDown(() => workspace.delete(recursive: true));
-    final repository = GameLibraryRepository(AssetGameLibraryScanner().scan);
+    final repository = GameLibraryRepository(() async => const <GameSummary>[]);
     final catalog = GameLibraryDeveloperProjectCatalog(
       repository,
       workspaceRoot: workspace,
@@ -1680,7 +1783,7 @@ void main() {
     );
     addTearDown(() => workspace.delete(recursive: true));
     final catalog = GameLibraryDeveloperProjectCatalog(
-      GameLibraryRepository(AssetGameLibraryScanner().scan),
+      GameLibraryRepository(() async => const <GameSummary>[]),
       workspaceRoot: workspace,
     );
 
@@ -1707,6 +1810,24 @@ void main() {
     expect(files, isNot(contains('app/static/js/service/index.js')));
     expect(manifest, contains('"solo"'));
     expect(manifest, isNot(contains('"authority"')));
+    final staleControllerManifest = Map<String, Object?>.from(
+      jsonDecode(manifest) as Map,
+    );
+    staleControllerManifest['entries'] = {
+      ...Map<String, Object?>.from(staleControllerManifest['entries']! as Map),
+      'controller': 'controller/index.html',
+    };
+    final normalized =
+        jsonDecode(
+              utf8.decode(
+                (await catalog.updateManifest(
+                  project.id,
+                  staleControllerManifest,
+                )).bytes,
+              ),
+            )
+            as Map;
+    expect(normalized['entries'], {'game': 'index.html'});
     expect((await catalog.validateProject(project.id)).valid, isTrue);
   });
   test('Agent/CLI 发布写入作者时间并生成可恢复的本地历史', () async {
@@ -1718,7 +1839,7 @@ void main() {
       '${libraryRoot.path}${Platform.pathSeparator}packages',
     );
     await workspace.create(recursive: true);
-    final repository = GameLibraryRepository(AssetGameLibraryScanner().scan);
+    final repository = GameLibraryRepository(() async => const <GameSummary>[]);
     final transfer = GamePackageTransferService(libraryRoot: libraryRoot);
     final catalog = GameLibraryDeveloperProjectCatalog(
       repository,
@@ -1945,6 +2066,11 @@ void main() {
     expect(firstResult['succeeded'], isFalse);
     expect(firstResult['partiallySucceeded'], isTrue);
     expect(firstResult['failedSourceIds'], ['community']);
+    final firstSources = (firstResult['sources'] as List).cast<Map>();
+    expect(
+      firstSources.singleWhere((source) => source['sourceId'] == 'community'),
+      containsPair('detail', 'main.json.entries.game 对应文件不存在'),
+    );
     expect(publisher.requests.single, ['official', 'community']);
 
     final retry = await http.post(
@@ -2024,7 +2150,127 @@ void main() {
     expect(catalog.prepareCount, 0);
     expect(publisher.requests, isEmpty);
   });
+
+  test('开发资源会话只接受当前 CLI 对端并在撤销时停止临时运行', () async {
+    final port = await _availablePort();
+    final launched = <DeveloperProjectLaunchRequest>[];
+    var stopped = 0;
+    var restarted = 0;
+    final now = DateTime.utc(2026, 7, 30, 12);
+    final runController = DeveloperRunController(
+      onLaunch: (request) async => launched.add(request),
+      clock: () => now,
+    );
+    runController.registerStopHandler('demo', () async => stopped += 1);
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: 'development-session-token',
+      catalog: _FakeCatalog(),
+      runController: runController,
+      clock: () => now,
+    );
+    addTearDown(gateway.close);
+    final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
+    const headers = {
+      HttpHeaders.authorizationHeader: 'Bearer development-session-token',
+      HttpHeaders.contentTypeHeader: 'application/json',
+    };
+    final credential = List<String>.filled(40, 'c').join();
+    final expiresAt = now.add(const Duration(minutes: 30));
+
+    final foreign = await http.post(
+      base.resolve('/dev/api/projects/demo/development'),
+      headers: headers,
+      body: jsonEncode({
+        'resourceBaseUrl': 'http://192.0.2.10:4173/',
+        'credential': credential,
+        'expiresAt': expiresAt.millisecondsSinceEpoch,
+      }),
+    );
+    expect(foreign.statusCode, HttpStatus.badRequest);
+    expect(launched, isEmpty);
+
+    final invalidExpiry = await http.post(
+      base.resolve('/dev/api/projects/demo/development'),
+      headers: headers,
+      body: jsonEncode({
+        'resourceBaseUrl': 'http://127.0.0.1:4173/',
+        'credential': credential,
+        'expiresAt': 9223372036854775807,
+      }),
+    );
+    expect(invalidExpiry.statusCode, HttpStatus.badRequest);
+    expect(launched, isEmpty);
+
+    final started = await http.post(
+      base.resolve('/dev/api/projects/demo/development'),
+      headers: headers,
+      body: jsonEncode({
+        'resourceBaseUrl': 'http://127.0.0.1:4173/',
+        'credential': credential,
+        'expiresAt': expiresAt.millisecondsSinceEpoch,
+      }),
+    );
+    expect(started.statusCode, HttpStatus.accepted, reason: started.body);
+    final startedRunId = jsonDecode(started.body)['runId'] as String;
+    expect(launched, hasLength(1));
+    expect(launched.single.projectId, 'demo');
+    expect(
+      launched.single.resourceSession?.resourceBaseUri,
+      Uri.parse('http://127.0.0.1:4173/'),
+    );
+    final status = await http.get(
+      base.resolve('/dev/api/projects/demo/development'),
+      headers: headers,
+    );
+    expect(status.statusCode, HttpStatus.ok);
+    expect(jsonDecode(status.body)['active'], isTrue);
+    expect(status.body, isNot(contains(credential)));
+    runController.registerRestartHandler(
+      'demo',
+      () async => restarted += 1,
+      expectedRunId: startedRunId,
+    );
+    final restart = await http.post(
+      base.resolve('/dev/api/projects/demo/run/restart'),
+      headers: headers,
+    );
+    expect(restart.statusCode, HttpStatus.accepted, reason: restart.body);
+    expect(jsonDecode(restart.body)['runId'], startedRunId);
+    expect(restarted, 1);
+    expect(launched, hasLength(1));
+    expect(runController.resourceSession('demo'), isNotNull);
+
+    final revoked = await http.delete(
+      base.resolve('/dev/api/projects/demo/development'),
+      headers: headers,
+    );
+    expect(revoked.statusCode, HttpStatus.ok, reason: revoked.body);
+    expect(stopped, 1);
+    expect(runController.resourceSession('demo'), isNull);
+  });
 }
+
+GameSummary _installedDeveloperGame({
+  required String id,
+  required String? packageRootFilePath,
+}) => GameSummary(
+  id: id,
+  name: id,
+  version: '1.0.0',
+  description: '',
+  minPlayers: 1,
+  maxPlayers: 1,
+  supportsMultiplayer: false,
+  displayModeLabel: '多人多屏',
+  displayMode: 'multi_screen',
+  orientation: GameOrientation.landscape,
+  entry: LocalGameEntry(
+    gameEntryPath: 'index.html',
+    statusLabel: 'Game SDK 4.0.0',
+    packageRootFilePath: packageRootFilePath,
+  ),
+);
 
 Future<Map<String, Object?>> _waitForAiApproval(
   Uri base, {
@@ -2060,9 +2306,11 @@ class _FakeCatalog implements DeveloperProjectCatalog {
         ),
         'main.json': Uint8List.fromList(
           utf8.encode(
-            '{"id":"demo","modes":["multiplayer"],'
+            '{"id":"demo","sdkVersion":"4.0.0","appSdkVersion":"3.2.0",'
+            '"modes":["multiplayer"],'
             '"displayModes":["multi_screen"],'
-            '"authority":{"entry":"app/static/js/service/index.js"}}',
+            '"entries":{"game":"index.html"},'
+            '"authority":{"entry":"static/js/service/index.js"}}',
           ),
         ),
       };
@@ -2076,8 +2324,7 @@ class _FakeCatalog implements DeveloperProjectCatalog {
       id: 'demo',
       name: 'Demo',
       version: '1.0.0',
-      rootAssetPath: 'assets/demo',
-      readOnly: true,
+      rootFilePath: 'test-projects/demo',
     ),
   ];
 
@@ -2246,11 +2493,7 @@ class _FakeCatalog implements DeveloperProjectCatalog {
     displayModeLabel: '多屏',
     displayMode: 'multi_screen',
     orientation: GameOrientation.landscape,
-    entry: LocalGameEntry(
-      assetPath: 'assets/demo/app/index.html',
-      statusLabel: '开发项目',
-      packageRootAssetPath: 'assets/demo',
-    ),
+    entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: '开发项目'),
   );
 }
 
@@ -2315,8 +2558,11 @@ class _FakeProjectPublisher implements DeveloperProjectPublisher {
           sourceId: id,
           sourceName: id == 'official' ? 'Official' : 'Community',
           status: id == 'community' && !isRetry
-              ? 'network_failed'
+              ? 'package_validation_failed'
               : 'entered_review',
+          detail: id == 'community' && !isRetry
+              ? 'main.json.entries.game 对应文件不存在'
+              : null,
         ),
     ];
     for (final source in sources) {

@@ -11,6 +11,7 @@ import 'core/catalog/online_game_catalog.dart';
 import 'core/game_package/game_library_manager.dart';
 import 'core/game_package/game_library_repository.dart';
 import 'core/game_package/game_package_transfer_service.dart';
+import 'core/game_package/ordinary_web_package_importer.dart';
 import 'core/localization/playmesh_localization.dart';
 import 'core/localization/playmesh_ui_controller.dart';
 import 'core/localization/playmesh_ui_preferences.dart';
@@ -19,6 +20,7 @@ import 'core/developer/developer_game_catalog_publisher.dart';
 import 'core/developer/developer_project_catalog.dart';
 import 'core/developer/developer_run_controller.dart';
 import 'core/developer/developer_web_gateway_contract.dart';
+import 'core/platform/app_platform.dart';
 import 'core/profile/user_profile_store.dart';
 import 'core/platform/incoming_file_service.dart';
 import 'core/services/go_core_runtime.dart';
@@ -84,6 +86,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
   late final GameLibraryRepository _gameLibrary;
   GameLibraryLocalMetadataStore? _gameLibraryMetadata;
   late final GamePackageTransferService _packageTransfer;
+  late final OrdinaryWebPackageImporter _ordinaryWebPackageImporter;
   late final GameCatalogController _catalogController;
   late final GameLibraryDeveloperProjectCatalog _developerCatalog;
   late final DeveloperRunController _developerRuns;
@@ -118,13 +121,18 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     final injectedGames = widget.games;
     _gameLibraryManager = GameLibraryManager();
     _packageTransfer = GamePackageTransferService();
+    _ordinaryWebPackageImporter = const OrdinaryWebPackageImporter();
     _profileStore = const UserProfileStore();
     late GameLibraryScan scan;
     _gameLibrary = GameLibraryRepository(
       () => scan(),
       initialGames: injectedGames ?? const [],
     );
-    _developerCatalog = GameLibraryDeveloperProjectCatalog(_gameLibrary);
+    _developerCatalog = GameLibraryDeveloperProjectCatalog(
+      _gameLibrary,
+      packageTransfer: _packageTransfer,
+      ordinaryWebPackageImporter: _ordinaryWebPackageImporter,
+    );
     if (injectedGames == null) {
       final metadata = GameLibraryLocalMetadataStore();
       _gameLibraryMetadata = metadata;
@@ -148,7 +156,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
         : SynchronousFuture(_gameLibrary.cachedGames);
     _developerRuns = DeveloperRunController(onLaunch: _launchDeveloperProject);
     unawaited(cleanupStaleGamePackageExport());
-    // The Android embedding currently owns the ACTION_VIEW/open-file bridge.
+    // Android 嵌入层目前负责 ACTION_VIEW/打开文件桥接。
     if (!kIsWeb && Platform.isAndroid) {
       final incomingFiles = IncomingFileService();
       _incomingFiles = incomingFiles;
@@ -428,6 +436,8 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
           games: _gameLibrary.cachedGames,
           onRefresh: _gameLibrary.refresh,
           onImport: _importGame,
+          onInspectImport: _inspectGameImport,
+          onImportOrdinaryWebPackage: _importOrdinaryWebGame,
           onQuery: (search, {required offset, required limit}) =>
               _gameLibrary.query(search: search, offset: offset, limit: limit),
           onCheckUpdates: widget.games == null
@@ -488,7 +498,10 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
           final launchArguments = arguments is GameLaunchArguments
               ? arguments
               : switch (arguments as GameSummary? ?? primaryGame) {
-                  final game? => GameLaunchArguments(game: game),
+                  final game? => GameLaunchArguments(
+                    game: game,
+                    enterFullscreenOnLaunch: true,
+                  ),
                   null => null,
                 };
           if (launchArguments == null) return null;
@@ -498,6 +511,7 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
             settings: settings,
             builder: (_) => GamePage(
               game: launchArguments.game,
+              enterFullscreenOnLaunch: launchArguments.enterFullscreenOnLaunch,
               localUserId: _profile.userId,
               localNickname: _profile.nickname,
               localProfile: _profile,
@@ -508,6 +522,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
                   : null,
               joinRequest: launchArguments.joinRequest,
               developerProjectId: launchArguments.developerProjectId,
+              developerRunId: launchArguments.developerRunId,
+              developerResourceSession:
+                  launchArguments.developerResourceSession,
             ),
           );
         }
@@ -588,6 +605,29 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     return game;
   }
 
+  Future<GamePackageImportInspection> _inspectGameImport(String sourcePath) {
+    return _ordinaryWebPackageImporter.inspect(File(sourcePath));
+  }
+
+  Future<GameSummary> _importOrdinaryWebGame(
+    String sourcePath,
+    OrdinaryWebPackageConfiguration configuration,
+  ) async {
+    final game = await _developerCatalog.publishOrdinaryWebPackage(
+      File(sourcePath),
+      configuration: configuration,
+      author: _profile.nickname,
+      lastModifiedAt: DateTime.now().toUtc(),
+    );
+    _gameLibrary.upsert(game);
+    if (mounted) {
+      setState(() {
+        _games = SynchronousFuture(_gameLibrary.cachedGames);
+      });
+    }
+    return game;
+  }
+
   Future<void> _catalogGameImported(GameSummary _) async {
     await _gameLibrary.refresh();
     if (!mounted) return;
@@ -636,7 +676,10 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     if (file.isHtml) {
       await navigator.push<void>(
         MaterialPageRoute<void>(
-          builder: (_) => StandaloneHtmlPage(filePath: file.path),
+          builder: (_) => StandaloneHtmlPage(
+            filePath: file.path,
+            enterFullscreenOnLaunch: isMobileAppPlatform,
+          ),
         ),
       );
       return;
@@ -667,8 +710,11 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     )?.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _launchDeveloperProject(String projectId) async {
+  Future<void> _launchDeveloperProject(
+    DeveloperProjectLaunchRequest request,
+  ) async {
     await _games;
+    final projectId = request.projectId;
     final game = await _developerCatalog.prepareGame(projectId);
     var navigator = _navigatorKey.currentState;
     if (navigator == null) {
@@ -680,7 +726,13 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
     }
     launchDeveloperGameRoute(
       navigator,
-      GameLaunchArguments(game: game, developerProjectId: projectId),
+      GameLaunchArguments(
+        game: game,
+        enterFullscreenOnLaunch: isMobileAppPlatform,
+        developerProjectId: projectId,
+        developerRunId: request.runId,
+        developerResourceSession: request.resourceSession,
+      ),
     );
   }
 }

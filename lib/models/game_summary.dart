@@ -66,6 +66,8 @@ class GameSummary {
   final List<String> tags;
   final GameCapabilities capabilities;
 
+  bool get isRunnable => manifestError == null;
+
   GameOrientation orientationForRole({required bool controller}) =>
       controller ? controllerOrientation ?? orientation : orientation;
 

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../../models/game_manifest.dart';
 import '../../models/game_capabilities.dart';
+import '../../models/game_package_layout.dart';
 import '../game_package/game_package_icon.dart';
 
 enum DeveloperDiagnosticSeverity {
@@ -170,6 +171,21 @@ class DeveloperProjectValidator {
       if (entity is! File) continue;
       files[path] = entity;
       totalBytes += await entity.length();
+      if (path.startsWith('app/')) {
+        try {
+          playmeshGamePackageLayout.validatePackagePath(path, field: '项目文件路径');
+        } on FormatException catch (error) {
+          diagnostics.add(
+            _error(
+              'reserved_runtime_namespace',
+              path,
+              error.message,
+              hint: '将游戏资源移出 app/playmesh/ 和 app/bucket/，并使用未编码的规范路径。',
+              messageArguments: {'path': path},
+            ),
+          );
+        }
+      }
       final extension = _extension(path);
       if (_blockedExtensions.contains(extension)) {
         diagnostics.add(
@@ -206,52 +222,62 @@ class DeveloperProjectValidator {
     }
 
     if (manifest != null) {
+      final gameEntry = playmeshGamePackageLayout.parseWebEntry(
+        manifest.entries.game,
+        field: 'entries.game',
+        kind: GameWebEntryKind.html,
+      );
       _requireFile(
         files,
         diagnostics,
-        manifest.entries.game,
+        playmeshGamePackageLayout.packagePathForWebPath(gameEntry.path),
         code: 'app_entry_missing',
         message: 'entries.game 指向的主游戏入口不存在',
       );
-      if (manifest.displayModes.contains(
-        GameDisplayMode.singleScreenMultiplayer,
-      )) {
+      if (manifest.supportsMultiplayer &&
+          manifest.displayModes.contains(
+            GameDisplayMode.singleScreenMultiplayer,
+          )) {
+        final controllerEntry = playmeshGamePackageLayout.parseWebEntry(
+          manifest.entries.controller!,
+          field: 'entries.controller',
+          kind: GameWebEntryKind.html,
+        );
         _requireFile(
           files,
           diagnostics,
-          manifest.entries.controller,
+          playmeshGamePackageLayout.packagePathForWebPath(controllerEntry.path),
           code: 'controller_entry_missing',
           message: 'entries.controller 指向的控制器入口不存在',
         );
       }
-      final authorityPath = manifest.authority?.entry;
+      final authorityPath = manifest.supportsMultiplayer
+          ? manifest.authority?.entry
+          : null;
       if (authorityPath != null) {
+        final authorityEntry = playmeshGamePackageLayout.parseWebEntry(
+          authorityPath,
+          field: 'authority.entry',
+          kind: GameWebEntryKind.javaScript,
+        );
         _requireFile(
           files,
           diagnostics,
-          authorityPath,
+          playmeshGamePackageLayout.packagePathForWebPath(authorityEntry.path),
           code: 'authority_entry_missing',
           message: 'authority.entry 指向的文件不存在',
         );
       }
-      final rootIcon = files['icon.png'];
-      if (rootIcon != null && !isSafeGamePackageIconSync(rootIcon)) {
-        diagnostics.add(
-          _error(
-            'root_icon_invalid',
-            'icon.png',
-            '包根目录 icon.png 不是安全的 PNG 图片',
-            hint: '请删除该文件，或替换为不超过 2 MiB 的有效 PNG。',
-          ),
-        );
-      }
-    } else {
-      _requireFile(
-        files,
-        diagnostics,
-        'app/index.html',
-        code: 'app_entry_missing',
-        message: '缺少默认主游戏入口 app/index.html',
+    }
+    final rootIcon = files['icon.png'];
+    if (rootIcon != null && !isSafeGamePackageIconSync(rootIcon)) {
+      diagnostics.add(
+        _error(
+          'root_icon_invalid',
+          'icon.png',
+          '包根目录 icon.png 不是安全的 PNG 图片',
+          hint: '请删除该文件，或替换为不超过 2 MiB 的有效 PNG。',
+        ),
       );
     }
 
@@ -490,23 +516,28 @@ class _ResolvedReference {
 
 _ResolvedReference? _resolveReference(String sourcePath, String raw) {
   final value = raw.trim();
+  final lower = value.toLowerCase();
   if (value.isEmpty ||
       value.startsWith('#') ||
-      value.startsWith('data:') ||
-      value.startsWith('blob:') ||
-      value.startsWith('http:') ||
-      value.startsWith('https:') ||
+      lower.startsWith('data:') ||
+      lower.startsWith('blob:') ||
+      lower.startsWith('http:') ||
+      lower.startsWith('https:') ||
       value.startsWith('//') ||
-      value.startsWith('/playmesh/')) {
+      _isRuntimeReference(value)) {
     return null;
   }
   final withoutQuery = value.split(RegExp(r'[?#]')).first;
   if (withoutQuery.isEmpty) return null;
-  final candidate = withoutQuery.startsWith('/app/')
-      ? 'app/${withoutQuery.substring('/app/'.length)}'
-      : withoutQuery.startsWith('/')
+  if (withoutQuery.contains(r'\') || withoutQuery.contains('%')) {
+    return const _ResolvedReference('', escaped: true);
+  }
+  final sourceWebPath = sourcePath.startsWith('app/')
+      ? sourcePath.substring('app/'.length)
+      : sourcePath;
+  final candidate = withoutQuery.startsWith('/')
       ? withoutQuery.substring(1)
-      : '${_parent(sourcePath)}/$withoutQuery';
+      : '${_parent(sourceWebPath)}/$withoutQuery';
   final parts = <String>[];
   for (final part in candidate.split('/')) {
     if (part.isEmpty || part == '.') continue;
@@ -517,8 +548,22 @@ _ResolvedReference? _resolveReference(String sourcePath, String raw) {
       parts.add(part);
     }
   }
-  final path = parts.join('/');
-  return _ResolvedReference(path, escaped: !path.startsWith('app/'));
+  if (parts.isEmpty) return const _ResolvedReference('', escaped: true);
+  if (playmeshGamePackageLayout.isRuntimeNamespace(parts.first)) return null;
+  try {
+    return _ResolvedReference(
+      playmeshGamePackageLayout.packagePathForWebPath(parts.join('/')),
+    );
+  } on FormatException {
+    return const _ResolvedReference('', escaped: true);
+  }
+}
+
+bool _isRuntimeReference(String value) {
+  if (!value.startsWith('/')) return false;
+  final path = value.substring(1).split(RegExp(r'[?#]')).first;
+  if (path.isEmpty) return false;
+  return playmeshGamePackageLayout.isRuntimeNamespace(path.split('/').first);
 }
 
 (int, int) _position(String source, int offset) {

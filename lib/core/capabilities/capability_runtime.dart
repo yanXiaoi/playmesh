@@ -18,9 +18,8 @@ class CapabilityRuntime {
   int _sequence = 0;
   bool _confirmed = false;
 
-  Iterable<String> get availableDeclaredCodes => declaredCapabilities.where(
-    (code) => registry.plugin(code)?.isAvailable == true,
-  );
+  Iterable<String> get availableDeclaredCodes =>
+      declaredCapabilities.where(registry.isAvailable);
 
   void confirm() => _confirmed = true;
 
@@ -35,7 +34,9 @@ class CapabilityRuntime {
       throw StateError('当前游戏未在 capabilities.json 声明 $code');
     }
     if (!_confirmed) throw StateError('请先完成本次游戏能力确认');
-    if (!plugin.isAvailable) throw UnsupportedError('当前设备不支持 $code');
+    if (!registry.isPluginAvailable(plugin)) {
+      throw UnsupportedError('当前设备不支持 $code');
+    }
     final options = _map(payload['options'], field: 'options');
     final instance = await plugin.create(options);
     final instanceId =

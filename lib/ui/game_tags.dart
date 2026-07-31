@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../core/localization/playmesh_localization.dart';
 
-/// Displays manifest tags as a semantic, theme-aware group.
+/// 以具备语义且响应主题的分组形式显示清单标签。
 ///
-/// Every tag remains in a single horizontal rail. Constrained list cards can
-/// scroll the rail instead of hiding, wrapping, or summarizing manifest tags.
+/// 所有标签保持在同一条水平轨道中；空间受限的列表卡片可以横向滚动该轨道，
+/// 而不是隐藏、换行或汇总清单标签。
 class GameTagList extends StatelessWidget {
   const GameTagList({
     super.key,

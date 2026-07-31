@@ -58,7 +58,7 @@ GameSummary _game(String packageRoot) => GameSummary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.portrait,
   entry: LocalGameEntry(
-    assetPath: 'app/index.html',
+    gameEntryPath: 'index.html',
     statusLabel: 'Game SDK 1.0',
     packageRootFilePath: packageRoot,
   ),

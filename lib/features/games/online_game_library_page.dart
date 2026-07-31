@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/catalog/game_catalog_models.dart';
 import '../../core/catalog/online_game_catalog.dart';
+import '../../core/formatting/byte_size_formatter.dart';
 import '../../core/game_package/game_library_local_metadata.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/version/semantic_version.dart';
@@ -1793,8 +1794,7 @@ class _CatalogSourceDetailPageState extends State<CatalogSourceDetailPage> {
   @override
   void initState() {
     super.initState();
-    // Paint the persisted declaration first, then refresh it without blocking
-    // the first frame or replacing cached details with a loading screen.
+    // 先绘制已持久化的声明，再异步刷新，避免阻塞首帧或用加载页替换缓存详情。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _source != null) {
         unawaited(_refreshDeclaration(showFeedback: false));
@@ -1940,7 +1940,7 @@ class _SourceDetails extends StatelessWidget {
               label: context.tr('online.sources.upload_contract'),
               value: upload?.supported == true
                   ? '${upload!.protocolVersion} · ${upload.path} · '
-                        '${_formatBytes(upload.maxUploadBytes!)}'
+                        '${formatByteSize(upload.maxUploadBytes!)}'
                   : '—',
             ),
             _DetailRow(
@@ -2178,18 +2178,14 @@ class _SingleDownloadDialog extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 18),
-                  LinearProgressIndicator(
-                    value: task.status == GameDownloadStatus.downloading
-                        ? task.progress
-                        : task.status == GameDownloadStatus.completed
-                        ? 1
-                        : null,
-                  ),
+                  LinearProgressIndicator(value: _downloadProgress(task)),
                   const SizedBox(height: 10),
                   Text(
                     _downloadLabel(context, task),
                     textAlign: TextAlign.center,
                   ),
+                  const SizedBox(height: 16),
+                  _DownloadMetrics(task: task),
                 ],
               ),
             ),
@@ -2226,25 +2222,127 @@ class _SingleDownloadDialog extends StatelessWidget {
     GameDownloadStatus.failed => Icons.error_outline,
   };
 
-  static String _downloadLabel(BuildContext context, GameDownloadTask task) =>
-      switch (task.status) {
-        GameDownloadStatus.queued => context.tr('online.downloads.waiting'),
-        GameDownloadStatus.downloading =>
-          task.progress == null
-              ? context.tr('online.downloads.downloading')
-              : context.tr(
-                  'online.downloads.progress',
-                  arguments: {'progress': (task.progress! * 100).round()},
-                ),
-        GameDownloadStatus.completed => context.tr(
-          'online.downloads.installed',
+  static double? _downloadProgress(GameDownloadTask task) {
+    if (task.status == GameDownloadStatus.completed) return 1;
+    if (task.status != GameDownloadStatus.downloading ||
+        task.phase == GameDownloadPhase.preparing ||
+        task.phase == GameDownloadPhase.installing) {
+      return null;
+    }
+    return task.progress;
+  }
+
+  static String _downloadLabel(
+    BuildContext context,
+    GameDownloadTask task,
+  ) => switch (task.status) {
+    GameDownloadStatus.queued => context.tr('online.downloads.waiting'),
+    GameDownloadStatus.downloading => switch (task.phase) {
+      GameDownloadPhase.preparing => context.tr('online.downloads.preparing'),
+      GameDownloadPhase.installing => context.tr('online.downloads.installing'),
+      _ =>
+        task.progress == null
+            ? context.tr('online.downloads.downloading')
+            : context.tr(
+                'online.downloads.progress',
+                arguments: {'progress': (task.progress! * 100).round()},
+              ),
+    },
+    GameDownloadStatus.completed => context.tr('online.downloads.installed'),
+    GameDownloadStatus.stopped => context.tr('online.downloads.stopped'),
+    GameDownloadStatus.failed => context.tr(
+      'online.downloads.failed',
+      arguments: {'error': task.error},
+    ),
+  };
+}
+
+class _DownloadMetrics extends StatelessWidget {
+  const _DownloadMetrics({required this.task});
+
+  final GameDownloadTask task;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = task.totalBytes;
+    final totalText = total == null
+        ? context.tr('online.downloads.size_unknown')
+        : formatByteSize(total);
+    final speedText =
+        task.phase == GameDownloadPhase.downloading &&
+            task.bytesPerSecond != null
+        ? formatByteRate(task.bytesPerSecond!)
+        : '—';
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
         ),
-        GameDownloadStatus.stopped => context.tr('online.downloads.stopped'),
-        GameDownloadStatus.failed => context.tr(
-          'online.downloads.failed',
-          arguments: {'error': task.error},
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            runAlignment: WrapAlignment.center,
+            spacing: 18,
+            runSpacing: 12,
+            children: [
+              _DownloadMetric(
+                key: const ValueKey('catalog-download-total-size'),
+                label: context.tr('online.downloads.total_size'),
+                value: totalText,
+              ),
+              _DownloadMetric(
+                key: const ValueKey('catalog-download-speed'),
+                label: context.tr('online.downloads.current_speed'),
+                value: speedText,
+              ),
+              _DownloadMetric(
+                key: const ValueKey('catalog-download-transferred'),
+                label: context.tr('online.downloads.transferred'),
+                value: '${formatByteSize(task.bytesReceived)} / $totalText',
+              ),
+            ],
+          ),
         ),
-      };
+      ),
+    );
+  }
+}
+
+class _DownloadMetric extends StatelessWidget {
+  const _DownloadMetric({super.key, required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 112),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CatalogSourceScannerPage extends StatefulWidget {
@@ -2610,14 +2708,6 @@ List<String> _nearestFocusFallbackIds({
   }
   ordered.addAll(nextIds.where((id) => !ordered.contains(id)));
   return ordered;
-}
-
-String _formatBytes(int value) {
-  if (value >= 1024 * 1024) {
-    return '${(value / (1024 * 1024)).toStringAsFixed(1)} MiB';
-  }
-  if (value >= 1024) return '${(value / 1024).toStringAsFixed(1)} KiB';
-  return '$value B';
 }
 
 String _formatLocalDateTime(BuildContext context, DateTime value) {

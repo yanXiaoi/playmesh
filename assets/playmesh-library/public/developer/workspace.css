@@ -1101,10 +1101,16 @@ button,
 
 .publish-result-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
   gap: 12px;
   padding-top: 6px;
   border-top: 1px solid var(--line);
+}
+
+.publish-result-row span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .publish-result-row span:first-child {

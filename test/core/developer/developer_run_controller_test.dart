@@ -120,4 +120,220 @@ void main() {
       throwsStateError,
     );
   });
+
+  test('开发资源会话只在内存绑定并随停止运行撤销', () async {
+    DeveloperProjectLaunchRequest? launched;
+    var stopped = 0;
+    final controller = DeveloperRunController(
+      onLaunch: (request) async => launched = request,
+    );
+    controller.registerStopHandler(
+      'com.example.development',
+      () async => stopped += 1,
+    );
+    final session = DeveloperResourceSession(
+      projectId: 'com.example.development',
+      resourceBaseUri: Uri.parse('http://192.168.1.8:4173/'),
+      credential: List<String>.filled(40, 'a').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+
+    final started = await controller.runDevelopment(session);
+
+    expect(started.phase, DeveloperRunPhase.starting);
+    expect(launched?.projectId, session.projectId);
+    expect(launched?.resourceSession, same(session));
+    expect(controller.resourceSession(session.projectId), same(session));
+
+    final stoppedStatus = await controller.stopDevelopment(session.projectId);
+    expect(stopped, 1);
+    expect(stoppedStatus.phase, DeveloperRunPhase.stopped);
+    expect(controller.resourceSession(session.projectId), isNull);
+  });
+
+  test('开发资源启动失败时不残留会话凭据', () async {
+    final controller = DeveloperRunController(
+      onLaunch: (_) async => throw StateError('launch failed'),
+    );
+    final session = DeveloperResourceSession(
+      projectId: 'com.example.failed-development',
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'b').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+
+    await expectLater(controller.runDevelopment(session), throwsStateError);
+
+    expect(controller.resourceSession(session.projectId), isNull);
+    expect(controller.status(session.projectId).phase, DeveloperRunPhase.error);
+  });
+
+  test('重复开发启动会先完整停止旧运行再绑定新凭据', () async {
+    late DeveloperRunController controller;
+    final launched = <DeveloperProjectLaunchRequest>[];
+    final stoppedRunIds = <String>[];
+    controller = DeveloperRunController(
+      onLaunch: (request) async {
+        launched.add(request);
+        controller.registerStopHandler(
+          request.projectId,
+          () async => stoppedRunIds.add(request.runId),
+          expectedRunId: request.runId,
+        );
+      },
+    );
+    final first = DeveloperResourceSession(
+      projectId: 'com.example.repeated-development',
+      resourceBaseUri: Uri.parse('http://192.168.1.8:4173/'),
+      credential: List<String>.filled(40, 'c').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+    final second = DeveloperResourceSession(
+      projectId: first.projectId,
+      resourceBaseUri: Uri.parse('http://192.168.1.8:5173/'),
+      credential: List<String>.filled(40, 'd').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+
+    final firstStatus = await controller.runDevelopment(first);
+    controller.reportRunning(
+      projectId: first.projectId,
+      expectedRunId: firstStatus.runId,
+    );
+    final secondStatus = await controller.runDevelopment(second);
+
+    expect(launched, hasLength(2));
+    expect(stoppedRunIds, [firstStatus.runId]);
+    expect(secondStatus.runId, isNot(firstStatus.runId));
+    expect(controller.resourceSession(first.projectId), same(second));
+  });
+
+  test('启动后立即停止会等待对应页面注册处理器', () async {
+    DeveloperProjectLaunchRequest? request;
+    final controller = DeveloperRunController(
+      onLaunch: (value) async => request = value,
+      stopHandlerTimeout: const Duration(seconds: 1),
+    );
+    final session = DeveloperResourceSession(
+      projectId: 'com.example.immediate-stop',
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'e').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+    await controller.runDevelopment(session);
+
+    final stopping = controller.stopDevelopment(session.projectId);
+    await Future<void>.delayed(Duration.zero);
+    var stopped = 0;
+    controller.registerStopHandler(
+      session.projectId,
+      () async => stopped += 1,
+      expectedRunId: request!.runId,
+    );
+    final status = await stopping;
+
+    expect(stopped, 1);
+    expect(status.phase, DeveloperRunPhase.stopped);
+    expect(controller.resourceSession(session.projectId), isNull);
+  });
+
+  test('停止失败保留开发会话并允许使用同一处理器重试', () async {
+    late DeveloperRunController controller;
+    var attempts = 0;
+    controller = DeveloperRunController(
+      onLaunch: (request) async {
+        controller.registerStopHandler(request.projectId, () async {
+          attempts += 1;
+          if (attempts == 1) throw StateError('temporary stop failure');
+        }, expectedRunId: request.runId);
+      },
+    );
+    final session = DeveloperResourceSession(
+      projectId: 'com.example.retry-stop',
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'f').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+    await controller.runDevelopment(session);
+
+    await expectLater(
+      controller.stopDevelopment(session.projectId),
+      throwsStateError,
+    );
+    expect(controller.resourceSession(session.projectId), same(session));
+
+    final stopped = await controller.stopDevelopment(session.projectId);
+    expect(attempts, 2);
+    expect(stopped.phase, DeveloperRunPhase.stopped);
+    expect(controller.resourceSession(session.projectId), isNull);
+  });
+
+  test('开发会话重启会复用当前运行标识并保留开发资源源', () async {
+    late DeveloperRunController controller;
+    final launched = <DeveloperProjectLaunchRequest>[];
+    var restarted = 0;
+    controller = DeveloperRunController(
+      onLaunch: (request) async {
+        launched.add(request);
+        controller.registerRestartHandler(
+          request.projectId,
+          () async => restarted += 1,
+          expectedRunId: request.runId,
+        );
+        controller.registerStopHandler(
+          request.projectId,
+          () async {},
+          expectedRunId: request.runId,
+        );
+      },
+    );
+    final session = DeveloperResourceSession(
+      projectId: 'com.example.formal-after-development',
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'g').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    );
+    final development = await controller.runDevelopment(session);
+    controller.reportRunning(
+      projectId: session.projectId,
+      expectedRunId: development.runId,
+    );
+
+    final refreshed = await controller.restart(session.projectId);
+
+    expect(launched, hasLength(1));
+    expect(launched.first.resourceSession, same(session));
+    expect(restarted, 1);
+    expect(refreshed.runId, development.runId);
+    expect(controller.resourceSession(session.projectId), same(session));
+    expect(refreshed.message, contains('资源会话保持运行'));
+  });
+
+  test('开发会话到期会停止对应运行并从状态查询中撤销', () async {
+    late DeveloperRunController controller;
+    controller = DeveloperRunController(
+      onLaunch: (request) async {
+        controller.registerStopHandler(
+          request.projectId,
+          () async {},
+          expectedRunId: request.runId,
+        );
+      },
+    );
+    final session = DeveloperResourceSession(
+      projectId: 'com.example.expiring-development',
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'h').join(),
+      expiresAt: DateTime.now().toUtc().add(const Duration(milliseconds: 30)),
+    );
+
+    await controller.runDevelopment(session);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(controller.resourceSession(session.projectId), isNull);
+    expect(
+      controller.status(session.projectId).phase,
+      DeveloperRunPhase.stopped,
+    );
+  });
 }

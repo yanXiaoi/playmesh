@@ -238,18 +238,33 @@ class GoCoreRuntime
 
   void Function() registerDeveloperGameRestartHandler(
     String projectId,
-    Future<void> Function() handler,
-  ) => developerRunController.registerRestartHandler(projectId, handler);
+    Future<void> Function() handler, {
+    String? expectedRunId,
+  }) => developerRunController.registerRestartHandler(
+    projectId,
+    handler,
+    expectedRunId: expectedRunId,
+  );
 
   void Function() registerDeveloperGameStopHandler(
     String projectId,
-    Future<void> Function() handler,
-  ) => developerRunController.registerStopHandler(projectId, handler);
+    Future<void> Function() handler, {
+    String? expectedRunId,
+  }) => developerRunController.registerStopHandler(
+    projectId,
+    handler,
+    expectedRunId: expectedRunId,
+  );
 
   void Function() registerDeveloperGameJavaScriptExecutor(
     String projectId,
-    DeveloperWebViewJavaScriptExecutor executor,
-  ) => developerRunController.registerJavaScriptExecutor(projectId, executor);
+    DeveloperWebViewJavaScriptExecutor executor, {
+    String? expectedRunId,
+  }) => developerRunController.registerJavaScriptExecutor(
+    projectId,
+    executor,
+    expectedRunId: expectedRunId,
+  );
 
   @override
   Future<List<Uri>> developerWorkspaceLinks(DeveloperSession session) async {

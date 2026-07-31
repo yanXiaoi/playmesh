@@ -1,10 +1,14 @@
 import '../capabilities/capability_runtime.dart';
+import '../app_media/app_media_runtime.dart';
 import '../session/go_core_session_client.dart';
 import '../storage/game_storage_service.dart';
 
 part 'features/app/app_capability_feature.dart';
 part 'features/app/app_core_feature.dart';
 part 'features/app/app_device_feature.dart';
+part 'features/app/app_media_feature.dart';
+part 'features/app/app_media_webrtc_feature.dart';
+part 'features/app/app_performance_feature.dart';
 part 'features/app/app_ui_feature.dart';
 part 'features/game/game_binary_feature.dart';
 part 'features/game/game_core_feature.dart';
@@ -169,8 +173,6 @@ abstract interface class _AppSdkCommandFeature {
 class GameSdkCommandContext {
   GameSdkCommandContext({
     required this.ensureStorage,
-    required this.emitFps,
-    required this.emitLatency,
     required this.completeLifecycle,
     required this.routeRemoteStorage,
     this.gameInfo = const <String, Object?>{},
@@ -182,8 +184,6 @@ class GameSdkCommandContext {
   final Map<String, Object?>? standalonePlayer;
   final Map<String, Object?> gameInfo;
   final Future<GameStorageService> Function() ensureStorage;
-  final void Function(double value) emitFps;
-  final void Function(double? value) emitLatency;
   final bool Function(String requestId) completeLifecycle;
   final Future<void> Function(
     String command,
@@ -201,6 +201,7 @@ class AppSdkCommandContext {
     required this.configureRuntimeGame,
     required this.confirmCapabilities,
     required this.capabilityRuntime,
+    required this.mediaRuntime,
     required this.sendCapabilityEvent,
     required this.disposeCapability,
     required this.setFullscreen,
@@ -219,6 +220,7 @@ class AppSdkCommandContext {
   configureRuntimeGame;
   final Object? Function() confirmCapabilities;
   final CapabilityRuntime capabilityRuntime;
+  final AppMediaRuntime mediaRuntime;
   final Future<void> Function(Map<String, Object?> message) sendCapabilityEvent;
   final Future<Object?> Function(Map<String, Object?> payload)
   disposeCapability;
@@ -237,12 +239,13 @@ final class SdkFeatureRegistry {
     _GameCoreFeature(),
     _GameSessionFeature(),
     _GameStorageLifecycleFeature(),
-    _GamePerformanceFeature(),
+    _GamePerformanceTransportFeature(),
   ];
 
   static final List<_AppSdkCommandFeature> _appCommandFeatures = [
     _AppCoreFeature(),
     _AppCapabilityFeature(),
+    _AppMediaFeature(),
     _AppUiFeature(),
     _AppDeviceFeature(),
   ];
@@ -273,6 +276,9 @@ final class SdkFeatureRegistry {
     gameStorageLifecycleSdkSource,
     appCoreSdkSource,
     appCapabilitySdkSource,
+    appMediaSdkSource,
+    appMediaWebRtcSdkSource,
+    appPerformanceSdkSource,
     appUiSdkSource,
     appDeviceSdkSource,
   ];
@@ -284,7 +290,7 @@ final class SdkFeatureRegistry {
   static final List<SdkRelease> _sdkReleases = _registerSdkReleases([
     SdkRelease._(
       target: SdkSourceTarget.game,
-      minimumRequestedVersion: '1.0.0',
+      minimumRequestedVersion: _runtimeBundle.gameVersion,
       maximumRequestedVersion: _runtimeBundle.gameVersion,
       bundleVersion: _runtimeBundle.gameVersion,
       files: _sdkFilesForTarget(_runtimeBundle.files, SdkSourceTarget.game),
@@ -298,7 +304,7 @@ final class SdkFeatureRegistry {
     ),
     SdkRelease._(
       target: SdkSourceTarget.app,
-      minimumRequestedVersion: '1.0.0',
+      minimumRequestedVersion: _runtimeBundle.appVersion,
       maximumRequestedVersion: _runtimeBundle.appVersion,
       bundleVersion: _runtimeBundle.appVersion,
       files: _sdkFilesForTarget(_runtimeBundle.files, SdkSourceTarget.app),
@@ -349,7 +355,8 @@ final class SdkFeatureRegistry {
     const prefix = 'sdk/v1/';
     if (!relativePath.startsWith(prefix)) return null;
     final name = relativePath.substring(prefix.length);
-    final target = _sdkTargetForFileOrNull(name);
+    // raw TypeScript 只用于注册表组装和正式生成，不能成为运行时公开资源。
+    final target = _publicSdkTargetForFileOrNull(name);
     if (target == null) return null;
     return sdkFile(
       name,
@@ -414,13 +421,23 @@ SdkSourceTarget _sdkTargetForFile(String name) {
 
 SdkSourceTarget? _sdkTargetForFileOrNull(String name) {
   if (name == 'playmesh.ts' ||
-      name == 'playmesh.js' ||
-      name == 'playmesh.d.ts') {
+      name == 'playmesh-main.js' ||
+      name == 'playmesh-main.d.ts') {
     return SdkSourceTarget.game;
   }
   if (name == 'playmesh-app.ts' ||
       name == 'playmesh-app.js' ||
       name == 'playmesh-app.d.ts') {
+    return SdkSourceTarget.app;
+  }
+  return null;
+}
+
+SdkSourceTarget? _publicSdkTargetForFileOrNull(String name) {
+  if (name == 'playmesh-main.js' || name == 'playmesh-main.d.ts') {
+    return SdkSourceTarget.game;
+  }
+  if (name == 'playmesh-app.js' || name == 'playmesh-app.d.ts') {
     return SdkSourceTarget.app;
   }
   return null;
@@ -613,8 +630,8 @@ _SdkRuntimeBundle _assembleRuntimeBundle(
   );
   for (final entry in {
     'playmesh.ts': gameTypeScript,
-    'playmesh.js': gameJavaScript,
-    'playmesh.d.ts': gameDeclaration,
+    'playmesh-main.js': gameJavaScript,
+    'playmesh-main.d.ts': gameDeclaration,
   }.entries) {
     if (entry.value.contains(appVersionPlaceholder)) {
       throw StateError(
@@ -627,8 +644,8 @@ _SdkRuntimeBundle _assembleRuntimeBundle(
     appVersion: app.version,
     files: Map.unmodifiable({
       'playmesh.ts': gameTypeScript,
-      'playmesh.js': gameJavaScript,
-      'playmesh.d.ts': gameDeclaration,
+      'playmesh-main.js': gameJavaScript,
+      'playmesh-main.d.ts': gameDeclaration,
       'playmesh-app.ts': app.typeScript,
       'playmesh-app.js': app.javaScript,
       'playmesh-app.d.ts': app.declaration,

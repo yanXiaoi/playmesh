@@ -14,10 +14,8 @@ void main() {
       'storage.set',
       'storage.remove',
       'storage.clear',
-      'performance.fps',
       'performance.ping',
       'performance.pong',
-      'performance.latency',
       'lifecycle.complete',
     });
     expect(SdkFeatureRegistry.appCommandNames, {
@@ -27,6 +25,8 @@ void main() {
       'app.capability.create',
       'app.capability.invoke',
       'app.capability.dispose',
+      'app.media.open',
+      'app.media.close',
       'app.input.takeover',
       'app.ui.openSharePanel',
       'app.device.fullscreen',
@@ -35,15 +35,15 @@ void main() {
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;
-    expect(fragments, hasLength(11));
-    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(11));
+    expect(fragments, hasLength(14));
+    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(14));
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.game),
       hasLength(7),
     );
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.app),
-      hasLength(4),
+      hasLength(7),
     );
     expect(
       fragments.every((fragment) => fragment.typeScript.trim().isNotEmpty),
@@ -65,8 +65,8 @@ void main() {
             SdkFeatureRegistry.appSdkVersion,
           ),
     );
-    expect(SdkFeatureRegistry.gameSdkVersion, '3.1.0');
-    expect(SdkFeatureRegistry.appSdkVersion, '3.0.0');
+    expect(SdkFeatureRegistry.gameSdkVersion, '4.0.0');
+    expect(SdkFeatureRegistry.appSdkVersion, '3.2.0');
     expect(
       SdkFeatureRegistry.gameSdkReleases
           .map(
@@ -77,7 +77,7 @@ void main() {
             ),
           )
           .toList(),
-      [('1.0.0', '3.1.0', '3.1.0')],
+      [('4.0.0', '4.0.0', '4.0.0')],
     );
     expect(
       SdkFeatureRegistry.appSdkReleases
@@ -89,7 +89,7 @@ void main() {
             ),
           )
           .toList(),
-      [('1.0.0', '3.0.0', '3.0.0')],
+      [('3.2.0', '3.2.0', '3.2.0')],
     );
     expect(
       SdkFeatureRegistry.gameSdkReleases.single.commandNames,
@@ -99,12 +99,21 @@ void main() {
       SdkFeatureRegistry.appSdkReleases.single.commandNames,
       SdkFeatureRegistry.appCommandNames,
     );
-    expect(SdkFeatureRegistry.resolveGameSdkVersion('1.0.0'), '3.1.0');
-    expect(SdkFeatureRegistry.resolveAppSdkVersion('1.0.0'), '3.0.0');
     expect(
-      SdkFeatureRegistry.sdkFile('playmesh.js'),
+      () => SdkFeatureRegistry.resolveGameSdkVersion('1.0.0'),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => SdkFeatureRegistry.resolveAppSdkVersion('1.0.0'),
+      throwsUnsupportedError,
+    );
+    expect(
+      SdkFeatureRegistry.sdkFile('playmesh-main.js'),
       allOf(
-        contains('version: "${SdkFeatureRegistry.appSdkVersion}"'),
+        contains('Symbol.for("playmesh.app.internal.v1")'),
+        contains('const appSdk = appInternalRuntime?.publicApi'),
+        contains('app: appSdk'),
+        isNot(contains('main.__receive')),
         isNot(contains('__PLAYMESH_APP_SDK_VERSION__')),
         isNot(contains('PLAYMESH_DECLARATION = String.raw')),
       ),
@@ -117,14 +126,19 @@ void main() {
       ),
     );
     expect(
-      SdkFeatureRegistry.sdkFile('playmesh.d.ts'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.d.ts'),
       allOf([
         contains('interface PlaymeshApi'),
-        contains('readonly version: "${SdkFeatureRegistry.appSdkVersion}"'),
+        contains('readonly version: "${SdkFeatureRegistry.gameSdkVersion}"'),
+        contains('interface PlaymeshMainApi'),
+        contains('readonly main: PlaymeshMainApi'),
+        contains('readonly app: PlaymeshAppApi'),
         contains('avatar: string | null'),
         contains('openSharePanel(): Promise<void>'),
         contains('showGameSidebar(): Promise<boolean>'),
         contains('exitGame(): Promise<void>'),
+        contains('readonly media: PlaymeshAppMediaApi'),
+        contains('Promise<PlaymeshAppMediaSession>'),
         isNot(contains('hideGameSidebar')),
         isNot(contains('onMenuRequest')),
         isNot(contains('playmesh.authority.openSharePanel')),
@@ -132,15 +146,23 @@ void main() {
         isNot(contains('platform.ui.restoreGameFocus')),
       ]),
     );
+    expect(
+      () => SdkFeatureRegistry.sdkFile('playmesh.d.ts'),
+      throwsArgumentError,
+    );
   });
 
-  test('版本选择拒绝未注册范围且兼容版仍从统一 Dart 源组装', () {
+  test('版本选择拒绝未注册范围且当前版仍从统一 Dart 源组装', () {
     expect(
-      SdkFeatureRegistry.sdkFile('playmesh.js', version: '1.0.0'),
-      SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.1.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
     );
     expect(
-      () => SdkFeatureRegistry.sdkFile('playmesh.js', version: '3.1.1'),
+      () => SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '1.0.0'),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.1'),
       throwsUnsupportedError,
     );
     expect(
@@ -148,9 +170,29 @@ void main() {
       throwsUnsupportedError,
     );
     expect(
-      () => SdkFeatureRegistry.sdkFile('playmesh.js', version: 'latest'),
+      () => SdkFeatureRegistry.sdkFile('playmesh-main.js', version: 'latest'),
       throwsFormatException,
     );
+  });
+
+  test('公开 SDK 路由只暴露成对的 JavaScript 与声明文件', () {
+    for (final file in const [
+      'playmesh-main.js',
+      'playmesh-main.d.ts',
+      'playmesh-app.js',
+      'playmesh-app.d.ts',
+    ]) {
+      expect(
+        SdkFeatureRegistry.sdkFileForPublicPath('sdk/v1/$file'),
+        SdkFeatureRegistry.sdkFile(file),
+      );
+    }
+    for (final internalFile in const ['playmesh.ts', 'playmesh-app.ts']) {
+      expect(
+        SdkFeatureRegistry.sdkFileForPublicPath('sdk/v1/$internalFile'),
+        isNull,
+      );
+    }
   });
 
   test('注册表拒绝没有执行器的 Game SDK 命令', () async {
@@ -161,8 +203,6 @@ void main() {
         'connected': true,
       },
       ensureStorage: () => throw UnimplementedError(),
-      emitFps: (_) {},
-      emitLatency: (_) {},
       completeLifecycle: (_) => false,
       routeRemoteStorage: (_, _, _) async {},
     );

@@ -53,19 +53,26 @@ class GameJoinRequest {
 class GameLaunchArguments {
   const GameLaunchArguments({
     required this.game,
+    required this.enterFullscreenOnLaunch,
     this.joinRequest,
     this.developerProjectId,
+    this.developerRunId,
+    this.developerResourceSession,
   });
 
   final GameSummary game;
+  final bool enterFullscreenOnLaunch;
   final GameJoinRequest? joinRequest;
   final String? developerProjectId;
+  final String? developerRunId;
+  final DeveloperResourceSession? developerResourceSession;
 }
 
 class GamePage extends StatefulWidget {
   const GamePage({
     super.key,
     required this.game,
+    required this.enterFullscreenOnLaunch,
     this.localUserId = 'u_local',
     this.localNickname = playmeshDefaultLocalNickname,
     this.localProfile,
@@ -74,9 +81,9 @@ class GamePage extends StatefulWidget {
     this.goCoreRuntime,
     this.joinRequest,
     this.developerProjectId,
+    this.developerRunId,
+    this.developerResourceSession,
     this.catalogController,
-    this.initialPerformanceVisible = false,
-    this.onPerformanceVisibilityChanged,
   });
 
   static const routeName = '/game';
@@ -87,6 +94,7 @@ class GamePage extends StatefulWidget {
   }
 
   final GameSummary game;
+  final bool enterFullscreenOnLaunch;
   final String localUserId;
   final String localNickname;
   final UserProfile? localProfile;
@@ -95,9 +103,9 @@ class GamePage extends StatefulWidget {
   final GoCoreRuntime? goCoreRuntime;
   final GameJoinRequest? joinRequest;
   final String? developerProjectId;
+  final String? developerRunId;
+  final DeveloperResourceSession? developerResourceSession;
   final GameCatalogController? catalogController;
-  final bool initialPerformanceVisible;
-  final ValueChanged<bool>? onPerformanceVisibilityChanged;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -118,7 +126,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   GoCoreSessionClient? _sessionClient;
   GameRuntimeBridge? _bridge;
   StandaloneGameRuntimeBridge? _soloBridge;
-  bool _showPerformance = false;
   GameWebGateway? _webGateway;
   List<Uri> _shareLinks = const [];
   Uri? _selectedShareLink;
@@ -157,16 +164,21 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   bool get _controllerRole =>
       widget.game.displayMode == 'single_screen_multiplayer' &&
       widget.joinRequest != null;
+  bool get _shouldEnterFullscreenOnLaunch =>
+      widget.enterFullscreenOnLaunch || _controllerRole;
   GameOrientation get _runtimeOrientation =>
       widget.game.orientationForRole(controller: _controllerRole);
 
   @override
   void initState() {
     super.initState();
+    _developerRunId = widget.developerRunId;
     WidgetsBinding.instance.addObserver(this);
     _orientationController =
         widget.orientationController ?? SystemGameOrientationController();
-    _applyOrientation(_runtimeOrientation);
+    if (_shouldEnterFullscreenOnLaunch) {
+      _applyOrientation(_runtimeOrientation);
+    }
     _registerDeveloperHandlers();
     _initializeSession();
   }
@@ -180,11 +192,15 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final oldOrientation = oldWidget.game.orientationForRole(
       controller: oldControllerRole,
     );
-    if (oldOrientation != _runtimeOrientation) {
+    final oldShouldEnterFullscreen =
+        oldWidget.enterFullscreenOnLaunch || oldControllerRole;
+    if (_shouldEnterFullscreenOnLaunch &&
+        (!oldShouldEnterFullscreen || oldOrientation != _runtimeOrientation)) {
       _applyOrientation(_runtimeOrientation);
     }
     final developerBindingChanged =
         oldWidget.developerProjectId != widget.developerProjectId ||
+        oldWidget.developerRunId != widget.developerRunId ||
         !identical(oldWidget.goCoreRuntime, widget.goCoreRuntime);
     final runtimeChanged =
         developerBindingChanged || _runtimeIdentityChanged(oldWidget);
@@ -197,6 +213,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         );
       }
       _unregisterDeveloperHandlers();
+      _developerRunId = widget.developerRunId;
       _registerDeveloperHandlers();
     }
     if (runtimeChanged) {
@@ -224,11 +241,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         oldGame.displayMode != game.displayMode ||
         oldGame.orientation != game.orientation ||
         oldGame.controllerOrientation != game.controllerOrientation ||
-        oldEntry.assetPath != entry.assetPath ||
         oldEntry.gameEntryPath != entry.gameEntryPath ||
         oldEntry.controllerEntryPath != entry.controllerEntryPath ||
-        oldEntry.packageRootAssetPath != entry.packageRootAssetPath ||
         oldEntry.packageRootFilePath != entry.packageRootFilePath ||
+        !_sameDeveloperResourceSession(
+          oldWidget.developerResourceSession,
+          widget.developerResourceSession,
+        ) ||
         !setEquals(oldGame.capabilities.required, game.capabilities.required) ||
         !setEquals(
           oldGame.capabilities.controllerRequired,
@@ -242,6 +261,19 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         oldJoin?.nickname != join?.nickname;
   }
 
+  bool _sameDeveloperResourceSession(
+    DeveloperResourceSession? left,
+    DeveloperResourceSession? right,
+  ) {
+    if (identical(left, right)) return true;
+    return left != null &&
+        right != null &&
+        left.projectId == right.projectId &&
+        left.resourceBaseUri == right.resourceBaseUri &&
+        left.credential == right.credential &&
+        left.expiresAt == right.expiresAt;
+  }
+
   bool _isCurrentConfiguration(int generation) =>
       mounted && !_disposing && generation == _configurationGeneration;
 
@@ -252,15 +284,18 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _unregisterDeveloperRestart = runtime.registerDeveloperGameRestartHandler(
       developerProjectId,
       _restartGame,
+      expectedRunId: _developerRunId,
     );
     _unregisterDeveloperStop = runtime.registerDeveloperGameStopHandler(
       developerProjectId,
       _exitGame,
+      expectedRunId: _developerRunId,
     );
     _unregisterDeveloperJavaScript = runtime
         .registerDeveloperGameJavaScriptExecutor(
           developerProjectId,
           _executeDeveloperJavaScript,
+          expectedRunId: _developerRunId,
         );
   }
 
@@ -284,7 +319,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _runtimeGeneration += 1;
       _sessionReady = false;
       _sessionError = null;
-      _showPerformance = false;
       _shareVisible = false;
       _shareLoading = false;
       _shareError = null;
@@ -294,7 +328,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _relayConnecting = false;
       _relayError = null;
     });
-    widget.onPerformanceVisibilityChanged?.call(false);
     await _initializeSession();
   }
 
@@ -315,11 +348,21 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     unawaited(_closeSession());
     unawaited(
       _orientationOperation.then(
-        (_) => _orientationController.restore(),
-        onError: (_) => _orientationController.restore(),
+        (_) => _restoreDisplayState(),
+        onError: (_) => _restoreDisplayState(),
       ),
     );
     super.dispose();
+  }
+
+  Future<void> _restoreDisplayState() async {
+    try {
+      if (!_shouldEnterFullscreenOnLaunch) {
+        await _orientationController.exitFullscreen();
+      }
+    } finally {
+      await _orientationController.restore();
+    }
   }
 
   @override
@@ -434,6 +477,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             bridge: _webViewBridge,
             localUserId: widget.localUserId,
             localNickname: widget.localNickname,
+            developerResourceSession: widget.developerResourceSession,
             controllerRole: _controllerRole,
             onOpenSharePanel: _canShareFromAppSdk ? _openShareFromAppSdk : null,
             onExitRequested: _returnToPrevious,
@@ -493,12 +537,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       _shareClosedAt = null;
       setState(() {
         _runtimeGeneration += 1;
-        _showPerformance = false;
         _shareVisible = false;
         _fullscreenError = null;
       });
-      _webViewBridge?.setPerformanceVisible(false);
-      widget.onPerformanceVisibilityChanged?.call(false);
     }
     if (!_isCurrentConfiguration(configurationGeneration)) return;
     _clearLogsForNewRun();
@@ -567,9 +608,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         return;
       }
       if (connection.isAuthority) {
-        // A process crash can leave fixed-name platform avatar files behind.
-        // A newly created Authority session owns a fresh avatar namespace and
-        // must clear it before any local or joining player synchronizes.
+        // 进程崩溃可能遗留使用固定文件名的平台头像文件。
+        // 新创建的 Authority 会话拥有全新的头像命名空间，
+        // 必须在任何本地玩家或加入端玩家同步前将其清空。
         await storage.clearSystemAvatars();
         if (!_isCurrentConfiguration(configurationGeneration)) {
           await connection.close();
@@ -614,12 +655,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         }
         if (message['session'] is! Map) return;
         setState(() {});
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_isCurrentConfiguration(configurationGeneration) &&
-            identical(_bridge, bridge)) {
-          bridge.setPerformanceVisible(_showPerformance);
-        }
       });
       if (developerProjectId != null &&
           _isCurrentConfiguration(configurationGeneration)) {
@@ -684,12 +719,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       setState(() {
         _soloBridge = bridge;
         _sessionReady = true;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_isCurrentConfiguration(configurationGeneration) &&
-            identical(_soloBridge, bridge)) {
-          bridge.setPerformanceVisible(_showPerformance);
-        }
       });
       if (developerProjectId != null &&
           _isCurrentConfiguration(configurationGeneration)) {
@@ -916,9 +945,19 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final bridge = _bridge;
     final soloBridge = _soloBridge;
     final runtime = widget.goCoreRuntime;
-    final gameRootAsset = game.entry.packageRootAssetPath;
     final gameRootFile = game.entry.packageRootFilePath;
-    final hasGameRoot = gameRootAsset != null || gameRootFile != null;
+    final developerResourceSession = widget.developerResourceSession;
+    final GameWebResourceSource? gameResourceSource =
+        developerResourceSession != null
+        ? DevelopmentGameWebResourceSource(
+            baseUri: developerResourceSession.resourceBaseUri,
+            credential: developerResourceSession.credential,
+            expiresAt: developerResourceSession.expiresAt,
+          )
+        : gameRootFile != null
+        ? InstalledGameWebResourceSource(packageRootPath: gameRootFile)
+        : null;
+    final hasGameRoot = gameResourceSource != null;
     final canShareMultiplayer =
         bridge != null && bridge.connection.isAuthority && runtime != null;
     bool isCurrentOperation() =>
@@ -1009,8 +1048,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         storage = localStorage ?? soloStorage!;
       }
       final startedGateway = await startGameWebGateway(
-        gameRootAssetPath: gameRootAsset ?? '',
-        gameRootFilePath: gameRootFile,
+        source: gameResourceSource,
         multiplayer: multiplayer,
         displayMode: multiplayer
             ? bridge!.connection.snapshot.displayMode
@@ -1294,12 +1332,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _clearLogsForNewRun();
     setState(() {
       _runtimeGeneration += 1;
-      _showPerformance = false;
       _fullscreenError = null;
-    });
-    widget.onPerformanceVisibilityChanged?.call(false);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _webViewBridge?.setPerformanceVisible(_showPerformance);
     });
     ScaffoldMessenger.of(
       context,
@@ -1316,9 +1349,15 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   void _clearLogsForNewRun() {
     final projectId = widget.developerProjectId;
-    _developerRunId = projectId == null
-        ? null
-        : widget.goCoreRuntime?.developerRunController.status(projectId).runId;
+    if (projectId == null) {
+      _developerRunId = null;
+    } else {
+      _developerRunId =
+          widget.goCoreRuntime?.developerRunController
+              .status(projectId)
+              .runId ??
+          widget.developerRunId;
+    }
     developerEventHub.beginRuntime(
       projectId: projectId,
       runId: _developerRunId,
@@ -1331,12 +1370,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     _shareClosedAt = null;
     setState(() {
       _runtimeGeneration += 1;
-      _showPerformance = false;
       _shareVisible = false;
       _fullscreenError = null;
     });
-    _webViewBridge?.setPerformanceVisible(false);
-    widget.onPerformanceVisibilityChanged?.call(false);
   }
 
   Future<void> _returnToPrevious() =>
@@ -1349,8 +1385,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     if (!mounted) return;
     final closeOperation = _closeSession();
     setState(() => _allowPop = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted) {
       final navigator = Navigator.of(context);
       if (toLibrary) {
         navigator.popUntil(
@@ -1359,7 +1395,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       } else {
         navigator.pop();
       }
-    });
+    }
     try {
       await closeOperation;
     } on Object catch (error) {
@@ -1954,10 +1990,7 @@ class _ShareOverlayState extends State<_ShareOverlay> {
                     player.nickname,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: Text(
-                    '${_playerSourceLabel(player.source)} · '
-                    '${player.latencyMs == null ? '-- ms' : '${player.latencyMs} ms'}',
-                  ),
+                  subtitle: Text(_playerSourceLabel(player.source)),
                   trailing: Text(
                     player.connected
                         ? context.tr('game.player_online')

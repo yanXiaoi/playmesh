@@ -6,10 +6,12 @@ import 'package:archive/archive_io.dart';
 
 import '../../models/game_manifest.dart';
 import '../../models/game_capabilities.dart';
+import '../../models/game_package_layout.dart';
 import '../../models/game_summary.dart';
 import '../library/playmesh_library_root.dart';
 import 'file_game_library_scanner.dart';
 import 'game_package_icon.dart';
+import 'safe_game_package_archive.dart';
 
 class ValidatedGamePackage {
   const ValidatedGamePackage({required this.manifest, required this.files});
@@ -22,23 +24,10 @@ class GamePackageTransferService {
   GamePackageTransferService({Directory? libraryRoot})
     : _injectedRoot = libraryRoot;
 
-  static const maxCompressedBytes = 64 * 1024 * 1024;
-  static const maxExpandedBytes = 256 * 1024 * 1024;
-  static const maxSingleFileBytes = 32 * 1024 * 1024;
-  static const maxFileCount = 4096;
-
-  static const _blockedExtensions = {
-    '.exe',
-    '.dll',
-    '.so',
-    '.dylib',
-    '.bat',
-    '.cmd',
-    '.com',
-    '.msi',
-    '.ps1',
-    '.sh',
-  };
+  static const maxCompressedBytes = SafeGamePackageArchive.maxCompressedBytes;
+  static const maxExpandedBytes = SafeGamePackageArchive.maxExpandedBytes;
+  static const maxSingleFileBytes = SafeGamePackageArchive.maxSingleFileBytes;
+  static const maxFileCount = SafeGamePackageArchive.maxFileCount;
 
   final Directory? _injectedRoot;
   Directory? _resolvedRoot;
@@ -83,36 +72,29 @@ class GamePackageTransferService {
     String? author,
     DateTime? lastModifiedAt,
   }) async {
-    if (!await source.exists()) throw StateError('找不到游戏包文件');
-    final compressedSize = await source.length();
-    if (compressedSize <= 0 || compressedSize > maxCompressedBytes) {
-      throw const FormatException('游戏包压缩文件大小必须在 1 B 至 64 MiB 之间');
-    }
-    final archive = ZipDecoder().decodeBytes(
-      await source.readAsBytes(),
-      verify: true,
+    return validatePackageFiles(
+      await SafeGamePackageArchive.read(source),
+      author: author,
+      lastModifiedAt: lastModifiedAt,
     );
-    final files = <String, ArchiveFile>{};
-    var expandedBytes = 0;
-    for (final entry in archive) {
-      if (entry.isSymbolicLink) {
-        throw FormatException('游戏包不允许符号链接：${entry.name}');
-      }
-      final path = _safeArchivePath(entry.name);
-      if (path == null || !entry.isFile) continue;
-      if (files.containsKey(path)) throw FormatException('游戏包包含重复路径：$path');
-      if (entry.size > maxSingleFileBytes) {
-        throw FormatException('单个文件超过 32 MiB：$path');
-      }
-      expandedBytes += entry.size;
-      if (expandedBytes > maxExpandedBytes) {
-        throw const FormatException('游戏包解压后不能超过 256 MiB');
-      }
-      if (files.length >= maxFileCount) {
-        throw const FormatException('游戏包文件数量不能超过 4096');
+  }
+
+  ValidatedGamePackage validatePackageFiles(
+    Map<String, List<int>> sourceFiles, {
+    String? author,
+    DateTime? lastModifiedAt,
+  }) {
+    final files = <String, List<int>>{};
+    for (final item in sourceFiles.entries) {
+      final path = SafeGamePackageArchive.normalizePath(item.key);
+      if (path == null) {
+        throw FormatException('游戏包文件路径不能以目录分隔符结尾：${item.key}');
       }
       _validatePackagePath(path);
-      files[path] = entry;
+      if (files.containsKey(path)) {
+        throw FormatException('游戏包包含重复路径：$path');
+      }
+      files[path] = item.value;
     }
     final manifestEntry = files['main.json'];
     if (manifestEntry == null) {
@@ -143,8 +125,10 @@ class GamePackageTransferService {
     }
     _validateRequiredFiles(manifest, files.keys.toSet());
     if (files[gamePackageIconName] case final iconEntry?) {
-      final content = List<int>.from(iconEntry.content as List<int>);
-      if (!isSafeGamePackageIconBytes(content, totalLength: iconEntry.size)) {
+      if (!isSafeGamePackageIconBytes(
+        iconEntry,
+        totalLength: iconEntry.length,
+      )) {
         files.remove(gamePackageIconName);
       }
     }
@@ -154,7 +138,7 @@ class GamePackageTransferService {
             ? utf8.encode(
                 '${const JsonEncoder.withIndent('  ').convert(manifest.toJson())}\n',
               )
-            : List<int>.from(item.value.content as List<int>),
+            : item.value,
     };
     return ValidatedGamePackage(
       manifest: manifest,
@@ -202,8 +186,7 @@ class GamePackageTransferService {
     }
   }
 
-  /// Restores the last complete package if a previous process stopped between
-  /// the two same-volume directory renames used by [commitPackage].
+  /// 若上次进程停在 [commitPackage] 的两次同卷目录重命名之间，则恢复最后一个完整包。
   Future<void> recoverInterruptedImports() async {
     final root = await _root();
     final packages = Directory('${root.path}${Platform.pathSeparator}packages');
@@ -229,8 +212,7 @@ class GamePackageTransferService {
     try {
       await backup.delete(recursive: true);
     } on FileSystemException {
-      // A complete new target is already visible. Startup recovery removes the
-      // stale backup without risking rollback of the committed package.
+      // 完整的新目标已可见；启动恢复只删除陈旧备份，不能冒险回滚已提交包。
     }
   }
 
@@ -238,42 +220,33 @@ class GamePackageTransferService {
     Directory target,
     Directory staging,
   ) async {
-    const publishedNames = {
-      'main.json',
-      'capabilities.json',
-      gamePackageIconName,
-      'app',
-    };
-    await for (final entity in target.list(followLinks: false)) {
-      final name = entity.path.substring(target.path.length + 1);
-      if (publishedNames.contains(name)) continue;
-      await _copyEntity(
-        entity,
-        '${staging.path}${Platform.pathSeparator}$name',
+    for (final name in const ['data', 'cache']) {
+      final source = Directory('${target.path}${Platform.pathSeparator}$name');
+      if (await FileSystemEntity.type(source.path, followLinks: false) !=
+          FileSystemEntityType.directory) {
+        continue;
+      }
+      await _copyPreservedDirectory(
+        source,
+        Directory('${staging.path}${Platform.pathSeparator}$name'),
       );
     }
   }
 
-  Future<void> _copyEntity(FileSystemEntity source, String destination) async {
-    if (source is File) {
-      await File(destination).parent.create(recursive: true);
-      await source.copy(destination);
-      return;
-    }
-    if (source is Link) {
-      await Link(destination).parent.create(recursive: true);
-      await Link(destination).create(await source.target());
-      return;
-    }
-    if (source is! Directory) return;
-    final destinationDirectory = Directory(destination);
-    await destinationDirectory.create(recursive: true);
+  Future<void> _copyPreservedDirectory(
+    Directory source,
+    Directory destination,
+  ) async {
+    await destination.create(recursive: true);
     await for (final child in source.list(followLinks: false)) {
       final name = child.path.substring(source.path.length + 1);
-      await _copyEntity(
-        child,
-        '${destinationDirectory.path}${Platform.pathSeparator}$name',
-      );
+      final targetPath = '${destination.path}${Platform.pathSeparator}$name';
+      if (child is File) {
+        await File(targetPath).parent.create(recursive: true);
+        await child.copy(targetPath);
+      } else if (child is Directory) {
+        await _copyPreservedDirectory(child, Directory(targetPath));
+      }
     }
   }
 
@@ -309,7 +282,7 @@ class GamePackageTransferService {
           await backup.rename(target.path);
         }
       } on Object {
-        // Leave an unrecognized backup untouched for manual recovery.
+        // 无法识别的备份保持原样，供人工恢复。
       }
     }
     for (final directory in staging) {
@@ -325,7 +298,7 @@ class GamePackageTransferService {
     bool validate = true,
   }) async {
     final packagePath = game.entry.packageRootFilePath;
-    if (packagePath == null) throw StateError('内置游戏不能导出为本地游戏包');
+    if (packagePath == null) throw StateError('游戏缺少已安装包目录，无法导出');
     final root = await _root();
     final packagesDirectory = Directory(
       '${root.path}${Platform.pathSeparator}packages',
@@ -422,7 +395,7 @@ class GamePackageTransferService {
         if (entity is! File) continue;
         final size = await entity.length();
         if (size > maxSingleFileBytes) {
-          throw FormatException('单个文件超过 32 MiB：${entity.path}');
+          throw FormatException('单个文件超过 128 MiB：${entity.path}');
         }
         expandedBytes += size;
         fileCount += 1;
@@ -459,7 +432,7 @@ class GamePackageTransferService {
         try {
           await encoder.close();
         } on Object {
-          // Preserve the original export error.
+          // 保留原始导出错误。
         }
       }
       if (await destination.exists()) await destination.delete();
@@ -468,14 +441,14 @@ class GamePackageTransferService {
     return destination;
   }
 
-  Map<String, Object?> _readManifestJson(ArchiveFile file) {
-    final decoded = jsonDecode(utf8.decode(file.content as List<int>));
+  Map<String, Object?> _readManifestJson(List<int> file) {
+    final decoded = jsonDecode(utf8.decode(file));
     if (decoded is! Map) throw const FormatException('main.json 根节点必须是对象');
     return Map<String, Object?>.from(decoded);
   }
 
-  GameCapabilities _readCapabilities(ArchiveFile file) {
-    final decoded = jsonDecode(utf8.decode(file.content as List<int>));
+  GameCapabilities _readCapabilities(List<int> file) {
+    final decoded = jsonDecode(utf8.decode(file));
     if (decoded is! Map) {
       throw const FormatException('capabilities.json 根节点必须是对象');
     }
@@ -483,34 +456,44 @@ class GamePackageTransferService {
   }
 
   void _validateRequiredFiles(GameManifest manifest, Set<String> paths) {
-    final required = <String>{'main.json', manifest.entries.game};
+    final gameEntry = playmeshGamePackageLayout.parseWebEntry(
+      manifest.entries.game,
+      field: 'entries.game',
+      kind: GameWebEntryKind.html,
+    );
+    final required = <String>{
+      'main.json',
+      playmeshGamePackageLayout.packagePathForWebPath(gameEntry.path),
+    };
     if (manifest.displayModes.contains(
       GameDisplayMode.singleScreenMultiplayer,
     )) {
-      required.add(manifest.entries.controller);
+      final controllerEntry = playmeshGamePackageLayout.parseWebEntry(
+        manifest.entries.controller!,
+        field: 'entries.controller',
+        kind: GameWebEntryKind.html,
+      );
+      required.add(
+        playmeshGamePackageLayout.packagePathForWebPath(controllerEntry.path),
+      );
     }
-    if (manifest.authority case final authority?) required.add(authority.entry);
+    if (manifest.authority case final authority?) {
+      final authorityEntry = playmeshGamePackageLayout.parseWebEntry(
+        authority.entry,
+        field: 'authority.entry',
+        kind: GameWebEntryKind.javaScript,
+      );
+      required.add(
+        playmeshGamePackageLayout.packagePathForWebPath(authorityEntry.path),
+      );
+    }
     for (final path in required) {
       if (!paths.contains(path)) throw FormatException('游戏包缺少 $path');
     }
   }
 
-  String? _safeArchivePath(String raw) {
-    final normalized = raw.replaceAll('\\', '/');
-    if (normalized.endsWith('/')) return null;
-    if (normalized.isEmpty ||
-        normalized.startsWith('/') ||
-        RegExp(r'^[A-Za-z]:').hasMatch(normalized)) {
-      throw FormatException('游戏包包含非法路径：$raw');
-    }
-    final parts = normalized.split('/');
-    if (parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
-      throw FormatException('游戏包包含目录穿越路径：$raw');
-    }
-    return parts.join('/');
-  }
-
   void _validatePackagePath(String path) {
+    playmeshGamePackageLayout.validatePackagePath(path, field: '游戏包路径');
     if (path != 'main.json' &&
         path != 'capabilities.json' &&
         path != gamePackageIconName &&
@@ -519,10 +502,7 @@ class GamePackageTransferService {
         '游戏包只允许包含根 main.json、icon.png、capabilities.json 和 app/：$path',
       );
     }
-    final lower = path.toLowerCase();
-    if (_blockedExtensions.any(lower.endsWith)) {
-      throw FormatException('游戏包包含禁止文件类型：$path');
-    }
+    SafeGamePackageArchive.validateAllowedExtension(path);
   }
 
   Future<Directory> _root() async {

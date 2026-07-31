@@ -19,21 +19,23 @@ void main() {
       gameId: 'com.playmesh.test-game',
       libraryRoot: root,
     );
+    final packageRoot = await _createInstalledPackageRoot();
     final gateway = await startGameWebGateway(
-      gameRootAssetPath:
-          'assets/playmesh-library/public/developer/templates/default-game/package',
+      source: InstalledGameWebResourceSource(packageRootPath: packageRoot.path),
       gameId: 'com.playmesh.test-game',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
       controllerOrientation: GameOrientation.portrait,
+      gameEntryPath: 'index.html',
+      controllerEntryPath: 'controller/index.html',
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
       gameName: '测试游戏',
       tags: const ['派对', '本地多人'],
-      gameSdkVersion: '1.4.2',
-      appSdkVersion: '1.2.1',
+      gameSdkVersion: '4.0.0',
+      appSdkVersion: '3.2.0',
       requiredCapabilities: const ['media.camera'],
       controllerRequiredCapabilities: const ['media.microphone'],
       storage: storage,
@@ -42,6 +44,7 @@ void main() {
       await gateway.close();
       await storage.close();
       await root.delete(recursive: true);
+      await packageRoot.delete(recursive: true);
     });
     final base = Uri.parse('http://127.0.0.1:${gateway.port}');
     final shareLinks = await gateway.shareLinks();
@@ -49,21 +52,23 @@ void main() {
     expect(
       shareLinks.every(
         (link) =>
-            link.queryParameters['token'] == 'share-token' &&
-            RegExp(
-              r'^[A-Za-z0-9_-]{12}$',
-            ).hasMatch(link.queryParameters['channelId'] ?? '') &&
-            link.path == '/app/controller/index.html' &&
-            link.queryParameters.length == 2 &&
-            !link.hasFragment,
+            link.path == playmeshGameInvitationPath &&
+            !link.hasQuery &&
+            RegExp(r'^[A-Za-z0-9_-]{32}$').hasMatch(
+              Uri.splitQueryString(
+                    link.fragment,
+                  )[playmeshGameInvitationTokenParameter] ??
+                  '',
+            ),
       ),
       isTrue,
     );
 
-    final controller = await http.get(
-      shareLinks.first,
-      headers: const {'Accept-Language': 'en-GB, zh-CN;q=0.8'},
-    );
+    final opened = await _openInvitation(shareLinks.first);
+    final controller = opened.entry;
+    expect(opened.landing.body, contains('正在进入游戏'));
+    expect(opened.entryUri.path, '/controller/index.html');
+    expect(opened.entryUri.hasQuery, isFalse);
     expect(controller.statusCode, HttpStatus.ok);
     expect(controller.body, contains('window.__PLAYMESH_BROWSER__'));
     expect(
@@ -72,7 +77,7 @@ void main() {
       ),
       lessThan(
         controller.body.indexOf(
-          '<script src="/playmesh/sdk/v1/playmesh.js"></script>',
+          '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>',
         ),
       ),
     );
@@ -91,42 +96,27 @@ void main() {
     );
     expect(controller.body, contains('"tags":["派对","本地多人"]'));
     expect(controller.body, contains('"availableCapabilities":[]'));
-    expect(controller.body, contains('/playmesh/sdk/v1/playmesh.js'));
+    expect(controller.body, contains('/playmesh/sdk/v1/playmesh-main.js'));
     expect(
       controller.body.indexOf('/playmesh/sdk/v1/playmesh-app.js'),
-      lessThan(controller.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
+      lessThan(controller.body.indexOf('/playmesh/sdk/v1/playmesh-main.js')),
     );
     expect(controller.body, isNot(contains('joinEndpoint')));
     expect(controller.body, isNot(contains('storageEndpoint')));
     expect(controller.body, isNot(contains('nicknameEndpoint')));
     expect(controller.body, isNot(contains('"nickname":')));
 
-    final appController = await http.get(
-      shareLinks.first.replace(
-        queryParameters: {
-          ...shareLinks.first.queryParameters,
-          'playmeshNickname': 'App 玩家',
-          'playmeshApp': '1',
-          'playmeshAppSdkUrl': 'http://127.0.0.1:45678/playmesh-app.js',
-        },
+    final spoofedAppController = await http.get(
+      opened.entryUri.replace(
+        query:
+            'playmeshNickname=App'
+            '&playmeshApp=1'
+            '&playmeshAppSdkUrl=http%3A%2F%2F127.0.0.1%3A45678'
+            '%2Fplaymesh-app.js',
       ),
+      headers: {'Cookie': opened.cookie},
     );
-    expect(appController.statusCode, HttpStatus.ok);
-    expect(appController.body, contains('"nickname":"App 玩家"'));
-    expect(
-      appController.body,
-      contains('http://127.0.0.1:45678/playmesh-app.js?version=3.0.0'),
-    );
-    expect(
-      appController.body,
-      isNot(contains('/playmesh/sdk/v1/playmesh-app.js')),
-    );
-    expect(
-      appController.body.indexOf(
-        'http://127.0.0.1:45678/playmesh-app.js?version=3.0.0',
-      ),
-      lessThan(appController.body.indexOf('/playmesh/sdk/v1/playmesh.js')),
-    );
+    expect(spoofedAppController.statusCode, HttpStatus.forbidden);
 
     final relayEntry = await http.get(
       base.replace(
@@ -146,13 +136,15 @@ void main() {
       expect(response.statusCode, HttpStatus.notFound, reason: path);
     }
 
-    final sdk = await http.get(base.resolve('/playmesh/sdk/v1/playmesh.js'));
+    final sdk = await http.get(
+      base.resolve('/playmesh/sdk/v1/playmesh-main.js'),
+    );
     expect(sdk.statusCode, HttpStatus.ok);
     expect(
       sdk.body,
-      SdkFeatureRegistry.sdkFile('playmesh.js', version: '1.4.2'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
     );
-    expect(sdk.body, contains('global.playmesh = playmesh'));
+    expect(sdk.body, contains('global.playmesh = Object.freeze'));
     expect(sdk.body, isNot(contains('/playmesh/developer/log')));
 
     final rejectedRemoteLog = await http.post(
@@ -162,12 +154,16 @@ void main() {
     );
     expect(rejectedRemoteLog.statusCode, HttpStatus.notFound);
 
-    final appAsset = await http.get(base.resolve('/app/static/css/game.css'));
+    final appAsset = await http.get(base.resolve('/static/css/game.css'));
     expect(appAsset.statusCode, HttpStatus.ok);
-    final legacyAsset = await http.get(
-      base.resolve('/game/static/css/game.css'),
+    final noImplicitAppAlias = await http.get(
+      base.resolve('/app/static/css/game.css'),
     );
-    expect(legacyAsset.statusCode, HttpStatus.notFound);
+    expect(noImplicitAppAlias.statusCode, HttpStatus.notFound);
+    final reservedCaseVariant = await http.get(
+      base.resolve('/PLAYMESH/sdk/v1/playmesh-main.js'),
+    );
+    expect(reservedCaseVariant.statusCode, HttpStatus.notFound);
 
     final rejectedUpload = await http.post(
       base.resolve('/bucket/replays?name=round.bin'),
@@ -209,14 +205,16 @@ void main() {
       gameId: 'com.playmesh.core-tunnel',
       libraryRoot: root,
     );
+    final packageRoot = await _createInstalledPackageRoot();
     final gateway = await startGameWebGateway(
-      gameRootAssetPath:
-          'assets/playmesh-library/public/developer/templates/default-game/package',
+      source: InstalledGameWebResourceSource(packageRootPath: packageRoot.path),
       gameId: 'com.playmesh.core-tunnel',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
       controllerOrientation: GameOrientation.portrait,
+      gameEntryPath: 'index.html',
+      controllerEntryPath: 'controller/index.html',
       coreEndpoint: Uri(scheme: 'http', host: '127.0.0.1', port: core.port),
       joinCode: 'ABC123',
       shareToken: 'share-token',
@@ -225,13 +223,18 @@ void main() {
     final coreGateway = await startLocalUpgradeTunnelGateway(
       targetBaseUri: Uri(scheme: 'http', host: '127.0.0.1', port: gateway.port),
       path: playmeshCoreTunnelPath,
-      headers: const {playmeshShareTokenHeader: 'share-token'},
+      headers: {
+        playmeshShareTokenHeader: parsePlaymeshInvitationFragment(
+          (await gateway.shareLinks()).first.fragment,
+        )[playmeshGameInvitationTokenParameter]!,
+      },
     );
     addTearDown(() async {
       await coreGateway.close();
       await gateway.close();
       await storage.close();
       await root.delete(recursive: true);
+      await packageRoot.delete(recursive: true);
       await coreSubscription.cancel();
       await core.close(force: true);
     });
@@ -255,25 +258,25 @@ void main() {
     await controller.create(recursive: true);
     await File('${app.path}${Platform.pathSeparator}index.html').writeAsString(
       '<!doctype html><html><head></head><body>MAIN_ENTRY'
-      '<script src="/playmesh/sdk/v1/playmesh.js"></script></body></html>',
+      '<script src="/playmesh/sdk/v1/playmesh-main.js"></script></body></html>',
     );
     await File(
       '${controller.path}${Platform.pathSeparator}index.html',
     ).writeAsString(
       '<!doctype html><html><head></head><body>CONTROLLER_ENTRY'
-      '<script src="/playmesh/sdk/v1/playmesh.js"></script></body></html>',
+      '<script src="/playmesh/sdk/v1/playmesh-main.js"></script></body></html>',
     );
     final storage = await GameStorageService.create(
       gameId: 'com.example.multi-screen',
       libraryRoot: root,
     );
     final gateway = await startGameWebGateway(
-      gameRootAssetPath: 'unused-for-file-package',
-      gameRootFilePath: root.path,
+      source: InstalledGameWebResourceSource(packageRootPath: root.path),
       gameId: 'com.example.multi-screen',
       multiplayer: true,
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
+      gameEntryPath: 'index.html',
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'MULTI1',
       shareToken: 'share-token',
@@ -285,12 +288,14 @@ void main() {
       await root.delete(recursive: true);
     });
 
-    final response = await http.get((await gateway.shareLinks()).first);
+    final response = (await _openInvitation(
+      (await gateway.shareLinks()).first,
+    )).entry;
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('MAIN_ENTRY'));
     expect(response.body, isNot(contains('CONTROLLER_ENTRY')));
-    expect(response.body, contains('<base href="/app/">'));
+    expect(response.body, contains('<base href="/">'));
     expect(response.body, contains('window.__PLAYMESH_BROWSER__'));
     expect(
       response.body,
@@ -304,19 +309,19 @@ void main() {
     await app.create(recursive: true);
     await File('${app.path}${Platform.pathSeparator}index.html').writeAsString(
       '<!doctype html><html><head></head><body>SOLO_ENTRY'
-      '<script src="/playmesh/sdk/v1/playmesh.js"></script></body></html>',
+      '<script src="/playmesh/sdk/v1/playmesh-main.js"></script></body></html>',
     );
     final storage = await GameStorageService.create(
       gameId: 'com.example.solo',
       libraryRoot: root,
     );
     final gateway = await startGameWebGateway(
-      gameRootAssetPath: 'unused-for-file-package',
-      gameRootFilePath: root.path,
+      source: InstalledGameWebResourceSource(packageRootPath: root.path),
       gameId: 'com.example.solo',
       multiplayer: false,
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
+      gameEntryPath: 'index.html',
       shareToken: 'solo-token',
       storage: storage,
     );
@@ -328,16 +333,13 @@ void main() {
 
     final links = await gateway.shareLinks();
     expect(links, isNotEmpty);
-    expect(links.first.path, '/app/index.html');
-    expect(
-      links.first.queryParameters['channelId'],
-      matches(RegExp(r'^[A-Za-z0-9_-]{12}$')),
-    );
-    final response = await http.get(links.first);
+    expect(links.first.path, playmeshGameInvitationPath);
+    expect(links.first.hasQuery, isFalse);
+    final response = (await _openInvitation(links.first)).entry;
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('SOLO_ENTRY'));
-    expect(response.body, contains('<base href="/app/">'));
+    expect(response.body, contains('<base href="/">'));
     expect(response.body, contains('"mode":"solo"'));
     expect(
       response.body,
@@ -349,20 +351,22 @@ void main() {
     expect(response.body, isNot(contains('nicknameEndpoint')));
   });
 
-  test('错误或缺失的分享 token 会被拒绝', () async {
+  test('缺失浏览器会话或错误邀请凭据会被拒绝', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-web-storage-');
     final storage = await GameStorageService.create(
       gameId: 'com.playmesh.test-game',
       libraryRoot: root,
     );
+    final packageRoot = await _createInstalledPackageRoot();
     final gateway = await startGameWebGateway(
-      gameRootAssetPath:
-          'assets/playmesh-library/public/developer/templates/default-game/package',
+      source: InstalledGameWebResourceSource(packageRootPath: packageRoot.path),
       gameId: 'com.playmesh.test-game',
       multiplayer: true,
       displayMode: 'single_screen_multiplayer',
       orientation: GameOrientation.landscape,
       controllerOrientation: GameOrientation.portrait,
+      gameEntryPath: 'index.html',
+      controllerEntryPath: 'controller/index.html',
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
@@ -372,6 +376,7 @@ void main() {
       await gateway.close();
       await storage.close();
       await root.delete(recursive: true);
+      await packageRoot.delete(recursive: true);
     });
 
     final invitation = (await gateway.shareLinks()).first;
@@ -380,10 +385,17 @@ void main() {
         scheme: invitation.scheme,
         host: invitation.host,
         port: invitation.port,
-        path: invitation.path,
+        path: '/controller/index.html',
       ),
     );
     expect(response.statusCode, HttpStatus.forbidden);
+
+    final rejectedExchange = await http.post(
+      invitation.replace(fragment: null),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({playmeshGameInvitationTokenParameter: 'wrong-token'}),
+    );
+    expect(rejectedExchange.statusCode, HttpStatus.forbidden);
 
     final storageResponse = await http.post(
       Uri.parse('http://127.0.0.1:${gateway.port}/api/storage'),
@@ -398,7 +410,7 @@ void main() {
     expect(storageResponse.statusCode, HttpStatus.notFound);
   });
 
-  test('自定义嵌套首页按入口目录注入 base 路径', () async {
+  test('自定义嵌套首页保留重复查询参数并按入口目录注入 base 路径', () async {
     final root = await Directory.systemTemp.createTemp(
       'playmesh-web-custom-entry-',
     );
@@ -409,20 +421,23 @@ void main() {
     await entry.parent.create(recursive: true);
     await entry.writeAsString(
       '<!doctype html><html><head></head><body>CUSTOM_ENTRY'
-      '<script src="/playmesh/sdk/v1/playmesh.js"></script></body></html>',
+      '<script src="/playmesh/sdk/v1/playmesh-main.js"></script></body></html>',
     );
     final storage = await GameStorageService.create(
       gameId: 'com.example.custom-entry',
       libraryRoot: root,
     );
     final gateway = await startGameWebGateway(
-      gameRootAssetPath: 'unused-for-file-package',
-      gameRootFilePath: root.path,
+      source: InstalledGameWebResourceSource(packageRootPath: root.path),
       gameId: 'com.example.custom-entry',
       multiplayer: false,
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
-      gameEntryPath: 'app/play/main.html',
+      // 分享握手独立于入口查询串，所有 manifest 参数都按原语义保留。
+      gameEntryPath:
+          'play/main.html?scene=current_scene&mode=touch&other=1'
+          '&mode=keyboard&raw=%2f&blob=%FF'
+          '&channelId=manifest-channel&token=manifest-token',
       shareToken: 'custom-token',
       storage: storage,
     );
@@ -433,11 +448,274 @@ void main() {
     });
 
     final invitation = (await gateway.shareLinks()).first;
-    expect(invitation.path, '/app/play/main.html');
-    final response = await http.get(invitation);
+    expect(invitation.path, playmeshGameInvitationPath);
+    expect(invitation.hasQuery, isFalse);
+    final opened = await _openInvitation(invitation);
+    expect(opened.entryUri.path, '/play/main.html');
+    expect(_rawQueryValues(opened.entryUri, 'scene'), ['current_scene']);
+    expect(_rawQueryValues(opened.entryUri, 'mode'), ['touch', 'keyboard']);
+    expect(_rawQueryValues(opened.entryUri, 'token'), ['manifest-token']);
+    expect(_rawQueryValues(opened.entryUri, 'channelId'), ['manifest-channel']);
+    expect(
+      opened.entryUri.query,
+      'scene=current_scene&mode=touch&other=1&mode=keyboard'
+      '&raw=%2F&blob=%FF'
+      '&channelId=manifest-channel&token=manifest-token',
+    );
+    final response = opened.entry;
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('CUSTOM_ENTRY'));
-    expect(response.body, contains('<base href="/app/play/">'));
+    expect(response.body, contains('<base href="/play/">'));
   });
+
+  test('开发态浏览器分享复用实时资源源且不向上游转发平台目录', () async {
+    final credential = List<String>.filled(40, 's').join();
+    final forwardedRequests = <String>[];
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final upstreamSubscription = upstream.listen((request) async {
+      forwardedRequests.add(request.uri.toString());
+      if (request.headers.value(playmeshDevelopmentCredentialHeader) !=
+          credential) {
+        request.response.statusCode = HttpStatus.forbidden;
+      } else if (request.uri.path == '/index.html') {
+        request.response.headers.contentType = ContentType.html;
+        request.response.write(
+          '<!doctype html><html><head></head><body>LIVE_SHARE'
+          '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>'
+          '</body></html>',
+        );
+      } else if (request.uri.path == '/assets/hot.js') {
+        request.response.headers.contentType = ContentType(
+          'text',
+          'javascript',
+        );
+        request.response.write('hot-resource-ok');
+      } else if (request.uri.toString() ==
+          '/scripting/engine/external/%2540cocos/box2d.js') {
+        request.response.headers.contentType = ContentType(
+          'text',
+          'javascript',
+        );
+        request.response.write('cocos-virtual-resource-ok');
+      } else if (request.uri.path == '/app/secret.js' ||
+          request.uri.path == '/app/playmesh/user.js') {
+        request.response.headers.contentType = ContentType(
+          'text',
+          'javascript',
+        );
+        request.response.write('window.userAppRoute = true;');
+      } else {
+        request.response.statusCode = HttpStatus.notFound;
+      }
+      await request.response.close();
+    });
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-web-development-share-',
+    );
+    final storage = await GameStorageService.create(
+      gameId: 'com.example.development-share',
+      libraryRoot: root,
+    );
+    final gateway = await startGameWebGateway(
+      source: DevelopmentGameWebResourceSource(
+        baseUri: Uri.parse('http://127.0.0.1:${upstream.port}/'),
+        credential: credential,
+        expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 5)),
+      ),
+      gameId: 'com.example.development-share',
+      multiplayer: false,
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      gameEntryPath: 'index.html',
+      shareToken: 'development-share-token',
+      storage: storage,
+    );
+    addTearDown(() async {
+      await gateway.close();
+      await storage.close();
+      await root.delete(recursive: true);
+      await upstreamSubscription.cancel();
+      await upstream.close(force: true);
+    });
+
+    final invitation = (await gateway.shareLinks()).first;
+    final opened = await _openInvitation(invitation);
+    final entry = opened.entry;
+    final script = await http.get(invitation.resolve('/assets/hot.js?v=1'));
+    final cocosVirtualResource = await http.get(
+      Uri.parse(
+        '${invitation.origin}'
+        '/scripting/engine/external/%2540cocos/box2d.js',
+      ),
+    );
+    final platform = await http.get(
+      invitation.resolve('/playmesh/unavailable.js'),
+    );
+    final bucket = await http.get(invitation.resolve('/bucket/private'));
+    final userApp = await http.get(invitation.resolve('/app/secret.js'));
+    final nestedPlatformName = await http.get(
+      invitation.resolve('/app/playmesh/user.js'),
+    );
+
+    expect(entry.statusCode, HttpStatus.ok);
+    expect(entry.body, contains('LIVE_SHARE'));
+    expect(entry.body, contains('window.__PLAYMESH_BROWSER__'));
+    expect(script.statusCode, HttpStatus.ok);
+    expect(script.body, 'hot-resource-ok');
+    expect(cocosVirtualResource.statusCode, HttpStatus.ok);
+    expect(cocosVirtualResource.body, 'cocos-virtual-resource-ok');
+    expect(platform.statusCode, HttpStatus.notFound);
+    expect(bucket.statusCode, HttpStatus.notFound);
+    expect(userApp.statusCode, HttpStatus.ok);
+    expect(nestedPlatformName.statusCode, HttpStatus.ok);
+    expect(forwardedRequests, [
+      '/index.html',
+      '/assets/hot.js?v=1',
+      '/scripting/engine/external/%2540cocos/box2d.js',
+      '/app/secret.js',
+      '/app/playmesh/user.js',
+    ]);
+  });
+
+  test('分享网关允许用户 app 目录入口声明', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-web-user-app-entry-',
+    );
+    final userApp = Directory(
+      '${root.path}${Platform.pathSeparator}app'
+      '${Platform.pathSeparator}app',
+    );
+    await userApp.create(recursive: true);
+    await File(
+      '${userApp.path}${Platform.pathSeparator}index.html',
+    ).writeAsString(
+      '<!doctype html><html><head></head><body>USER_APP_ENTRY</body></html>',
+    );
+    final storage = await GameStorageService.create(
+      gameId: 'com.example.user-app-entry',
+      libraryRoot: root,
+    );
+    addTearDown(() async {
+      await storage.close();
+      await root.delete(recursive: true);
+    });
+
+    final gateway = await startGameWebGateway(
+      source: InstalledGameWebResourceSource(packageRootPath: root.path),
+      gameId: 'com.example.user-app-entry',
+      multiplayer: false,
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      gameEntryPath: 'app/index.html',
+      shareToken: 'user-app-token',
+      storage: storage,
+    );
+    addTearDown(gateway.close);
+
+    final invitation = (await gateway.shareLinks()).first;
+    expect(invitation.path, playmeshGameInvitationPath);
+    final opened = await _openInvitation(invitation);
+    expect(opened.entryUri.path, '/app/index.html');
+    final response = opened.entry;
+    expect(response.statusCode, HttpStatus.ok);
+    expect(response.body, contains('USER_APP_ENTRY'));
+  });
+}
+
+final class _OpenedInvitation {
+  const _OpenedInvitation({
+    required this.landing,
+    required this.entryUri,
+    required this.entry,
+    required this.cookie,
+  });
+
+  final http.Response landing;
+  final Uri entryUri;
+  final http.Response entry;
+  final String cookie;
+}
+
+Future<_OpenedInvitation> _openInvitation(Uri invitation) async {
+  final fragment = Uri.splitQueryString(invitation.fragment);
+  final inviteToken = fragment[playmeshGameInvitationTokenParameter];
+  if (fragment.length != 1 || inviteToken == null || inviteToken.isEmpty) {
+    throw StateError('测试邀请缺少 inviteToken');
+  }
+  final endpoint = invitation.replace(fragment: null);
+  final landing = await http.get(endpoint);
+  final exchange = await http.post(
+    endpoint,
+    headers: const {'Content-Type': 'application/json'},
+    body: jsonEncode({playmeshGameInvitationTokenParameter: inviteToken}),
+  );
+  if (exchange.statusCode != HttpStatus.ok) {
+    throw StateError('邀请交换失败: ${exchange.statusCode} ${exchange.body}');
+  }
+  final cookieHeader = exchange.headers['set-cookie'];
+  if (cookieHeader == null || cookieHeader.isEmpty) {
+    throw StateError('邀请交换没有设置 Cookie');
+  }
+  final cookie = cookieHeader.split(';').first;
+  final payload = jsonDecode(exchange.body) as Map<String, Object?>;
+  final entryUri = endpoint.resolve(payload['entry']! as String);
+  final entry = await http.get(entryUri, headers: {'Cookie': cookie});
+  return _OpenedInvitation(
+    landing: landing,
+    entryUri: entryUri,
+    entry: entry,
+    cookie: cookie,
+  );
+}
+
+List<String> _rawQueryValues(Uri uri, String expectedName) {
+  final values = <String>[];
+  for (final segment in uri.query.split('&')) {
+    final separator = segment.indexOf('=');
+    final encodedName = separator < 0
+        ? segment
+        : segment.substring(0, separator);
+    final encodedValue = separator < 0 ? '' : segment.substring(separator + 1);
+    try {
+      if (Uri.decodeQueryComponent(encodedName) == expectedName) {
+        values.add(Uri.decodeQueryComponent(encodedValue));
+      }
+    } on FormatException {
+      // 非目标参数允许保留不透明的百分号字节。
+    }
+  }
+  return values;
+}
+
+Future<Directory> _createInstalledPackageRoot() async {
+  final root = await Directory.systemTemp.createTemp(
+    'playmesh-installed-share-package-',
+  );
+  final app = Directory('${root.path}${Platform.pathSeparator}app');
+  final controller = Directory(
+    '${app.path}${Platform.pathSeparator}controller',
+  );
+  final styles = Directory(
+    '${app.path}${Platform.pathSeparator}static'
+    '${Platform.pathSeparator}css',
+  );
+  await controller.create(recursive: true);
+  await styles.create(recursive: true);
+  await File('${app.path}${Platform.pathSeparator}index.html').writeAsString(
+    '<!doctype html><html><head></head><body>GAME'
+    '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>'
+    '</body></html>',
+  );
+  await File(
+    '${controller.path}${Platform.pathSeparator}index.html',
+  ).writeAsString(
+    '<!doctype html><html><head></head><body>CONTROLLER'
+    '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>'
+    '</body></html>',
+  );
+  await File(
+    '${styles.path}${Platform.pathSeparator}game.css',
+  ).writeAsString('body { color: white; }');
+  return root;
 }

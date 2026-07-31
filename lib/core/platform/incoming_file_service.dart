@@ -74,7 +74,7 @@ class IncomingFileService {
       final initial = await _channel.invokeMethod<Object?>('getInitialFile');
       if (initial != null) await onFile(_decode(initial));
     } on MissingPluginException {
-      // Non-Android and widget-test environments do not provide this channel.
+      // 非 Android 平台和 Widget 测试环境不提供此通道。
     } on Object catch (error) {
       onError(error);
     }

@@ -578,17 +578,6 @@ func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 					Type: "session.pong", Sequence: message.Sequence, Payload: payload,
 				})
 			}
-		case "performance.latency":
-			var report struct {
-				LatencyMS *int `json:"latencyMs"`
-			}
-			if json.Unmarshal(message.Payload, &report) != nil ||
-				(report.LatencyMS != nil && (*report.LatencyMS < 0 || *report.LatencyMS > 60000)) {
-				_ = client.conn.Close(websocket.StatusUnsupportedData, "延迟报告格式无效")
-				return
-			}
-			updated := h.store.SetLatency(record, client.player.ID, report.LatencyMS)
-			h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &updated})
 		case "authority.pong":
 			if client.player.ID != snapshot.AuthorityClientID ||
 				len(message.TargetPlayerIDs) != 1 ||

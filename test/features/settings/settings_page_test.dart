@@ -14,6 +14,37 @@ import '../../support/localized_test_app.dart';
 void main() {
   setUpAll(initializeLocalizedTestApp);
 
+  testWidgets('renders settings before the initial Core check starts', (
+    tester,
+  ) async {
+    final result = Completer<GoCoreStatusResult>();
+    var settingsRenderedWhenCheckStarted = false;
+    final provider = _DelayedStatusProvider(
+      onCheck: () {
+        settingsRenderedWhenCheckStarted = find
+            .text('设置')
+            .evaluate()
+            .isNotEmpty;
+      },
+      result: result.future,
+    );
+
+    await tester.pumpWidget(
+      localizedTestApp(home: SettingsPage(statusProvider: provider)),
+    );
+
+    expect(settingsRenderedWhenCheckStarted, isTrue);
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('正在检查'), findsOneWidget);
+
+    result.complete(
+      GoCoreStatusResult.online(_onlineStatus('req-settings-async')),
+    );
+    await _pumpAsync(tester);
+
+    expect(find.text('req-settings-async'), findsOneWidget);
+  });
+
   testWidgets('shows online Core version and request ID', (tester) async {
     final provider = _QueueStatusProvider([
       GoCoreStatusResult.online(_onlineStatus('req-settings-online')),
@@ -24,9 +55,9 @@ void main() {
     );
     await _pumpAsync(tester);
 
-    expect(find.text('Playmesh 3.1.0'), findsOneWidget);
+    expect(find.text('Playmesh 4.0.0'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Playmesh 3.1.0')).dy,
+      tester.getTopLeft(find.text('Playmesh 4.0.0')).dy,
       lessThan(tester.getTopLeft(find.text('Core 0.1.0')).dy),
     );
     expect(find.text('在线'), findsOneWidget);
@@ -242,6 +273,25 @@ class _QueueStatusProvider implements GoCoreStatusProvider {
     final index = checkCalls.clamp(0, results.length - 1);
     checkCalls += 1;
     return results[index];
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+class _DelayedStatusProvider implements GoCoreStatusProvider {
+  const _DelayedStatusProvider({required this.onCheck, required this.result});
+
+  final VoidCallback onCheck;
+  final Future<GoCoreStatusResult> result;
+
+  @override
+  Uri get endpoint => Uri.parse('http://127.0.0.1:43210/health');
+
+  @override
+  Future<GoCoreStatusResult> check() {
+    onCheck();
+    return result;
   }
 
   @override

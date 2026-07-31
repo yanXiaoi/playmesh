@@ -250,8 +250,7 @@ class GameStorageService {
           try {
             await temporary.delete();
           } on FileSystemException {
-            // Windows may keep a failed temporary write locked briefly. A
-            // unique name prevents it from blocking subsequent flushes.
+            // Windows 可能短暂锁定写入失败的临时文件；唯一名称可避免阻塞后续刷新。
           }
         }
       }
@@ -347,7 +346,7 @@ class GameStorageService {
             try {
               await previous;
             } on Object {
-              // A failed write must not permanently poison the per-file queue.
+              // 一次写入失败不能永久破坏单文件队列。
             }
           }
           await action();

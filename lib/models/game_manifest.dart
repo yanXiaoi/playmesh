@@ -1,5 +1,6 @@
 import 'game_summary.dart';
 import 'game_id.dart';
+import 'game_package_layout.dart';
 import '../core/game_sdk/sdk_feature_registry.dart';
 import '../core/version/semantic_version.dart';
 
@@ -37,13 +38,10 @@ class GameAuthorityManifest {
 }
 
 class GameEntriesManifest {
-  const GameEntriesManifest({
-    this.game = 'app/index.html',
-    this.controller = 'app/controller/index.html',
-  });
+  const GameEntriesManifest({required this.game, this.controller});
 
   final String game;
-  final String controller;
+  final String? controller;
 }
 
 class GameManifest {
@@ -66,7 +64,10 @@ class GameManifest {
     this.authority,
   });
 
-  factory GameManifest.fromJson(Map<String, Object?> json) {
+  factory GameManifest.fromJson(
+    Map<String, Object?> json, {
+    bool validateSdkCompatibility = true,
+  }) {
     final id = _requiredString(json, 'id');
     if (!isValidPlaymeshGameId(id)) {
       throw const FormatException(
@@ -89,14 +90,14 @@ class GameManifest {
           );
     final version = _requiredVersion(json, 'version');
     final sdkVersion = _requiredVersion(json, 'sdkVersion');
-    final appSdkVersion = json['appSdkVersion'] == null
-        ? '1.0.0'
-        : _requiredVersion(json, 'appSdkVersion');
-    try {
-      SdkFeatureRegistry.resolveGameSdkVersion(sdkVersion);
-      SdkFeatureRegistry.resolveAppSdkVersion(appSdkVersion);
-    } on UnsupportedError catch (error) {
-      throw FormatException(error.message ?? error.toString());
+    final appSdkVersion = _requiredVersion(json, 'appSdkVersion');
+    if (validateSdkCompatibility) {
+      try {
+        SdkFeatureRegistry.resolveGameSdkVersion(sdkVersion);
+        SdkFeatureRegistry.resolveAppSdkVersion(appSdkVersion);
+      } on UnsupportedError catch (error) {
+        throw FormatException(error.message ?? error.toString());
+      }
     }
 
     final orientation = GameOrientation.fromManifestValue(
@@ -111,6 +112,7 @@ class GameManifest {
     if (modes.length != 1) {
       throw const FormatException('modes 必须且只能声明一个游戏模式');
     }
+    final isMultiplayer = modes.single == GameMode.multiplayer;
     final displayModes = _enumList(
       json,
       'displayModes',
@@ -121,6 +123,7 @@ class GameManifest {
       throw const FormatException('displayModes 必须且只能声明一个显示模式');
     }
     final singleScreen =
+        isMultiplayer &&
         displayModes.single == GameDisplayMode.singleScreenMultiplayer;
     final controllerOrientationValue = json['controllerOrientation'];
     final controllerOrientation = controllerOrientationValue == null
@@ -146,20 +149,24 @@ class GameManifest {
       throw const FormatException('players 必须满足 1 <= min <= max');
     }
 
-    final entriesJson = json['entries'];
-    final entriesMap = entriesJson == null
-        ? const <String, Object?>{}
-        : _asMap(entriesJson, 'entries');
+    final entriesMap = _requiredMap(json, 'entries');
+    final controllerEntry = !singleScreen || entriesMap['controller'] == null
+        ? null
+        : _validateHtmlEntry(
+            _requiredUntrimmedString(entriesMap, 'controller'),
+            field: 'entries.controller',
+          );
+    if (singleScreen && controllerEntry == null) {
+      throw const FormatException(
+        'single_screen_multiplayer 必须声明 entries.controller',
+      );
+    }
     final entries = GameEntriesManifest(
       game: _validateHtmlEntry(
-        _optionalString(entriesMap, 'game') ?? 'app/index.html',
+        _requiredUntrimmedString(entriesMap, 'game'),
         field: 'entries.game',
       ),
-      controller: _validateHtmlEntry(
-        _optionalString(entriesMap, 'controller') ??
-            'app/controller/index.html',
-        field: 'entries.controller',
-      ),
+      controller: controllerEntry,
     );
 
     final authorityJson = json['authority'];
@@ -167,11 +174,13 @@ class GameManifest {
         ? null
         : GameAuthorityManifest(
             entry: _validateJavaScriptEntry(
-              _requiredString(_asMap(authorityJson, 'authority'), 'entry'),
+              _requiredUntrimmedString(
+                _asMap(authorityJson, 'authority'),
+                'entry',
+              ),
               field: 'authority.entry',
             ),
           );
-    final isMultiplayer = modes.contains(GameMode.multiplayer);
     if (isMultiplayer && authority == null) {
       throw const FormatException('多人游戏必须声明 authority.entry');
     }
@@ -236,7 +245,7 @@ class GameManifest {
       'modes': modes.map((mode) => mode.manifestValue).toList(),
       'displayModes': displayModes.map((mode) => mode.manifestValue).toList(),
       'players': {'min': players.min, 'max': players.max},
-      'entries': {'game': entries.game, 'controller': entries.controller},
+      'entries': {'game': entries.game, 'controller': ?entries.controller},
       'tags': tags,
     };
     if (lastModifiedAt case final lastModifiedAt?) {
@@ -252,9 +261,8 @@ class GameManifest {
   }
 }
 
-/// Returns the writable projection of a manifest without assigning semantics
-/// to unknown JSON members. Readers may accept arbitrary extra members, while
-/// every App-owned write path emits only fields from the current contract.
+/// 返回清单的可写投影，不为未知 JSON 成员赋予语义。读取端可以接受任意额外成员，
+/// 但 App 管理的所有写入路径只输出当前协议中的字段。
 Map<String, Object?> projectGameManifestJson(Map<String, Object?> source) {
   final projected = _projectJsonObject(source, const [
     'id',
@@ -302,46 +310,19 @@ Map<String, Object?> _projectJsonObject(
 };
 
 String validateGamePackagePath(String value, {required String field}) {
-  if (value.isEmpty ||
-      value.startsWith('/') ||
-      value.startsWith('\\') ||
-      value.contains('\\') ||
-      value.contains('?') ||
-      value.contains('#') ||
-      RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(value)) {
-    throw FormatException('$field 必须是游戏包内的相对路径');
-  }
-
-  final segments = value.split('/');
-  if (segments.any(
-    (segment) => segment.isEmpty || segment == '.' || segment == '..',
-  )) {
-    throw FormatException('$field 不能越过游戏包目录');
-  }
-  return value;
+  return playmeshGamePackageLayout.validatePackagePath(value, field: field);
 }
 
 String _validateHtmlEntry(String value, {required String field}) {
-  final path = validateGamePackagePath(value.trim(), field: field);
-  if (!path.startsWith('app/')) {
-    throw FormatException('$field 必须位于 app/ 公开资源目录内');
-  }
-  if (!path.toLowerCase().endsWith('.html')) {
-    throw FormatException('$field 必须指向 HTML 文件');
-  }
-  return path;
+  return playmeshGamePackageLayout
+      .parseWebEntry(value, field: field, kind: GameWebEntryKind.html)
+      .value;
 }
 
 String _validateJavaScriptEntry(String value, {required String field}) {
-  final path = validateGamePackagePath(value.trim(), field: field);
-  if (!path.startsWith('app/')) {
-    throw FormatException('$field 必须位于 app/ 公开资源目录内');
-  }
-  final lower = path.toLowerCase();
-  if (!lower.endsWith('.js') && !lower.endsWith('.mjs')) {
-    throw FormatException('$field 必须指向 JavaScript 文件');
-  }
-  return path;
+  return playmeshGamePackageLayout
+      .parseWebEntry(value, field: field, kind: GameWebEntryKind.javaScript)
+      .value;
 }
 
 String _requiredString(Map<String, Object?> json, String field) {
@@ -354,6 +335,14 @@ String _requiredString(Map<String, Object?> json, String field) {
     throw FormatException('$field 不能为空');
   }
   return result;
+}
+
+String _requiredUntrimmedString(Map<String, Object?> json, String field) {
+  final value = json[field];
+  if (value == null) {
+    throw FormatException('缺少必填字段: $field');
+  }
+  return _asString(value, field);
 }
 
 String? _optionalString(Map<String, Object?> json, String field) {

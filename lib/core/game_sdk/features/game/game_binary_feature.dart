@@ -640,7 +640,7 @@ const gameBinarySdkSource = SdkSourceFragment(
         return () => state.listeners.delete(callback);
       },
       onForward(handler) {
-        if (!playmesh.session.isAuthority() || mode !== "authority") {
+        if (!main.session.isAuthority() || mode !== "authority") {
           throw new Error("只有 Authority mode 的 Authority 可以注册 Binary Channel 审核器");
         }
         if (typeof handler !== "function") throw new Error("Binary Channel onForward 需要函数");
@@ -650,7 +650,7 @@ const gameBinarySdkSource = SdkSourceFragment(
         };
       },
       async close() {
-        if (!playmesh.session.isAuthority()) {
+        if (!main.session.isAuthority()) {
           throw new Error("只有 Authority 可以关闭 Binary Channel");
         }
         if (state.closed) return;

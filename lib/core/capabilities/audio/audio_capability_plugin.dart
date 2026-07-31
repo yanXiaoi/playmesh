@@ -162,6 +162,10 @@ class AudioCapabilityPlugin
     name: '麦克风与语音转文字',
     description: '允许标准 Web API 使用麦克风，并提供跨平台原生语音转文字。',
     apiVersion: '1.1.0',
+    supportedPlatforms: [
+      CapabilityPlatform.WINDOWS,
+      CapabilityPlatform.ANDROID,
+    ],
     optionsSchema: {'type': 'object', 'additionalProperties': false},
     methods: [
       CapabilityMethodDescriptor(
@@ -310,17 +314,6 @@ class AudioCapabilityPlugin
     );
     _activeInstance = instance;
     return instance;
-  }
-
-  @override
-  Future<CapabilityJson> test(Duration timeout) async {
-    if (!isAvailable) throw UnsupportedError('当前平台不支持语音转文字');
-    return {
-      'available': true,
-      'permissionRequested': false,
-      'methods': const ['toText'],
-      'events': const ['textOnSoundLevelChange', 'textOnResult'],
-    };
   }
 
   @override

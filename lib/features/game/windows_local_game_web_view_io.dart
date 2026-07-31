@@ -263,9 +263,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   }
 
   Future<void> _sendAppMessage(String message) async {
-    await _controller.executeScript(
-      'window.playmeshApp && window.playmeshApp.__receive($message);',
-    );
+    await _controller.executeScript(appSdkReceiveScript(message));
   }
 
   Future<WebviewPermissionDecision> _handlePermissionRequest(

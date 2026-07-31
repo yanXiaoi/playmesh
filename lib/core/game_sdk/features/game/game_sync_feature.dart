@@ -176,7 +176,7 @@ const gameSyncSdkSource = SdkSourceFragment(
   }
 
   function startSyncAuthority(options) {
-    if (!playmesh.session.isAuthority()) {
+    if (!main.session.isAuthority()) {
       throw new Error("只有 Authority Client 可以启动状态同步");
     }
     if (syncAuthorityRuntime) throw new Error("权威状态同步已经启动");

@@ -83,7 +83,7 @@ func (h *Handler) PublicGames(c *gin.Context) {
 			"recordId": game.ID, "id": game.PackageID, "name": game.Name,
 			"author": game.Author, "version": game.Version,
 			"remarks": game.Remarks, "status": game.Status,
-			"createdAt": game.CreatedAt,
+			"packageSizeBytes": game.PackageSizeBytes, "createdAt": game.CreatedAt,
 		}
 		if game.Status == store.StatusApproved {
 			item["downloadUrl"] = "/api/public/games/" +

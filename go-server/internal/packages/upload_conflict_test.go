@@ -77,6 +77,73 @@ func TestManifestParserProjectsOnlyKnownFields(t *testing.T) {
 	}
 }
 
+func TestUserUploadRejectsNonCurrentSDKVersions(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = filepath.Join(root, "server.db")
+	cfg.Storage.GamesDirectory = filepath.Join(root, "games")
+	cfg.Storage.QuarantineDirectory = filepath.Join(root, "quarantine")
+	cfg.Scanner.Enabled = false
+	database, err := store.Open(cfg.Storage, store.Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	owner, err := database.CreateUser(
+		context.Background(),
+		"sdk-owner@example.com",
+		"hash",
+		"active",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(
+		cfg,
+		database,
+		mailer.New(config.Mail{}),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	cases := []struct {
+		name     string
+		manifest string
+		want     string
+	}{
+		{
+			name: "旧 Game SDK",
+			manifest: `{"id":"com.example.old-game-sdk","name":"Old Game SDK",` +
+				`"version":"1.0.0","sdkVersion":"3.2.0","appSdkVersion":"3.2.0",` +
+				`"entries":{"game":"index.html"}}`,
+			want: "main.json.sdkVersion 必须显式声明为 4.0.0",
+		},
+		{
+			name: "旧 App SDK",
+			manifest: `{"id":"com.example.old-app-sdk","name":"Old App SDK",` +
+				`"version":"1.0.0","sdkVersion":"4.0.0","appSdkVersion":"3.1.0",` +
+				`"entries":{"game":"index.html"}}`,
+			want: "main.json.appSdkVersion 必须显式声明为 3.2.0",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			file := buildTestPackageArchive(t, testCase.manifest, nil)
+			_, uploadErr := service.ProcessUserUpload(
+				context.Background(),
+				file,
+				"old-sdk.zip",
+				owner,
+			)
+			_ = file.Close()
+			var rejected *RejectedError
+			if !errors.As(uploadErr, &rejected) ||
+				!strings.Contains(rejected.Reason, testCase.want) {
+				t.Fatalf("非当前 SDK 上传未被严格拒绝: %v", uploadErr)
+			}
+			assertUploadFileCounts(t, cfg.Storage, 0, 0)
+		})
+	}
+}
+
 func TestUserUploadConflictsLeaveNoStoredOrQuarantineResidue(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
@@ -127,7 +194,9 @@ func TestUserUploadConflictsLeaveNoStoredOrQuarantineResidue(t *testing.T) {
 	firstFile := buildTestPackageArchive(
 		t,
 		`{"id":"com.example.conflict","name":"动态游戏名称","author":"包内伪造发布者",`+
-			`"version":"1.0.0","remarks":"动态简介","tags":["动态标签"],`+
+			`"version":"1.0.0","sdkVersion":"4.0.0","appSdkVersion":"3.2.0",`+
+			`"remarks":"动态简介","tags":["动态标签"],`+
+			`"entries":{"game":"index.html"},`+
 			`"permissions":["http://ignored.example"],`+
 			`"icon":"javascript:ignored","extra":"http://ignored.example"}`,
 		icon,
@@ -225,6 +294,94 @@ func TestUserUploadConflictsLeaveNoStoredOrQuarantineResidue(t *testing.T) {
 	}
 }
 
+func TestUnsafeRootIconsAreRemovedFromNormalizedDownload(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = filepath.Join(root, "server.db")
+	cfg.Storage.GamesDirectory = filepath.Join(root, "games")
+	cfg.Storage.QuarantineDirectory = filepath.Join(root, "quarantine")
+	cfg.Scanner.Enabled = false
+	database, err := store.Open(cfg.Storage, store.Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	owner, err := database.CreateUser(
+		context.Background(),
+		"icon-owner@example.com",
+		"hash",
+		"active",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err = database.UpdateDisplayName(
+		context.Background(),
+		owner.ID,
+		"Icon Owner",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(
+		cfg,
+		database,
+		mailer.New(config.Mail{}),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	cases := []struct {
+		name string
+		id   string
+		icon []byte
+	}{
+		{
+			name: "invalid png",
+			id:   "com.example.invalid-icon",
+			icon: []byte("not a png"),
+		},
+		{
+			name: "oversized png",
+			id:   "com.example.oversized-icon",
+			icon: bytes.Repeat([]byte{0}, int(maxRootIconBytes)+1),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			file := buildTestPackageArchive(
+				t,
+				`{"id":"`+testCase.id+`","name":"Icon","version":"1.0.0",`+
+					`"sdkVersion":"4.0.0","appSdkVersion":"3.2.0",`+
+					`"entries":{"game":"index.html"}}`,
+				testCase.icon,
+			)
+			game, err := service.ProcessUserUpload(
+				context.Background(),
+				file,
+				"icon.zip",
+				owner,
+			)
+			_ = file.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if game.IconPath != "" {
+				t.Fatalf("unsafe icon must not have a display artifact: %s", game.IconPath)
+			}
+			download, err := zip.OpenReader(game.StoredPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if findArchiveEntry(download.File, "icon.png") != nil {
+				_ = download.Close()
+				t.Fatal("normalized downloadable ZIP retained unsafe icon.png")
+			}
+			if err := download.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func containsFinding(findings []string, prefix string) bool {
 	for _, finding := range findings {
 		if strings.HasPrefix(finding, prefix) {
@@ -270,7 +427,9 @@ func buildTestPackage(t *testing.T, version string) *os.File {
 	return buildTestPackageWithManifest(
 		t,
 		`{"id":"com.example.conflict","name":"动态游戏名称","author":"包内伪造发布者","version":"`+
-			version+`","remarks":"动态简介","tags":["动态标签"]}`,
+			version+`","sdkVersion":"4.0.0","appSdkVersion":"3.2.0",`+
+			`"remarks":"动态简介","tags":["动态标签"],`+
+			`"entries":{"game":"index.html"}}`,
 	)
 }
 
@@ -333,6 +492,17 @@ func testRootIcon(t *testing.T) []byte {
 
 func assertNormalizedManifest(t *testing.T, game store.Game) {
 	t.Helper()
+	info, err := os.Stat(game.StoredPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if game.PackageSizeBytes != info.Size() || game.PackageSizeBytes <= 0 {
+		t.Fatalf(
+			"数据库游戏包大小 = %d，实际 = %d",
+			game.PackageSizeBytes,
+			info.Size(),
+		)
+	}
 	for _, forbidden := range []string{`"permissions"`, `"icon"`, `"extra"`} {
 		if strings.Contains(game.ManifestJSON, forbidden) {
 			t.Fatalf("数据库 Manifest 已知字段投影仍包含 %s: %s", forbidden, game.ManifestJSON)

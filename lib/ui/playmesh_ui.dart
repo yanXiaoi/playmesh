@@ -557,10 +557,9 @@ class _PlaymeshPageTransitionsBuilder extends PageTransitionsBuilder {
       begin: const Offset(0.012, 0),
       end: Offset.zero,
     ).animate(curve);
-    // On pop, move the outgoing route all the way off screen. The previous
-    // 1.2% movement kept it covering the previous route for almost the whole
-    // animation, which looked like a frozen frame followed by a hard switch.
-    // A compositor-only slide also avoids full-screen opacity blending.
+    // 返回时将退出路由完全移出屏幕。此前 1.2% 的位移使其在几乎整个动画期间
+    // 都遮挡着上一条路由，看起来像画面冻结后突然切换。
+    // 仅由合成器完成的滑动也避免了全屏透明度混合。
     final exitPosition = Tween<Offset>(
       begin: const Offset(1, 0),
       end: Offset.zero,

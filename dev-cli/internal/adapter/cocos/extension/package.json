@@ -1,0 +1,72 @@
+{
+  "package_version": 2,
+  "name": "playmesh",
+  "title": "Playmesh",
+  "version": "2.0.0",
+  "description": "为 Cocos Creator 3.x Web 预览与正式构建接入 Playmesh App。",
+  "author": "Playmesh",
+  "editor": ">=3.0.0 <4.0.0",
+  "main": "./dist/main.js",
+  "panels": {
+    "settings": {
+      "title": "Playmesh 项目设置",
+      "type": "dockable",
+      "main": "./dist/panels/settings",
+      "icon": "./static/playmesh.svg",
+      "size": {
+        "min-width": 520,
+        "min-height": 520,
+        "width": 720,
+        "height": 760
+      }
+    }
+  },
+  "scripts": {},
+  "contributions": {
+    "builder": "./dist/builder.js",
+    "messages": {
+      "logs": {
+        "methods": [
+          "logs"
+        ]
+      },
+      "update": {
+        "methods": [
+          "update"
+        ]
+      },
+      "open-settings": {
+        "methods": [
+          "openSettings"
+        ]
+      },
+      "load-settings": {
+        "methods": [
+          "loadSettings"
+        ]
+      },
+      "save-settings": {
+        "methods": [
+          "saveSettings"
+        ]
+      }
+    },
+    "menu": [
+      {
+        "path": "i18n:menu.extension/Playmesh",
+        "label": "项目设置",
+        "message": "open-settings"
+      },
+      {
+        "path": "i18n:menu.extension/Playmesh",
+        "label": "查看运行日志",
+        "message": "logs"
+      },
+      {
+        "path": "i18n:menu.extension/Playmesh",
+        "label": "更新 Playmesh 集成",
+        "message": "update"
+      }
+    ]
+  }
+}

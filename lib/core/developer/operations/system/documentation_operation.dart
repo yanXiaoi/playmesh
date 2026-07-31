@@ -186,7 +186,6 @@ class _DocumentationOperation implements _DeveloperHttpOperation {
 }
 
 const _sessionSchema = {
-  r'$schema': 'https://json-schema.org/draft/2020-12/schema',
   'title': 'DeveloperSession',
   'type': 'object',
   'required': ['enabled', 'port'],
@@ -201,7 +200,6 @@ const _sessionSchema = {
 };
 
 const _projectValidationSchema = {
-  r'$schema': 'https://json-schema.org/draft/2020-12/schema',
   'title': 'DeveloperProjectValidationReport',
   'type': 'object',
   'required': [

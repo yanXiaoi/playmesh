@@ -13,16 +13,18 @@ const source = fs.readFileSync(serviceFile, "utf8");
 const playerSource = fs.readFileSync(playerFile, "utf8");
 
 assert.equal(/WebSocket|fetch\s*\(|document\./.test(source), false);
-assert.match(playerSource, /playmesh\.session\.isAuthority\(\)/);
-assert.match(playerSource, /playmesh\.sync\.observe/);
+assert.match(playerSource, /playmesh\.main\.session\.isAuthority\(\)/);
+assert.match(playerSource, /playmesh\.main\.sync\.observe/);
 
 let authorityOptions = null;
 const authorityController = { stop() {} };
 globalThis.playmesh = {
-  sync: {
-    startAuthority(options) {
-      authorityOptions = options;
-      return authorityController;
+  main: {
+    sync: {
+      startAuthority(options) {
+        authorityOptions = options;
+        return authorityController;
+      },
     },
   },
 };

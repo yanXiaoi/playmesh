@@ -111,4 +111,4 @@ ChatAI。
 - [AgentAI 使用方法](agent-ai-development.md)
 - [网页开发者通道](web-dev-channel.md)
 - [游戏开发指南](development-guide.md)
-- [Game SDK / App Bridge SDK](sdk-v1.md)
+- [Game SDK / App SDK](sdk-v1.md)

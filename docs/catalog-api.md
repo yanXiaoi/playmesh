@@ -1,17 +1,26 @@
-# Playmesh Catalog API 2.0
+# Playmesh Catalog API 3.0.0
 
 Catalog API 把本机或独立服务器上的游戏包公开为 Playmesh 游戏源。它与 Go Core、
 游戏会话分享、Relay 和 Developer Gateway 相互独立；当前唯一受支持的契约版本为
-`2.0.0`。
+`3.0.0`。
 
-本版本是破坏性升级：
+版本历史与当前破坏性边界：
 
-- 不读取 Catalog 1.x。
-- 不接受旧 `{host, token}` 分离导入或 `playmesh://catalog-source` 二维码。
-- 不支持省略版本下载“最新包”。
-- 不读取旧源配置；App 会隔离旧文件并要求重新导入。
-- `main.json` 不定义 `icon` 或 `permissions`；只认游戏包根目录可选 `icon.png`，
-  受保护能力只认同级 `capabilities.json`。
+- Catalog `2.0.0` 历史上引入单一 `publicURL`、每个游戏只列 latest offer、
+  带 `gameId + version` 的下载、独立图标接口和上传能力声明；同时停止读取
+  Catalog 1.x、旧 `{host, token}` 分离导入、`playmesh://catalog-source` 二维码、
+  省略版本的“最新包”下载及旧源配置。
+- Catalog `2.1.0` 历史上增加可选 `packageSizeBytes`，其余 2.0 规则保持不变。
+- Catalog `3.0.0` 的 offer 和游戏 Manifest 入口统一相对于外层物理 `app/`，例如
+  `index.html`、`controller/index.html`。安装后的外层物理目录仍是 `app/`，Web URL
+  映射为 `/`；用户首段 `app` 合法，因此入口 `app/index.html` 对应物理
+  `app/app/index.html` 和 URL `/app/index.html`，但不会把它别名到外层
+  `app/index.html`。仅 `/playmesh/**` 与 `/bucket/**` 保留给平台。
+
+App 对协议版本执行精确匹配，因此 2.x 源声明不会由 3.0 客户端转换或继续消费；
+入口是否以 `app/` 开头不参与版本兼容判断。`main.json` 不定义 `icon` 或
+`permissions`；只认游戏包根目录可选 `icon.png`，受保护能力只认同级
+`capabilities.json`。
 
 ## publicURL 与鉴权
 
@@ -32,7 +41,7 @@ Authorization: Bearer read-token
 二维码、Catalog 响应、JavaScript、日志或错误详情。
 
 扫码和手工输入必须调用同一导入函数。保存前 App 必须成功请求 `/apps/info`，
-验证 HTTP 200、JSON、`catalogApiVersion == "2.0.0"` 以及 Relay/上传能力内部一致；
+验证 HTTP 200、JSON、`catalogApiVersion == "3.0.0"` 以及 Relay/上传能力内部一致；
 失败时不得写入配置。
 
 ## `/apps/info`
@@ -46,13 +55,13 @@ Authorization: Bearer optional-read-token
 
 ```json
 {
-  "catalogApiVersion": "2.0.0",
+  "catalogApiVersion": "3.0.0",
   "name": "Playmesh 公共游戏源",
   "author": "Source Builder",
   "homepage": "https://example.com",
   "supportsGameRelay": true,
   "relay": {
-    "protocolVersion": "2.0.0",
+    "protocolVersion": "3.0.0",
     "transport": "playmesh-tcp-upgrade",
     "publicBaseUrl": "https://relay.example.com",
     "hostPath": "/relay/v1/host",
@@ -81,7 +90,7 @@ App 自带的只读分享源固定声明：
 
 ```json
 {
-  "catalogApiVersion": "2.0.0",
+  "catalogApiVersion": "3.0.0",
   "name": "{用户昵称}的游戏库",
   "author": "Playmesh App",
   "supportsGameRelay": false,
@@ -117,14 +126,15 @@ Authorization: Bearer optional-read-token
       "remarks": "游戏描述",
       "author": "发布者名称",
       "version": "2.0.0",
-      "sdkVersion": "2.3.0",
-      "appSdkVersion": "2.1.1",
+      "sdkVersion": "4.0.0",
+      "appSdkVersion": "3.2.0",
       "orientation": "landscape",
       "modes": ["multiplayer"],
       "displayModes": ["multi_screen"],
       "players": { "min": 2, "max": 5 },
-      "entries": { "game": "app/index.html" },
+      "entries": { "game": "index.html" },
       "tags": ["party"],
+      "packageSizeBytes": 73400320,
       "icon": "https://catalog.example.com/apps/icon?id=com.example.game&version=2.0.0"
     }
   ]
@@ -133,6 +143,19 @@ Authorization: Bearer optional-read-token
 
 `icon` 可选，必须与源 Origin 同源。App 拒绝跨源图片，并在加载、解码或大小校验
 失败时显示平台默认图标。
+
+`entries.game` 对所有游戏显式必填；`entries.controller` 对
+`single_screen_multiplayer` 显式必填；`authority.entry` 对 `multiplayer` 显式
+必填。三者都相对于下载包外层物理 `app/`，缺失时不回退模板路径。它们不得带前导
+`/`、查询、fragment、反斜线、外部 URL、`.`/`..` 段，也不得以不区分大小写的
+`playmesh` 或 `bucket` 作为首段。`app` 是普通合法首段，并解析到外层物理 `app/`
+内的同名子目录。Catalog 不重写入口，客户端在安装前按同一规则校验。
+
+`packageSizeBytes` 使用 ZIP 的实际字节数，是 Catalog `2.1.0` 引入并在 3.0
+继续保留的可选正整数字段。Go
+Server 在接收并规范化游戏包时写入数据库，后续列表直接读取，不在每次请求时重新
+读取文件。App 临时局域网分发源按需生成 ZIP，可以在列表中省略该字段；客户端下载
+收到响应头后使用准确的 `Content-Length` 补充总大小。
 
 ## `/apps/icon`
 
@@ -157,7 +180,8 @@ GET /apps/download?id=com.example.game&version=2.0.0
 Authorization: Bearer optional-read-token
 ```
 
-`id` 与严格三段式 `version` 都是必填项。成功返回 `application/zip`，文件名为
+`id` 与严格三段式 `version` 都是必填项。成功返回 `application/zip`，并应携带准确
+的 `Content-Length`；文件名为
 `游戏名称-v游戏版本.zip`。包只包含：
 
 ```text
@@ -221,7 +245,7 @@ publicURL，不包含上传密钥。
 
 ## 安全与缓存
 
-- 所有响应带 `X-Playmesh-Catalog-Version: 2.0.0`。
+- 所有响应带 `X-Playmesh-Catalog-Version: 3.0.0`。
 - 读取 Token 只提供 Catalog 读取能力，不能代替防火墙或可信网络边界。
 - App 自带源绑定 `0.0.0.0`，默认关闭，不支持用户上传或 Relay。
 - Catalog 导出使用流式 ZIP、串行任务和专用临时目录；启动、操作前和完成后清理。

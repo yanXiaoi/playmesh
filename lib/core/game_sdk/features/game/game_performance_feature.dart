@@ -1,144 +1,49 @@
 part of '../../sdk_feature_registry.dart';
 
+/// 性能指标由 App SDK 在当前页面内保存和渲染。
+///
+/// Game SDK 只负责复用受控 Session 传输发送延迟探针；它不会把 FPS 或 RTT
+/// 上报给 Dart，也不会维护第二份性能状态。
 const gamePerformanceSdkSource = SdkSourceFragment(
-  id: 'game.performance',
+  id: 'game.performance-transport',
   target: SdkSourceTarget.game,
   order: 50,
-  typeScript: r'''  function setLatency(value, diagnostics = null) {
-    currentLatency = typeof value === "number" && Number.isFinite(value)
-      ? Math.max(0, Math.round(value))
-      : null;
-    latencyDiagnostics = diagnostics;
-    emit(latencyListeners, currentLatency);
-    void renderPerformanceUi();
-    post("performance.latency", {
-      latencyMs: currentLatency,
-      diagnostics: latencyDiagnostics,
-    }).catch(() => {});
-  }
-
-  function sendLatencyProbe() {
-    if (!bootstrap?.session) return;
-    const clientSentAt = Date.now();
-    post("performance.ping", {
-      probeId: `latency-${clientSentAt}-${++latencyProbeSequence}`,
-      clientSentAt,
-    }).catch(() => {});
-  }
-
-  function startLatencyProbes() {
-    if (!bootstrap?.session) return;
-    if (latencyTimer) return;
-    sendLatencyProbe();
-    latencyTimer = global.setInterval(sendLatencyProbe, 3000);
-    latencyTimer?.unref?.();
-  }
-
-  function stopLatencyProbes() {
-    if (latencyTimer) global.clearInterval(latencyTimer);
-    latencyTimer = null;
-  }
-
-  function handleLatencyPong(payload) {
-    const receivedAt = Date.now();
-    const sentAt = Number(payload?.clientSentAt);
-    if (!Number.isFinite(sentAt) || sentAt > receivedAt) return;
-    if (payload.authorityAvailable !== true) {
-      setLatency(null, {
-        probeId: payload.probeId || null,
-        clientSentAt: sentAt,
-        serverReceivedAt: payload.serverReceivedAt || null,
-        serverSentAt: payload.serverSentAt || null,
-        receivedAt,
-        authorityAvailable: false,
-      });
-      return;
-    }
-    const rtt = Math.max(0, receivedAt - sentAt);
-    const smoothed = currentLatency == null ? rtt : (currentLatency * 0.75) + (rtt * 0.25);
-    setLatency(smoothed, {
-      probeId: payload.probeId || null,
-      clientSentAt: sentAt,
-      serverReceivedAt: payload.serverReceivedAt || null,
-      serverSentAt: payload.serverSentAt || null,
-      receivedAt,
-      authorityAvailable: true,
-      rawRttMs: rtt,
+  typeScript: r'''
+  function configureClientPerformance() {
+    appInternalRuntime.configureRuntimePerformance?.({
+      multiplayer: Boolean(bootstrap?.session),
+      sendLatencyProbe(payload) {
+        return post("performance.ping", payload);
+      },
     });
   }
 
-  async function ensurePerformanceUi() {
-    if (global.__PLAYMESH_BROWSER__ && !appSdk.isAvailable()) {
-      return ensureBrowserNicknameUi();
-    }
-    if (performanceUi) return performanceUi;
-    if (!global.document) return null;
-    if (!global.document.body) {
-      await new Promise((resolve) => global.document.addEventListener("DOMContentLoaded", resolve, { once: true }));
-    }
-    if (typeof global.document.createElement !== "function") return null;
-    const host = global.document.createElement("div");
-    host.id = "playmesh-performance";
-    host.setAttribute?.("data-theme", platformUiTheme);
-    const root = host.attachShadow({ mode: "closed" });
-    root.innerHTML = `<style>
-      :host{all:initial;--pm-performance-border:#ffffff30;--pm-performance-surface:#111827e8;--pm-performance-text:#f9fafb;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;color-scheme:dark}
-      :host([data-theme="light"]){--pm-performance-border:#8795a6;--pm-performance-surface:#fffffff2;--pm-performance-text:#17202b;color-scheme:light}
-      .panel{position:fixed;right:12px;top:12px;z-index:2147483646;display:flex;gap:10px;padding:7px 9px;border:1px solid var(--pm-performance-border);border-radius:7px;background:var(--pm-performance-surface);color:var(--pm-performance-text);box-shadow:0 3px 12px #0004;font-size:12px;font-weight:700;line-height:1}
-      .panel[hidden],.latency[hidden]{display:none}
-    </style><div class="panel"><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
-    global.document.body.appendChild(host);
-    performanceUi = {
-      host,
-      panel: root.querySelector(".panel"),
-      fps: root.querySelector(".fps"),
-      latency: root.querySelector(".latency"),
-    };
-    refreshPerformancePlatformUi(performanceUi);
-    return performanceUi;
+  function startLatencyProbes() {
+    configureClientPerformance();
   }
 
-  function refreshPerformancePlatformUi(ui) {
-    ui?.host?.setAttribute?.("data-theme", platformUiTheme);
+  function stopLatencyProbes() {
+    appInternalRuntime.configureRuntimePerformance?.({ multiplayer: false });
   }
 
-  async function renderPerformanceUi() {
-    if (typeof appSdk.__refreshRuntimeUi === "function") {
-      appSdk.__refreshRuntimeUi();
-      return;
-    }
-    const ui = await ensurePerformanceUi();
-    if (!ui) return;
-    ui.panel.hidden = !performanceVisible;
-    ui.fps.textContent = currentFps == null ? "-- FPS" : `${currentFps} FPS`;
-    const multiplayer = Boolean(bootstrap?.session);
-    ui.latency.hidden = !multiplayer;
-    ui.latency.textContent = currentLatency == null ? "-- ms" : `${currentLatency} ms`;
-    if (ui.performanceButton) {
-      ui.performanceButton.classList.toggle("active", performanceVisible);
-      ui.performanceButton.setAttribute("aria-pressed", String(performanceVisible));
-    }
+  function handleLatencyPong(payload) {
+    appInternalRuntime.recordRuntimeLatencyPong?.(payload);
   }
 
 ''',
 );
 
-class _GamePerformanceFeature implements _GameSdkCommandFeature {
+final class _GamePerformanceTransportFeature implements _GameSdkCommandFeature {
   @override
   SdkSourceFragment get source => gamePerformanceSdkSource;
 
   @override
   List<SdkVersionRange> get supportedVersions => const [
-    SdkVersionRange('1.0.0', SdkVersionRange.last),
+    SdkVersionRange('4.0.0', SdkVersionRange.last),
   ];
 
   @override
-  Set<String> get commands => const {
-    'performance.fps',
-    'performance.ping',
-    'performance.pong',
-    'performance.latency',
-  };
+  Set<String> get commands => const {'performance.ping', 'performance.pong'};
 
   @override
   Future<SdkCommandExecution> execute(
@@ -146,21 +51,6 @@ class _GamePerformanceFeature implements _GameSdkCommandFeature {
     SdkCommandEnvelope command,
   ) async {
     switch (command.name) {
-      case 'performance.fps':
-        final fps = command.payload['fps'];
-        if (fps is! num || !fps.isFinite || fps < 0) {
-          throw const FormatException('fps 必须是非负有限数值');
-        }
-        context.emitFps(fps.toDouble());
-        return const SdkCommandResult();
-      case 'performance.latency':
-        final latency = command.payload['latencyMs'];
-        if (latency != null &&
-            (latency is! num || !latency.isFinite || latency < 0)) {
-          throw const FormatException('latencyMs 必须为空或非负有限数值');
-        }
-        context.emitLatency((latency as num?)?.toDouble());
-        return const SdkCommandResult();
       case 'performance.ping':
         final connection = context.connection;
         if (connection == null) {
@@ -179,6 +69,6 @@ class _GamePerformanceFeature implements _GameSdkCommandFeature {
         );
         return const SdkCommandResult();
     }
-    throw StateError('未注册的性能命令: ${command.name}');
+    throw StateError('未注册的性能传输命令: ${command.name}');
   }
 }

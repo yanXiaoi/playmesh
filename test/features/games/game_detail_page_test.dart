@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/features/game/game_page.dart';
 import 'package:playmesh/features/games/game_detail_page.dart';
 import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
@@ -27,7 +28,7 @@ void main() {
     displayMode: 'multi_screen',
     orientation: GameOrientation.landscape,
     tags: const ['派对', '本地多人'],
-    entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: '可运行'),
+    entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: '可运行'),
   );
 
   test('导出包使用游戏名称-v版本.zip', () {
@@ -46,13 +47,37 @@ void main() {
           displayMode: 'multi_screen',
           orientation: GameOrientation.portrait,
           entry: LocalGameEntry(
-            assetPath: 'app/index.html',
+            gameEntryPath: 'index.html',
             statusLabel: '可运行',
           ),
         ),
       ),
       '派对_问答__-v2.0.0.zip',
     );
+  });
+
+  testWidgets('从游戏库详情启动时默认进入全屏', (tester) async {
+    GameLaunchArguments? launched;
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GameDetailPage(game: game, onDelete: (_) async {}),
+        onGenerateRoute: (settings) {
+          if (settings.name != GamePage.routeName) return null;
+          launched = settings.arguments! as GameLaunchArguments;
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('GAME_ROUTE')),
+          );
+        },
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('game-detail-start')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GAME_ROUTE'), findsOneWidget);
+    expect(launched?.game.id, game.id);
+    expect(launched?.enterFullscreenOnLaunch, isTrue);
   });
 
   testWidgets('点击游戏 ID 会复制并显示反馈', (tester) async {
@@ -137,7 +162,7 @@ void main() {
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
       entry: LocalGameEntry(
-        assetPath: 'app/index.html',
+        gameEntryPath: 'index.html',
         statusLabel: 'manifest_repair_required',
       ),
     );
@@ -174,7 +199,7 @@ void main() {
         displayMode: 'multi_screen',
         orientation: GameOrientation.landscape,
         entry: LocalGameEntry(
-          assetPath: 'app/index.html',
+          gameEntryPath: 'index.html',
           statusLabel: 'manifest_repair_required',
         ),
       ),
@@ -194,7 +219,7 @@ void main() {
       displayModeLabel: '多屏',
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
-      entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: '待修复'),
+      entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: '待修复'),
     );
     await tester.pumpWidget(
       localizedTestApp(

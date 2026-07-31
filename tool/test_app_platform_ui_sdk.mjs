@@ -6,6 +6,19 @@ const source = fs.readFileSync(
   new URL("../assets/playmesh-library/public/sdk/v1/playmesh-app.js", import.meta.url),
   "utf8",
 );
+const appLocale = JSON.parse(fs.readFileSync(
+  new URL(
+    "../assets/playmesh-localization/locales/zh-CN/app.json",
+    import.meta.url,
+  ),
+  "utf8",
+));
+const platformMessages = Object.fromEntries(
+  Object.entries(appLocale)
+    .filter(([key]) => key.startsWith("platform.game."))
+    .map(([key, value]) => [key.slice("platform.game.".length), value]),
+);
+const appInternalKey = Symbol.for("playmesh.app.internal.v1");
 
 const selectors = [
   ".menu-fab",
@@ -32,6 +45,7 @@ const selectors = [
   ".game-tags-label",
   ".game-tags",
   ".game-detail",
+  ".info-edit",
   ".info-close",
   ".logs-layer",
   ".logs-title",
@@ -231,33 +245,7 @@ function createPage({
     locales: [{
       locale: "zh-CN",
       theme: "dark",
-      messages: {
-        "sidebar.title": "游戏菜单",
-        "sidebar.continue": "继续游戏",
-        "sidebar.restart": "重新开始",
-        "sidebar.share": "分享/邀请",
-        "sidebar.logs": "运行日志",
-        "sidebar.enter_fullscreen": "进入全屏",
-        "sidebar.exit_fullscreen": "退出全屏",
-        "sidebar.info": "游戏信息",
-        "sidebar.performance": "显示性能信息",
-        "sidebar.performance_hide": "关闭性能信息",
-        "sidebar.exit": "退出游戏",
-        "info.title": "游戏信息",
-        "info.game_id": "Game ID",
-        "info.role": "运行角色",
-        "info.role_solo": "单机",
-        "info.platform": "运行平台",
-        "info.app_sdk": "App SDK",
-        "info.capabilities": "声明能力",
-        "info.none": "无",
-        "logs.title": "运行日志",
-        "logs.empty": "暂无运行日志",
-        "logs.copy": "复制全部",
-        "logs.copied": "已复制",
-        "common.close": "关闭",
-        "common.clear": "清空",
-      },
+      messages: platformMessages,
     }],
   };
   const window = {
@@ -314,13 +302,13 @@ function createPage({
         const command = JSON.parse(raw);
         commands.push(command.command);
         queueMicrotask(() => {
-          window.playmeshApp.__receive({
+          window[appInternalKey].receive({
             type: "app.command.result",
             requestId: command.requestId,
             result: command.command === "app.bootstrap"
               ? {
                   available: true,
-                  sdkVersion: "3.0.0",
+                  sdkVersion: "3.2.0",
                   identity: null,
                   capabilityRegistry: [],
                   device: {
@@ -358,6 +346,7 @@ function createPage({
   };
   return {
     window,
+    appSdk: window[appInternalKey].publicApi,
     document,
     mounted,
     commands,
@@ -371,12 +360,19 @@ const browserPage = createPage();
 assert.equal(browserPage.consoleEntries[0].args.length, 1);
 assert.equal(
   browserPage.consoleEntries[0].args[0],
-  'Playmesh App SDK 注入成功 {"version":"3.0.0"}',
+  'Playmesh App SDK 注入成功 {"version":"3.2.0"}',
 );
-await browserPage.window.playmeshApp.ready;
+assert.equal(browserPage.window.playmesh, undefined);
+assert.equal(browserPage.window.playmeshApp, undefined);
+assert.deepEqual(
+  Object.keys(browserPage.appSdk).filter((key) =>
+    key.startsWith("__")),
+  [],
+);
+await browserPage.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(browserPage.mounted.length, 1);
-browserPage.window.playmeshApp.__registerRuntimeUi({
+browserPage.window[appInternalKey].registerRuntimeUi({
   async getInfo() {
     return {
       gameId: "com.playmesh.browser-game",
@@ -388,8 +384,8 @@ browserPage.window.playmeshApp.__registerRuntimeUi({
       isAuthority: true,
       playerName: null,
       playerCount: null,
-      gameSdkVersion: "3.0.0",
-      appSdkVersion: "3.0.0",
+      gameSdkVersion: "4.0.0",
+      appSdkVersion: "3.2.0",
       platform: "browser",
     };
   },
@@ -427,10 +423,10 @@ assert.equal(
   structuredConsoleEntry.args[0],
   '结构化日志 {"score":7,"tags":["alpha","beta"]}',
 );
-await browserPage.window.playmeshApp.ui.openRuntimeLogs();
+await browserPage.appSdk.ui.openRuntimeLogs();
 assert.equal(
   browserUi[".logs-output"].textContent.includes(
-    'Playmesh App SDK 注入成功 {"version":"3.0.0"}',
+    'Playmesh App SDK 注入成功 {"version":"3.2.0"}',
   ),
   true,
 );
@@ -449,7 +445,7 @@ assert.equal(
 );
 assert.equal(browserUi[".logs-copy"].__label.textContent, "已复制");
 browserUi[".logs-close"].click();
-await browserPage.window.playmeshApp.ui.openGameInfo();
+await browserPage.appSdk.ui.openGameInfo();
 assert.equal(browserUi[".game-name"].textContent, "浏览器游戏");
 assert.equal(browserUi[".game-tags-wrap"].hidden, false);
 assert.equal(browserUi[".game-tags-label"].textContent, "标签");
@@ -491,7 +487,7 @@ assert.equal(
 );
 assert.equal(
   browserHost.__root.html.includes(
-    ".performance-panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483647",
+    ".performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647",
   ),
   true,
 );
@@ -499,7 +495,7 @@ assert.equal(
 browserUi[".scrim"].click();
 assert.equal(browserUi[".layer"].hidden, true);
 assert.equal(browserPage.document.activeElement, browserPage.gameFocus);
-await browserPage.window.playmeshApp.ui.showGameSidebar();
+await browserPage.appSdk.ui.showGameSidebar();
 assert.equal(browserUi[".layer"].hidden, false);
 assert.equal(browserPage.document.activeElement, browserUi[".continue"]);
 browserUi[".performance"].click();
@@ -564,7 +560,7 @@ assert.equal(browserPage.document.activeElement, browserUi[".continue"]);
 browserUi[".continue"].click();
 assert.equal(browserUi[".layer"].hidden, true);
 assert.equal(browserPage.document.activeElement, browserPage.gameFocus);
-assert.equal(await browserPage.window.playmeshApp.ui.showGameSidebar(), true);
+assert.equal(await browserPage.appSdk.ui.showGameSidebar(), true);
 assert.equal(browserUi[".layer"].hidden, false);
 
 browserUi[".menu-fab"].emit("pointerdown", {
@@ -598,8 +594,8 @@ assert.equal(browserUi[".menu-fab"].style.top, "-21px");
 
 const restartSession = new Map();
 const restartPage = createPage({ sessionState: restartSession });
-await restartPage.window.playmeshApp.ready;
-await restartPage.window.playmeshApp.ui.showGameSidebar();
+await restartPage.appSdk.ready;
+await restartPage.appSdk.ui.showGameSidebar();
 restartPage.mounted[0].__elements[".restart"].click();
 assert.equal(
   restartPage.mounted[0].__elements[".layer"].hidden,
@@ -607,22 +603,22 @@ assert.equal(
 );
 assert.equal(restartSession.has("playmesh.app.ui.reopenAfterRestart"), false);
 const reloadedPage = createPage({ sessionState: restartSession });
-await reloadedPage.window.playmeshApp.ready;
+await reloadedPage.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(reloadedPage.mounted[0].__elements[".layer"].hidden, true);
 
 const disabledPage = createPage({ fallbackUi: false });
-await disabledPage.window.playmeshApp.ready;
+await disabledPage.appSdk.ready;
 assert.equal(disabledPage.mounted.length, 0);
-assert.equal(await disabledPage.window.playmeshApp.ui.showGameSidebar(), false);
+assert.equal(await disabledPage.appSdk.ui.showGameSidebar(), false);
 assert.equal(disabledPage.dispatchKey("Escape", 27).defaultPrevented, false);
 
 const browserWithoutFloatingButton = createPage();
 assert.equal(
-  browserWithoutFloatingButton.window.playmeshApp.ui.initializeBrowser(),
+  browserWithoutFloatingButton.appSdk.ui.initializeBrowser(),
   true,
 );
-await browserWithoutFloatingButton.window.playmeshApp.ready;
+await browserWithoutFloatingButton.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(browserWithoutFloatingButton.mounted.length, 1);
 assert.equal(
@@ -632,19 +628,19 @@ assert.equal(
   false,
 );
 assert.equal(
-  await browserWithoutFloatingButton.window.playmeshApp.ui.showGameSidebar(),
+  await browserWithoutFloatingButton.appSdk.ui.showGameSidebar(),
   true,
 );
 
 const appPage = createPage({ app: true });
 const earlyEscape = appPage.dispatchKey("Escape", 27);
 await Promise.resolve();
+await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(earlyEscape.defaultPrevented, true);
 assert.equal(appPage.mounted[0].__elements[".layer"].hidden, false);
-await appPage.window.playmeshApp.ready;
-await Promise.resolve();
+await appPage.appSdk.ready;
 assert.equal(appPage.commands.includes("app.input.takeover"), true);
-assert.equal(appPage.window.playmeshApp.ui.initializeBrowser(), false);
+assert.equal(appPage.appSdk.ui.initializeBrowser(), false);
 const appUi = appPage.mounted[0].__elements;
 appUi[".continue"].focus();
 appPage.mounted[0].__root.emit("keydown", { key: "ArrowDown" });
@@ -656,15 +652,15 @@ assert.equal(
   false,
 );
 assert.equal(appPage.commands.includes("app.ui.gameSidebar.show"), false);
-assert.equal(appPage.window.playmeshApp.hideGameSidebar, undefined);
-assert.equal(appPage.window.playmeshApp.onMenuRequest, undefined);
+assert.equal(appPage.appSdk.hideGameSidebar, undefined);
+assert.equal(appPage.appSdk.onMenuRequest, undefined);
 appPage.mounted[0].__elements[".share"].click();
 assert.equal(appPage.mounted[0].__elements[".layer"].hidden, false);
 await Promise.resolve();
 assert.equal(appPage.commands.includes("app.ui.openSharePanel"), true);
 
 const androidMenuPage = createPage();
-await androidMenuPage.window.playmeshApp.ready;
+await androidMenuPage.appSdk.ready;
 assert.equal(androidMenuPage.dispatchKey("Menu", 82).defaultPrevented, true);
 await Promise.resolve();
 assert.equal(androidMenuPage.mounted[0].__elements[".layer"].hidden, false);

@@ -3,8 +3,8 @@ import '../catalog/game_catalog_publisher.dart';
 import '../catalog/online_game_catalog.dart';
 import 'developer_web_gateway_contract.dart';
 
-/// Keeps catalog credentials inside the Flutter process while exposing only
-/// the safe source metadata and status values needed by Developer Workspace.
+/// 将 Catalog 凭据保留在 Flutter 进程内，只向 Developer Workspace 暴露所需的安全源
+/// 元数据和状态值。
 class GameCatalogDeveloperProjectPublisher
     implements DeveloperProjectPublisher {
   GameCatalogDeveloperProjectPublisher(this.catalog);
@@ -59,6 +59,7 @@ class GameCatalogDeveloperProjectPublisher
     sourceId: result.sourceId,
     sourceName: result.sourceName,
     status: result.status.wireValue,
+    detail: result.detail,
     retryAfter: result.retryAfter,
     currentHighestVersion: result.currentHighestVersion,
   );

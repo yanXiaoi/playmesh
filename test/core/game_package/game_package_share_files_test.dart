@@ -127,5 +127,5 @@ const _game = GameSummary(
   displayModeLabel: '多屏',
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
-  entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: 'SDK'),
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'SDK'),
 );

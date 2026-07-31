@@ -21,6 +21,7 @@ GameSummary _game({
   bool multiplayer = true,
   String displayMode = 'multi_screen',
   GameOrientation orientation = GameOrientation.landscape,
+  String? manifestError,
 }) => GameSummary(
   id: id,
   name: name,
@@ -35,7 +36,8 @@ GameSummary _game({
   displayModeLabel: displayMode,
   displayMode: displayMode,
   orientation: orientation,
-  entry: LocalGameEntry(assetPath: id, statusLabel: 'Ready'),
+  manifestError: manifestError,
+  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'Ready'),
 );
 
 void main() {
@@ -60,7 +62,7 @@ void main() {
       name: '中间游戏',
       lastOpenedAt: DateTime.utc(2026, 7, 2),
     );
-    GameSummary? launched;
+    GameLaunchArguments? launched;
 
     await tester.pumpWidget(
       localizedTestApp(
@@ -71,7 +73,7 @@ void main() {
         },
         onGenerateRoute: (settings) {
           if (settings.name != GamePage.routeName) return null;
-          launched = settings.arguments! as GameSummary;
+          launched = settings.arguments! as GameLaunchArguments;
           return MaterialPageRoute<void>(
             settings: settings,
             builder: (_) => const Scaffold(body: Text('DIRECT_GAME_ROUTE')),
@@ -105,7 +107,8 @@ void main() {
     await tester.tap(find.byKey(HomePage.gameQuickLaunchKey(latest.id)));
     await tester.pumpAndSettle();
     expect(find.text('DIRECT_GAME_ROUTE'), findsOneWidget);
-    expect(launched?.id, latest.id);
+    expect(launched?.game.id, latest.id);
+    expect(launched?.enterFullscreenOnLaunch, isTrue);
   });
 
   testWidgets('最近游戏不足三项时按游戏库顺序补位且查看全部进入游戏库', (tester) async {
@@ -136,6 +139,28 @@ void main() {
     await tester.tap(find.text('查看全部'));
     await tester.pumpAndSettle();
     expect(find.text('LOCAL_LIBRARY_ROUTE'), findsOneWidget);
+  });
+
+  testWidgets('待修复包不会进入首页快捷启动路径', (tester) async {
+    final broken = _game(
+      id: 'broken',
+      name: '待修复游戏',
+      lastOpenedAt: DateTime.utc(2026, 7, 6),
+      manifestError: 'main.json 缺少 entries.game',
+    );
+    final runnable = _game(id: 'runnable', name: '可运行游戏');
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: HomePage(user: _user, games: [broken, runnable]),
+      ),
+    );
+
+    expect(find.byKey(HomePage.gameQuickLaunchKey(broken.id)), findsNothing);
+    expect(
+      find.byKey(HomePage.gameQuickLaunchKey(runnable.id)),
+      findsOneWidget,
+    );
   });
 
   testWidgets('首页在 320dp 保持两项主入口和右上角扫码、GitHub、设置', (tester) async {

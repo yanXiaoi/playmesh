@@ -5,51 +5,8 @@ const appDeviceSdkSource = SdkSourceFragment(
   target: SdkSourceTarget.app,
   order: 30,
   typeScript: r'''
-  const playmeshApp = {
+  const publicAppApi = {
     version: PLAYMESH_APP_SDK_VERSION,
-    ready: null,
-    __requestExit() {
-      return exitAppUiGame();
-    },
-    __restoreGameContentFocus() {
-      restoreAppUiReturnFocus();
-    },
-    __handleNativeBack() {
-      return handleAppUiNativeBack();
-    },
-    __syncAvatar(sessionId, credentialToken) {
-      return request("app.identity.syncAvatar", { sessionId, credentialToken });
-    },
-    __confirmCapabilities() {
-      return request("app.capabilities.confirm");
-    },
-    __configureRuntimeGame(declaration) {
-      return request("app.game.configure", {
-        declaredCapabilities: [
-          ...(declaration?.requiredCapabilities || []),
-        ],
-      }).then((environment) => {
-        bootstrap = {
-          ...bootstrap,
-          capabilityRegistry: clone(environment?.capabilityRegistry || []),
-          device: clone(environment?.device || bootstrap?.device),
-        };
-        return clone(bootstrap);
-      });
-    },
-    __registerRuntimeUi(adapter) {
-      registerAppUiRuntimeAdapter(adapter);
-    },
-    __refreshRuntimeUi() {
-      refreshAppFallbackUi();
-      refreshAppUiPerformance();
-    },
-    __configurePlatformUi(configuration) {
-      initializeAppPlatformUi({
-        ...(configuration || {}),
-        actions: appUiConfiguration?.actions,
-      });
-    },
     isAvailable() {
       return bootstrap?.available === true;
     },
@@ -58,6 +15,47 @@ const appDeviceSdkSource = SdkSourceFragment(
         return bootstrap ? clone(bootstrap.identity) : null;
       },
     },
+    runtime: Object.freeze({
+      getLocale() {
+        if (!appRuntimeLocale) {
+          throw new Error(
+            "playmesh.app.runtime.getLocale requires await playmesh.app.ready",
+          );
+        }
+        return appRuntimeLocale;
+      },
+    }),
+    performance: Object.freeze({
+      getFps() {
+        return appPerformanceFps;
+      },
+      onFps(callback) {
+        return subscribeAppPerformance(
+          appPerformanceFpsListeners,
+          callback,
+          appPerformanceFps,
+        );
+      },
+      getLatency() {
+        return appPerformanceLatency;
+      },
+      getLatencyDiagnostics() {
+        return clone(appPerformanceLatencyDiagnostics);
+      },
+      onLatency(callback) {
+        return subscribeAppPerformance(
+          appPerformanceLatencyListeners,
+          callback,
+          appPerformanceLatency,
+        );
+      },
+      setVisible(visible) {
+        setAppUiPerformanceVisible(visible === true);
+      },
+      reportFrame(timestamp) {
+        return reportAppPerformanceFrame(timestamp);
+      },
+    }),
     capabilities: {
       getRegistry() {
         return bootstrap ? clone(bootstrap.capabilityRegistry || []) : [];
@@ -69,6 +67,9 @@ const appDeviceSdkSource = SdkSourceFragment(
         return bootstrap ? [...(bootstrap.device?.declaredCapabilities || [])] : [];
       },
       create: createCapability,
+    },
+    media: {
+      open: openAppMedia,
     },
     device: {
       getPlatform() {
@@ -115,7 +116,7 @@ const appDeviceSdkSource = SdkSourceFragment(
       },
       enterFullscreen(orientation) {
         if (bootstrap?.available === true) {
-          return playmeshApp.device.setFullscreen(true, orientation);
+          return publicAppApi.device.setFullscreen(true, orientation);
         }
         return setAppUiFullscreen(true);
       },
@@ -135,10 +136,98 @@ const appDeviceSdkSource = SdkSourceFragment(
         return exitAppUiGame();
       },
     },
-    __receive: receive,
   };
 
-  global.playmeshApp = playmeshApp;
+  // ready 对外只暴露一个稳定只读视图；远程 App 的运行时能力配置会更新内部
+  // bootstrap，但不会替换开发者已经取得的 ready 结果引用。
+  const appBootstrapResult = Object.freeze({
+    get available() {
+      return bootstrap?.available === true;
+    },
+    get sdkVersion() {
+      return bootstrap?.sdkVersion || PLAYMESH_APP_SDK_VERSION;
+    },
+    get identity() {
+      return clone(bootstrap?.identity ?? null);
+    },
+    get runtime() {
+      return clone(bootstrap?.runtime ?? null);
+    },
+    get capabilityRegistry() {
+      return clone(bootstrap?.capabilityRegistry || []);
+    },
+    get device() {
+      return clone(bootstrap?.device || {
+        platform: "browser",
+        capabilities: [],
+        declaredCapabilities: [],
+      });
+    },
+  });
+
+  const appInternalRuntime = Object.freeze({
+    publicApi: publicAppApi,
+    receive,
+    requestExit() {
+      return exitAppUiGame();
+    },
+    restoreGameContentFocus() {
+      restoreAppUiReturnFocus();
+    },
+    handleNativeBack() {
+      return handleAppUiNativeBack();
+    },
+    syncAvatar(sessionId, credentialToken) {
+      return request("app.identity.syncAvatar", { sessionId, credentialToken });
+    },
+    confirmCapabilities() {
+      return request("app.capabilities.confirm");
+    },
+    configureRuntimeGame(declaration) {
+      return request("app.game.configure", {
+        declaredCapabilities: [
+          ...(declaration?.requiredCapabilities || []),
+        ],
+      }).then((environment) => {
+        bootstrap = {
+          ...bootstrap,
+          capabilityRegistry: clone(environment?.capabilityRegistry || []),
+          device: clone(environment?.device || bootstrap?.device),
+        };
+        return appBootstrapResult;
+      });
+    },
+    configureRuntimePerformance(context) {
+      configureAppRuntimePerformance(context);
+    },
+    recordRuntimeLatencyPong(payload) {
+      recordAppRuntimeLatencyPong(payload);
+    },
+    registerRuntimeUi(adapter) {
+      registerAppUiRuntimeAdapter(adapter);
+    },
+    refreshRuntimeUi() {
+      refreshAppFallbackUi();
+      refreshAppUiPerformance();
+    },
+    configurePlatformUi(configuration) {
+      initializeAppPlatformUi({
+        ...(configuration || {}),
+        actions: appUiConfiguration?.actions,
+      });
+    },
+    takePlatformUiConfiguration() {
+      const configuration = appPlatformUiConfiguration;
+      appPlatformUiConfiguration = null;
+      return clone(configuration);
+    },
+  });
+  Object.defineProperty(global, PLAYMESH_APP_INTERNAL_KEY, {
+    value: appInternalRuntime,
+    configurable: true,
+    enumerable: false,
+    writable: false,
+  });
   installAppUiConsoleCapture();
   global.console?.info?.(
     `Playmesh App SDK 注入成功 ${JSON.stringify({
@@ -160,40 +249,47 @@ const appDeviceSdkSource = SdkSourceFragment(
       appInputTakeoverRequested = false;
     });
   }
-  playmeshApp.ready = request("app.bootstrap").then((result) => {
-    const privateUi = result?._playmeshPlatformUi;
-    if (privateUi && typeof privateUi === "object") {
-      Object.defineProperty(global, PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY, {
-        value: clone(privateUi),
-        configurable: true,
-        enumerable: false,
-        writable: false,
-      });
-    } else {
-      delete global[PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY];
-    }
-    bootstrap = result && typeof result === "object"
-      ? { ...result }
-      : result;
-    if (bootstrap && typeof bootstrap === "object") {
-      delete bootstrap._playmeshPlatformUi;
-    }
-    initializeAppPlatformUi(privateUi);
-    requestAppInputTakeover();
-    global.console?.info?.("Playmesh App SDK 就绪");
-    return clone(bootstrap);
-  }).catch((error) => {
-    delete global[PLAYMESH_PLATFORM_UI_CONFIGURATION_KEY];
-    bootstrap = {
-      available: false,
-      identity: null,
-      capabilityRegistry: [],
-      device: { platform: "browser", capabilities: [], declaredCapabilities: [] },
-      error: error?.message || String(error),
-    };
-    initializeAppPlatformUi(runtimePlatformUi);
-    return clone(bootstrap);
+  const appReady = nativeSender() === null
+    ? Promise.resolve().then(() => {
+      // 普通浏览器没有原生 Bridge，属于预期降级；存在 Bridge 时的任何失败必须 reject。
+      bootstrap = {
+        available: false,
+        sdkVersion: PLAYMESH_APP_SDK_VERSION,
+        identity: null,
+        runtime: null,
+        capabilityRegistry: [],
+        device: {
+          platform: "browser",
+          capabilities: [],
+          declaredCapabilities: [],
+        },
+      };
+      appPlatformUiConfiguration = null;
+      initializeAppPlatformUi(runtimePlatformUi);
+      global.console?.info?.("Playmesh App SDK 就绪");
+      return appBootstrapResult;
+    })
+    : request("app.bootstrap").then((result) => {
+      const privateUi = result?._playmeshPlatformUi;
+      appPlatformUiConfiguration =
+        privateUi && typeof privateUi === "object" ? clone(privateUi) : null;
+      bootstrap = result && typeof result === "object"
+        ? { ...result }
+        : result;
+      if (bootstrap && typeof bootstrap === "object") {
+        delete bootstrap._playmeshPlatformUi;
+      }
+      initializeAppPlatformUi(privateUi);
+      requestAppInputTakeover();
+      global.console?.info?.("Playmesh App SDK 就绪");
+      return appBootstrapResult;
+    });
+  Object.defineProperty(publicAppApi, "ready", {
+    value: appReady,
+    enumerable: true,
+    writable: false,
   });
+  Object.freeze(publicAppApi);
 })(window);
 ''',
 );

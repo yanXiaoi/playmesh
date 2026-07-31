@@ -203,7 +203,7 @@ App 自带只读 Catalog 只公开能够重新解析且与缓存 id、version �
 - `lib/core/game_package/game_package_icon.dart`
 - `lib/core/game_package/game_package_transfer_service.dart`
 - `lib/core/game_package/file_game_library_scanner.dart`
-- `dev-cli/files.go`
+- `dev-cli/internal/packaging/archive.go`
 
 允许包根：
 

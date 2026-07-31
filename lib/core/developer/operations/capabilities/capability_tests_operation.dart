@@ -44,7 +44,7 @@ class _CapabilityTestsOperation implements _DeveloperHttpOperation {
       id: 'capability_tests.run',
       method: 'POST',
       path: '/dev/api/capability-tests',
-      summary: '测试全部或指定平台能力',
+      summary: '用默认参数创建并释放全部或指定平台能力',
       permission: 'capability.test',
       risk: DeveloperOperationRisk.medium,
       idempotent: false,
@@ -119,7 +119,7 @@ class _CapabilityTestsOperation implements _DeveloperHttpOperation {
       case 'capability_tests.list':
         await _json(request.response, HttpStatus.ok, {
           'requestId': requestId,
-          'capabilities': gateway.capabilityTests.describe(),
+          'capabilities': await gateway.capabilityTests.describe(),
         });
         return;
       case 'capability_tests.run':

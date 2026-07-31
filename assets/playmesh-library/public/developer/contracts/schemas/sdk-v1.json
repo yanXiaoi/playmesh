@@ -1,6 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://playmesh.local/schemas/sdk-v1.json",
+  "$id": "sdk-v1.json",
   "title": "Playmesh Game SDK v1 Types",
   "$defs": {
     "JsonValue": {
@@ -39,7 +38,7 @@
         "zh-CN",
         "en-US"
       ],
-      "description": "Locale identifier returned by playmesh.runtime.getLocale(); no platform message dictionary is exposed."
+      "description": "Locale identifier returned by playmesh.app.runtime.getLocale(); no platform message dictionary is exposed."
     },
     "GameInfo": {
       "type": "object",
@@ -467,7 +466,7 @@
       "pattern": "^/bucket/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[0-9]+(?:\\.[A-Za-z0-9]{1,16})?$",
       "description": "Same-origin URL returned by StorageBucket.upload(file)"
     },
-    "SdkBootstrap": {
+    "PlaymeshBootstrap": {
       "type": "object",
       "required": [
         "sdkVersion",
@@ -478,7 +477,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "3.1.0"
+          "const": "4.0.0"
         },
         "gameInfo": {
           "$ref": "#/$defs/GameInfo"
@@ -505,6 +504,106 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "PlaymeshAppBootstrap": {
+      "type": "object",
+      "required": [
+        "available",
+        "sdkVersion",
+        "identity",
+        "runtime",
+        "capabilityRegistry",
+        "device"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "sdkVersion": {
+          "const": "3.2.0"
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AppIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtime": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "coreBase": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "playerSource": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilityRegistry": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CapabilityDefinition"
+          }
+        },
+        "device": {
+          "type": "object",
+          "required": [
+            "platform",
+            "capabilities",
+            "declaredCapabilities"
+          ],
+          "properties": {
+            "platform": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capabilities": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "declaredCapabilities": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "PlaymeshReadyResult": {
+      "type": "object",
+      "required": [
+        "main",
+        "app"
+      ],
+      "properties": {
+        "main": {
+          "$ref": "#/$defs/PlaymeshBootstrap"
+        },
+        "app": {
+          "$ref": "#/$defs/PlaymeshAppBootstrap"
         }
       }
     }

@@ -1,6 +1,6 @@
 import '../game_web/local_tunnel_gateway_contract.dart';
 
-const relayProtocolVersion = '2.0.0';
+const relayProtocolVersion = '3.0.0';
 
 enum RelayTarget {
   web(1),

@@ -6,9 +6,13 @@ const manifest = JSON.parse(read("assets/playmesh-localization/manifest.json"));
 const platformAssetsSource = read("lib/core/localization/platform_game_ui_assets.dart");
 const gameCoreSource = read("lib/core/game_sdk/features/game/game_core_feature.dart");
 const runtimeSource = read("lib/core/game_sdk/features/game/game_runtime_feature.dart");
-const performanceSource = read("lib/core/game_sdk/features/game/game_performance_feature.dart");
 const lifecycleSource = read("lib/core/game_sdk/features/game/game_storage_lifecycle_feature.dart");
+const gamePerformanceSource = read(
+  "lib/core/game_sdk/features/game/game_performance_feature.dart",
+);
 const appDeviceSource = read("lib/core/game_sdk/features/app/app_device_feature.dart");
+const appPerformanceSource = read("lib/core/game_sdk/features/app/app_performance_feature.dart");
+const appUiSource = read("lib/core/game_sdk/features/app/app_ui_feature.dart");
 const appBridgeSource = read("lib/core/game_sdk/app_webview_bridge.dart");
 const localGameWebViewSource = read("lib/features/game/local_game_web_view.dart");
 const remoteGamePageSource = read("lib/features/game/remote_game_page.dart");
@@ -78,13 +82,44 @@ assert.match(
 );
 assert.doesNotMatch(runtimeSource, /"en-US"/);
 assert.match(runtimeSource, /platformText\("capability\.denied"\)/);
-assert.match(runtimeSource, /refreshPerformancePlatformUi\(performanceUi\)/);
-assert.match(performanceSource, /host\.setAttribute\?\.\("data-theme", platformUiTheme\)/);
-assert.match(performanceSource, /:host\(\[data-theme="light"\]\)/);
+assert.match(
+  appUiSource,
+  /host\.setAttribute\?\.\("data-theme", appUiConfiguration\?\.theme \|\| "dark"\)/,
+);
+assert.match(appUiSource, /:host\(\[data-theme="light"\]\)/);
+assert.doesNotMatch(
+  appUiSource,
+  /appUiText\([^)\n]+,\s*["']/,
+  "App SDK 平台 UI 不得维护本地化 fallback 文案",
+);
+assert.match(appPerformanceSource, /recordAppRuntimeLatencyPong/);
+assert.match(appPerformanceSource, /reportAppPerformanceFrame/);
+assert.match(appPerformanceSource, /appPerformanceProbeSequence/);
+assert.match(appPerformanceSource, /global\.setInterval\(/);
+assert.match(appPerformanceSource, /sendAppRuntimeLatencyProbe/);
+assert.doesNotMatch(appPerformanceSource, /__reset/);
+assert.doesNotMatch(appPerformanceSource, /post\("performance\.(?:fps|latency)"/);
+assert.match(
+  gamePerformanceSource,
+  /sendLatencyProbe\(payload\) \{\s*return post\("performance\.ping", payload\);/,
+);
+assert.match(
+  gamePerformanceSource,
+  /appInternalRuntime\.recordRuntimeLatencyPong\?\.\(payload\)/,
+);
+assert.doesNotMatch(gamePerformanceSource, /setInterval|latencyProbeSequence/);
 assert.match(lifecycleSource, /platformText\("nickname\.invalid"\)/);
 assert.match(lifecycleSource, /platformText\("nickname\.update_failed"\)/);
-assert.match(lifecycleSource, /platformHtml\("sidebar\.title"\)/);
-assert.match(lifecycleSource, /getLocale\(\)/);
+assert.doesNotMatch(
+  lifecycleSource,
+  /sidebar-layer|info-overlay|logs-overlay|performance-panel/,
+  "Main SDK 不得创建 App SDK 所属的平台菜单、信息、日志或性能 UI",
+);
+assert.match(appUiSource, /class="performance-panel"/);
+assert.match(appUiSource, /class="dialog-layer info-layer"/);
+assert.match(appUiSource, /class="dialog-layer logs-layer"/);
+assert.doesNotMatch(lifecycleSource, /getLocale\(\)/);
+assert.match(appDeviceSource, /getLocale\(\)/);
 assert.doesNotMatch(
   `${runtimeSource}\n${lifecycleSource}`,
   /document\.documentElement\.(?:lang|setAttribute\(["']lang["'])/,
@@ -94,7 +129,8 @@ assert.match(gameCoreSource, /getLocale\(\): string/);
 assert.doesNotMatch(gameCoreSource, /platformUiMessages|_playmeshPlatformUi/);
 assert.match(appBridgeSource, /'_playmeshPlatformUi'/);
 assert.match(appDeviceSource, /delete bootstrap\._playmeshPlatformUi/);
-assert.match(appDeviceSource, /return clone\(bootstrap\)/);
+assert.match(appDeviceSource, /const appBootstrapResult = Object\.freeze/);
+assert.match(appDeviceSource, /return appBootstrapResult/);
 for (const appWebViewSource of [localGameWebViewSource, remoteGamePageSource]) {
   assert.match(
     appWebViewSource,
@@ -112,7 +148,7 @@ assert.match(webGatewaySource, /platformUiAssets\.browserCatalog\.toJson\(\)/);
 assert.doesNotMatch(webGatewaySource, /acceptLanguageHeader/);
 assert.match(webGatewaySource, /'_playmeshPlatformUi'/);
 const runtimeNamespace = sdkManifest.namespaces.find(
-  (namespace) => namespace.name === "playmesh.runtime",
+  (namespace) => namespace.name === "playmesh.app.runtime",
 );
 assert.equal(runtimeNamespace?.members?.[0]?.name, "getLocale");
 assert.equal(sdkSchema.$defs.RuntimeLocale.type, "string");

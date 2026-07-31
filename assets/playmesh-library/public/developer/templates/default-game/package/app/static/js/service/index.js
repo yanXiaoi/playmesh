@@ -1,7 +1,7 @@
 import { InputTypes } from "../shared/types.js";
 
 export function startAuthoritySync() {
-  return playmesh.sync.startAuthority({
+  return playmesh.main.sync.startAuthority({
     initialState: { actionCount: 0, lastPlayerId: null },
     tickRate: 10,
     onInput(input, context) {

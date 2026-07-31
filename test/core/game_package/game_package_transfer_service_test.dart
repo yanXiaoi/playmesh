@@ -8,6 +8,13 @@ import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
 void main() {
+  test('游戏包导入预算覆盖大型 Cocos HTML 资源', () {
+    expect(GamePackageTransferService.maxCompressedBytes, 100 * 1024 * 1024);
+    expect(GamePackageTransferService.maxExpandedBytes, 512 * 1024 * 1024);
+    expect(GamePackageTransferService.maxSingleFileBytes, 128 * 1024 * 1024);
+    expect(GamePackageTransferService.maxFileCount, 8000);
+  });
+
   test('导入并导出根目录含 main.json 的 Playmesh 游戏包', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-transfer-');
     addTearDown(() => root.delete(recursive: true));
@@ -52,6 +59,49 @@ void main() {
     expect(entries.any((path) => path.startsWith('.playmesh/')), isFalse);
   });
 
+  test('App 导入保留用户 app 目录及其入口语义', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-user-app-import-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    await _writeZip(source, {
+      'main.json': _manifest(
+        'com.example.user-app-import',
+        gameEntry: 'app/index.html?scene=main&player=1&player=2',
+      ),
+      'app/app/index.html': '<!doctype html><title>User App</title>',
+      'app/app/playmesh/user.js': 'window.userAppRoute = true;',
+    });
+
+    final game = await GamePackageTransferService(
+      libraryRoot: root,
+    ).importPackage(source);
+
+    expect(
+      game.entry.gameEntryPath,
+      'app/index.html?scene=main&player=1&player=2',
+    );
+    final installed = Directory(game.entry.packageRootFilePath!);
+    expect(
+      await File(
+        '${installed.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).exists(),
+      isTrue,
+    );
+    expect(
+      await File(
+        '${installed.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}playmesh'
+        '${Platform.pathSeparator}user.js',
+      ).exists(),
+      isTrue,
+    );
+  });
+
   test('同 ID 更新只替换发布文件并保留 data 和 cache', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-update-');
     addTearDown(() => root.delete(recursive: true));
@@ -79,6 +129,47 @@ void main() {
     await cache.parent.create(recursive: true);
     await data.writeAsString('{"score":7}');
     await cache.writeAsString('cached');
+    final removedEntries = <FileSystemEntity>[
+      File(
+        '${installed.path}${Platform.pathSeparator}sdk'
+        '${Platform.pathSeparator}legacy.js',
+      ),
+      File(
+        '${installed.path}${Platform.pathSeparator}.playmesh'
+        '${Platform.pathSeparator}state.json',
+      ),
+      File('${installed.path}${Platform.pathSeparator}arbitrary.txt'),
+      Directory('${installed.path}${Platform.pathSeparator}other-root'),
+    ];
+    for (final entry in removedEntries) {
+      if (entry is Directory) {
+        await entry.create(recursive: true);
+        await File(
+          '${entry.path}${Platform.pathSeparator}state.bin',
+        ).writeAsString('legacy');
+      } else if (entry is File) {
+        await entry.parent.create(recursive: true);
+        await entry.writeAsString('legacy');
+      }
+    }
+    final outside = File(
+      '${root.path}${Platform.pathSeparator}outside-preserved-link.txt',
+    );
+    await outside.writeAsString('outside');
+    final rootLink = Link(
+      '${installed.path}${Platform.pathSeparator}legacy-link',
+    );
+    final dataLink = Link(
+      '${data.parent.path}${Platform.pathSeparator}linked-save',
+    );
+    var linksCreated = false;
+    try {
+      await rootLink.create(outside.path);
+      await dataLink.create(outside.path);
+      linksCreated = true;
+    } on FileSystemException {
+      // 未获符号链接权限的 Windows 环境无法执行链接断言。
+    }
 
     await _writeZip(source, {
       'main.json': _manifest('com.example.update', version: '1.1.0'),
@@ -91,6 +182,23 @@ void main() {
 
     expect(await data.readAsString(), '{"score":7}');
     expect(await cache.readAsString(), 'cached');
+    for (final entry in removedEntries) {
+      expect(
+        await FileSystemEntity.type(entry.path, followLinks: false),
+        FileSystemEntityType.notFound,
+        reason: '${entry.path} must not survive a package update',
+      );
+    }
+    if (linksCreated) {
+      expect(
+        await FileSystemEntity.type(rootLink.path, followLinks: false),
+        FileSystemEntityType.notFound,
+      );
+      expect(
+        await FileSystemEntity.type(dataLink.path, followLinks: false),
+        FileSystemEntityType.notFound,
+      );
+    }
     expect(
       await File(
         '${installed.path}${Platform.pathSeparator}app'
@@ -193,6 +301,44 @@ void main() {
     );
   });
 
+  test('拒绝物理 app 下的平台保留目录和编码或大小写绕过', () {
+    final service = GamePackageTransferService();
+    for (final path in [
+      'app/playmesh/sdk.js',
+      'app/PLAYMESH/sdk.js',
+      'app/Bucket/file.json',
+      r'app\bucket\file.json',
+      'app/%70laymesh/sdk.js',
+    ]) {
+      expect(
+        () => service.validatePackageFiles({
+          'main.json': utf8.encode(_manifest('com.example.reserved')),
+          'app/index.html': utf8.encode('<!doctype html>'),
+          path: [0],
+        }),
+        throwsFormatException,
+        reason: path,
+      );
+    }
+  });
+
+  test('允许嵌套目录继续使用 playmesh 和 bucket 名称', () {
+    final package = GamePackageTransferService().validatePackageFiles({
+      'main.json': utf8.encode(_manifest('com.example.nested-names')),
+      'app/index.html': utf8.encode('<!doctype html>'),
+      'app/assets/playmesh/logo.png': [0],
+      'app/data/bucket/level.json': utf8.encode('{}'),
+    });
+
+    expect(
+      package.files.keys,
+      containsAll([
+        'app/assets/playmesh/logo.png',
+        'app/data/bucket/level.json',
+      ]),
+    );
+  });
+
   test('根 icon.png 被导入导出且清单未知字段被统一投影丢弃', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-icon-v2-');
     addTearDown(() => root.delete(recursive: true));
@@ -283,7 +429,7 @@ void main() {
       displayModeLabel: '',
       displayMode: 'multi_screen',
       orientation: GameOrientation.landscape,
-      entry: LocalGameEntry(assetPath: 'app/index.html', statusLabel: '待修复'),
+      entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: '待修复'),
     );
     final recoverable = GameSummary(
       id: game.id,
@@ -297,7 +443,7 @@ void main() {
       displayMode: game.displayMode,
       orientation: game.orientation,
       entry: LocalGameEntry(
-        assetPath: game.entry.assetPath,
+        gameEntryPath: game.entry.gameEntryPath,
         statusLabel: game.entry.statusLabel,
         packageRootFilePath: package.path,
       ),
@@ -395,17 +541,20 @@ String _manifest(
   String id, {
   String version = '1.0.0',
   String author = 'Test Author',
+  String gameEntry = 'index.html',
 }) => jsonEncode({
   'id': id,
   'name': 'Transfer Game',
   'author': author,
   'lastModifiedAt': 1784851200000,
   'version': version,
-  'sdkVersion': '1.0.0',
+  'sdkVersion': '4.0.0',
+  'appSdkVersion': '3.2.0',
   'orientation': 'portrait',
   'modes': ['solo'],
   'displayModes': ['multi_screen'],
   'players': {'min': 1, 'max': 1},
+  'entries': {'game': gameEntry},
 });
 
 final _pngBytes = base64Decode(

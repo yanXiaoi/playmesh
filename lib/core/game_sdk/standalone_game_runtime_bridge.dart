@@ -43,19 +43,11 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
   final String userId;
   final String nickname;
   final StreamController<String> _outbound = StreamController.broadcast();
-  final StreamController<double> _fpsValues = StreamController.broadcast();
-  final StreamController<double?> _latencyValues = StreamController.broadcast();
   final Map<String, Completer<void>> _lifecycleOperations = {};
   int _lifecycleSequence = 0;
 
   @override
   Stream<String> get outboundMessages => _outbound.stream;
-
-  @override
-  Stream<double> get fpsValues => _fpsValues.stream;
-
-  @override
-  Stream<double?> get latencyValues => _latencyValues.stream;
 
   @override
   Future<void> handleJavaScriptMessage(String rawMessage) async {
@@ -90,12 +82,6 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
             'connected': true,
           },
           ensureStorage: ensureStorage,
-          emitFps: (value) {
-            if (!_fpsValues.isClosed) _fpsValues.add(value);
-          },
-          emitLatency: (value) {
-            if (!_latencyValues.isClosed) _latencyValues.add(value);
-          },
           completeLifecycle: (lifecycleRequestId) {
             final operation = _lifecycleOperations.remove(lifecycleRequestId);
             if (operation == null || operation.isCompleted) return false;
@@ -145,11 +131,6 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
   }
 
   @override
-  void setPerformanceVisible(bool visible) {
-    _send({'type': 'performance.visibility', 'visible': visible});
-  }
-
-  @override
   void restoreGameContentFocus() {
     _send({'type': 'platform.ui.restoreGameFocus'});
   }
@@ -177,8 +158,6 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     }
     _lifecycleOperations.clear();
     await _storage?.close();
-    await _fpsValues.close();
-    await _latencyValues.close();
     await _outbound.close();
   }
 

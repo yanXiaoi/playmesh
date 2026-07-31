@@ -8,15 +8,24 @@ import 'package:flutter/services.dart';
 import '../../core/catalog/game_catalog_models.dart';
 import '../../core/game_package/game_package_icon.dart';
 import '../../core/game_package/game_library_repository.dart';
+import '../../core/game_package/ordinary_web_package_importer.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../models/game_summary.dart';
 import '../../ui/focus/playmesh_shortcuts.dart';
 import '../../ui/game_tags.dart';
 import '../../ui/playmesh_ui.dart';
 import 'game_detail_page.dart';
+import 'ordinary_web_package_import_dialog.dart';
 
 typedef GameLibraryRefresh = Future<List<GameSummary>> Function();
 typedef GamePackageImport = Future<GameSummary> Function(String path);
+typedef GamePackageImportInspectionLoader =
+    Future<GamePackageImportInspection> Function(String path);
+typedef OrdinaryWebPackageImport =
+    Future<GameSummary> Function(
+      String path,
+      OrdinaryWebPackageConfiguration configuration,
+    );
 typedef GameLibraryQuery =
     GameLibraryQueryResult Function(
       String search, {
@@ -37,6 +46,8 @@ class GameLibraryPage extends StatefulWidget {
     required this.onRefresh,
     required this.onQuery,
     this.onImport,
+    this.onInspectImport,
+    this.onImportOrdinaryWebPackage,
     this.onOpenOnline,
     this.onCheckUpdates,
     this.onDownloadUpdate,
@@ -47,10 +58,11 @@ class GameLibraryPage extends StatefulWidget {
   final List<GameSummary> games;
   final GameLibraryRefresh onRefresh;
   final GamePackageImport? onImport;
+  final GamePackageImportInspectionLoader? onInspectImport;
+  final OrdinaryWebPackageImport? onImportOrdinaryWebPackage;
   final VoidCallback? onOpenOnline;
 
-  /// Queries an existing in-memory index. Implementations must not scan disk or
-  /// access the network.
+  /// 查询已有的内存索引。实现不得扫描磁盘或访问网络。
   final GameLibraryQuery onQuery;
   final GameLibraryUpdateCheck? onCheckUpdates;
   final GameLibraryUpdateDownload? onDownloadUpdate;
@@ -670,7 +682,25 @@ class _GameLibraryPageState extends State<GameLibraryPage> {
       _operationRetry = null;
     });
     try {
-      final game = await importPackage(source.path);
+      final inspection = await widget.onInspectImport?.call(source.path);
+      if (!mounted) return;
+      final GameSummary game;
+      if (inspection is OrdinaryWebPackageInspection) {
+        final importOrdinary = widget.onImportOrdinaryWebPackage;
+        if (importOrdinary == null) {
+          throw StateError(context.tr('library.web_import.unavailable'));
+        }
+        final configuration = await showOrdinaryWebPackageImportDialog(
+          context: context,
+          inspection: inspection,
+        );
+        if (configuration == null || !mounted) return;
+        game = await importOrdinary(source.path, configuration);
+      } else if (inspection is UnsupportedGamePackageInspection) {
+        throw FormatException(context.tr('library.web_import.not_web_package'));
+      } else {
+        game = await importPackage(source.path);
+      }
       if (!mounted) return;
       setState(() {
         _games.removeWhere((item) => item.id == game.id);

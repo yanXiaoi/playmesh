@@ -65,6 +65,7 @@ part 'operations/projects/project_operation.dart';
 part 'operations/projects/projects_operation.dart';
 part 'operations/projects/validate_operation.dart';
 part 'operations/runtime/active_run_operation.dart';
+part 'operations/runtime/development_session_operation.dart';
 part 'operations/runtime/events_operation.dart';
 part 'operations/runtime/logs_operation.dart';
 part 'operations/runtime/project_run_operation.dart';
@@ -102,6 +103,7 @@ final _developerOperationRegistry = _DeveloperOperationRegistry(const [
   _ValidateOperation(),
   _ProjectDataOperation(),
   _ProjectRunOperation(),
+  _DevelopmentSessionOperation(),
   _WebViewJavaScriptOperation(),
   _EventsOperation(),
   _LogsOperation(),
@@ -314,6 +316,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   @override
   Future<void> close() async {
     approvalBroker.dispose();
+    await runController.stopAllDevelopment();
     await server.close(force: true);
     await capabilityTests.dispose();
   }

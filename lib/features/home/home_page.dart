@@ -45,7 +45,7 @@ class HomePage extends StatelessWidget {
 
   final UserProfile user;
 
-  /// Kept for callers that have not migrated to [games] yet.
+  /// 为尚未迁移到 [games] 的调用方保留。
   final GameSummary? featuredGame;
   final List<GameSummary> games;
   final VoidCallback? onOpenOnline;
@@ -57,10 +57,10 @@ class HomePage extends StatelessWidget {
   List<GameSummary> get _visibleGames {
     final featured = featuredGame;
     final candidates = games.isNotEmpty
-        ? [...games]
+        ? [...games.where((game) => game.isRunnable)]
         : featured == null
         ? <GameSummary>[]
-        : [featured];
+        : [if (featured.isRunnable) featured];
     final originalOrder = {
       for (var index = 0; index < candidates.length; index++)
         candidates[index].id: index,
@@ -91,8 +91,10 @@ class HomePage extends StatelessWidget {
         Navigator.of(context).pushNamed(ProfilePage.routeName);
     void openLibrary() =>
         Navigator.of(context).pushNamed(GameLibraryPage.routeName);
-    void openGame(GameSummary game) =>
-        Navigator.of(context).pushNamed(GamePage.routeName, arguments: game);
+    void openGame(GameSummary game) => Navigator.of(context).pushNamed(
+      GamePage.routeName,
+      arguments: GameLaunchArguments(game: game, enterFullscreenOnLaunch: true),
+    );
     void scanAndJoin() => Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         settings: const RouteSettings(

@@ -16,7 +16,7 @@ interface PlaymeshPlayer {
   nickname: string;
   /** App 玩家同步成功后的同源头像路径；未同步及 HTML 玩家为 `null`。 */
   avatar: string | null;
-  /** 当前玩家在会话中的参与角色；Authority 资格仍以 `session.isAuthority()` 为准。 */
+  /** 当前玩家在会话中的参与角色；Authority 资格仍以 `playmesh.main.session.isAuthority()` 为准。 */
   role: "authority" | "authority_player" | "player";
   /** 玩家是否拥有在线连接；离线玩家可以保留在成员列表中等待重连。 */
   connected: boolean;
@@ -67,7 +67,7 @@ interface PlaymeshPlayerConnectionEvent {
   isCurrentPlayer: boolean;
 }
 
-/** `await playmesh.ready` 的初始化结果。 */
+/** `await playmesh.main.ready` 的初始化结果。 */
 interface PlaymeshBootstrap {
   /** 当前 Game SDK 版本。 */
   sdkVersion: string;
@@ -154,7 +154,7 @@ interface PlaymeshBinaryChannel {
   close(): Promise<void>;
 }
 
-/** `playmesh.sync` 发布的完整权威状态快照。 */
+/** `playmesh.main.sync` 发布的完整权威状态快照。 */
 interface PlaymeshSyncSnapshot<T = PlaymeshJson> {
   protocolVersion: 1;
   stateType: string;
@@ -191,7 +191,7 @@ interface PlaymeshSyncTickContext<T> {
   members: PlaymeshPlayer[];
 }
 
-/** 启动 Authority 状态同步的配置。只能在 `session.isAuthority()` 为 true 时调用。 */
+/** 启动 Authority 状态同步的配置。只能在 `playmesh.main.session.isAuthority()` 为 true 时调用。 */
 interface PlaymeshSyncAuthorityOptions<T> {
   /** 首个完整权威状态，必须可 JSON 序列化。 */
   initialState: T;
@@ -246,17 +246,41 @@ interface PlaymeshCapabilityEventDefinition {
   dataSchema: { [key: string]: PlaymeshJson };
 }
 
+type PlaymeshCapabilityPlatform = "WINDOWS" | "ANDROID" | "HTML";
+
 /** 全平台注册表中的能力插件元数据。 */
 interface PlaymeshCapabilityDefinition {
   code: string;
   name: string;
   description: string;
   apiVersion: string;
-  appSupported: boolean;
-  htmlSupported: boolean;
+  supportedPlatforms: PlaymeshCapabilityPlatform[];
   optionsSchema: { [key: string]: PlaymeshJson };
   methods: PlaymeshCapabilityMethodDefinition[];
   events: PlaymeshCapabilityEventDefinition[];
+}
+
+/** `await playmesh.app.ready` 返回的当前终端初始化结果。 */
+interface PlaymeshAppBootstrap {
+  /** 当前页面是否连接到 Playmesh App 原生 Bridge。 */
+  readonly available: boolean;
+  /** 当前 App Bridge SDK 版本。 */
+  readonly sdkVersion: "3.2.0";
+  /** App 自动注入的本机身份；普通浏览器为 `null`。 */
+  readonly identity: PlaymeshAppIdentity | null;
+  /** App 提供的受控运行环境；普通浏览器为 `null`。 */
+  readonly runtime: {
+    readonly coreBase?: string;
+    readonly playerSource?: string;
+  } | null;
+  /** 当前终端的能力插件注册表。 */
+  readonly capabilityRegistry: PlaymeshCapabilityDefinition[];
+  /** 当前终端的平台与本次页面能力声明。 */
+  readonly device: {
+    readonly platform: string;
+    readonly capabilities: string[];
+    readonly declaredCapabilities: string[];
+  };
 }
 
 /** 由 `playmesh.app.capabilities.create()` 创建的有状态能力实例。 */
@@ -266,11 +290,47 @@ interface PlaymeshCapabilityHandle {
   readonly apiVersion: string;
   invoke<T = PlaymeshJson>(method: string, args?: { [key: string]: PlaymeshJson }): Promise<T>;
   on(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): PlaymeshUnsubscribe;
+  /** DOM 风格的事件订阅别名；已有 `on()` 保持兼容。 */
+  addEventListener(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): void;
+  removeEventListener(event: string, callback: (data: { [key: string]: PlaymeshJson }) => void): void;
   onError(callback: (error: Error) => void): PlaymeshUnsubscribe;
   dispose(): Promise<void>;
 }
 
-/** `playmesh.storage.getBucket()` 返回的 Authority 主机存储分区。 */
+/** 由终端能力签发、只能交给 `playmesh.app.media.open()` 的实时媒体源。 */
+interface PlaymeshAppMediaSource {
+  readonly type: "playmesh.app.media-source";
+  readonly version: 1;
+  readonly id: string;
+  readonly kind: "video" | "audio" | "audio-video";
+  readonly protocol: string;
+  readonly live: true;
+  readonly [key: string]: PlaymeshJson;
+}
+
+interface PlaymeshAppMediaOpenOptions {
+  /** 取消仍在进行的媒体协商。 */
+  signal?: AbortSignal;
+}
+
+/** 当前 WebView 对一个终端媒体源的消费会话。 */
+interface PlaymeshAppMediaSession {
+  readonly id: string;
+  readonly source: PlaymeshAppMediaSource;
+  readonly stream: MediaStream;
+  readonly state: "opening" | "open" | "ended" | "failed";
+  close(): Promise<void>;
+}
+
+interface PlaymeshAppMediaApi {
+  /** 打开能力签发的媒体源；具体传输协议由已注册终端适配器处理。 @playmesh-completion playmesh.app.media.open */
+  open(
+    source: PlaymeshAppMediaSource,
+    options?: PlaymeshAppMediaOpenOptions,
+  ): Promise<PlaymeshAppMediaSession>;
+}
+
+/** `playmesh.main.storage.getBucket()` 返回的 Authority 主机存储分区。 */
 interface PlaymeshStorageBucket {
   /** 读取 key；不存在时返回 `null`。key 长度 1～128，只允许字母、数字、点、下划线和连字符。 */
   getData<T = PlaymeshJson>(key: string): Promise<T | null>;
@@ -321,14 +381,36 @@ interface PlaymeshAppUiApi {
 /** App Bridge 与统一平台 UI 能力。App WebView 和普通浏览器都会注入。 */
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
-  readonly version: "3.0.0";
-  /** App Bridge 完成身份和能力插件注册表注入后 resolve。 */
-  readonly ready: Promise<unknown>;
+  readonly version: "3.2.0";
+  /** App Bridge 完成身份和能力插件注册表注入后 resolve；原生 Bridge 失败时 reject。 */
+  readonly ready: Promise<PlaymeshAppBootstrap>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
   isAvailable(): boolean;
   readonly identity: {
     /** 返回 App 自动注入的当前用户；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.identity.getCurrent */
     getCurrent(): PlaymeshAppIdentity | null;
+  };
+  /** 当前客户端只读运行环境；不包含平台 UI 词典。 */
+  readonly runtime: {
+    /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.app.runtime.getLocale */
+    getLocale(): string;
+  };
+  /** 当前客户端游戏页的渲染与联机观测指标。不得用于权威玩法判定。 */
+  readonly performance: {
+    /** 返回当前页面最近 FPS；尚未形成统计窗口时返回 `null`。 @playmesh-completion playmesh.app.performance.getFps */
+    getFps(): number | null;
+    /** 订阅当前页面 FPS；注册后立即回调当前值。 @playmesh-completion playmesh.app.performance.onFps */
+    onFps(callback: (fps: number | null) => void): PlaymeshUnsubscribe;
+    /** 返回当前参与端到 Authority 的最近平滑 RTT 毫秒数；单机或 Authority 不在线时返回 `null`。 @playmesh-completion playmesh.app.performance.getLatency */
+    getLatency(): number | null;
+    /** 返回当前参与端最近延迟探测诊断数据；游戏规则不得依赖该数据判定胜负。 @playmesh-completion playmesh.app.performance.getLatencyDiagnostics */
+    getLatencyDiagnostics(): Record<string, unknown> | null;
+    /** 订阅当前参与端到 Authority 的延迟毫秒数。 @playmesh-completion playmesh.app.performance.onLatency */
+    onLatency(callback: (latency: number | null) => void): PlaymeshUnsubscribe;
+    /** 显示或隐藏当前客户端的 SDK 性能浮层。 @playmesh-completion playmesh.app.performance.setVisible */
+    setVisible(visible: boolean): void;
+    /** 当前页面在真实画面完成后报告一帧；返回最近 FPS。SDK 不会自行启动 RAF。 @playmesh-completion playmesh.app.performance.reportFrame */
+    reportFrame(timestamp?: number): number | null;
   };
   readonly capabilities: {
     /** 返回全平台注册表。 @playmesh-completion playmesh.app.capabilities.getRegistry */
@@ -340,6 +422,8 @@ interface PlaymeshAppApi {
     /** 创建一个有状态能力实例。 @playmesh-completion playmesh.app.capabilities.create */
     create(code: string, options?: { [key: string]: PlaymeshJson }): Promise<PlaymeshCapabilityHandle>;
   };
+  /** 当前终端的协议无关音视频消费入口。 */
+  readonly media: PlaymeshAppMediaApi;
   readonly device: {
     /** 返回宿主平台名称，例如 `android` 或 `windows`；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.device.getPlatform */
     getPlatform(): string | null;
@@ -352,57 +436,50 @@ interface PlaymeshAppApi {
   readonly ui: PlaymeshAppUiApi;
 }
 
-/** Playmesh 游戏公开 API。所有页面先等待 `playmesh.ready`，再使用其他命名空间。 */
-interface PlaymeshApi {
+/** 游戏本体与对局公开 API。所有页面先等待 `playmesh.main.ready`。 */
+interface PlaymeshMainApi {
   /** 当前 Game SDK 版本。 */
   readonly version: "__PLAYMESH_SDK_VERSION__";
   /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
   readonly ready: Promise<PlaymeshBootstrap>;
-  /** 当前设备的 App Bridge 能力；普通浏览器中 `isAvailable()` 为 false。 */
-  readonly app: PlaymeshAppApi;
-  /** 当前游戏页面的只读运行环境信息；不包含平台 UI 词典。 */
-  readonly runtime: {
-    /** 返回实际显示该页面的 App locale；普通浏览器按浏览器语言解析，失败时返回 `zh`。 @playmesh-completion playmesh.runtime.getLocale */
-    getLocale(): string;
-  };
   /** 当前页面对应的游戏声明。 */
   readonly gameInfo: {
-    /** 返回 Game SDK 初始化后的只读游戏信息；尚未就绪时返回 `null`。 @playmesh-completion playmesh.gameInfo.getCurrent */
+    /** 返回 Game SDK 初始化后的只读游戏信息；尚未就绪时返回 `null`。 @playmesh-completion playmesh.main.gameInfo.getCurrent */
     getCurrent(): PlaymeshGameInfo | null;
   };
   /** 对局状态、Authority 身份和玩家成员事件。 */
   readonly session: {
-    /** 订阅会话快照；注册后若已就绪会立即回调。 @returns 取消订阅函数。 @playmesh-completion playmesh.session.onStateChange */
+    /** 订阅会话快照；注册后若已就绪会立即回调。 @returns 取消订阅函数。 @playmesh-completion playmesh.main.session.onStateChange */
     onStateChange(callback: (session: PlaymeshSessionSnapshot | null) => void): PlaymeshUnsubscribe;
-    /** 玩家第一次加入时回调。重连不会重复触发本事件。 @playmesh-completion playmesh.session.onPlayerJoin */
+    /** 玩家第一次加入时回调。重连不会重复触发本事件。 @playmesh-completion playmesh.main.session.onPlayerJoin */
     onPlayerJoin(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
-    /** 玩家连接断开时回调；成员可能仍留在会话中。 @playmesh-completion playmesh.session.onPlayerLeave */
+    /** 玩家连接断开时回调；成员可能仍留在会话中。 @playmesh-completion playmesh.main.session.onPlayerLeave */
     onPlayerLeave(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
-    /** 离线玩家使用相同 ID 恢复连接时回调。 @playmesh-completion playmesh.session.onPlayerReconnect */
+    /** 离线玩家使用相同 ID 恢复连接时回调。 @playmesh-completion playmesh.main.session.onPlayerReconnect */
     onPlayerReconnect(callback: (event: PlaymeshPlayerConnectionEvent) => void): PlaymeshUnsubscribe;
-    /** 当前页面是否是固定 Authority Client。不要根据 `players[0]` 推断。 @playmesh-completion playmesh.session.isAuthority */
+    /** 当前页面是否是固定 Authority Client。不要根据 `players[0]` 推断。 @playmesh-completion playmesh.main.session.isAuthority */
     isAuthority(): boolean;
-    /** 返回最近会话快照；单机分享页或尚未就绪时返回 `null`。 @playmesh-completion playmesh.session.getCurrent */
+    /** 返回最近会话快照；单机分享页或尚未就绪时返回 `null`。 @playmesh-completion playmesh.main.session.getCurrent */
     getCurrent(): PlaymeshSessionSnapshot | null;
-    /** 仅请求 Core 切换为运行状态；准备、倒计时和玩法条件由游戏 Authority 判断。 @playmesh-completion playmesh.session.start */
+    /** 仅请求 Core 切换为运行状态；准备、倒计时和玩法条件由游戏 Authority 判断。 @playmesh-completion playmesh.main.session.start */
     start(): Promise<PlaymeshSessionSnapshot>;
-    /** 仅在游戏规则确认结束后请求 Core 停止会话并清理离线成员；SDK 不判断胜负。 @playmesh-completion playmesh.session.finish */
+    /** 仅在游戏规则确认结束后请求 Core 停止会话并清理离线成员；SDK 不判断胜负。 @playmesh-completion playmesh.main.session.finish */
     finish(): Promise<PlaymeshSessionSnapshot>;
   };
   /** 当前参与玩家资料。 */
   readonly player: {
-    /** 返回当前玩家；公共 Authority 主屏和单机分享页返回 `null`。 @playmesh-completion playmesh.player.getCurrent */
+    /** 返回当前玩家；公共 Authority 主屏和单机分享页返回 `null`。 @playmesh-completion playmesh.main.player.getCurrent */
     getCurrent(): PlaymeshPlayer | null;
-    /** 修改当前玩家昵称，去除首尾空白后必须为 1～32 个字符。 @playmesh-completion playmesh.player.setNickname */
+    /** 修改当前玩家昵称，去除首尾空白后必须为 1～32 个字符。 @playmesh-completion playmesh.main.player.setNickname */
     setNickname(nickname: string): Promise<PlaymeshPlayer>;
   };
-  /** 自定义低层游戏消息。普通多人游戏优先使用 `playmesh.sync`。 */
+  /** 自定义低层游戏消息。普通多人游戏优先使用 `playmesh.main.sync`。 */
   readonly game: {
-    /** 向 Authority 提交 JSON 业务动作；发送者身份由平台附加。 @playmesh-completion playmesh.game.submitAction */
+    /** 向 Authority 提交 JSON 业务动作；发送者身份由平台附加。 @playmesh-completion playmesh.main.game.submitAction */
     submitAction(action: PlaymeshJson): Promise<unknown>;
-    /** 订阅 Authority 发给当前客户端的 JSON 消息。 @playmesh-completion playmesh.game.onMessage */
+    /** 订阅 Authority 发给当前客户端的 JSON 消息。 @playmesh-completion playmesh.main.game.onMessage */
     onMessage(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
-    /** `onMessage` 的兼容别名；新代码优先使用 `onMessage`。 @playmesh-completion playmesh.game.onEvent */
+    /** `onMessage` 的兼容别名；新代码优先使用 `onMessage`。 @playmesh-completion playmesh.main.game.onEvent */
     onEvent(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
   };
   /** 自定义 Authority 动作处理。只有 Authority Client 可以注册。 */
@@ -410,7 +487,7 @@ interface PlaymeshApi {
     /**
      * 注册权威动作处理器。规则、分数和胜负应在这里决定，不能信任动作中自报的身份。
      * @returns 取消注册函数。
-     * @playmesh-completion playmesh.authority.onService
+     * @playmesh-completion playmesh.main.authority.onService
      */
     onService(handler: (action: PlaymeshJson, context: PlaymeshAuthorityContext) => PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined | Promise<PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined>): PlaymeshUnsubscribe;
   };
@@ -418,59 +495,56 @@ interface PlaymeshApi {
   readonly binary: {
     /** Authority 在所有 Binary Channel 中使用的固定玩家 ID。 */
     readonly authorityPlayerId: "authority";
-    /** 创建逻辑 Channel；只有 Authority 可以调用。 @playmesh-completion playmesh.binary.createChannel */
+    /** 创建逻辑 Channel；只有 Authority 可以调用。 @playmesh-completion playmesh.main.binary.createChannel */
     createChannel(options: PlaymeshBinaryChannelOptions): Promise<PlaymeshBinaryChannel>;
-    /** 使用 Authority 分享的 Channel ID 加入逻辑 Channel。 @playmesh-completion playmesh.binary.joinChannel */
+    /** 使用 Authority 分享的 Channel ID 加入逻辑 Channel。 @playmesh-completion playmesh.main.binary.joinChannel */
     joinChannel(channelId: string): Promise<PlaymeshBinaryChannel>;
   };
   /** 完整权威状态同步、输入限频与快照订阅。 */
   readonly sync: {
-    /** 仅 Authority 启动状态同步；同一页面同时只能有一个同步 runtime。 @playmesh-completion playmesh.sync.startAuthority */
+    /** 仅 Authority 启动状态同步；同一页面同时只能有一个同步 runtime。 @playmesh-completion playmesh.main.sync.startAuthority */
     startAuthority<T = PlaymeshJson>(options: PlaymeshSyncAuthorityOptions<T>): PlaymeshSyncAuthorityController<T>;
-    /** 提交一次性语义输入，返回生成的 input ID。 @playmesh-completion playmesh.sync.submitAction */
+    /** 提交一次性语义输入，返回生成的 input ID。 @playmesh-completion playmesh.main.sync.submitAction */
     submitAction(payload: PlaymeshJson): Promise<string>;
-    /** 同一 key 只保留最新连续输入；`rateHz` 必须为 1～20。 @playmesh-completion playmesh.sync.submitState */
+    /** 同一 key 只保留最新连续输入；`rateHz` 必须为 1～20。 @playmesh-completion playmesh.main.sync.submitState */
     submitState(key: string, value: PlaymeshJson, options?: { rateHz?: number }): Promise<null>;
-    /** 请求 Authority 立即向当前玩家发送最新完整快照。 @playmesh-completion playmesh.sync.requestSnapshot */
+    /** 请求 Authority 立即向当前玩家发送最新完整快照。 @playmesh-completion playmesh.main.sync.requestSnapshot */
     requestSnapshot(): Promise<string>;
-    /** 返回最近完整快照；尚未收到时返回 `null`。 @playmesh-completion playmesh.sync.getSnapshot */
+    /** 返回最近完整快照；尚未收到时返回 `null`。 @playmesh-completion playmesh.main.sync.getSnapshot */
     getSnapshot<T = PlaymeshJson>(): PlaymeshSyncSnapshot<T> | null;
-    /** 订阅完整快照；已有快照时注册后立即回调。 @playmesh-completion playmesh.sync.observe */
+    /** 订阅完整快照；已有快照时注册后立即回调。 @playmesh-completion playmesh.main.sync.observe */
     observe<T = PlaymeshJson>(callback: (snapshot: PlaymeshSyncSnapshot<T>) => void): PlaymeshUnsubscribe;
   };
   /** WebView 暂停、恢复、退出和错误事件。 */
   readonly lifecycle: {
-    /** 订阅全部生命周期事件。 @playmesh-completion playmesh.lifecycle.onChange */
+    /** 订阅全部生命周期事件。 @playmesh-completion playmesh.main.lifecycle.onChange */
     onChange(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
-    /** 仅订阅暂停事件。 @playmesh-completion playmesh.lifecycle.onPause */
+    /** 仅订阅暂停事件。 @playmesh-completion playmesh.main.lifecycle.onPause */
     onPause(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
-    /** 仅订阅恢复事件。 @playmesh-completion playmesh.lifecycle.onResume */
+    /** 仅订阅恢复事件。 @playmesh-completion playmesh.main.lifecycle.onResume */
     onResume(callback: (event: PlaymeshLifecycleEvent) => void): PlaymeshUnsubscribe;
-    /** 订阅退出事件；允许返回 Promise，宿主只会有限等待。 @playmesh-completion playmesh.lifecycle.onExit */
+    /** 订阅退出事件；允许返回 Promise，宿主只会有限等待。 @playmesh-completion playmesh.main.lifecycle.onExit */
     onExit(callback: (event: PlaymeshLifecycleEvent) => void | Promise<void>): PlaymeshUnsubscribe;
-  };
-  /** 游戏上报的 FPS、自动测量的多人 RTT 与 SDK 性能浮层。 */
-  readonly performance: {
-    /** 返回最近 FPS；尚未形成统计窗口时返回 `null`。 @playmesh-completion playmesh.performance.getFps */
-    getFps(): number | null;
-    /** 订阅 FPS；注册后立即回调当前值。 @playmesh-completion playmesh.performance.onFps */
-    onFps(callback: (fps: number | null) => void): PlaymeshUnsubscribe;
-    /** 返回最近平滑 RTT 毫秒数；单机或 Authority 不在线时返回 `null`。 @playmesh-completion playmesh.performance.getLatency */
-    getLatency(): number | null;
-    /** 返回最近延迟探测诊断数据；游戏规则不得依赖该数据判定胜负。 @playmesh-completion playmesh.performance.getLatencyDiagnostics */
-    getLatencyDiagnostics(): Record<string, unknown> | null;
-    /** 订阅延迟毫秒数。 @playmesh-completion playmesh.performance.onLatency */
-    onLatency(callback: (latency: number | null) => void): PlaymeshUnsubscribe;
-    /** 显示或隐藏 SDK 性能浮层。 @playmesh-completion playmesh.performance.setVisible */
-    setVisible(visible: boolean): void;
-    /** 在真实画面完成后报告一帧；返回最近 FPS。SDK 不会自行启动 RAF。 @playmesh-completion playmesh.performance.reportFrame */
-    reportFrame(timestamp?: number): number | null;
   };
   /** Authority 主机上的持久 JSON Bucket。浏览器和加入设备不建立独立副本。 */
   readonly storage: {
-    /** 获取 Bucket；名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。 @playmesh-completion playmesh.storage.getBucket */
+    /** 获取 Bucket；名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。 @playmesh-completion playmesh.main.storage.getBucket */
     getBucket(bucket: string): PlaymeshStorageBucket;
   };
+}
+
+interface PlaymeshReadyResult {
+  readonly main: PlaymeshBootstrap;
+  /** 与 `await playmesh.app.ready` 严格相同的稳定结果引用。 */
+  readonly app: PlaymeshAppBootstrap;
+}
+
+/** Playmesh 游戏页面的公开根对象；根级只提供聚合就绪状态及 main/app 分区。 */
+interface PlaymeshApi {
+  /** 复用 `playmesh.main.ready` 初始化链并返回游戏本体与当前客户端结果。 */
+  readonly ready: Promise<PlaymeshReadyResult>;
+  readonly main: PlaymeshMainApi;
+  readonly app: PlaymeshAppApi;
 }
 
 /** 游戏页面使用的全局 Playmesh SDK。 */
@@ -481,7 +555,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "3.1.0";
+  const PLAYMESH_SDK_VERSION = "4.0.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -503,9 +577,6 @@ interface Window { playmesh: PlaymeshApi; }
   const binaryPending = new Map();
   const binaryChannels = new Map();
   let browserNicknameUi = null;
-  let browserBackInterceptionInstalled = false;
-  let browserBackExitRequested = false;
-  let browserBackGuardUrl = null;
   let capabilityConsentUi = null;
   let transportSequence = 0;
   const pending = new Map();
@@ -521,20 +592,9 @@ interface Window { playmesh: PlaymeshApi; }
   const pauseListeners = new Set();
   const resumeListeners = new Set();
   const exitListeners = new Set();
-  const fpsListeners = new Set();
-  const latencyListeners = new Set();
   const syncListeners = new Set();
   const browserNicknameStorageKey = "playmesh.nickname.v1";
   const browserPlayerIdStorageKey = "playmesh.player-id.v1";
-  let currentFps = null;
-  let fpsFrameCount = 0;
-  let fpsWindowStartedAt = null;
-  let currentLatency = null;
-  let latencyDiagnostics = null;
-  let latencyTimer = null;
-  let latencyProbeSequence = 0;
-  let performanceVisible = false;
-  let performanceUi = null;
   let syncAuthorityRuntime = null;
   let currentSyncSnapshot = null;
   let syncInputSequence = 0;
@@ -577,8 +637,7 @@ interface Window { playmesh: PlaymeshApi; }
     });
     if (global.__PLAYMESH_BROWSER__ &&
         (command === "game.submitAction" ||
-          command === "performance.ping" ||
-          command === "performance.latency")) {
+          command === "performance.ping")) {
       return sendBrowserTransport(command, payload);
     }
     const send = global.PlaymeshBridge && global.PlaymeshBridge.postMessage
@@ -635,9 +694,7 @@ interface Window { playmesh: PlaymeshApi; }
     }
     const type = command === "game.submitAction"
       ? "game.action"
-      : command === "performance.latency"
-        ? "performance.latency"
-        : "session.ping";
+      : "session.ping";
     socket.send(JSON.stringify({
       type,
       sequence: ++transportSequence,
@@ -1295,7 +1352,7 @@ interface Window { playmesh: PlaymeshApi; }
         return () => state.listeners.delete(callback);
       },
       onForward(handler) {
-        if (!playmesh.session.isAuthority() || mode !== "authority") {
+        if (!main.session.isAuthority() || mode !== "authority") {
           throw new Error("只有 Authority mode 的 Authority 可以注册 Binary Channel 审核器");
         }
         if (typeof handler !== "function") throw new Error("Binary Channel onForward 需要函数");
@@ -1305,7 +1362,7 @@ interface Window { playmesh: PlaymeshApi; }
         };
       },
       async close() {
-        if (!playmesh.session.isAuthority()) {
+        if (!main.session.isAuthority()) {
           throw new Error("只有 Authority 可以关闭 Binary Channel");
         }
         if (state.closed) return;
@@ -1619,7 +1676,7 @@ interface Window { playmesh: PlaymeshApi; }
   }
 
   function startSyncAuthority(options) {
-    if (!playmesh.session.isAuthority()) {
+    if (!main.session.isAuthority()) {
       throw new Error("只有 Authority Client 可以启动状态同步");
     }
     if (syncAuthorityRuntime) throw new Error("权威状态同步已经启动");
@@ -1665,127 +1722,33 @@ interface Window { playmesh: PlaymeshApi; }
     };
   }
 
-  function setLatency(value, diagnostics = null) {
-    currentLatency = typeof value === "number" && Number.isFinite(value)
-      ? Math.max(0, Math.round(value))
-      : null;
-    latencyDiagnostics = diagnostics;
-    emit(latencyListeners, currentLatency);
-    void renderPerformanceUi();
-    post("performance.latency", {
-      latencyMs: currentLatency,
-      diagnostics: latencyDiagnostics,
-    }).catch(() => {});
-  }
 
-  function sendLatencyProbe() {
-    if (!bootstrap?.session) return;
-    const clientSentAt = Date.now();
-    post("performance.ping", {
-      probeId: `latency-${clientSentAt}-${++latencyProbeSequence}`,
-      clientSentAt,
-    }).catch(() => {});
-  }
-
-  function startLatencyProbes() {
-    if (!bootstrap?.session) return;
-    if (latencyTimer) return;
-    sendLatencyProbe();
-    latencyTimer = global.setInterval(sendLatencyProbe, 3000);
-    latencyTimer?.unref?.();
-  }
-
-  function stopLatencyProbes() {
-    if (latencyTimer) global.clearInterval(latencyTimer);
-    latencyTimer = null;
-  }
-
-  function handleLatencyPong(payload) {
-    const receivedAt = Date.now();
-    const sentAt = Number(payload?.clientSentAt);
-    if (!Number.isFinite(sentAt) || sentAt > receivedAt) return;
-    if (payload.authorityAvailable !== true) {
-      setLatency(null, {
-        probeId: payload.probeId || null,
-        clientSentAt: sentAt,
-        serverReceivedAt: payload.serverReceivedAt || null,
-        serverSentAt: payload.serverSentAt || null,
-        receivedAt,
-        authorityAvailable: false,
-      });
-      return;
-    }
-    const rtt = Math.max(0, receivedAt - sentAt);
-    const smoothed = currentLatency == null ? rtt : (currentLatency * 0.75) + (rtt * 0.25);
-    setLatency(smoothed, {
-      probeId: payload.probeId || null,
-      clientSentAt: sentAt,
-      serverReceivedAt: payload.serverReceivedAt || null,
-      serverSentAt: payload.serverSentAt || null,
-      receivedAt,
-      authorityAvailable: true,
-      rawRttMs: rtt,
+  function configureClientPerformance() {
+    appInternalRuntime.configureRuntimePerformance?.({
+      multiplayer: Boolean(bootstrap?.session),
+      sendLatencyProbe(payload) {
+        return post("performance.ping", payload);
+      },
     });
   }
 
-  async function ensurePerformanceUi() {
-    if (global.__PLAYMESH_BROWSER__ && !appSdk.isAvailable()) {
-      return ensureBrowserNicknameUi();
-    }
-    if (performanceUi) return performanceUi;
-    if (!global.document) return null;
-    if (!global.document.body) {
-      await new Promise((resolve) => global.document.addEventListener("DOMContentLoaded", resolve, { once: true }));
-    }
-    if (typeof global.document.createElement !== "function") return null;
-    const host = global.document.createElement("div");
-    host.id = "playmesh-performance";
-    host.setAttribute?.("data-theme", platformUiTheme);
-    const root = host.attachShadow({ mode: "closed" });
-    root.innerHTML = `<style>
-      :host{all:initial;--pm-performance-border:#ffffff30;--pm-performance-surface:#111827e8;--pm-performance-text:#f9fafb;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;color-scheme:dark}
-      :host([data-theme="light"]){--pm-performance-border:#8795a6;--pm-performance-surface:#fffffff2;--pm-performance-text:#17202b;color-scheme:light}
-      .panel{position:fixed;right:12px;top:12px;z-index:2147483646;display:flex;gap:10px;padding:7px 9px;border:1px solid var(--pm-performance-border);border-radius:7px;background:var(--pm-performance-surface);color:var(--pm-performance-text);box-shadow:0 3px 12px #0004;font-size:12px;font-weight:700;line-height:1}
-      .panel[hidden],.latency[hidden]{display:none}
-    </style><div class="panel"><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
-    global.document.body.appendChild(host);
-    performanceUi = {
-      host,
-      panel: root.querySelector(".panel"),
-      fps: root.querySelector(".fps"),
-      latency: root.querySelector(".latency"),
-    };
-    refreshPerformancePlatformUi(performanceUi);
-    return performanceUi;
+  function startLatencyProbes() {
+    configureClientPerformance();
   }
 
-  function refreshPerformancePlatformUi(ui) {
-    ui?.host?.setAttribute?.("data-theme", platformUiTheme);
+  function stopLatencyProbes() {
+    appInternalRuntime.configureRuntimePerformance?.({ multiplayer: false });
   }
 
-  async function renderPerformanceUi() {
-    if (typeof appSdk.__refreshRuntimeUi === "function") {
-      appSdk.__refreshRuntimeUi();
-      return;
-    }
-    const ui = await ensurePerformanceUi();
-    if (!ui) return;
-    ui.panel.hidden = !performanceVisible;
-    ui.fps.textContent = currentFps == null ? "-- FPS" : `${currentFps} FPS`;
-    const multiplayer = Boolean(bootstrap?.session);
-    ui.latency.hidden = !multiplayer;
-    ui.latency.textContent = currentLatency == null ? "-- ms" : `${currentLatency} ms`;
-    if (ui.performanceButton) {
-      ui.performanceButton.classList.toggle("active", performanceVisible);
-      ui.performanceButton.setAttribute("aria-pressed", String(performanceVisible));
-    }
+  function handleLatencyPong(payload) {
+    appInternalRuntime.recordRuntimeLatencyPong?.(payload);
   }
 
   function receive(rawMessage) {
     const message = typeof rawMessage === "string" ? JSON.parse(rawMessage) : rawMessage;
     if (!message || typeof message !== "object") return;
     if (message.type === "platform.ui.restoreGameFocus") {
-      appSdk.__restoreGameContentFocus?.();
+      appInternalRuntime.restoreGameContentFocus?.();
       return;
     }
     if (message.type === "platform.ui.configure") {
@@ -1799,11 +1762,6 @@ interface Window { playmesh: PlaymeshApi; }
       } catch (error) {
         global.console?.error?.("Playmesh platform UI localization update failed", error);
       }
-      return;
-    }
-    if (message.type === "performance.visibility") {
-      performanceVisible = message.visible !== false;
-      void renderPerformanceUi();
       return;
     }
     if (message.type === "sdk.bootstrap") {
@@ -1829,7 +1787,7 @@ interface Window { playmesh: PlaymeshApi; }
       global.console?.info?.("Playmesh Game SDK 就绪", {
         mode: bootstrap.session ? "multiplayer" : "solo",
       });
-      void renderPerformanceUi();
+      configureClientPerformance();
       startLatencyProbes();
       if (bootstrap.session && !bootstrap.isAuthority) {
         void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
@@ -1858,7 +1816,6 @@ interface Window { playmesh: PlaymeshApi; }
       });
       closeBinaryTransport("主会话连接已关闭");
       stopLatencyProbes();
-      setLatency(null);
       emit(lifecycleListeners, {
         state: message.type === "transport.closed" ? "closed" : "error",
         error: message.error,
@@ -1914,7 +1871,6 @@ interface Window { playmesh: PlaymeshApi; }
       emitPlayerConnectionChanges(bootstrap.session, transport.session);
       bootstrap.session = transport.session;
       emit(sessionListeners, transport.session);
-      void renderPerformanceUi();
       startLatencyProbes();
     } else if (transport.type === "game.message") {
       const storageResponse = transport.payload?.__playmeshStorageResponse;
@@ -1956,12 +1912,7 @@ interface Window { playmesh: PlaymeshApi; }
         session: null,
       };
       emit(lifecycleListeners, { state: "ready" });
-      if (!appSdk.isAvailable()) {
-        void ensureBrowserNicknameUi().catch((error) => {
-          global.console?.warn?.("Playmesh 浏览器游戏菜单初始化失败", error);
-        });
-      }
-      void renderPerformanceUi();
+      configureClientPerformance();
       return bootstrap;
     }
     const appIdentity = appSdk.isAvailable()
@@ -1982,8 +1933,12 @@ interface Window { playmesh: PlaymeshApi; }
     applyBrowserJoin(config, joined);
     try {
       await connectBrowserSocket(config, joined);
-      if (appSdk.isAvailable() && typeof appSdk.__syncAvatar === "function") {
-        appSdk.__syncAvatar(joined.session.id, joined.credential.token).catch((error) => {
+      if (appSdk.isAvailable() &&
+          typeof appInternalRuntime.syncAvatar === "function") {
+        appInternalRuntime.syncAvatar(
+          joined.session.id,
+          joined.credential.token,
+        ).catch((error) => {
           global.console?.warn?.("Playmesh App 头像同步失败，游戏将继续", error);
         });
       }
@@ -2004,8 +1959,7 @@ interface Window { playmesh: PlaymeshApi; }
     }
     emit(sessionListeners, bootstrap.session);
     emit(lifecycleListeners, { state: "ready" });
-    mountBrowserNicknameControl().catch(() => {});
-    void renderPerformanceUi();
+    configureClientPerformance();
     startLatencyProbes();
     void submitSyncEnvelope("snapshot.request", {}).catch(() => {});
     return bootstrap;
@@ -2021,8 +1975,8 @@ interface Window { playmesh: PlaymeshApi; }
     if (joined.credential.reconnected) {
       previouslyConnectedPlayerIds.add(joined.credential.player.id);
     }
-    // The Core may publish the connected snapshot as soon as the socket opens.
-    // Seed bootstrap first so that an early session.state can update it safely.
+    // Core 可能在套接字打开后立即发布连接快照，因此先建立 bootstrap，
+    // 让提前到达的 session.state 可以安全更新它。
     bootstrap = {
       type: "sdk.bootstrap",
       sdkVersion: PLAYMESH_SDK_VERSION,
@@ -2081,8 +2035,7 @@ interface Window { playmesh: PlaymeshApi; }
     const socket = new WebSocket(socketUrl);
     browserSocket = socket;
     let opened = false;
-    // Subscribe before awaiting open so the initial connected snapshot cannot
-    // pass between the open event and listener registration.
+    // 必须在等待打开前订阅，避免首个连接快照落在 open 事件与监听注册之间。
     socket.addEventListener("message", (event) => {
       receive({ type: "transport.message", message: JSON.parse(event.data) });
     });
@@ -2147,8 +2100,9 @@ interface Window { playmesh: PlaymeshApi; }
         const joined = await joinBrowser(browserConnectionConfig);
         applyBrowserJoin(browserConnectionConfig, joined);
         await connectBrowserSocket(browserConnectionConfig, joined);
-        if (appSdk.isAvailable() && typeof appSdk.__syncAvatar === "function") {
-          void appSdk.__syncAvatar(
+        if (appSdk.isAvailable() &&
+            typeof appInternalRuntime.syncAvatar === "function") {
+          void appInternalRuntime.syncAvatar(
             joined.session.id,
             joined.credential.token,
           ).catch(() => {});
@@ -2176,58 +2130,17 @@ interface Window { playmesh: PlaymeshApi; }
     throw new Error("游戏页面已退出，停止主会话 WebSocket 重连");
   }
 
-  const emptyAppSdk = {
-    version: "3.0.0",
-    ready: Promise.resolve({
-      available: false,
-      identity: null,
-      device: { platform: "browser", capabilities: [] },
-    }),
-    isAvailable() { return false; },
-    __restoreGameContentFocus() {},
-    __requestExit() { return Promise.resolve(); },
-    __confirmCapabilities() { return Promise.resolve(); },
-    __configureRuntimeGame() { return emptyAppSdk.ready; },
-    identity: { getCurrent() { return null; } },
-    capabilities: {
-      getRegistry() { return []; },
-      getAvailable() { return []; },
-      getDeclared() { return []; },
-      create() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 能力插件宿主")); },
-    },
-    device: {
-      getPlatform() { return "browser"; },
-      setFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
-      onInput() { return function unsubscribe() {}; },
-    },
-    ui: {
-      initializeBrowser() { return false; },
-      configure() { return { fallbackUi: false, floatingButton: false }; },
-      restartGame() { global.location?.reload?.(); },
-      openSharePanel() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 平台分享宿主")); },
-      showGameSidebar() { return Promise.resolve(false); },
-      openRuntimeLogs() { return Promise.resolve(false); },
-      enterFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
-      exitFullscreen() { return Promise.reject(new Error("请使用浏览器 Fullscreen API")); },
-      openGameInfo() { return Promise.resolve(false); },
-      setPerformanceVisible() { return false; },
-      togglePerformance() { return false; },
-      exitGame() { return Promise.reject(new Error("当前浏览器没有 Playmesh App 游戏退出宿主")); },
-    },
-  };
-  const appSdk = global.playmeshApp || emptyAppSdk;
-  const appPlatformUiConfigurationKey =
-    typeof Symbol === "function" && typeof Symbol.for === "function"
-      ? Symbol.for("playmesh.platform-ui.configuration")
-      : "__PLAYMESH_PLATFORM_UI_CONFIGURATION__";
+  const PLAYMESH_APP_INTERNAL_KEY =
+    Symbol.for("playmesh.app.internal.v1");
+  const appInternalRuntime = global[PLAYMESH_APP_INTERNAL_KEY];
+  const appSdk = appInternalRuntime?.publicApi;
+  if (!appInternalRuntime || !appSdk) {
+    throw new Error(
+      "Playmesh App SDK 未注入；playmesh-app.js 必须先于 playmesh-main.js 加载",
+    );
+  }
   function takeAppPlatformUiConfiguration() {
-    const configuration = global[appPlatformUiConfigurationKey] || null;
-    try {
-      delete global[appPlatformUiConfigurationKey];
-    } catch (_) {
-      // The host-owned value is still never copied into a public SDK result.
-    }
-    return configuration;
+    return appInternalRuntime.takePlatformUiConfiguration?.() || null;
   }
   let browserPlatformUiCatalog =
     global.__PLAYMESH_BROWSER__?._playmeshPlatformUi || null;
@@ -2368,7 +2281,6 @@ interface Window { playmesh: PlaymeshApi; }
     platformUiTheme = effectivePlatformUiTheme(themeMode);
     refreshCapabilityConsentUi(capabilityConsentUi);
     refreshBrowserPlatformUi(browserNicknameUi);
-    refreshPerformancePlatformUi(performanceUi);
   }
 
   function platformUiSystemThemeChanged() {
@@ -2376,7 +2288,6 @@ interface Window { playmesh: PlaymeshApi; }
     platformUiTheme = effectivePlatformUiTheme("system");
     refreshCapabilityConsentUi(capabilityConsentUi);
     refreshBrowserPlatformUi(browserNicknameUi);
-    refreshPerformancePlatformUi(performanceUi);
   }
   platformUiDarkModeQuery?.addEventListener?.(
     "change",
@@ -2691,8 +2602,9 @@ interface Window { playmesh: PlaymeshApi; }
       global.setTimeout(() => focusPlatformUiControl(deny), 0);
     });
     if (decision === "allow") {
-      if (appSdk.isAvailable() && typeof appSdk.__confirmCapabilities === "function") {
-        await appSdk.__confirmCapabilities();
+      if (appSdk.isAvailable() &&
+          typeof appInternalRuntime.confirmCapabilities === "function") {
+        await appInternalRuntime.confirmCapabilities();
       }
       host.remove();
       capabilityConsentUi = null;
@@ -2707,8 +2619,9 @@ interface Window { playmesh: PlaymeshApi; }
     }
     const error = new Error("用户拒绝了当前游戏的能力请求");
     error.code = "capability_denied";
-    if (appSdk.isAvailable() && typeof appSdk.__requestExit === "function") {
-      await appSdk.__requestExit().catch(() => {});
+    if (appSdk.isAvailable() &&
+        typeof appInternalRuntime.requestExit === "function") {
+      await appInternalRuntime.requestExit().catch(() => {});
     } else if (global.history?.length > 1) {
       global.setTimeout(() => global.history.back(), 0);
     }
@@ -2773,21 +2686,9 @@ interface Window { playmesh: PlaymeshApi; }
       .replace(/'/g, "&#39;");
   }
 
-  const browserConsoleLogs = [];
-  const BROWSER_CONSOLE_LOG_LIMIT = 500;
-  let browserConsoleCaptureInstalled = false;
-  const playmesh = {
+  const main = {
     version: PLAYMESH_SDK_VERSION,
     ready: null,
-    app: appSdk,
-    runtime: Object.freeze({
-      getLocale() {
-        if (!runtimeLocale) {
-          throw new Error("playmesh.runtime.getLocale requires await playmesh.ready");
-        }
-        return runtimeLocale;
-      },
-    }),
     gameInfo: Object.freeze({
       getCurrent() {
         const info = bootstrap?.gameInfo;
@@ -2853,7 +2754,7 @@ interface Window { playmesh: PlaymeshApi; }
     },
     authority: {
       onService(handler) {
-        if (!playmesh.session.isAuthority()) {
+        if (!main.session.isAuthority()) {
           throw new Error("只有 Authority Client 可以注册权威服务");
         }
         authorityService = handler;
@@ -2865,8 +2766,8 @@ interface Window { playmesh: PlaymeshApi; }
     binary: {
       authorityPlayerId: "authority",
       async createChannel(options) {
-        await playmesh.ready;
-        if (!playmesh.session.isAuthority()) {
+        await main.ready;
+        if (!main.session.isAuthority()) {
           throw new Error("只有 Authority 可以创建 Binary Channel");
         }
         const mode = binaryModeCode(options?.mode);
@@ -2877,7 +2778,7 @@ interface Window { playmesh: PlaymeshApi; }
         return createBinaryChannelHandle(result.id, result.mode);
       },
       async joinChannel(channelId) {
-        await playmesh.ready;
+        await main.ready;
         const normalized = binaryChannelIdFromBytes(binaryChannelIdToBytes(channelId));
         const existing = binaryChannels.get(normalized);
         if (existing && !existing.closed) return existing.handle;
@@ -2920,49 +2821,6 @@ interface Window { playmesh: PlaymeshApi; }
         return subscribe(exitListeners, callback);
       },
     },
-    performance: {
-      getFps() {
-        return currentFps;
-      },
-      onFps(callback) {
-        const unsubscribe = subscribe(fpsListeners, callback);
-        callback(currentFps);
-        return unsubscribe;
-      },
-      getLatency() {
-        return currentLatency;
-      },
-      getLatencyDiagnostics() {
-        return latencyDiagnostics && cloneJson(latencyDiagnostics, "延迟诊断");
-      },
-      onLatency(callback) {
-        const unsubscribe = subscribe(latencyListeners, callback);
-        callback(currentLatency);
-        return unsubscribe;
-      },
-      setVisible(visible) {
-        performanceVisible = visible !== false;
-        void renderPerformanceUi();
-      },
-      reportFrame(timestamp = global.performance?.now?.() || Date.now()) {
-        if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
-          throw new Error("无效的帧时间");
-        }
-        fpsFrameCount += 1;
-        fpsWindowStartedAt ??= timestamp;
-        const elapsed = timestamp - fpsWindowStartedAt;
-        if (elapsed < 1000) return currentFps;
-        currentFps = Math.round((fpsFrameCount * 1000) / elapsed);
-        fpsFrameCount = 0;
-        fpsWindowStartedAt = timestamp;
-        emit(fpsListeners, currentFps);
-        void renderPerformanceUi();
-        if (!global.__PLAYMESH_BROWSER__) {
-          post("performance.fps", { fps: currentFps }).catch(() => {});
-        }
-        return currentFps;
-      },
-    },
     storage: {
       getBucket(bucket) {
         validateStorageName(bucket, "bucket");
@@ -2989,25 +2847,33 @@ interface Window { playmesh: PlaymeshApi; }
         };
       },
     },
-    __receive: receive,
   };
 
-  registerAppPlatformUiRuntime();
-  global.playmesh = playmesh;
-  global.console?.info?.("Playmesh Game SDK 注入成功", {
-    version: PLAYMESH_SDK_VERSION,
+  const PLAYMESH_MAIN_INTERNAL_KEY =
+    Symbol.for("playmesh.main.internal.v1");
+  Object.defineProperty(global, PLAYMESH_MAIN_INTERNAL_KEY, {
+    value: Object.freeze({ receive }),
+    configurable: true,
+    enumerable: false,
+    writable: false,
   });
+  registerAppPlatformUiRuntime();
   if (global.chrome && global.chrome.webview) {
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
   }
-  global.addEventListener?.("pagehide", () => markRuntimeExited("游戏页面已退出"));
-  playmesh.ready = appSdk.ready.then(async (initialAppBootstrap) => {
-    let appBootstrap = initialAppBootstrap;
+  global.addEventListener?.("pagehide", () => {
+    const refreshing = global.__playmeshDevelopmentRefreshRequested === true;
+    markRuntimeExited(refreshing ? "开发游戏页面正在重启" : "游戏页面已退出");
+  });
+  let readyAppBootstrap = null;
+  main.ready = (async () => {
+    const appBootstrap = await appSdk.ready;
+    readyAppBootstrap = appBootstrap;
     const runtimeGameDeclaration = global.__PLAYMESH_BROWSER__;
     if (runtimeGameDeclaration &&
         appSdk.isAvailable() &&
-        typeof appSdk.__configureRuntimeGame === "function") {
-      appBootstrap = await appSdk.__configureRuntimeGame({
+        typeof appInternalRuntime.configureRuntimeGame === "function") {
+      await appInternalRuntime.configureRuntimeGame({
         requiredCapabilities:
           runtimeGameDeclaration.requiredCapabilities || [],
       });
@@ -3035,6 +2901,20 @@ interface Window { playmesh: PlaymeshApi; }
             : {}),
         })
       : post("sdk.ready", {});
+  })();
+  const ready = main.ready.then(
+    (mainBootstrap) => Object.freeze({
+      main: mainBootstrap,
+      app: readyAppBootstrap,
+    }),
+  );
+  global.playmesh = Object.freeze({
+    ready,
+    main,
+    app: appSdk,
+  });
+  global.console?.info?.("Playmesh Game SDK 注入成功", {
+    version: PLAYMESH_SDK_VERSION,
   });
 
   async function connectBrowserFullscreen(config) {
@@ -3066,7 +2946,13 @@ interface Window { playmesh: PlaymeshApi; }
       socket.close(1000, reason);
     }
     closeBinaryTransport(reason, true);
-    global.console?.info?.("Playmesh 游戏页面已退出，停止 WebSocket 重连", { reason });
+    stopLatencyProbes();
+    global.console?.info?.(
+      reason === "开发游戏页面正在重启"
+        ? "Playmesh 开发游戏页面正在重启，已停止旧页面 WebSocket 重连"
+        : "Playmesh 游戏页面已退出，停止 WebSocket 重连",
+      { reason },
+    );
   }
 
   async function lockBrowserOrientation(orientation) {
@@ -3091,7 +2977,7 @@ interface Window { playmesh: PlaymeshApi; }
     if (!global.__PLAYMESH_BROWSER__) {
       return post(command, { bucket, key, value });
     }
-    await playmesh.ready;
+    await main.ready;
     const requestId = `browser-storage-${Date.now()}-${++browserStorageSequence}`;
     return new Promise((resolve, reject) => {
       const timer = global.setTimeout(() => {
@@ -3125,7 +3011,7 @@ interface Window { playmesh: PlaymeshApi; }
   }
 
   async function storageUpload(bucket, file) {
-    await playmesh.ready;
+    await main.ready;
     if (!file || typeof file.name !== "string" || typeof file.size !== "number") {
       throw new Error("upload(file) 需要浏览器 File");
     }
@@ -3181,7 +3067,7 @@ interface Window { playmesh: PlaymeshApi; }
     try {
       global.localStorage?.setItem(browserNicknameStorageKey, nickname);
     } catch (_) {
-      // Private browsing may reject storage; the current session can still continue.
+      // 隐私浏览可能拒绝持久化，但当前会话仍可继续。
     }
   }
 
@@ -3190,7 +3076,7 @@ interface Window { playmesh: PlaymeshApi; }
       const cached = global.localStorage?.getItem(browserPlayerIdStorageKey);
       if (/^p_[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(cached || "")) return cached;
     } catch (_) {
-      // Continue with an in-memory identity when persistent storage is unavailable.
+      // 持久化不可用时继续使用内存身份。
     }
     const bytes = new Uint8Array(16);
     if (global.crypto?.getRandomValues) {
@@ -3204,14 +3090,14 @@ interface Window { playmesh: PlaymeshApi; }
     try {
       global.localStorage?.setItem(browserPlayerIdStorageKey, playerId);
     } catch (_) {
-      // The current page can still join, but refresh cannot restore this identity.
+      // 当前页面仍可加入，但刷新后无法恢复这个身份。
     }
     return playerId;
   }
 
   async function updateBrowserNickname(value) {
     const nickname = validateNickname(value, true);
-    await playmesh.ready;
+    await main.ready;
     const config = global.__PLAYMESH_BROWSER__;
     const response = await fetch(new URL(
       `v1/sessions/${encodeURIComponent(bootstrap.session.id)}/players/me`,
@@ -3244,20 +3130,14 @@ interface Window { playmesh: PlaymeshApi; }
     return null;
   }
 
-  async function mountBrowserNicknameControl() {
-    if (appSdk.isAvailable()) return;
-    const ui = await ensureBrowserNicknameUi();
-    if (!ui) return;
-    ui.button.hidden = false;
-    ui.button.onclick = () => {
-      closePlatformUiLayer(ui.infoOverlay, ui.info);
-      return openBrowserNicknameDialog({
-        required: false,
-        current: bootstrap?.player?.nickname || readBrowserNickname() || "",
-        returnFocus: ui.info,
-        submit: updateBrowserNickname,
-      });
-    };
+  async function editBrowserNickname() {
+    if (appSdk.isAvailable()) return false;
+    const value = await openBrowserNicknameDialog({
+      required: false,
+      current: bootstrap?.player?.nickname || readBrowserNickname() || "",
+      submit: updateBrowserNickname,
+    });
+    return value !== null;
   }
 
   async function openBrowserNicknameDialog(options) {
@@ -3321,108 +3201,22 @@ interface Window { playmesh: PlaymeshApi; }
     });
   }
 
-  function formatBrowserConsoleValue(value) {
-    if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
-    if (typeof value === "string") return value;
-    if (typeof value === "bigint") return value.toString();
-    try {
-      const encoded = JSON.stringify(value);
-      return encoded === undefined ? String(value) : encoded;
-    } catch (_) {
-      return String(value);
-    }
-  }
-
-  function recordBrowserConsole(level, args, eventType = "console") {
-    browserConsoleLogs.push({
-      timestamp: Date.now(),
-      level,
-      eventType,
-      message: args.map(formatBrowserConsoleValue).join(" "),
-    });
-    if (browserConsoleLogs.length > BROWSER_CONSOLE_LOG_LIMIT) {
-      browserConsoleLogs.splice(0, browserConsoleLogs.length - BROWSER_CONSOLE_LOG_LIMIT);
-    }
-    if (browserNicknameUi?.logsOverlay && !browserNicknameUi.logsOverlay.hidden) {
-      renderBrowserConsoleLogs(browserNicknameUi);
-    }
-  }
-
-  function installBrowserConsoleCapture() {
-    if (!global.__PLAYMESH_BROWSER__ ||
-        appSdk.isAvailable() ||
-        browserConsoleCaptureInstalled ||
-        !global.console) {
-      return;
-    }
-    browserConsoleCaptureInstalled = true;
-    for (const level of ["log", "info", "warn", "error", "debug"]) {
-      const nativeMethod = typeof global.console[level] === "function"
-        ? global.console[level].bind(global.console)
-        : null;
-      if (!nativeMethod) continue;
-      global.console[level] = (...args) => {
-        nativeMethod(...args);
-        recordBrowserConsole(level, args);
-      };
-    }
-    global.addEventListener?.("error", (event) => {
-      const resource = event.target && event.target !== global
-        ? event.target.currentSrc || event.target.src || event.target.href
-        : null;
-      const error = event.error instanceof Error ? event.error : null;
-      recordBrowserConsole(
-        "error",
-        [resource ? `Resource load failed: ${resource}` : error || event.message],
-        resource ? "resource.error" : "uncaught.error",
-      );
-    }, true);
-    global.addEventListener?.("unhandledrejection", (event) => {
-      recordBrowserConsole("error", [event.reason], "unhandled.rejection");
-    });
-  }
-
-  function formatBrowserConsoleTimestamp(timestamp) {
-    const value = new Date(timestamp);
-    try {
-      return new Intl.DateTimeFormat(platformUiLocale || undefined, {
-        dateStyle: "short",
-        timeStyle: "medium",
-      }).format(value);
-    } catch (_) {
-      // Older WebViews keep the deterministic fallback below.
-    }
-    const pad = (part) => String(part).padStart(2, "0");
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ` +
-      `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
-  }
-
-  function renderBrowserConsoleLogs(ui) {
-    if (!ui?.logsOutput) return;
-    ui.logsOutput.textContent = browserConsoleLogs.length
-      ? browserConsoleLogs.map((entry) => {
-          const eventType = entry.eventType === "console" ? "" : ` [${entry.eventType}]`;
-          return `[${formatBrowserConsoleTimestamp(entry.timestamp)}] [${entry.level}]${eventType} ${entry.message}`;
-        }).join("\n")
-      : platformText("logs.empty");
-    ui.logsOutput.scrollTop = ui.logsOutput.scrollHeight;
-  }
-
   function registerAppPlatformUiRuntime() {
-    if (typeof appSdk.__registerRuntimeUi !== "function") return;
-    appSdk.__registerRuntimeUi({
+    if (typeof appInternalRuntime.registerRuntimeUi !== "function") return;
+    appInternalRuntime.registerRuntimeUi({
       async reload() {
-        if (playmesh.session.isAuthority()) {
+        const multiplayer = main.gameInfo.getCurrent()?.multiplayer === true;
+        if (multiplayer && main.session.isAuthority()) {
           await post("session.reset", {});
         }
         global.location?.reload?.();
       },
       async getInfo() {
-        await playmesh.ready;
-        const gameInfo = playmesh.gameInfo.getCurrent();
+        await main.ready;
+        const gameInfo = main.gameInfo.getCurrent();
         if (!gameInfo) return null;
-        const session = playmesh.session.getCurrent();
-        const player = playmesh.player.getCurrent();
+        const session = main.session.getCurrent();
+        const player = main.player.getCurrent();
         return {
           gameId: gameInfo.id,
           gameName: gameInfo.name,
@@ -3430,45 +3224,21 @@ interface Window { playmesh: PlaymeshApi; }
           requiredCapabilities: [...gameInfo.requiredCapabilities],
           joinCode: session?.joinCode || null,
           multiplayer: gameInfo.multiplayer,
-          isAuthority: playmesh.session.isAuthority(),
+          isAuthority: main.session.isAuthority(),
           playerName: player?.nickname || null,
+          canEditNickname: !appSdk.isAvailable(),
           playerCount: Array.isArray(session?.players)
             ? session.players.length
             : null,
-          gameSdkVersion: playmesh.version,
+          gameSdkVersion: main.version,
           appSdkVersion: appSdk.version,
-          platform: playmesh.app.device.getPlatform() || "browser",
+          platform: appSdk.device.getPlatform() || "browser",
         };
       },
-      getPerformance() {
-        return {
-          fps: currentFps,
-          latency: currentLatency,
-          multiplayer: Boolean(bootstrap?.session),
-        };
-      },
-      setPerformanceVisible(visible) {
-        performanceVisible = visible === true;
+      editNickname() {
+        return editBrowserNickname();
       },
     });
-  }
-
-  function exitBrowserGameFromSidebar(ui) {
-    browserBackExitRequested = true;
-    ui.closeSidebar(false);
-    markRuntimeExited("用户从游戏菜单退出");
-    try {
-      if (browserBackInterceptionInstalled && global.history.length > 2) {
-        global.history.go(-2);
-        return;
-      }
-      global.close?.();
-      global.setTimeout(() => {
-        if (!global.closed) global.location?.replace?.("about:blank");
-      }, 0);
-    } catch (error) {
-      global.console?.warn?.("浏览器无法离开当前游戏页面", error);
-    }
   }
 
   async function ensureBrowserNicknameUi() {
@@ -3479,82 +3249,38 @@ interface Window { playmesh: PlaymeshApi; }
     }
     const pageReturnFocus = global.document.activeElement || null;
     const host = global.document.createElement("div");
-    host.id = "playmesh-browser-profile";
+    host.id = "playmesh-browser-nickname-ui";
     host.setAttribute?.("lang", platformUiLocale);
     host.setAttribute?.("data-theme", platformUiTheme);
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>
-      :host{all:initial;--pm-surface:#121720eb;--pm-surface-solid:#20242b;--pm-surface-hover:#343b46;--pm-text:#f4f7fb;--pm-muted:#d5dbe4;--pm-border:#596272;--pm-soft-border:#ffffff35;--pm-divider:#ffffff18;--pm-overlay:#0008;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#0b0f15;--pm-log-text:#dbe5f0;--pm-focus:#78a6ff;--pm-error:#fda4af;font-family:system-ui,"Microsoft YaHei",sans-serif;letter-spacing:0;color-scheme:dark}
-      :host([data-theme="light"]){--pm-surface:#fffffff2;--pm-surface-solid:#ffffff;--pm-surface-hover:#e8edf3;--pm-text:#18212c;--pm-muted:#526071;--pm-border:#91a0b0;--pm-soft-border:#aab5c2;--pm-divider:#d5dde6;--pm-overlay:#dce3ecd9;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-log-bg:#f4f7fa;--pm-log-text:#1f2937;--pm-focus:#075dce;--pm-error:#a1122f;color-scheme:light}
+      :host{all:initial;--pm-surface:#20242b;--pm-hover:#343b46;--pm-text:#f4f7fb;--pm-border:#596272;--pm-overlay:#0008;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-focus:#78a6ff;--pm-error:#fda4af;font-family:system-ui,"Microsoft YaHei",sans-serif;color-scheme:dark}
+      :host([data-theme="light"]){--pm-surface:#fff;--pm-hover:#e8edf3;--pm-text:#18212c;--pm-border:#91a0b0;--pm-overlay:#dce3ecd9;--pm-field-bg:#fff;--pm-field-text:#111827;--pm-focus:#075dce;--pm-error:#a1122f;color-scheme:light}
       button,input{box-sizing:border-box;font:inherit;letter-spacing:0}
-      .sidebar-layer{position:fixed;inset:0;z-index:2147483646;color:var(--pm-text)}
-      .sidebar-scrim{position:absolute;inset:0;width:100%;height:100%;padding:0;border:0;background:var(--pm-overlay);cursor:pointer}
-      .sidebar{box-sizing:border-box;position:absolute;right:0;top:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(88vw,360px);height:100%;height:100dvh;padding:max(16px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) 10px;border-left:1px solid var(--pm-border);background:var(--pm-surface-solid);box-shadow:-18px 0 42px #0006}
-      .sidebar-head{display:flex;align-items:center;gap:12px;padding:4px 10px 14px;border-bottom:1px solid var(--pm-divider)}
-      .sidebar-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#087f6d;color:#fff;font:800 18px/1 system-ui}
-      .sidebar-title{margin:0;color:var(--pm-text);font-size:20px;line-height:1.25;font-weight:800}
-      .sidebar-actions{min-height:0;overflow:auto;padding:8px 0}
-      .sidebar-action{display:flex;align-items:center;gap:13px;width:100%;min-height:52px;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--pm-text);font:700 15px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer}
-      .sidebar-action:hover{background:var(--pm-surface-hover)}.sidebar-action:focus-visible,.sidebar-scrim:focus-visible,.actions button:focus-visible,.logs-head button:focus-visible,.logs-output:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}
-      .sidebar-action.continue{background:#087f6d;color:#fff}.sidebar-action.exit{color:var(--pm-error)}
-      .sidebar-icon{display:grid;place-items:center;flex:0 0 24px;width:24px;font:800 19px/1 system-ui}
-      .sidebar-foot{padding-top:8px;border-top:1px solid var(--pm-divider)}
-      .panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483645;display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--pm-soft-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);font:700 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace}
       .overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}
-      .sidebar-layer[hidden],.overlay[hidden],.panel[hidden],.edit[hidden],.latency[hidden],.info-overlay[hidden],.logs-overlay[hidden]{display:none}
-      form,.info-card{box-sizing:border-box;width:min(100%,380px);max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}
+      .overlay[hidden]{display:none}
+      form{box-sizing:border-box;width:min(100%,380px);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 16px 40px #0005}
       h2{margin:0 0 16px;font-size:20px;line-height:1.3;letter-spacing:0}
       label{display:block;margin-bottom:6px;font-size:14px;font-weight:700}
       input{width:100%;height:44px;padding:8px 10px;border:1px solid var(--pm-border);border-radius:6px;color:var(--pm-field-text);background:var(--pm-field-bg)}
       .error{min-height:20px;margin:6px 0;color:var(--pm-error);font-size:13px}
       .actions{display:flex;justify-content:flex-end;gap:8px}
-      .actions button{height:40px;padding:0 14px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}
+      .actions button{height:40px;padding:0 14px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-hover);color:var(--pm-text);cursor:pointer}
       .actions .save{border-color:#10b981;background:#0f766e;color:#fff;font-weight:700}
-      .info-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:var(--pm-overlay)}.info-card p{margin:8px 0;color:var(--pm-muted);line-height:1.6}.info-card strong{color:var(--pm-text)}.info-card .actions{margin-top:18px}
-      .logs-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:14px;background:var(--pm-overlay)}.logs-card{box-sizing:border-box;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,760px);height:min(78vh,620px);height:min(78dvh,620px);padding:16px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface-solid);color:var(--pm-text);box-shadow:0 16px 40px #0005}.logs-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}.logs-head h2{flex:1;margin:0}.logs-head button{height:36px;padding:0 12px;border:1px solid var(--pm-border);border-radius:6px;background:var(--pm-surface-hover);color:var(--pm-text);cursor:pointer}.logs-output{min-width:0;min-height:0;margin:0;padding:10px;overflow:auto;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-log-bg);color:var(--pm-log-text);white-space:pre-wrap;word-break:break-word;user-select:text;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.logs-card .actions{margin-top:10px}
+      .actions button:focus-visible,input:focus-visible{outline:3px solid var(--pm-focus);outline-offset:-3px}
       button:disabled{cursor:wait;opacity:.65}
-      @media (orientation:landscape){.sidebar{width:min(46vw,420px)}.sidebar-head{padding-bottom:10px}.sidebar-actions{padding:5px 0}.sidebar-action{min-height:46px}.sidebar-foot{padding-top:5px}}
     </style>
-    <div class="sidebar-layer" hidden>
-      <button class="sidebar-scrim" type="button" aria-label="${platformHtml("sidebar.continue")}" tabindex="-1"></button>
-      <aside class="sidebar" role="dialog" aria-modal="true" aria-labelledby="playmesh-sidebar-title">
-        <header class="sidebar-head"><span class="sidebar-mark" aria-hidden="true">P</span><h2 class="sidebar-title" id="playmesh-sidebar-title">${platformHtml("sidebar.title")}</h2></header>
-        <nav class="sidebar-actions">
-          <button class="sidebar-action continue" type="button"><span class="sidebar-icon" aria-hidden="true">▶</span><span>${platformHtml("sidebar.continue")}</span></button>
-          <button class="sidebar-action reload" type="button"><span class="sidebar-icon" aria-hidden="true">↻</span><span>${platformHtml("sidebar.restart")}</span></button>
-          <button class="sidebar-action logs" type="button"><span class="sidebar-icon" aria-hidden="true">≡</span><span>${platformHtml("sidebar.logs")}</span></button>
-          <button class="sidebar-action enter-fullscreen" type="button"><span class="sidebar-icon" aria-hidden="true">⛶</span><span>${platformHtml("sidebar.enter_fullscreen")}</span></button>
-          <button class="sidebar-action exit-fullscreen" type="button"><span class="sidebar-icon" aria-hidden="true">⊡</span><span>${platformHtml("sidebar.exit_fullscreen")}</span></button>
-          <button class="sidebar-action info" type="button"><span class="sidebar-icon" aria-hidden="true">ⓘ</span><span>${platformHtml("sidebar.info")}</span></button>
-          <button class="sidebar-action performance" type="button" aria-pressed="false"><span class="sidebar-icon" aria-hidden="true">◴</span><span>${platformHtml("sidebar.performance")}</span></button>
-        </nav>
-        <footer class="sidebar-foot"><button class="sidebar-action exit" type="button"><span class="sidebar-icon" aria-hidden="true">↩</span><span>${platformHtml("sidebar.exit")}</span></button></footer>
-      </aside>
-    </div>
-    <div class="panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>
     <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-nickname-title" hidden>
       <form><h2 id="playmesh-nickname-title"></h2><label class="nickname-label" for="nickname">${platformHtml("nickname.label")}</label>
       <input id="nickname" maxlength="32" autocomplete="nickname" required>
       <div class="error" role="alert"></div><div class="actions">
       <button class="close" type="button" aria-label="${platformHtml("common.cancel")}">${platformHtml("common.cancel")}</button><button class="save" type="submit" aria-label="${platformHtml("common.save")}">${platformHtml("common.save")}</button>
       </div></form>
-    </div>
-    <div class="info-overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-info-title" hidden><div class="info-card"><h2 class="info-title" id="playmesh-info-title">${platformHtml("info.title")}</h2><p class="game-name"></p><p class="session-info"></p><div class="actions"><button class="edit" type="button" aria-label="${platformHtml("nickname.edit_action")}" hidden>${platformHtml("nickname.edit_action")}</button><button class="info-close" type="button" aria-label="${platformHtml("common.close")}">${platformHtml("common.close")}</button></div></div></div>
-    <div class="logs-overlay" role="dialog" aria-modal="true" aria-labelledby="playmesh-logs-title" hidden><div class="logs-card"><div class="logs-head"><h2 class="logs-title" id="playmesh-logs-title">${platformHtml("logs.title")}</h2><button class="logs-clear" type="button" aria-label="${platformHtml("common.clear")}">${platformHtml("common.clear")}</button></div><pre class="logs-output" tabindex="0" aria-live="polite">${platformHtml("logs.empty")}</pre><div class="actions"><button class="logs-close" type="button" aria-label="${platformHtml("common.close")}">${platformHtml("common.close")}</button></div></div></div>`;
+    </div>`;
     global.document.body.appendChild(host);
     browserNicknameUi = {
       host,
       pageReturnFocus,
-      sidebarLayer: root.querySelector(".sidebar-layer"),
-      sidebar: root.querySelector(".sidebar"),
-      sidebarTitle: root.querySelector(".sidebar-title"),
-      sidebarScrim: root.querySelector(".sidebar-scrim"),
-      continueButton: root.querySelector(".continue"),
-      panel: root.querySelector(".panel"),
-      fps: root.querySelector(".fps"),
-      latency: root.querySelector(".latency"),
-      performanceButton: root.querySelector(".performance"),
-      button: root.querySelector(".edit"),
       overlay: root.querySelector(".overlay"),
       form: root.querySelector("form"),
       title: root.querySelector("h2"),
@@ -3563,22 +3289,6 @@ interface Window { playmesh: PlaymeshApi; }
       error: root.querySelector(".error"),
       close: root.querySelector(".close"),
       submit: root.querySelector(".save"),
-      reload: root.querySelector(".reload"),
-      enterFullscreen: root.querySelector(".enter-fullscreen"),
-      exitFullscreen: root.querySelector(".exit-fullscreen"),
-      info: root.querySelector(".info"),
-      exit: root.querySelector(".exit"),
-      logs: root.querySelector(".logs"),
-      infoOverlay: root.querySelector(".info-overlay"),
-      infoClose: root.querySelector(".info-close"),
-      infoTitle: root.querySelector(".info-title"),
-      gameName: root.querySelector(".game-name"),
-      sessionInfo: root.querySelector(".session-info"),
-      logsOverlay: root.querySelector(".logs-overlay"),
-      logsOutput: root.querySelector(".logs-output"),
-      logsTitle: root.querySelector(".logs-title"),
-      logsClear: root.querySelector(".logs-clear"),
-      logsClose: root.querySelector(".logs-close"),
     };
     const ui = browserNicknameUi;
     global.document.addEventListener?.("focusin", (event) => {
@@ -3586,95 +3296,6 @@ interface Window { playmesh: PlaymeshApi; }
         ui.pageReturnFocus = event.target;
       }
     }, true);
-    const sidebarControls = () => [
-      ui.continueButton,
-      ui.reload,
-      ui.logs,
-      ui.enterFullscreen,
-      ui.exitFullscreen,
-      ui.info,
-      ui.performanceButton,
-      ui.exit,
-    ];
-    const closeBrowserSidebar = (restoreFocus = true) => {
-      ui.sidebarLayer.hidden = true;
-      if (restoreFocus) focusPlatformUiControl(ui.pageReturnFocus);
-    };
-    const openBrowserSidebar = () => {
-      const activeElement = global.document.activeElement;
-      if (activeElement && activeElement !== host) ui.pageReturnFocus = activeElement;
-      ui.sidebarLayer.hidden = false;
-      const first = setPlatformUiRovingTabStop(
-        sidebarControls(),
-        ui.continueButton,
-      );
-      focusPlatformUiControl(first);
-    };
-    ui.openSidebar = openBrowserSidebar;
-    ui.closeSidebar = closeBrowserSidebar;
-    ui.continueButton.onclick = () => closeBrowserSidebar();
-    ui.sidebarScrim.onclick = () => closeBrowserSidebar();
-    ui.reload.onclick = () => {
-      closeBrowserSidebar(false);
-      global.location?.reload?.();
-    };
-    ui.performanceButton.onclick = () => {
-      performanceVisible = !performanceVisible;
-      void renderPerformanceUi();
-      closeBrowserSidebar();
-    };
-    ui.enterFullscreen.onclick = async () => {
-      closeBrowserSidebar(false);
-      try {
-        await requestBrowserFullscreen(browserConnectionConfig?.orientation);
-      } catch (error) {
-        global.console?.warn?.("浏览器全屏或方向锁定不可用，请手动调整", error);
-      }
-    };
-    ui.exitFullscreen.onclick = () => {
-      closeBrowserSidebar(false);
-      if (global.document.fullscreenElement) {
-        Promise.resolve(global.document.exitFullscreen?.()).catch(() => {});
-      }
-    };
-    ui.info.onclick = () => {
-      const config = global.__PLAYMESH_BROWSER__ || {};
-      ui.infoTitle.textContent = platformText("info.title");
-      ui.gameName.textContent =
-        config.gameName || platformText("info.default_game");
-      ui.sessionInfo.textContent = bootstrap?.session?.joinCode
-        ? platformText("info.join_code", {
-            joinCode: bootstrap.session.joinCode,
-          })
-        : platformText("info.solo_share");
-      closeBrowserSidebar(false);
-      openPlatformUiLayer(ui.infoOverlay, ui.infoClose, ui.pageReturnFocus);
-    };
-    ui.logs.onclick = () => {
-      renderBrowserConsoleLogs(ui);
-      closeBrowserSidebar(false);
-      openPlatformUiLayer(ui.logsOverlay, ui.logsClose, ui.pageReturnFocus);
-    };
-    ui.infoClose.onclick = () => {
-      closePlatformUiLayer(ui.infoOverlay, ui.pageReturnFocus);
-    };
-    ui.logsClear.onclick = () => {
-      browserConsoleLogs.length = 0;
-      renderBrowserConsoleLogs(ui);
-    };
-    ui.logsClose.onclick = () => {
-      closePlatformUiLayer(ui.logsOverlay, ui.pageReturnFocus);
-    };
-    ui.exit.onclick = () => exitBrowserGameFromSidebar(ui);
-    installPlatformUiKeyboardNavigation(
-      ui.sidebar,
-      sidebarControls,
-      {
-        trap: true,
-        roving: true,
-        onBack: () => closeBrowserSidebar(),
-      },
-    );
     installPlatformUiKeyboardNavigation(
       ui.overlay,
       () => [ui.input, ui.close, ui.submit],
@@ -3683,24 +3304,7 @@ interface Window { playmesh: PlaymeshApi; }
         onBack: () => ui.onNicknameBack?.(),
       },
     );
-    installPlatformUiKeyboardNavigation(
-      ui.infoOverlay,
-      () => [ui.button, ui.infoClose],
-      {
-        trap: true,
-        onBack: () => ui.infoClose.onclick(),
-      },
-    );
-    installPlatformUiKeyboardNavigation(
-      ui.logsOverlay,
-      () => [ui.logsClear, ui.logsOutput, ui.logsClose],
-      {
-        trap: true,
-        onBack: () => ui.logsClose.onclick(),
-      },
-    );
     refreshBrowserPlatformUi(ui);
-    performanceUi = browserNicknameUi;
     return browserNicknameUi;
   }
 
@@ -3712,34 +3316,10 @@ interface Window { playmesh: PlaymeshApi; }
     if (visible) element.textContent = label;
   }
 
-  function setSidebarActionLabel(element, key) {
-    if (!element) return;
-    const label = platformText(key);
-    element.setAttribute?.("aria-label", label);
-    element.setAttribute?.("title", label);
-    const text = element.querySelector?.("span:last-child");
-    if (text) text.textContent = label;
-  }
-
   function refreshBrowserPlatformUi(ui) {
     if (!ui) return;
     ui.host?.setAttribute?.("data-theme", platformUiTheme);
     ui.host?.setAttribute?.("lang", platformUiLocale);
-    if (ui.sidebarTitle) {
-      ui.sidebarTitle.textContent = platformText("sidebar.title");
-    }
-    setPlatformControlLabel(ui.sidebarScrim, "sidebar.continue");
-    setSidebarActionLabel(ui.continueButton, "sidebar.continue");
-    setSidebarActionLabel(ui.reload, "sidebar.restart");
-    setSidebarActionLabel(ui.logs, "sidebar.logs");
-    setSidebarActionLabel(ui.enterFullscreen, "sidebar.enter_fullscreen");
-    setSidebarActionLabel(ui.exitFullscreen, "sidebar.exit_fullscreen");
-    setSidebarActionLabel(ui.info, "sidebar.info");
-    setSidebarActionLabel(ui.performanceButton, "sidebar.performance");
-    setSidebarActionLabel(ui.exit, "sidebar.exit");
-    setPlatformControlLabel(ui.button, "nickname.edit_action", {
-      visible: true,
-    });
     if (ui.nicknameLabel) {
       ui.nicknameLabel.textContent = platformText("nickname.label");
     }
@@ -3750,24 +3330,6 @@ interface Window { playmesh: PlaymeshApi; }
     }
     setPlatformControlLabel(ui.close, "common.cancel", { visible: true });
     setPlatformControlLabel(ui.submit, "common.save", { visible: true });
-    if (ui.infoTitle) ui.infoTitle.textContent = platformText("info.title");
-    setPlatformControlLabel(ui.infoClose, "common.close", { visible: true });
-    if (ui.logsTitle) ui.logsTitle.textContent = platformText("logs.title");
-    setPlatformControlLabel(ui.logsClear, "common.clear", { visible: true });
-    setPlatformControlLabel(ui.logsClose, "common.close", { visible: true });
-    const config = global.__PLAYMESH_BROWSER__ || {};
-    if (ui.gameName) {
-      ui.gameName.textContent =
-        config.gameName || platformText("info.default_game");
-    }
-    if (ui.sessionInfo) {
-      ui.sessionInfo.textContent = bootstrap?.session?.joinCode
-        ? platformText("info.join_code", {
-            joinCode: bootstrap.session.joinCode,
-          })
-        : platformText("info.solo_share");
-    }
-    if (!ui.logsOverlay.hidden) renderBrowserConsoleLogs(ui);
   }
 
   function validateStorageName(value, field) {

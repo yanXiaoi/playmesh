@@ -112,21 +112,29 @@ void main() {
     await expectLater(plugin.create({'duration': 100}), throwsFormatException);
   });
 
-  test('自检读取 vibration 插件能力但不产生震动', () async {
+  test('创建并释放 vibration 实例不产生震动', () async {
     final driver = _RecordingVibrationDriver();
     final plugin = VibrationCapabilityPlugin(driver: driver);
 
-    final result = await plugin.test(const Duration(seconds: 1));
+    final instance = await plugin.create(const {});
+    await instance.dispose();
 
-    expect(result['available'], isTrue);
-    expect(result['hasAmplitudeControl'], isTrue);
-    expect(result['hasCustomVibrationsSupport'], isTrue);
-    expect(result['sideEffectExecuted'], isFalse);
     expect(driver.vibrations, isEmpty);
+  });
+
+  test('设备没有振动器时创建实例直接失败', () async {
+    final plugin = VibrationCapabilityPlugin(
+      driver: _RecordingVibrationDriver(vibratorAvailable: false),
+    );
+
+    await expectLater(plugin.create(const {}), throwsUnsupportedError);
   });
 }
 
 class _RecordingVibrationDriver implements VibrationDriver {
+  _RecordingVibrationDriver({this.vibratorAvailable = true});
+
+  final bool vibratorAvailable;
   final List<_VibrationCall> vibrations = [];
   int cancelCount = 0;
 
@@ -134,7 +142,7 @@ class _RecordingVibrationDriver implements VibrationDriver {
   bool get platformSupported => true;
 
   @override
-  Future<bool> hasVibrator() async => true;
+  Future<bool> hasVibrator() async => vibratorAvailable;
 
   @override
   Future<bool> hasAmplitudeControl() async => true;

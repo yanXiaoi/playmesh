@@ -4,7 +4,8 @@
 Agent API、项目文件与本地历史。游戏作者使用说明见
 [网页开发者通道](../game/web-dev-channel.md)。
 
-当前 Developer API / OpenAPI 版本为 `2.3.0`。本轮完整实现说明见
+当前 Developer API / OpenAPI 版本为 `4.0.0`。本轮破坏性开发资源会话与外部工程
+接入变更见 [Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
 ## 架构
@@ -55,7 +56,7 @@ lib/core/developer/operations/{domain}/
 
 ## 当前完整 Operation 注册表
 
-下表记录 Developer API `2.3.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
+下表记录 Developer API `4.0.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
 真正用于路由的是“HTTP method + path 模板”，operation ID 用于响应头、OpenAPI、
 操作目录、审批和诊断，不参与路径命中。
 
@@ -68,12 +69,32 @@ lib/core/developer/operations/{domain}/
 | 文件与目录 | `GET /dev/api/projects/{projectId}/files` → `files.list`<br>`GET /dev/api/projects/{projectId}/file` → `files.read`<br>`PUT /dev/api/projects/{projectId}/file` → `files.write`<br>`PATCH /dev/api/projects/{projectId}/file` → `files.patch`<br>`DELETE /dev/api/projects/{projectId}/file` → `files.delete`<br>`GET /dev/api/projects/{projectId}/asset` → `files.read_asset`<br>`GET /dev/api/projects/{projectId}/diff` → `files.diff`<br>`POST /dev/api/projects/{projectId}/directory` → `directories.create`<br>`DELETE /dev/api/projects/{projectId}/directory` → `directories.delete`<br>`POST /dev/api/projects/{projectId}/file-operations` → `files.manage` |
 | 批量变更与历史 | `POST /dev/api/projects/{projectId}/file-changes/preview` → `file_changes.preview`<br>`POST /dev/api/projects/{projectId}/file-changes/apply` → `file_changes.apply`<br>`GET /dev/api/projects/{projectId}/local-history` → `history.list`<br>`GET /dev/api/projects/{projectId}/local-history/diff` → `history.diff`<br>`POST /dev/api/projects/{projectId}/local-history/restore` → `history.restore` |
 | 包与发布 | `POST /dev/api/packages/import` → `packages.import`<br>`GET /dev/api/projects/{projectId}/package` → `packages.export_project`<br>`GET /dev/api/projects/{projectId}/publish` → `projects.publish_sources`<br>`POST /dev/api/projects/{projectId}/publish` → `projects.publish` |
-| 运行时 | `GET /dev/api/run` → `runtime.active`<br>`GET /dev/api/projects/{projectId}/run` → `runtime.status`<br>`POST /dev/api/projects/{projectId}/run` → `runtime.start`<br>`POST /dev/api/projects/{projectId}/run/restart` → `runtime.restart`<br>`POST /dev/api/projects/{projectId}/run/stop` → `runtime.stop`<br>`POST /dev/api/projects/{projectId}/webview/javascript` → `runtime.webview.execute_javascript`<br>`GET /dev/api/events` → `events.subscribe`<br>`GET /dev/api/logs` → `runtime.logs` |
+| 运行时 | `GET /dev/api/run` → `runtime.active`<br>`GET /dev/api/projects/{projectId}/run` → `runtime.status`<br>`POST /dev/api/projects/{projectId}/run` → `runtime.start`<br>`POST /dev/api/projects/{projectId}/run/restart` → `runtime.restart`<br>`POST /dev/api/projects/{projectId}/run/stop` → `runtime.stop`<br>`GET /dev/api/projects/{projectId}/development` → `runtime.development.status`<br>`POST /dev/api/projects/{projectId}/development` → `runtime.development.start`<br>`DELETE /dev/api/projects/{projectId}/development` → `runtime.development.stop`<br>`POST /dev/api/projects/{projectId}/webview/javascript` → `runtime.webview.execute_javascript`<br>`GET /dev/api/events` → `events.subscribe`<br>`GET /dev/api/logs` → `runtime.logs` |
 | 平台能力 | `GET /dev/api/capabilities` → `capabilities.list`<br>`GET /dev/api/capability-tests` → `capability_tests.list`<br>`POST /dev/api/capability-tests` → `capability_tests.run`<br>`POST /dev/api/capability-tests/instances` → `capability_tests.instances.create`<br>`POST /dev/api/capability-tests/instances/{instanceId}/invoke` → `capability_tests.instances.invoke`<br>`DELETE /dev/api/capability-tests/instances/{instanceId}` → `capability_tests.instances.dispose` |
 | AI 与提示词 | `GET /dev/api/operations` → `operations.list`<br>`GET /dev/api/ai-context` → `operations.context`<br>`GET /dev/api/projects/{projectId}/chat-prompt.txt` → `prompts.project.chat`<br>`GET /dev/api/projects/{projectId}/agent-prompt.txt` → `prompts.project.agent`<br>`GET /dev/api/ai-prompt-templates` → `prompts.templates.list`<br>`PUT /dev/api/ai-prompt-templates/{templateId}` → `prompts.templates.save`<br>`DELETE /dev/api/ai-prompt-templates/{templateId}` → `prompts.templates.reset`<br>`GET /dev/api/ai-approvals` → `ai_approvals.list`<br>`POST /dev/api/ai-approvals/{approvalId}` → `ai_approvals.decide` |
 
 `GET /dev/{workspacePath}/workspace` 和 `/playmesh/**` 静态资源由 Gateway 外壳处理，
 不是 Operation。它们不能被复制进上表或 `/dev/api/operations` 冒充业务 API。
+
+### 开发资源会话
+
+`POST /dev/api/projects/{projectId}/development` 接收
+`resourceBaseUrl + credential + expiresAt`，把当前项目临时切换到 CLI 本地开发资源，
+并返回真实 App 运行的 `runId`。`resourceBaseUrl` 必须是带端口的 HTTP 根地址且属于
+当前请求来源；credential 为 32–128 位一次性 URL-safe 值，`expiresAt` 使用 Unix
+毫秒且最多在未来 24 小时。会话只保存在内存，不写入项目、安装包或开发者配置。
+
+CLI 在调用该接口前，已把 JavaScript、TypeScript、Cocos 或未来引擎的开发源归一为
+公共 `development.Mapping`。Developer Gateway 只消费上述三个会话字段，
+不会接收 Adapter ID，也不得加入 Cocos 或其他引擎分支；引擎侧来源、路径、headers
+和生命周期始终留在 CLI 的 `adapter.Adapter` / `development.Source` 边界。
+
+开发态仍复用 GamePage、WebView、Game/App SDK、权限、存储和多人 Authority。
+`/playmesh/**`、`/bucket/**` 由 App 本地处理，其他 GET、HEAD 和 WebSocket 请求才
+转发到固定开发源。重复开发启动、正式 `run/restart`、DELETE 和 Gateway 关闭必须按
+`runId` 串行：替换前先关闭旧页面、资源网关及现有 WebSocket；停止失败保留会话供
+重试；到期后状态查询返回 `active: false` 并触发清理。DELETE 只撤销临时开发运行，
+不覆盖正式物理 `app/`，也不删除 `data/`、`cache/`。
 
 ## 完整注册流程
 
@@ -336,6 +357,9 @@ assets/playmesh-library/public/developer/
 - 不硬编码 Developer API、能力列表或 SDK 方法树。
 - API 来自 Operation Catalog/OpenAPI。
 - 能力选项来自平台注册表。
+- 项目创建/修改弹窗的能力多选项只按描述符的 `supportedPlatforms` 渲染
+  `WINDOWS`、`ANDROID`、`HTML` 支持徽标；列表中没有的平台视为不支持，不再渲染
+  “不支持”徽标，也不读取旧的双布尔字段。
 - SDK 补全来自注册表组装的 `.d.ts`。
 - 能力测试参数只按 `CapabilityDescriptor.optionsSchema` 和
   `methods[].argumentsSchema` 递归渲染表单，不要求开发者手写 JSON，也不按能力
@@ -346,8 +370,9 @@ assets/playmesh-library/public/developer/
 
 ### 定义驱动的能力测试
 
-工作区“更多 → 平台能力测试”保留插件 `test()` 自检和调用结果 JSON 回显，并增加
-交互测试。完整调用链为：
+工作区“更多 → 平台能力测试”的一键自检使用默认参数调用真实 `create({})`，成功后
+立即 `dispose()`；创建或释放失败即报告自检失败，不维护独立探测接口。交互测试允许
+开发者按描述符传入参数并调用方法。完整调用链为：
 
 ```text
 GET /dev/api/capability-tests
@@ -355,11 +380,16 @@ GET /dev/api/capability-tests
   -> Workspace 选择 descriptor
   -> optionsSchema 递归生成测试实例参数表单
 
+POST /dev/api/capability-tests
+  -> 对选中插件调用 plugin.create({})
+  -> 成功后立即 instance.dispose()
+  -> 创建或释放失败时返回 failed
+
 POST /dev/api/capability-tests/instances
   body.code == descriptor.code
   -> registry.plugin(code)
   -> plugin == null 时 400 invalid_request
-  -> plugin.isAvailable == false 时 409 capability_unavailable
+  -> registry.isPluginAvailable(plugin) == false 时 409 capability_unavailable
   -> plugin.create(options)
   -> 订阅 instance.events
   -> 返回 instanceId

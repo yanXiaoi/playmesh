@@ -25,6 +25,16 @@ func TestValidateAllowsOptionalDeclarationFields(t *testing.T) {
 	}
 }
 
+func TestDefaultStorageBudgetSupportsLargeHTMLGames(t *testing.T) {
+	storage := Default().Storage
+	if storage.MaxUploadBytes != 100<<20 ||
+		storage.MaxExpandedBytes != 512<<20 ||
+		storage.MaxFileBytes != 128<<20 ||
+		storage.MaxFiles != 8000 {
+		t.Fatalf("默认游戏包预算 = %+v", storage)
+	}
+}
+
 func TestValidateRelayPublicBaseURL(t *testing.T) {
 	tests := []struct {
 		name          string

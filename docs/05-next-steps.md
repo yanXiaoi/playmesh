@@ -12,15 +12,21 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前开发版本为 App `3.1.0+24`、Go Core
-`0.5.0`、Core 协议 `1.3.0`、Catalog API `2.0.0`、Relay 协议 `2.0.0`、
-Developer API / OpenAPI `2.3.0`、Developer CLI `1.4.0`，Game SDK 与 App Bridge
-Game SDK 为 `3.1.0`、App Bridge SDK 为 `3.0.0`，统一公开
-`playmesh.app.ui` 游戏菜单与平台功能。第六阶段后
-不再开始新阶段，后续交付统一进入版本更新日志。游戏运行能力仍通过
-`GoCoreRuntime -> GoCoreSessionClient -> Game SDK`，游戏代码不得直连 Core；
-App WebView 另由 `playmesh-app.js` 提供本机身份与当前可用设备能力；网页工作区和
-CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 API。
+归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.0.0+26`、Go Core
+`0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
+Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`、Game SDK `4.0.0`、
+App Bridge SDK `3.2.0`。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
+App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
+对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
+`window.playmeshApp` 与公开 `__*` 内部桥接均不存在，内部协作使用不可枚举的私有
+`Symbol` runtime。`main.ready` 内部先等待 `app.ready`，根 `playmesh.ready`
+只复用这条初始化链并返回 `{main, app}`。第六阶段后
+不再开始新阶段，后续交付统一进入版本更新日志。正式游戏固定从已安装包启动，经
+`GamePage -> GameLauncher -> InstalledGameWebResourceSource -> LocalGameWebView`
+进入统一运行时；联机时再由 `GameRuntimeBridge -> GoCoreSessionClient` 接入 Core，
+游戏代码不得直连 Core。外部 CLI `dev` 只把同一链中的资源源临时替换为
+`DevelopmentGameWebResourceSource`；App WebView 仍由 `playmesh-app.js` 提供本机
+身份与当前可用设备能力。
 
 ## 当前稳定基线
 
@@ -28,9 +34,20 @@ CLI 均通过独立 `DeveloperWebGateway` 调用 App 提供的正式开发者 AP
 游戏库扫描 playmesh-library/packages/{gameId}/main.json
   -> 游戏详情
   -> 应用 orientation，并行尝试可选全屏
-  -> Game SDK / WebView
+  -> GamePage / GameLauncher
+  -> InstalledGameWebResourceSource / InstalledGameWebResourceProvider
+  -> GameAssetGateway / WebView / Game SDK + App SDK
   -> 返回详情 / 退出游戏库 / 刷新游戏
   -> 恢复进入前的全屏状态和系统屏幕方向
+```
+
+```text
+外部 CLI dev
+  -> adapter.Adapter / development.Mapping / CLI development.Proxy
+  -> DeveloperWebGateway 建立临时会话
+  -> GamePage / GameLauncher
+  -> DevelopmentGameWebResourceSource / DevelopmentGameWebResourceProvider
+  -> 与正式游戏共用 GameAssetGateway / WebView / Bridge / 存储 / Core
 ```
 
 ```text
@@ -38,7 +55,7 @@ Go Core 监听 0.0.0.0:0
   -> 宿主上报实际端口
   -> Flutter 本机使用回环地址
   -> 分享层列出全部可用局域网 IPv4 地址
-  -> /app/{entry} 权威页面
+  -> /{entry} 权威页面
   -> Game SDK 直接调用受控 Core Join 能力并建立 Session WebSocket
 ```
 
@@ -66,13 +83,13 @@ Go Core 监听 0.0.0.0:0
 
 ## 第五阶段完成
 
-第五阶段已于 2026-07-17 完成。`entries.game`、`entries.controller` 与 `authority.entry` 已统一进入 Manifest、游戏库扫描、开发校验、App/浏览器运行、模板和机器契约；状态同步、自动延迟、网页性能层、应用包导入/导出与工作区文件整理也已完成。完成归档见 `docs/status/phase-05-complete.md`。
+第五阶段已于 2026-07-17 完成。`entries.game`、`entries.controller` 与 `authority.entry` 已统一进入 Manifest、游戏库扫描、开发校验、App/浏览器运行、模板和机器契约；状态同步、自动延迟、App SDK 网页性能层、应用包导入/导出与工作区文件整理也已完成。完成归档见 `docs/status/phase-05-complete.md`。
 
-第五阶段把 SDK 升级为 AI 友好的轻量权威状态同步运行时，并加入 SDK 自动联机延迟显示。默认采用状态同步而不是帧同步：游戏或 AI 只维护权威状态、处理玩家输入、编写 tick 规则和渲染表现；SDK 负责连接、输入限频/合并、Authority tick、快照版本、状态分发、重连恢复和基础诊断。FPS 和延迟都由 SDK 在网页内自动渲染，多人游戏显示当前玩家到权威端并收到返回的往返耗时，和 FPS 共用左上角位置及开关；App 运行时由 App 工具坞控制开关，普通浏览器由 SDK 自己提供悬浮组件并放入昵称修改入口；单人游戏不显示延迟，游戏代码不需要手动创建组件。
+第五阶段把 SDK 升级为 AI 友好的轻量权威状态同步运行时，并加入 SDK 自动联机延迟显示。默认采用状态同步而不是帧同步：游戏或 AI 只维护权威状态、处理玩家输入、编写 tick 规则和渲染表现；SDK 负责连接、输入限频/合并、Authority tick、快照版本、状态分发、重连恢复和基础诊断。FPS 和延迟都由 App SDK 在网页内自动渲染，多人游戏显示当前玩家到权威端并收到返回的往返耗时，和 FPS 共用左上角位置及开关；App 运行时由 App 工具坞控制开关，普通浏览器由 App SDK 提供悬浮组件并放入昵称修改入口；Game SDK 不创建浏览器性能 panel，单人游戏不显示延迟，游戏代码不需要手动创建组件。
 
-第五阶段同时实现统一 `packages/{gameId}` 游戏库的导入与导出：导入包经过路径、清单和资源校验后原子安装；导出由用户直接选择系统保存位置，因此不产生需要清理的临时分享包。开发项目与正式项目使用同一目录，不增加单独发布步骤。
+第五阶段同时实现统一 `packages/{gameId}` 游戏库的导入与导出：导入包经过路径、清单和资源校验后原子安装；导出由用户直接选择系统保存位置，因此不产生需要清理的临时分享包。这里“同一目录”只指 App 内 Developer Workspace 新建或编辑的项目与其他已安装游戏都位于 `packages/{gameId}/`。外部 CLI `dev` 使用临时开发资源源，不把网页变更写入正式 `app/`；只有 `playmesh-cli run` 才把 `playmesh/package/` 原子安装为正式包。
 
-第五阶段还允许游戏在 `main.json` 中自定义运行入口，覆盖普通游戏首页、控制器首页和权威 JS。当前模板的默认值保持为：普通游戏首页 `app/index.html`、控制器首页 `app/controller/index.html`，权威 JS 使用当前 `authority.entry` 约定。自定义入口只能指向当前游戏包 `app/` 内文件，必须由项目校验拦截越界路径、缺失文件和外部 URL。应用侧导入/导出只处理根目录存在 `main.json` 的 Playmesh 游戏包；完整 HTML 小游戏通过开发者工作区上传文件，并使用解压、移动、复制、粘贴整理目录，不设置单独导入口。
+第五阶段还允许游戏在 `main.json` 中自定义运行入口，覆盖普通游戏首页、控制器首页和权威 JS。当前模板会相对于外层物理 `app/` 显式写入普通游戏首页 `index.html`、控制器首页 `controller/index.html` 与多人 `authority.entry`；所有游戏都必须声明 `entries.game`，单屏多人必须另行声明 `entries.controller`，多人必须声明 `authority.entry`，运行时不为缺失字段提供默认回退。自定义入口只能解析到当前游戏包 `app/` 内文件，必须由项目校验拦截平台保留命名空间、编码绕过、越界路径、缺失文件和外部 URL。用户首段 `app` 合法，例如入口 `app/index.html` 解析到物理 `app/app/index.html` 和运行时 `/app/index.html`；只有 `playmesh`、`bucket` 是保留首段。当前游戏库本地导入在此严格结构之上增加普通网页 ZIP 转换：包内必须存在 HTML，由用户确认方向、模式、显示方式和主/控制器入口，转换服务把网页内容整体迁移到 `app/` 并保留包内原相对路径、生成 `main.json`，再复用标准包校验和原子提交；已有 `main.json` 的包仍严格导入。
 
 第五阶段实施任何 SDK/API/模板改动后，必须同步更新所有相关项目文档、SDK 文档和 AI 提示词文档，特别是 SDK Manifest、JSON Schema、OpenAPI、开发者工作区说明和 `assets/playmesh-library/public/developer/prompts/` 下的提示词。
 
@@ -80,7 +97,17 @@ Go Core 监听 0.0.0.0:0
 
 第六阶段已于 2026-07-18 完成。加入 App 不再要求预装游戏，而是直接加载权威主机提供的当前入口；游戏与控制器的全屏请求不再参与运行前置条件，失败时只提示，并可在 WebView 悬浮工具中按需进入或退出。Android 已接通系统文件打开/分享入口：压缩包复用 Playmesh 包导入，单个 HTML 使用无 SDK 的独立 WebView，游戏包导出交给系统保存或分享。
 
-运行身份拆分为两层：`playmesh.js` 在所有平台使用 Authority 主机提供的游戏声明、会话、玩家和游戏数据；`playmesh-app.js` 由 App WebView 或普通浏览器的当前终端注入，提供终端环境、本机日志和覆盖层，App 中还提供持久身份与能力插件宿主。普通浏览器的 App 原生能力不可用，但统一覆盖层仍由 App SDK 渲染。具有公开方法或事件的原生适配能力通过 `capabilities.create()` 创建有状态实例，再使用 `invoke/on/onError/dispose`；摄像头、麦克风和 MIDI 当前只在 WebView 权限回调中核对声明，游戏直接使用标准 Web API。单屏多人按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
+运行身份拆分为两层：`playmesh-main.js` 在所有平台以 `playmesh.main.*` 使用 Authority
+主机提供的游戏声明、会话、玩家和游戏数据；`playmesh-app.js` 以
+`playmesh.app.*` 提供当前终端环境、本机日志和覆盖层，App 中还提供持久身份与能力
+插件宿主。两者在 App WebView 和普通浏览器中成对注入，旧 `playmesh.js` 不兼容。
+普通浏览器的 App 原生能力不可用，但统一覆盖层仍由 App SDK 渲染。具有公开方法或
+事件的原生适配能力通过 `capabilities.create()` 创建有状态实例，再使用
+`invoke/on/addEventListener/onError/dispose`；摄像头、麦克风和 MIDI 在 WebView
+权限回调中核对声明，游戏直接使用标准 Web API。Android `sensor.pose6d` 通过能力
+事件输出位姿，需要画面时再由 `playmesh.app.media` 按需打开不透明媒体源。单屏多人
+按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台
+托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
@@ -102,19 +129,20 @@ Go Core 监听 0.0.0.0:0
 - 主机中转采用动态热池：上限直接读取 `/apps/info.relay.maxConnectionsPerTunnel`，
   空闲时最多保留 4 条热连接，被配对后立即补充，活跃连接结束后自然收缩。
 - 端到端密钥只存在于两个 App 端点，放在邀请 fragment 中且不进入任何中转 HTTP/Upgrade 请求；TLS 保持可选。
-- 局域网邀请保留 `main.json` 声明的实际 `/app/**` 游戏或控制器入口，查询参数
-  收敛为 `channelId + token`；普通浏览器继续直连，局域网 App 解析同一链接后
+- 局域网邀请使用 `/playmesh/join#inviteToken=...` 落地页交换 HttpOnly Cookie，
+  再重定向到 `main.json` 声明的实际游戏或控制器入口；manifest 查询参数不含平台
+  覆盖键。普通浏览器继续直连，局域网 App 解析同一链接后
   使用本地回环。公共邀请收敛为 `/j/{tunnelId}#inviteToken=...`，只有 App
-  解析 fragment，并在回环 Origin 下恢复真实 `/app/**` 入口。
+  解析 fragment，并在回环 Origin 下恢复真实根相对入口。
 - 游戏页返回只弹出当前路由并恢复来源页面；开发者工作区运行游戏时不再清空
   工作区导航栈。
-- Authority 分享面只保留 `/app/**`、`/bucket/**`、`/playmesh/**` 和 SDK 无法替代的受控底层连接能力。新增能力优先修改 SDK，不恢复旧 `/api/*` 分享路由。
+- Authority 分享面只保留外层物理 `app/` 映射的根资源、`/bucket/**`、`/playmesh/**` 和 SDK 无法替代的受控底层连接能力。`/app/**` 是物理 `app/app/**` 存在时的普通游戏资源路径，不是外层目录的别名；新增平台能力仍优先修改 SDK，平台入口只放入 `/playmesh/**`，不增加 `/api/*` 分享路由。
 - 完整架构与验收项见 `docs/remote-game-relay.md`。
 
 ## 必须保持的边界
 
 - 游戏包直接位于 `playmesh-library/packages/{gameId}/`，不增加版本或 `files` 中间目录。
-- `packages/{gameId}/app/` 通过 `/app/...` 映射；平台公共 SDK、头像等资源位于 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。运行时只额外映射 `data/data` 中由 SDK 上传的文件到 `/bucket/{bucket}/{file}`；`data/json` 与 `cache/` 永不映射。
+- `packages/{gameId}/app/` 直接映射为运行时 `/`；平台公共 SDK、头像等资源位于 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。运行时只额外映射 `data/data` 中由 SDK 上传的文件到 `/bucket/{bucket}/{file}`；`data/json` 与 `cache/` 永不映射。
 - JSON 持久化文件位于 `packages/{gameId}/data/json/{bucket}.json`，二进制上传位于 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，不增加 `{userId}` 目录。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
 - Core 每次启动都使用系统分配端口，实际端口由宿主上报。
 - 开发者 Gateway 与 Core 分离，默认固定端口 `16666`，可在设置页修改；不得为了修改开发者端口重启 Core。
@@ -125,7 +153,7 @@ Go Core 监听 0.0.0.0:0
 - 主机与 App 扫码加入页使用同一套悬浮工具语义；主机分享入口为一级按钮，所有 App 游戏工具只保留返回而不重复提供退出。普通浏览器由 SDK 提供不含 App 导航和分享能力的对应功能区。
 - 分享链接/二维码面板在视口内居中并动态适配，内容超出屏幕时允许整体滚动；悬浮工具二级界面固定使用高对比度配色，不继承游戏显示颜色。
 - 所有 Bucket 数据只保存在开始游戏的 Authority 主机；普通浏览器和其他 App 玩家统一由权威 Game SDK 通过当前受控 Session WebSocket 的存储 RPC 路由到 Authority，不增加分享 HTTP 存储端点。
-- FPS 由游戏在真实渲染点调用 `playmesh.performance.reportFrame()` 上报，默认显示在左上角并可从悬浮工具坞关闭。
+- FPS 由游戏在真实渲染点调用当前客户端的 `playmesh.app.performance.reportFrame()` 上报，默认显示在左上角并可从悬浮工具坞关闭。
 - 平台构建仅在用户明确要求时执行；产物结构验证必须记录到 `docs/verification/`，安装、真机运行和生产签名仍由用户或 CI 验证。
 - 公共显示端不得进入 `players` 或提交玩家动作。
 

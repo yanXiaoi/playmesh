@@ -1,14 +1,14 @@
 {
-  "version": "3.1.0",
-  "channelVersion": "3.0.0",
-  "script": "/playmesh/sdk/v1/playmesh.js",
+  "version": "4.0.0",
+  "channelVersion": "3.2.0",
+  "script": "/playmesh/sdk/v1/playmesh-main.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
   "language": "JavaScript",
   "initialization": {
     "required": "await playmesh.ready",
     "failure": "Promise rejects with Error when the host transport or browser join fails",
-    "rule": "Do not call runtime, session, player, game, authority, binary or storage methods before ready resolves"
+    "rule": "Do not call playmesh.main or playmesh.app runtime methods before the aggregate ready Promise resolves"
   },
   "environments": [
     {
@@ -25,11 +25,11 @@
       "transport": "Host-injected HTTP and WebSocket endpoints",
       "currentPlayer": "the persistent browser player stored for this origin",
       "notes": [
-        "multi_screen loads app/index.html; single_screen_multiplayer loads app/controller/index.html",
+        "multi_screen loads the explicitly declared entries.game path; single_screen_multiplayer loads the explicitly declared entries.controller path",
         "The SDK owns nickname input and nickname editing UI",
         "The SDK stores playerId and nickname in localStorage and reuses them after refresh",
         "A playerId can have only one online WebSocket; reconnect is allowed after disconnection",
-        "The Authority gateway injects its default playmesh-app.js before playmesh.js; native App capabilities remain unavailable",
+        "The Authority gateway injects its default playmesh-app.js before playmesh-main.js; native App capabilities remain unavailable",
         "The default App SDK renders the centered menu and the browser-only draggable floating button",
         "Game code must not construct Core URLs, tokens or WebSocket frames"
       ]
@@ -39,7 +39,7 @@
       "transport": "Static assets plus host-injected HTTP storage endpoint",
       "currentPlayer": "null",
       "notes": [
-        "Loads app/index.html",
+        "Loads the explicitly declared entries.game path",
         "Does not join a Session, prompt for a nickname or open a WebSocket",
         "Console logs remain in the current browser and are not uploaded to Authority",
         "session.getCurrent() and player.getCurrent() return null"
@@ -139,21 +139,54 @@
       "name": "playmesh",
       "members": [
         {
+          "name": "ready",
+          "kind": "property",
+          "type": "Promise<PlaymeshReadyResult>",
+          "behavior": "Reuses the playmesh.main.ready chain, which first awaits playmesh.app.ready, then resolves to an immutable {main, app} result whose app member is the exact stable playmesh.app.ready result"
+        },
+        {
+          "name": "main",
+          "kind": "property",
+          "type": "PlaymeshMainApi"
+        },
+        {
+          "name": "app",
+          "kind": "property",
+          "type": "PlaymeshAppApi"
+        }
+      ]
+    },
+    {
+      "name": "playmesh.main",
+      "members": [
+        {
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "3.1.0"
+          "value": "4.0.0"
         },
         {
           "name": "ready",
           "kind": "property",
-          "type": "Promise<SdkBootstrap>"
+          "type": "Promise<PlaymeshBootstrap>"
         }
       ]
     },
     {
       "name": "playmesh.app",
       "members": [
+        {
+          "name": "version",
+          "kind": "property",
+          "type": "string",
+          "value": "3.2.0"
+        },
+        {
+          "name": "ready",
+          "kind": "property",
+          "type": "Promise<PlaymeshAppBootstrap>",
+          "behavior": "Resolves to one stable result object; ordinary browsers without a native bridge resolve with available=false, while bootstrap failures from an existing native bridge reject"
+        },
         {
           "name": "isAvailable",
           "signature": "isAvailable(): boolean",
@@ -271,7 +304,7 @@
       ]
     },
     {
-      "name": "playmesh.runtime",
+      "name": "playmesh.app.runtime",
       "members": [
         {
           "name": "getLocale",
@@ -284,18 +317,18 @@
       ]
     },
     {
-      "name": "playmesh.gameInfo",
+      "name": "playmesh.main.gameInfo",
       "members": [
         {
           "name": "getCurrent",
           "signature": "getCurrent(): PlaymeshGameInfo | null",
           "availability": "After await playmesh.ready",
-          "behavior": "Returns the current game id, display name, multiplayer flag, display mode and role-specific required capabilities from playmesh.js; playmesh-app.js does not maintain a second game bootstrap"
+          "behavior": "Returns the current game id, display name, multiplayer flag, display mode and role-specific required capabilities from playmesh-main.js; playmesh-app.js does not maintain a second game bootstrap"
         }
       ]
     },
     {
-      "name": "playmesh.session",
+      "name": "playmesh.main.session",
       "members": [
         {
           "name": "getCurrent",
@@ -345,7 +378,7 @@
       ]
     },
     {
-      "name": "playmesh.player",
+      "name": "playmesh.main.player",
       "members": [
         {
           "name": "getCurrent",
@@ -361,7 +394,7 @@
       ]
     },
     {
-      "name": "playmesh.game",
+      "name": "playmesh.main.game",
       "members": [
         {
           "name": "submitAction",
@@ -381,7 +414,7 @@
       ]
     },
     {
-      "name": "playmesh.authority",
+      "name": "playmesh.main.authority",
       "members": [
         {
           "name": "onService",
@@ -393,7 +426,7 @@
       ]
     },
     {
-      "name": "playmesh.binary",
+      "name": "playmesh.main.binary",
       "members": [
         {
           "name": "authorityPlayerId",
@@ -419,7 +452,7 @@
       ]
     },
     {
-      "name": "playmesh.lifecycle",
+      "name": "playmesh.main.lifecycle",
       "members": [
         {
           "name": "onChange",
@@ -441,7 +474,7 @@
       ]
     },
     {
-      "name": "playmesh.sync",
+      "name": "playmesh.main.sync",
       "members": [
         {
           "name": "startAuthority",
@@ -473,7 +506,7 @@
       ]
     },
     {
-      "name": "playmesh.storage",
+      "name": "playmesh.main.storage",
       "members": [
         {
           "name": "getBucket",
@@ -494,12 +527,12 @@
       ]
     },
     {
-      "name": "playmesh.performance",
+      "name": "playmesh.app.performance",
       "members": [
         {
           "name": "reportFrame",
           "signature": "reportFrame(timestamp?: number): number | null",
-          "rule": "Call only after a real visual frame is rendered"
+          "rule": "Call only after a real visual frame is rendered; FPS remains local to the current client and is not uploaded through the host bridge"
         },
         {
           "name": "getFps",
@@ -511,7 +544,8 @@
         },
         {
           "name": "getLatency",
-          "signature": "getLatency(): number | null"
+          "signature": "getLatency(): number | null",
+          "behavior": "Returns the current client's locally calculated smoothed RTT from the managed Session ping/pong"
         },
         {
           "name": "getLatencyDiagnostics",
@@ -524,23 +558,23 @@
         {
           "name": "setVisible",
           "signature": "setVisible(visible: boolean): void",
-          "rule": "Normally controlled by the App tool dock; available to browser integrations"
+          "rule": "Controls the current client's App SDK performance overlay"
         }
       ]
     }
   ],
   "authoritativeDataFlow": [
-    "Preferred: game starts playmesh.sync on Authority, players submit semantic input, and SDK publishes versioned full snapshots",
+    "Preferred: game starts playmesh.main.sync on Authority, players submit semantic input, and SDK publishes versioned full snapshots",
     "The App runtime that creates and runs the session is assigned authorityClientId before any player-order logic",
-    "Player calls playmesh.game.submitAction(action)",
+    "Player calls playmesh.main.game.submitAction(action)",
     "The platform attaches senderPlayerId and the current SessionSnapshot",
     "Authority handler validates the action and updates authoritative state",
     "Authority returns targetPlayerIds using Player.id values and optionally SessionSnapshot.authorityClientId for the single-screen public display",
-    "Target pages receive the message through playmesh.game.onMessage",
-    "Opaque Uint8Array data uses playmesh.binary; the SDK owns the second lazy WebSocket, multiplexing, addressing and frame format"
+    "Target pages receive the message through playmesh.main.game.onMessage",
+    "Opaque Uint8Array data uses playmesh.main.binary; the SDK owns the second lazy WebSocket, multiplexing, addressing and frame format"
   ],
   "securityRules": [
-    "Determine Authority only with playmesh.session.isAuthority() or SessionSnapshot.authorityClientId; never use players[0], join order or a first-player convention",
+    "Determine Authority only with playmesh.main.session.isAuthority() or SessionSnapshot.authorityClientId; never use players[0], join order or a first-player convention",
     "Do not access PlaymeshBridge, chrome.webview, Core HTTP, WebSocket, share tokens or player credentials directly",
     "Do not trust identity or final results supplied by action payloads",
     "Do not store credentials, player ids or game buckets in localStorage",
@@ -552,11 +586,13 @@
     "capabilityRegistry": "/dev/api/capabilities is the single metadata source for capability code, Chinese name, description, and App/HTML adapter status; generated AI prompts include this registry and the current declaration",
     "capabilityConsent": "When capabilities.json.required is non-empty, the main SDK prompts on every App/browser game load. Rejection exits; unsupported capabilities are labeled but never block entry after consent; results are not persisted",
     "publicRoot": "app/",
-    "sdkImport": "/playmesh/sdk/v1/playmesh.js",
-    "appUrlRoot": "/app/",
-    "gameEntry": "main.json entries.game; defaults to app/index.html",
-    "controllerEntry": "main.json entries.controller; defaults to app/controller/index.html and is required by single_screen_multiplayer",
-    "authorityEntry": "main.json authority.entry; must point to an app/ JavaScript file for multiplayer games",
+    "sdkImport": "/playmesh/sdk/v1/playmesh-main.js",
+    "appUrlRoot": "/",
+    "gameSdkVersion": "main.json sdkVersion is required and must equal 4.0.0",
+    "appSdkVersion": "main.json appSdkVersion is required and must equal 3.2.0",
+    "gameEntry": "main.json entries.game is required; it is relative to physical app/ and must explicitly identify an HTML file",
+    "controllerEntry": "main.json entries.controller is required for single_screen_multiplayer; it is relative to physical app/ and must explicitly identify an HTML file",
+    "authorityEntry": "main.json authority.entry is required for multiplayer games; it is relative to physical app/ and must explicitly identify a JavaScript file",
     "validationEndpoint": "/dev/api/projects/{projectId}/validate"
   }
 }

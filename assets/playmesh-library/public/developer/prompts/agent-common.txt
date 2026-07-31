@@ -17,21 +17,24 @@ PLAYMESH API AGENT 游戏开发提示
 10. 代码必须完整可运行，不能使用省略号、TODO 或伪代码。
 
 【项目与运行边界】
-- 必须存在 main.json 的 entries.game 指向的完整 HTML 游戏入口；页面通过 `/playmesh/sdk/v1/playmesh.js` 引入 SDK，游戏资源使用 `/app/...`。
-- 修改游戏内容后按语义版本规则评估 `main.json.version`，并只通过 manifest API 更新；`sdkVersion` 必须对应实际使用的 SDK。
+- `main.json.entries.game` 必须显式声明并指向真实存在的完整 HTML 游戏入口；`single_screen_multiplayer` 必须显式声明 `entries.controller`，`multiplayer` 必须显式声明 `authority.entry`，不得依赖任何未声明入口的默认或回退。页面通过 `/playmesh/sdk/v1/playmesh-main.js` 引入 SDK，游戏资源从 Web 根路径加载（例如 `/static/...`），对应物理文件仍放在包内 `app/`。
+- `entries.game`、`entries.controller` 和 `authority.entry` 都相对外层物理 `app/` 填写，不得带前导 `/`；首段 `app` 是普通用户目录，例如 `app/index.html` 对应物理 `app/app/index.html` 和运行时 `/app/index.html`。只有 `playmesh`、`bucket` 是平台保留首段。
+- 修改游戏内容后按语义版本规则评估 `main.json.version`，并只通过 manifest API 更新；`sdkVersion` 与 `appSdkVersion` 都必须显式声明，并与随后附带的类型声明中的精确版本一致，不得省略、使用范围或回退旧版本。
 - 所有 SDK 调用前必须 `await playmesh.ready`。
-- 不得直接访问 PlaymeshBridge、chrome.webview、Core HTTP、WebSocket、内部 token、玩家凭证、data、cache 或其他游戏包；二进制通信与运行时文件分别使用 `playmesh.binary` 和 Bucket upload。
+- 顶层只使用聚合入口 `playmesh.ready` 以及 `playmesh.main`、`playmesh.app` 两个分区；会话、玩家、权威同步、生命周期和存储属于 `playmesh.main`，当前客户端的身份、设备、能力、媒体、语言、性能与 UI 属于 `playmesh.app`。不得调用旧的 `playmesh.session`、`playmesh.storage`、`playmesh.runtime` 等根级成员。
+- 不得直接访问 PlaymeshBridge、chrome.webview、Core HTTP、WebSocket、内部 token、玩家凭证、data、cache 或其他游戏包；二进制通信与运行时文件分别使用 `playmesh.main.binary` 和 Bucket upload。
 - HTML/CSS/JavaScript 的所有本地资源引用必须存在；UI 必须适配 main.json 指定方向和手机触控。
 - 异步操作必须捕获并显示错误；console 日志由平台统一采集。
 
 【SDK 与能力】
-- 当前 Game SDK 版本字符串，当前为 3.1.0。
-- 随后附带的 `playmesh.d.ts` 和 `playmesh-app.d.ts` 是 SDK 接口的唯一事实源，不得臆造成员。
+- 随后附带的 `playmesh-main.d.ts` 和 `playmesh-app.d.ts` 是 SDK 接口的唯一事实源，不得臆造成员。
 - `playmesh.app` 只表示当前设备身份与硬件能力，不能替代权威 Game SDK。
-- 游戏项目自行维护业务国际化，平台不会翻译游戏 DOM、玩家昵称、标签或日志。在 `await playmesh.ready` 后可用只读 `playmesh.runtime.getLocale()` 选择游戏自己的语言资源：App WebView 返回当前实际显示 App 的语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`；不得读取 Authority 主机语言或平台内部词典。
-- 非敏感能力直接使用标准 Web API，例如加速度计、陀螺仪和设备方向；用户主动触发的 `<input type="file">` 不声明能力。`capabilities.json` 只按需声明敏感 WebView 权限（`media.camera`、`media.microphone`、`device.midi`）和多平台适配能力（例如 `device.vibration`），且每个页面只使用自身角色声明的能力。
+- 游戏项目自行维护业务国际化，平台不会翻译游戏 DOM、玩家昵称、标签或日志。在 `await playmesh.ready` 后可用只读 `playmesh.app.runtime.getLocale()` 选择游戏自己的语言资源：App WebView 返回当前实际显示 App 的语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`；不得读取 Authority 主机语言或平台内部词典。
+- `playmesh.app.performance` 只反映当前客户端本地的 FPS、Session RTT 与性能浮层；不得把这些遥测值当作 Authority 状态、胜负判定或其他客户端的性能。
+- 非敏感能力直接使用标准 Web API，例如加速度计、陀螺仪和设备方向；用户主动触发的 `<input type="file">` 不声明能力。`capabilities.json` 只按需声明敏感 WebView 权限（`media.camera`、`media.microphone`、`device.midi`）和原生适配能力（例如 `device.vibration`、`sensor.pose6d`），且每个页面只使用自身角色声明的能力。
 - 摄像头、麦克风采集和 MIDI 声明后直接使用 `getUserMedia()` 或 `requestMIDIAccess({sysex:true})`；原生短语音识别按实时注册表创建 `media.microphone`，调用 `toText({localeId,listenFor,pauseFor})` 并监听 `textOnSoundLevelChange`、`textOnResult`。只有描述符公开了方法或事件的能力才使用 `playmesh.app.capabilities.create()`，不得臆造 SDK 方法。
 - `device.vibration` 使用 `vibration` 插件适配；创建实例后，`vibrate` 可传 `duration/pattern/repeat/intensities/amplitude/sharpness/preset` 全部参数，持续或重复震动必须用 `cancel` 停止。
+- `sensor.pose6d` 通过 `pose` 事件提供米制 XYZ 和 XYZW 四元数。需要相机画面时才调用 `openVideo`，并把返回的不透明源交给 `playmesh.app.media.open()`；不得自行创建 WebRTC、媒体地址、端口或信令服务器，结束后关闭媒体会话和能力实例。
 - `playmesh.app.ui` 提供平台统一的居中游戏菜单、分享、日志、全屏、信息、性能与退出能力。游戏自己的菜单按钮只能调用 `showGameSidebar()` 打开统一菜单；该兼容方法名不表示菜单仍位于侧边。不要调用不存在的 `hideGameSidebar()` 或 `onMenuRequest`；只有游戏完整实现替代 UI 时才使用 `configure({fallbackUi:false})` 关闭平台兜底。
 - SDK 不判断玩法业务。准备、倒计时、开局、回合、胜负和结束条件由游戏 Authority 决定；`session.start/finish` 只是通过 SDK 请求 Core 切换基础会话状态。
 

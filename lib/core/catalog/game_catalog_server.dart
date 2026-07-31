@@ -258,7 +258,7 @@ class GameCatalogServer {
 
   Future<GameManifest> _manifest(GameSummary game) async {
     final root = game.entry.packageRootFilePath;
-    if (root == null) throw StateError('在线游戏源不能分享内置资源游戏');
+    if (root == null) throw StateError('在线游戏源只能分享已安装的文件包资源');
     final file = File('$root${Platform.pathSeparator}main.json');
     final decoded = jsonDecode(await file.readAsString());
     if (decoded is! Map) throw const FormatException('main.json 根节点必须是对象');
@@ -266,7 +266,7 @@ class GameCatalogServer {
   }
 
   Future<_CatalogEntry?> _publicEntry(GameSummary game) async {
-    if (game.manifestError != null) return null;
+    if (!game.isRunnable) return null;
     try {
       final manifest = await _manifest(game);
       if (manifest.id != game.id || manifest.version != game.version) {
@@ -274,8 +274,7 @@ class GameCatalogServer {
       }
       return _CatalogEntry(game: game, manifest: manifest);
     } on Object {
-      // A repair item or a concurrently edited package must not make the
-      // entire App-owned source unavailable.
+      // 修复项或被并发编辑损坏的单个包不能导致 App 自有源整体不可用。
       return null;
     }
   }

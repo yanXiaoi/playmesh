@@ -11,6 +11,7 @@ const appUiSdkSource = SdkSourceFragment(
   let appUiConfiguration = null;
   let appUiRuntimeAdapter = null;
   let appUiKeyboardInstalled = false;
+  let appUiTogglePending = false;
   let appUiConsoleCaptureInstalled = false;
   let appUiPerformanceVisible = false;
   let appUiRenderTimer = null;
@@ -124,7 +125,7 @@ const appUiSdkSource = SdkSourceFragment(
         returnFocus.focus({ preventScroll: true });
         if (documentObject?.activeElement === returnFocus) return;
       } catch (_) {
-        // Fall through to the game document.
+        // 平台 UI 未消费时继续交给游戏文档处理。
       }
     }
     const gameDocumentTarget =
@@ -139,7 +140,7 @@ const appUiSdkSource = SdkSourceFragment(
       }
       gameDocumentTarget.focus({ preventScroll: true });
     } catch (_) {
-      // The document may no longer be focusable while it is unloading.
+      // 页面卸载期间游戏文档可能已经无法恢复焦点。
     } finally {
       if (previousTabIndex == null) {
         gameDocumentTarget.removeAttribute?.("tabindex");
@@ -149,12 +150,15 @@ const appUiSdkSource = SdkSourceFragment(
     }
   }
 
-  function appUiText(key, fallback) {
+  function appUiText(key) {
     const messages = appUiConfiguration?.messages;
     const value = messages && typeof messages[key] === "string"
       ? messages[key]
       : null;
-    return value || fallback;
+    if (!value) {
+      throw new Error(`平台 UI 本地化消息不可用: ${key}`);
+    }
+    return value;
   }
 
   function resolveAppUiConfiguration(configuration) {
@@ -164,9 +168,19 @@ const appUiSdkSource = SdkSourceFragment(
       (item) => item && typeof item === "object" &&
         typeof item.locale === "string",
     );
+    let browserLocales = [];
+    try {
+      browserLocales = [
+        ...(Array.isArray(global.navigator?.languages)
+          ? global.navigator.languages
+          : []),
+        global.navigator?.language,
+      ];
+    } catch (_) {
+      // 受限浏览器上下文可能禁止访问 navigator。
+    }
     const candidates = [
-      ...(global.navigator?.languages || []),
-      global.navigator?.language,
+      ...browserLocales,
       configuration.fallbackLocale,
     ].filter((value) => typeof value === "string" && value);
     let selected = null;
@@ -256,7 +270,7 @@ const appUiSdkSource = SdkSourceFragment(
           const time = new Date(entry.timestamp).toLocaleTimeString();
           return `[${time}] [${entry.level.toUpperCase()}] ${entry.message}`;
         }).join("\n")
-      : appUiText("logs.empty", "暂无运行日志");
+      : appUiText("logs.empty");
     output.scrollTop = output.scrollHeight;
   }
 
@@ -279,58 +293,58 @@ const appUiSdkSource = SdkSourceFragment(
       : [];
     const role = runtimeInfo.multiplayer === true
       ? runtimeInfo.isAuthority === true
-        ? appUiText("info.role_authority", "主机")
-        : appUiText("info.role_player", "加入者")
-      : appUiText("info.role_solo", "单机");
+        ? appUiText("info.role_authority")
+        : appUiText("info.role_player")
+      : appUiText("info.role_solo");
     const gameId = runtimeInfo.gameId;
     const rows = [
       gameId
         ? {
-            label: appUiText("info.game_id", "Game ID"),
+            label: appUiText("info.game_id"),
             value: gameId,
             code: true,
             wide: true,
           }
         : null,
-      { label: appUiText("info.role", "运行角色"), value: role },
+      { label: appUiText("info.role"), value: role },
       runtimeInfo.joinCode
         ? {
-            label: appUiText("info.join_code_label", "加入码"),
+            label: appUiText("info.join_code_label"),
             value: runtimeInfo.joinCode,
             code: true,
           }
         : null,
       runtimeInfo.playerName
         ? {
-            label: appUiText("info.player", "当前玩家"),
+            label: appUiText("info.player"),
             value: runtimeInfo.playerName,
           }
         : null,
       Number.isFinite(runtimeInfo.playerCount)
         ? {
-            label: appUiText("info.players", "在线玩家"),
+            label: appUiText("info.players"),
             value: String(runtimeInfo.playerCount),
           }
         : null,
       {
-        label: appUiText("info.platform", "运行平台"),
+        label: appUiText("info.platform"),
         value: runtimeInfo.platform,
       },
       runtimeInfo.gameSdkVersion
         ? {
-            label: appUiText("info.game_sdk", "Game SDK"),
+            label: appUiText("info.game_sdk"),
             value: runtimeInfo.gameSdkVersion,
           }
         : null,
       {
-        label: appUiText("info.app_sdk", "App SDK"),
+        label: appUiText("info.app_sdk"),
         value: runtimeInfo.appSdkVersion,
       },
       {
-        label: appUiText("info.capabilities", "声明能力"),
+        label: appUiText("info.capabilities"),
         value: Array.isArray(capabilities) && capabilities.length
           ? capabilities.join(" · ")
-          : appUiText("info.none", "无"),
+          : appUiText("info.none"),
         wide: true,
       },
     ].filter(Boolean);
@@ -338,13 +352,17 @@ const appUiSdkSource = SdkSourceFragment(
       gameName: runtimeInfo.gameName,
       tags,
       rows,
+      canEditNickname:
+        runtimeInfo.canEditNickname === true &&
+        Boolean(runtimeInfo.playerName) &&
+        typeof appUiRuntimeAdapter?.editNickname === "function",
     };
   }
 
   function refreshAppUiPerformance() {
     const ui = appFallbackUi;
     if (!ui?.performancePanel) return;
-    const metrics = appUiRuntimeAdapter?.getPerformance?.() || {};
+    const metrics = appPerformanceSnapshot();
     ui.performancePanel.hidden = !appUiPerformanceVisible;
     ui.performanceButton?.setAttribute?.(
       "aria-pressed",
@@ -355,7 +373,6 @@ const appUiSdkSource = SdkSourceFragment(
       appUiPerformanceVisible
         ? "sidebar.performance_hide"
         : "sidebar.performance",
-      appUiPerformanceVisible ? "关闭性能信息" : "显示性能信息",
     );
     ui.fps.textContent =
       typeof metrics.fps === "number" ? `${Math.round(metrics.fps)} FPS` : "-- FPS";
@@ -368,7 +385,6 @@ const appUiSdkSource = SdkSourceFragment(
 
   function setAppUiPerformanceVisible(visible) {
     appUiPerformanceVisible = visible === true;
-    appUiRuntimeAdapter?.setPerformanceVisible?.(appUiPerformanceVisible);
     refreshAppUiPerformance();
     return appUiPerformanceVisible;
   }
@@ -427,15 +443,16 @@ const appUiSdkSource = SdkSourceFragment(
     ui.gameTagsWrap.hidden = info.tags.length === 0;
     ui.gameTags.setAttribute(
       "aria-label",
-      appUiText("info.tags", "标签"),
+      appUiText("info.tags"),
     );
-    ui.gameTagsLabel.textContent = appUiText("info.tags", "标签");
+    ui.gameTagsLabel.textContent = appUiText("info.tags");
     ui.gameDetail.innerHTML = info.rows.map((row) => `
       <div class="info-item${row.wide ? " wide" : ""}">
         <dt class="info-label">${escapeAppUiHtml(row.label)}</dt>
         <dd class="info-value${row.code ? " code" : ""}">${escapeAppUiHtml(row.value)}</dd>
       </div>
     `).join("");
+    ui.infoEdit.hidden = !info.canEditNickname;
     ui.infoLayer.hidden = false;
     ui.infoClose.focus?.({ preventScroll: true });
     return true;
@@ -565,7 +582,7 @@ const appUiSdkSource = SdkSourceFragment(
       .menu-fab::before{content:"";position:absolute;inset:-2px;z-index:-1;border:1px solid #36cbb266;border-radius:16px 0 0 16px;animation:menu-breathe 2.8s ease-in-out infinite;pointer-events:none}.menu-fab.detached::before{border-radius:16px}.menu-fab.detached:hover{transform:translateY(-2px)}.menu-fab:active{transform:scale(.96)}.menu-fab.dragging{cursor:grabbing;transform:none;transition:none}.menu-fab:focus-visible,.dialog button:focus-visible,.logs-output:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.action:focus-visible{outline:0;background:var(--pm-hover);box-shadow:inset 0 0 0 2px var(--pm-focus-ring)}
       .menu-mark{position:relative;display:block;width:22px;transform:translateX(-2px);font:900 20px/1 system-ui}.menu-mark::after{content:"";position:absolute;left:15px;top:3px;width:7px;height:2px;border-radius:2px;background:currentColor;box-shadow:0 5px currentColor,0 10px currentColor}
       .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
-      .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
+      .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
       .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
       [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
@@ -580,7 +597,7 @@ const appUiSdkSource = SdkSourceFragment(
       <button class="action info" data-action="info" type="button"><span class="icon" aria-hidden="true">ⓘ</span><span></span></button>
       <button class="action performance" data-action="performance" type="button" aria-pressed="false"><span class="icon" aria-hidden="true">◴</span><span></span></button>
     </nav><footer class="foot"><button class="action exit" data-action="exit" type="button"><span class="icon" aria-hidden="true">↩</span><span></span></button></footer></aside></div>
-    <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-close" type="button"></button></div></section></div>
+    <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-edit" type="button" hidden></button><button class="info-close" type="button"></button></div></section></div>
     <div class="dialog-layer logs-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="logs-title"></h2><pre class="logs-output" tabindex="0"></pre><div class="dialog-actions"><button class="logs-copy" type="button"></button><button class="logs-clear" type="button"></button><button class="logs-close" type="button"></button></div></section></div>
     <div class="performance-panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
     global.document.body.appendChild(host);
@@ -612,6 +629,7 @@ const appUiSdkSource = SdkSourceFragment(
       gameTagsLabel: query(".game-tags-label"),
       gameTags: query(".game-tags"),
       gameDetail: query(".game-detail"),
+      infoEdit: query(".info-edit"),
       infoClose: query(".info-close"),
       logsLayer: query(".logs-layer"),
       logsTitle: query(".logs-title"),
@@ -655,6 +673,16 @@ const appUiSdkSource = SdkSourceFragment(
         restoreAppUiReturnFocus();
       }
     };
+    ui.infoEdit.onclick = async () => {
+      ui.infoLayer.hidden = true;
+      try {
+        await appUiRuntimeAdapter?.editNickname?.();
+      } catch (error) {
+        global.console?.warn?.("Playmesh 浏览器昵称修改失败", error);
+      }
+      if (!ui.layer.hidden) void openAppUiGameInfo();
+      else restoreAppUiReturnFocus();
+    };
     ui.logsClear.onclick = () => {
       appUiConsoleLogs.length = 0;
       renderAppUiLogs();
@@ -663,9 +691,9 @@ const appUiSdkSource = SdkSourceFragment(
       try {
         const copied = await copyAppUiRuntimeLogs();
         if (!copied) throw new Error("当前环境不支持复制");
-        setAppUiControlLabel(ui.logsCopy, "logs.copied", "已复制");
+        setAppUiControlLabel(ui.logsCopy, "logs.copied");
         global.setTimeout?.(() => {
-          setAppUiControlLabel(ui.logsCopy, "logs.copy", "复制全部");
+          setAppUiControlLabel(ui.logsCopy, "logs.copy");
         }, 1200);
       } catch (error) {
         global.console?.warn?.("Playmesh 运行日志复制失败", error);
@@ -770,9 +798,9 @@ const appUiSdkSource = SdkSourceFragment(
     return ui;
   }
 
-  function setAppUiControlLabel(element, key, fallback, updateVisibleText = true) {
+  function setAppUiControlLabel(element, key, updateVisibleText = true) {
     if (!element) return;
-    const label = appUiText(key, fallback);
+    const label = appUiText(key);
     element.setAttribute?.("aria-label", label);
     element.setAttribute?.("title", label);
     if (!updateVisibleText) return;
@@ -786,29 +814,26 @@ const appUiSdkSource = SdkSourceFragment(
     if (!ui) return;
     ui.host.setAttribute?.("lang", appUiConfiguration?.locale || "zh-CN");
     ui.host.setAttribute?.("data-theme", appUiConfiguration?.theme || "dark");
-    ui.title.textContent = appUiText("sidebar.title", "游戏菜单");
-    setAppUiControlLabel(ui.menuButton, "sidebar.title", "游戏菜单", false);
-    setAppUiControlLabel(ui.continueButton, "sidebar.continue", "继续游戏");
-    setAppUiControlLabel(ui.restart, "sidebar.restart", "重新开始");
-    setAppUiControlLabel(ui.share, "sidebar.share", "分享/邀请");
-    setAppUiControlLabel(ui.logs, "sidebar.logs", "运行日志");
+    ui.title.textContent = appUiText("sidebar.title");
+    setAppUiControlLabel(ui.menuButton, "sidebar.title", false);
+    setAppUiControlLabel(ui.continueButton, "sidebar.continue");
+    setAppUiControlLabel(ui.restart, "sidebar.restart");
+    setAppUiControlLabel(ui.share, "sidebar.share");
+    setAppUiControlLabel(ui.logs, "sidebar.logs");
     setAppUiControlLabel(
       ui.enterFullscreen,
       "sidebar.enter_fullscreen",
-      "进入全屏",
     );
     setAppUiControlLabel(
       ui.exitFullscreen,
       "sidebar.exit_fullscreen",
-      "退出全屏",
     );
-    setAppUiControlLabel(ui.info, "sidebar.info", "游戏信息");
+    setAppUiControlLabel(ui.info, "sidebar.info");
     setAppUiControlLabel(
       ui.performanceButton,
       "sidebar.performance",
-      "显示性能信息",
     );
-    setAppUiControlLabel(ui.exit, "sidebar.exit", "退出游戏");
+    setAppUiControlLabel(ui.exit, "sidebar.exit");
     ui.share.hidden = !appUiActionEnabled("share", false);
     ui.restart.hidden = !appUiActionEnabled("restart");
     ui.logs.hidden = !appUiActionEnabled("logs");
@@ -826,12 +851,13 @@ const appUiSdkSource = SdkSourceFragment(
         !appUiOptions.floatingButton ||
         !ui.layer.hidden;
     }
-    ui.infoTitle.textContent = appUiText("info.title", "游戏信息");
-    ui.logsTitle.textContent = appUiText("logs.title", "运行日志");
-    setAppUiControlLabel(ui.logsCopy, "logs.copy", "复制全部");
-    setAppUiControlLabel(ui.infoClose, "common.close", "关闭");
-    setAppUiControlLabel(ui.logsClear, "common.clear", "清空");
-    setAppUiControlLabel(ui.logsClose, "common.close", "关闭");
+    ui.infoTitle.textContent = appUiText("info.title");
+    ui.logsTitle.textContent = appUiText("logs.title");
+    setAppUiControlLabel(ui.logsCopy, "logs.copy");
+    setAppUiControlLabel(ui.infoEdit, "nickname.edit_action");
+    setAppUiControlLabel(ui.infoClose, "common.close");
+    setAppUiControlLabel(ui.logsClear, "common.clear");
+    setAppUiControlLabel(ui.logsClose, "common.close");
   }
 
   async function showAppGameSidebar() {
@@ -904,7 +930,7 @@ const appUiSdkSource = SdkSourceFragment(
   async function setAppUiFullscreen(enabled) {
     try {
       if (bootstrap?.available === true) {
-        await global.playmeshApp?.device?.setFullscreen?.(enabled);
+        await publicAppApi.device.setFullscreen(enabled);
       } else if (enabled) {
         await global.document?.documentElement?.requestFullscreen?.();
       } else if (global.document?.fullscreenElement) {
@@ -989,16 +1015,26 @@ const appUiSdkSource = SdkSourceFragment(
       event.preventDefault?.();
       event.stopPropagation?.();
       event.stopImmediatePropagation?.();
+      if (!appUiConfiguration?.messages) {
+        // 原生 bootstrap 返回前先记录切换意图，避免 UI 为抢首键引入硬编码文案。
+        appUiTogglePending = !appUiTogglePending;
+        return;
+      }
       void toggleAppGameSidebar();
     }, true);
   }
 
   function initializeAppPlatformUi(configuration) {
     appUiConfiguration = resolveAppUiConfiguration(configuration);
+    updateAppRuntimeLocale(appUiConfiguration);
     installAppUiConsoleCapture();
     installAppUiKeyboardInterception();
     if (appUiOptions.fallbackUi) scheduleAppFallbackUi();
     refreshAppFallbackUi();
+    if (appUiTogglePending && appUiConfiguration?.messages) {
+      appUiTogglePending = false;
+      void toggleAppGameSidebar();
+    }
   }
 
 ''',

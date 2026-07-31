@@ -86,8 +86,9 @@ add_dependencies(${BINARY_NAME} playmesh_go_core)
 # Developer CLI 与桌面 App 一起构建，安装在 Go Core 同级目录。
 set(PLAYMESH_CLI_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../dev-cli")
 set(PLAYMESH_CLI_BINARY "${CMAKE_BINARY_DIR}/playmesh-cli.exe")
-file(GLOB PLAYMESH_CLI_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE PLAYMESH_CLI_SOURCES CONFIGURE_DEPENDS
   "${PLAYMESH_CLI_SOURCE_DIR}/*.go"
+  "${PLAYMESH_CLI_SOURCE_DIR}/internal/adapter/cocos/extension/*"
   "${PLAYMESH_CLI_SOURCE_DIR}/go.mod"
   "${PLAYMESH_CLI_SOURCE_DIR}/go.sum"
 )

@@ -102,6 +102,9 @@ func TestOwnershipVersionAndLatestPublication(t *testing.T) {
 	if total != 1 || len(games) != 1 || games[0].Version != "2.0.0" {
 		t.Fatalf("Catalog latest = total:%d games:%#v", total, games)
 	}
+	if games[0].PackageSizeBytes != 123456 {
+		t.Fatalf("Catalog 游戏包大小 = %d", games[0].PackageSizeBytes)
+	}
 	if _, err := database.SetPublished(
 		ctx, v1.ID, UserReviewActor(first.ID), true,
 	); !errors.Is(err, ErrNotLatestVersion) {
@@ -715,6 +718,7 @@ func TestOpenMigratesSchemaV3ToCurrent(t *testing.T) {
 		SELECT user_id, key_hmac, created_at, updated_at
 		FROM upload_credentials_v5;
 		DROP TABLE upload_credentials_v5;
+		ALTER TABLE games DROP COLUMN package_size_bytes;
 		PRAGMA user_version = 3;
 	`); err != nil {
 		_ = raw.Close()
@@ -740,7 +744,6 @@ func TestOpenMigratesSchemaV3ToCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var cid, notNull, primaryKey int
 		var name, columnType string
@@ -755,7 +758,36 @@ func TestOpenMigratesSchemaV3ToCurrent(t *testing.T) {
 		}
 	}
 	if ciphertextColumn != 1 {
+		_ = rows.Close()
 		t.Fatalf("迁移后 key_ciphertext 字段数 = %d", ciphertextColumn)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var packageSizeColumn int
+	gameRows, err := migrated.db.Query("PRAGMA table_info(games)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for gameRows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := gameRows.Scan(
+			&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if name == "package_size_bytes" {
+			packageSizeColumn++
+		}
+	}
+	if packageSizeColumn != 1 {
+		_ = gameRows.Close()
+		t.Fatalf("迁移后 package_size_bytes 字段数 = %d", packageSizeColumn)
+	}
+	if err := gameRows.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -825,6 +857,7 @@ func gameInput(userID int64, gameVersion string) CreateGameInput {
 		Status:           StatusPending,
 		OriginalFilename: "game.zip",
 		StoredPath:       "games/game.zip",
+		PackageSizeBytes: 123456,
 		ManifestJSON: `{"id":"com.example.game","name":"Example","version":"` +
 			gameVersion + `"}`,
 		ScanStatus: "clean",

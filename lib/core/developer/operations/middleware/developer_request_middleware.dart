@@ -43,6 +43,18 @@ class _DeveloperErrorMiddleware implements _DeveloperRequestMiddleware {
         'capability_unavailable',
         error.message,
       );
+    } on PlatformException catch (error) {
+      final nativeMessage = error.message?.trim();
+      await _json(request.response, HttpStatus.conflict, {
+        'requestId': requestId,
+        'error': {
+          'code': error.code,
+          'message': nativeMessage == null || nativeMessage.isEmpty
+              ? error.toString()
+              : nativeMessage,
+          if (error.details != null) 'details': error.details,
+        },
+      });
     } on FormatException catch (error) {
       await _error(
         request.response,

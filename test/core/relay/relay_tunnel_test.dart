@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:playmesh/core/game_web/game_web_gateway.dart';
 import 'package:playmesh/core/relay/relay_tunnel.dart';
 
 void main() {
@@ -34,11 +35,12 @@ void main() {
       authorityWebBaseUri: authorityBase,
       authorityCoreBaseUri: authorityBase,
       authorityEntryUri: authorityBase.replace(
-        path: '/app/controller/index.html',
-        queryParameters: {
-          'channelId': 'authority-channel',
-          'token': 'authority-share-token',
-        },
+        path: playmeshGameInvitationPath,
+        fragment: Uri(
+          queryParameters: {
+            playmeshGameInvitationTokenParameter: 'authority-share-token',
+          },
+        ).query,
       ),
       maxConnectionsPerTunnel: 1,
     );
@@ -54,13 +56,13 @@ void main() {
       );
       final response = await http
           .post(
-            client.localBaseUri.replace(path: '/app/probe.txt', query: 'x=1'),
+            client.localBaseUri.replace(path: '/probe.txt', query: 'x=1'),
             body: payload,
           )
           .timeout(const Duration(seconds: 5));
 
       expect(response.statusCode, HttpStatus.ok);
-      expect(response.headers['x-test-authority-uri'], '/app/probe.txt?x=1');
+      expect(response.headers['x-test-authority-uri'], '/probe.txt?x=1');
       expect(response.bodyBytes, payload);
       expect(host.joinUri.path, '/j/test-tunnel');
       expect(host.joinUri.hasQuery, isFalse);
@@ -68,15 +70,13 @@ void main() {
       expect(invitationFragment.keys, ['inviteToken']);
       expect(invitationFragment['inviteToken'], isNotEmpty);
       final inviteToken = invitationFragment['inviteToken']!;
+      expect(client.localEntryUri.path, playmeshGameInvitationPath);
+      expect(client.localEntryUri.hasQuery, isFalse);
       expect(
-        client.localEntryUri,
-        client.localBaseUri.replace(
-          path: '/app/controller/index.html',
-          queryParameters: {
-            'channelId': 'authority-channel',
-            'token': 'authority-share-token',
-          },
-        ),
+        parsePlaymeshInvitationFragment(
+          client.localEntryUri.fragment,
+        )[playmeshGameInvitationTokenParameter],
+        'authority-share-token',
       );
       expect(
         relay.observedRequests.any((request) => request.contains(inviteToken)),
@@ -90,7 +90,7 @@ void main() {
       ]);
       expect(
         utf8.decode(relay.clientCiphertext, allowMalformed: true),
-        isNot(contains('POST /app/probe.txt')),
+        isNot(contains('POST /probe.txt')),
       );
       expect(relay.deleted, isFalse);
     } finally {
@@ -124,11 +124,12 @@ void main() {
       authorityWebBaseUri: authorityBase,
       authorityCoreBaseUri: authorityBase,
       authorityEntryUri: authorityBase.replace(
-        path: '/app/index.html',
-        queryParameters: {
-          'channelId': 'authority-channel',
-          'token': 'authority-share-token',
-        },
+        path: playmeshGameInvitationPath,
+        fragment: Uri(
+          queryParameters: {
+            playmeshGameInvitationTokenParameter: 'authority-share-token',
+          },
+        ).query,
       ),
       maxConnectionsPerTunnel: 6,
     );

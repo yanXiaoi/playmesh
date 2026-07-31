@@ -3,7 +3,7 @@
 Playmesh 只要求游戏声明两类能力：
 
 - WebView 会通过权限回调请求的敏感能力，例如摄像头、麦克风和 MIDI SysEx。
-- 由 Playmesh 做多平台原生适配的能力，例如震动。
+- 由 Playmesh 做原生适配的能力，例如震动和 ARCore 空间位姿。
 
 普通 DOM、触摸、键盘、设备方向和运动传感器等非敏感能力直接使用标准 Web API，
 不写入 `capabilities.json`。文件选择必须由用户通过 `<input type="file">` 主动触发，
@@ -21,7 +21,8 @@ Playmesh 只要求游戏声明两类能力：
   "required": [
     "media.camera",
     "media.microphone",
-    "device.vibration"
+    "device.vibration",
+    "sensor.pose6d"
   ],
   "controllerRequired": [
     "device.midi"
@@ -123,6 +124,57 @@ if (playmesh.app.capabilities.getAvailable().includes("device.vibration")) {
 索引。`amplitude` 为 `-1`（系统默认）或 `1..255`，iOS `sharpness` 为 `0..1`。
 `preset` 会按插件规则覆盖其他震动参数。能力测试只查询设备支持情况，不主动震动。
 
+### Android 空间位姿与按需视频
+
+`sensor.pose6d@1.0.0` 在支持 ARCore 的 Android 终端提供 6DoF 相机位姿。它与原始
+加速度计、陀螺仪不同：该能力会使用相机并启动 ARCore，因此必须在当前页面角色中
+显式声明，并在创建实例时取得系统相机权限。
+
+```js
+await playmesh.ready;
+
+if (playmesh.app.capabilities.getAvailable().includes("sensor.pose6d")) {
+  const pose = await playmesh.app.capabilities.create("sensor.pose6d", {
+    rateHz: 30,
+  });
+
+  const onPose = (frame) => {
+    // position 是米制 [x,y,z]；rotation 是 [x,y,z,w] 四元数。
+    updateCamera(frame.position, frame.rotation, frame.trackingState);
+  };
+  pose.addEventListener("pose", onPose);
+
+  // 可选：把当前跟踪位姿设为本实例的游戏原点。
+  await pose.invoke("recenter", {});
+
+  // 只有页面确实需要相机画面时才创建并打开媒体源。
+  const source = await pose.invoke("openVideo", {
+    width: 1280,
+    height: 720,
+    fps: 30,
+  });
+  const media = await playmesh.app.media.open(source);
+  video.srcObject = media.stream;
+
+  // 不再需要画面；pose 事件仍可继续使用。
+  await media.close();
+
+  pose.removeEventListener("pose", onPose);
+  await pose.dispose();
+}
+```
+
+`rateHz` 为 `1..60` 的整数，默认 30。`captureTimestampNs` 是纳秒时间戳字符串；
+`trackingState` 为 `tracking`、`paused` 或 `stopped`。每个能力实例拥有独立
+`recenter()` 原点；多个实例共享一个 ARCore Session，并由最高请求频率驱动原生采样。
+
+`openVideo()` 返回的是当前页面运行时签发的不透明描述符，不是可请求 URL；
+`createVideoSource()` 是同契约的描述性别名。源不能作为 URL 请求，
+不能跨页面保存或传给其他终端。`playmesh.app.media.open()` 根据描述符选择已注册媒体
+适配器并返回标准 `MediaStream`。当前 Android WebRTC 适配器在同一终端的 WebView 与
+原生宿主之间通过既有 App SDK 宿主桥交换一次 offer/answer，不需要额外信令服务器，
+也不会开放网络媒体地址。尺寸和帧率是请求偏好，实际图像仍由 ARCore/设备决定。
+
 ## 不需要声明的 Web 能力
 
 - 加速度计、陀螺仪、设备方向和运动事件直接使用浏览器提供的 Generic Sensor API、
@@ -147,7 +199,8 @@ Game SDK 在每次页面加载时展示当前角色声明的能力：
 
 开发者工作区“更多 → 能力测试”读取全平台注册表并调用各插件自己的 `test()`。
 摄像头和 MIDI 插件的自检只报告适配状态，不主动弹系统权限或访问设备。音频插件的
-自检只报告语音转文字接口可用性；实际权限在创建实例或开始识别时由系统处理。
+自检只报告语音转文字接口可用性；`sensor.pose6d` 自检只报告 ARCore 安装与设备支持
+状态。实际权限在创建实例或开始识别时由系统处理。
 
 ```text
 GET  /dev/api/capability-tests

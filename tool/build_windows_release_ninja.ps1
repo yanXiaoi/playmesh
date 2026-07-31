@@ -2,7 +2,8 @@
 param(
   [string]$ReleaseAssetSnapshot,
   [switch]$SkipReleaseAssetPreflight,
-  [switch]$SkipSdkGeneration
+  [switch]$SkipSdkGeneration,
+  [switch]$ValidateToolchainOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,23 +60,87 @@ foreach ($requiredTool in @($vcVars, $cmake, $ninja)) {
   }
 }
 
-$environmentCommand = 'call "' + $vcVars + '" >nul && set'
+$originalPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+$systemRoot = [Environment]::GetEnvironmentVariable('SystemRoot', 'Process')
+if (-not $systemRoot) {
+  $systemRoot = 'C:\Windows'
+}
+$bootstrapPath = @(
+  (Join-Path $systemRoot 'System32')
+  $systemRoot
+  (Join-Path $systemRoot 'System32\Wbem')
+  (Join-Path $systemRoot 'System32\WindowsPowerShell\v1.0')
+) -join ';'
+
+# vcvars64.bat prepends several long Visual Studio paths. Starting it with an
+# already large (or duplicated as PATH/Path) environment can exceed cmd.exe's
+# 8191-character expanded-line limit. Bootstrap it with only Windows tools,
+# then merge the caller's PATH back in PowerShell where that limit does not
+# apply.
+$environmentCommand = (
+  'set "Path=" && set "PATH=' + $bootstrapPath +
+  '" && call "' + $vcVars + '" >nul && set'
+)
 $environmentLines = & $env:ComSpec /d /c $environmentCommand
 if ($LASTEXITCODE -ne 0) {
   throw "Failed to initialize the Visual Studio x64 environment: $LASTEXITCODE"
 }
 
+$visualStudioEnvironment =
+  [Collections.Generic.Dictionary[string, string]]::new(
+    [StringComparer]::OrdinalIgnoreCase
+  )
 foreach ($line in $environmentLines) {
   if ($line -match '^([^=]+)=(.*)$') {
-    [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+    $visualStudioEnvironment[$matches[1]] = $matches[2]
   }
 }
+
+foreach ($entry in $visualStudioEnvironment.GetEnumerator()) {
+  if ($entry.Key -ine 'Path') {
+    [Environment]::SetEnvironmentVariable(
+      $entry.Key,
+      $entry.Value,
+      'Process'
+    )
+  }
+}
+
+$visualStudioPath = $visualStudioEnvironment['Path']
+if (-not $visualStudioPath) {
+  throw 'Visual Studio environment did not define PATH.'
+}
+$seenPathEntries =
+  [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$mergedPathEntries = [Collections.Generic.List[string]]::new()
+foreach ($pathEntry in @(
+    ($visualStudioPath -split ';')
+    ($originalPath -split ';')
+  )) {
+  if ([string]::IsNullOrWhiteSpace($pathEntry)) {
+    continue
+  }
+  $trimmedPathEntry = $pathEntry.Trim()
+  if ($seenPathEntries.Add($trimmedPathEntry)) {
+    $mergedPathEntries.Add($trimmedPathEntry)
+  }
+}
+[Environment]::SetEnvironmentVariable(
+  'Path',
+  ($mergedPathEntries -join ';'),
+  'Process'
+)
 
 # The desktop environment may already define CC/CXX for MSYS2. Pin the
 # compiler so Ninja uses the same MSVC ABI as Flutter's Windows engine.
 Remove-Item Env:CC -ErrorAction SilentlyContinue
 Remove-Item Env:CXX -ErrorAction SilentlyContinue
 $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+
+if ($ValidateToolchainOnly) {
+  Write-Output "Visual Studio x64 environment: $compiler"
+  return
+}
 
 $flutterAssetsDir = Join-Path $repoRoot 'build\flutter_assets'
 if (Test-Path -LiteralPath $flutterAssetsDir) {

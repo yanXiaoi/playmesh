@@ -89,6 +89,35 @@ void main() {
     expect(limited.sources.single.retryAfter, '30');
   });
 
+  test('包校验失败保留具体原因且不会向工作区泄露源凭据', () async {
+    final fixture = await _Fixture.create();
+    addTearDown(fixture.close);
+    final result = await fixture
+        .publisher(
+          (_) async => http.Response(
+            jsonEncode({
+              'code': 'package_rejected',
+              'message':
+                  'main.json.sdkVersion 必须显式声明为 4.0.0\n'
+                  'upload-SECRET read-SECRET',
+            }),
+            HttpStatus.unprocessableEntity,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          ),
+        )
+        .publish(
+          game: fixture.game,
+          sourceIds: ['source'],
+          configuredSources: [fixture.source],
+        );
+
+    final source = result.sources.single;
+    expect(source.status, GameCatalogPublishStatus.packageValidationFailed);
+    expect(source.detail, contains('main.json.sdkVersion 必须显式声明为 4.0.0'));
+    expect(source.detail, isNot(contains('SECRET')));
+    expect(result.toJson().toString(), isNot(contains('SECRET')));
+  });
+
   test('所有权与版本冲突映射 code 和安全的当前最高版本', () async {
     final fixture = await _Fixture.create();
     addTearDown(fixture.close);
@@ -297,16 +326,13 @@ class _Fixture {
         'name': 'Publish Game',
         'author': 'Publisher',
         'version': '1.0.0',
-        'sdkVersion': '1.0.0',
-        'appSdkVersion': '1.0.0',
+        'sdkVersion': '4.0.0',
+        'appSdkVersion': '3.2.0',
         'orientation': 'landscape',
         'modes': ['solo'],
         'displayModes': ['multi_screen'],
         'players': {'min': 1, 'max': 1},
-        'entries': {
-          'game': 'app/index.html',
-          'controller': 'app/controller/index.html',
-        },
+        'entries': {'game': 'index.html'},
       }),
     );
     final game = _game(package.path);
@@ -368,7 +394,7 @@ OnlineGameSource _source({
   uploadKey: 'upload-SECRET',
   enabled: enabled,
   declaration: GameCatalogDeclaration(
-    catalogApiVersion: '2.0.0',
+    catalogApiVersion: gameCatalogApiVersion,
     name: 'Official Source',
     supportsGameRelay: false,
     userUpload: GameCatalogUserUploadDeclaration(
@@ -409,7 +435,7 @@ GameSummary _game(String packagePath) => GameSummary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
   entry: LocalGameEntry(
-    assetPath: 'app/index.html',
+    gameEntryPath: 'index.html',
     statusLabel: 'SDK',
     packageRootFilePath: packagePath,
   ),

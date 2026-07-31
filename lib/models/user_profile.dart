@@ -1,9 +1,8 @@
 import 'dart:typed_data';
 
-/// Locale-neutral seed used only until the user chooses a nickname.
+/// 与语言区域无关的初始值，仅在用户选择昵称前使用。
 ///
-/// Once created, nicknames are user/runtime data and must always be displayed
-/// verbatim rather than treated as localization keys.
+/// 昵称创建后属于用户/运行时数据，必须始终原样显示，不得作为本地化键处理。
 const playmeshDefaultLocalNickname = 'Playmesh Player';
 
 class UserProfile {

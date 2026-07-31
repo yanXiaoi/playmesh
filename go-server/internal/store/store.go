@@ -22,7 +22,7 @@ const (
 	StatusApproved = "approved"
 	StatusRejected = "rejected"
 	StatusDeleting = "deleting"
-	SchemaVersion  = 5
+	SchemaVersion  = 6
 )
 
 var (
@@ -63,6 +63,7 @@ type Game struct {
 	Published        bool   `json:"published"`
 	OriginalFilename string `json:"originalFilename"`
 	StoredPath       string `json:"-"`
+	PackageSizeBytes int64  `json:"packageSizeBytes"`
 	IconPath         string `json:"-"`
 	ManifestJSON     string `json:"-"`
 	ScanStatus       string `json:"scanStatus"`
@@ -85,6 +86,7 @@ type CreateGameInput struct {
 	Published        bool
 	OriginalFilename string
 	StoredPath       string
+	PackageSizeBytes int64
 	IconPath         string
 	ManifestJSON     string
 	ScanStatus       string
@@ -258,6 +260,13 @@ func Open(cfg config.Storage, defaults Settings) (*Store, error) {
 			}
 			schemaVersion = 5
 		}
+		if schemaVersion == 5 {
+			if err := result.migrateV5ToV6(); err != nil {
+				_ = db.Close()
+				return nil, err
+			}
+			schemaVersion = 6
+		}
 		if schemaVersion != SchemaVersion {
 			_ = db.Close()
 			return nil, fmt.Errorf(
@@ -378,6 +387,8 @@ func (s *Store) createSchema() error {
 			published INTEGER NOT NULL DEFAULT 0 CHECK(published IN (0, 1)),
 			original_filename TEXT NOT NULL,
 			stored_path TEXT NOT NULL DEFAULT '',
+			package_size_bytes INTEGER NOT NULL DEFAULT 0
+				CHECK(package_size_bytes >= 0),
 			icon_path TEXT NOT NULL DEFAULT '',
 			manifest_json TEXT NOT NULL,
 			scan_status TEXT NOT NULL,
@@ -476,6 +487,25 @@ func (s *Store) migrateV4ToV5() error {
 	return tx.Commit()
 }
 
+func (s *Store) migrateV5ToV6() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		ALTER TABLE games
+		ADD COLUMN package_size_bytes INTEGER NOT NULL DEFAULT 0
+			CHECK(package_size_bytes >= 0);
+	`); err != nil {
+		return fmt.Errorf("升级 SQLite schema v5 到 v6: %w", err)
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 6"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) verifySchema() error {
 	required := []string{
 		"users", "user_sessions", "email_verification_tokens", "upload_credentials",
@@ -514,6 +544,31 @@ func (s *Store) verifySchema() error {
 	}
 	if uploadKeyCiphertextColumn != 1 {
 		return errors.New("SQLite schema 缺少 upload_credentials.key_ciphertext")
+	}
+	var packageSizeColumn int
+	rows, err = s.db.Query("PRAGMA table_info(games)")
+	if err != nil {
+		return fmt.Errorf("检查游戏包大小字段: %w", err)
+	}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(
+			&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey,
+		); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("检查游戏包大小字段: %w", err)
+		}
+		if name == "package_size_bytes" {
+			packageSizeColumn++
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("检查游戏包大小字段: %w", err)
+	}
+	if packageSizeColumn != 1 {
+		return errors.New("SQLite schema 缺少 games.package_size_bytes")
 	}
 	var duplicatePackage, duplicateVersion string
 	var duplicateCount int
@@ -1193,13 +1248,13 @@ func (s *Store) CreateOwnedGame(
 		INSERT INTO games(
 			package_id, name, author, version, version_major, version_minor, version_patch,
 			remarks, tags_text, owner_user_id, status, published, original_filename,
-			stored_path, icon_path, manifest_json, scan_status, scan_report,
+			stored_path, package_size_bytes, icon_path, manifest_json, scan_status, scan_report,
 			rejection_reason, created_at, updated_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, input.PackageID, input.Name, input.Author, input.Version,
 		parsed.Major, parsed.Minor, parsed.Patch, input.Remarks, input.TagsText,
 		input.OwnerUserID, input.Status, input.Published, input.OriginalFilename,
-		input.StoredPath, input.IconPath, input.ManifestJSON, input.ScanStatus,
+		input.StoredPath, input.PackageSizeBytes, input.IconPath, input.ManifestJSON, input.ScanStatus,
 		input.ScanReport, input.RejectionReason, now, now)
 	if err != nil {
 		return Game{}, err
@@ -2026,7 +2081,7 @@ func (s *Store) CleanupAdminSessions(ctx context.Context, now time.Time) error {
 const gameSelect = `
 	SELECT g.id, g.package_id, g.name, u.display_name, g.version, g.remarks, g.tags_text,
 	       u.normalized_email, g.owner_user_id, g.status, g.published,
-	       g.original_filename, g.stored_path, g.icon_path, g.manifest_json,
+	       g.original_filename, g.stored_path, g.package_size_bytes, g.icon_path, g.manifest_json,
 	       g.scan_status, g.scan_report, g.rejection_reason,
 	       g.created_at, g.updated_at, g.reviewed_at
 	FROM games g JOIN users u ON u.id = g.owner_user_id
@@ -2034,7 +2089,7 @@ const gameSelect = `
 
 const rankedGameColumns = `
 	id, package_id, name, owner_display_name, version, remarks, tags_text, normalized_email,
-	owner_user_id, status, published, original_filename, stored_path, icon_path,
+	owner_user_id, status, published, original_filename, stored_path, package_size_bytes, icon_path,
 	manifest_json, scan_status, scan_report, rejection_reason,
 	created_at, updated_at, reviewed_at
 `
@@ -2049,7 +2104,7 @@ func scanGame(row rowScanner) (Game, error) {
 		&game.ID, &game.PackageID, &game.Name, &game.Author, &game.Version,
 		&game.Remarks, &game.TagsText, &game.Email, &game.OwnerUserID,
 		&game.Status, &game.Published, &game.OriginalFilename, &game.StoredPath,
-		&game.IconPath, &game.ManifestJSON, &game.ScanStatus, &game.ScanReport,
+		&game.PackageSizeBytes, &game.IconPath, &game.ManifestJSON, &game.ScanStatus, &game.ScanReport,
 		&game.RejectionReason, &game.CreatedAt, &game.UpdatedAt, &game.ReviewedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -21,13 +21,26 @@ import 'game_catalog_server.dart';
 
 enum GameDownloadStatus { queued, downloading, completed, stopped, failed }
 
+enum GameDownloadPhase {
+  waiting,
+  preparing,
+  downloading,
+  installing,
+  completed,
+}
+
 class GameDownloadTask {
-  GameDownloadTask({required this.id, required this.game});
+  GameDownloadTask({required this.id, required this.game})
+    : totalBytes = game.packageSizeBytes;
 
   final String id;
   final OnlineCatalogGame game;
   GameDownloadStatus status = GameDownloadStatus.queued;
+  GameDownloadPhase phase = GameDownloadPhase.waiting;
   double? progress;
+  int bytesReceived = 0;
+  int? totalBytes;
+  double? bytesPerSecond;
   String? error;
   bool cancelled = false;
   bool removeWhenDone = false;
@@ -150,7 +163,10 @@ class GameDownloadQueue extends ChangeNotifier {
 
   Future<void> _download(GameDownloadTask task) async {
     task.status = GameDownloadStatus.downloading;
-    task.progress = 0;
+    task.phase = GameDownloadPhase.preparing;
+    task.progress = null;
+    task.bytesReceived = 0;
+    task.bytesPerSecond = null;
     notifyListeners();
     final client = http.Client();
     task.client = client;
@@ -161,6 +177,11 @@ class GameDownloadQueue extends ChangeNotifier {
     IOSink? sink;
     try {
       if (await temporary.exists()) await temporary.delete();
+      final advertisedSize = task.game.packageSizeBytes;
+      if (advertisedSize != null &&
+          advertisedSize > GamePackageTransferService.maxCompressedBytes) {
+        throw const FormatException('远程游戏包大小超过允许范围');
+      }
       final uri = task.game.source.host.replace(
         path: '/apps/download',
         queryParameters: {
@@ -177,30 +198,65 @@ class GameDownloadQueue extends ChangeNotifier {
       if (response.statusCode != HttpStatus.ok) {
         throw HttpException('下载失败：HTTP ${response.statusCode}', uri: uri);
       }
-      final total = response.contentLength;
+      final total = response.contentLength ?? task.game.packageSizeBytes;
       if (total != null &&
           (total <= 0 ||
               total > GamePackageTransferService.maxCompressedBytes)) {
         throw const FormatException('远程游戏包大小超过允许范围');
       }
+      task.phase = GameDownloadPhase.downloading;
+      task.totalBytes = total;
+      task.progress = total == null ? null : 0;
+      notifyListeners();
       sink = temporary.openWrite();
       var received = 0;
+      final transferWatch = Stopwatch()..start();
+      var sampledAt = Duration.zero;
+      var sampledBytes = 0;
       await for (final chunk in response.stream) {
         if (task.cancelled) throw const _DownloadCancelled();
         received += chunk.length;
         if (received > GamePackageTransferService.maxCompressedBytes) {
-          throw const FormatException('远程游戏包超过 64 MiB');
+          throw const FormatException('远程游戏包超过 100 MiB');
         }
         sink.add(chunk);
+        task.bytesReceived = received;
         task.progress = total == null || total == 0
             ? null
             : (received / total).clamp(0, 1);
+        final elapsed = transferWatch.elapsed;
+        final sampleElapsed = elapsed - sampledAt;
+        if (sampleElapsed >= const Duration(milliseconds: 500)) {
+          final currentRate =
+              (received - sampledBytes) *
+              Duration.millisecondsPerSecond /
+              sampleElapsed.inMilliseconds;
+          task.bytesPerSecond = task.bytesPerSecond == null
+              ? currentRate
+              : task.bytesPerSecond! * 0.35 + currentRate * 0.65;
+          sampledAt = elapsed;
+          sampledBytes = received;
+        }
         notifyListeners();
       }
+      transferWatch.stop();
+      if (task.bytesPerSecond == null &&
+          received > 0 &&
+          transferWatch.elapsedMicroseconds > 0) {
+        task.bytesPerSecond =
+            received *
+            Duration.microsecondsPerSecond /
+            transferWatch.elapsedMicroseconds;
+      }
+      task.totalBytes ??= received;
       await sink.flush();
       await sink.close();
       sink = null;
       if (task.cancelled) throw const _DownloadCancelled();
+      task.phase = GameDownloadPhase.installing;
+      task.progress = 1;
+      task.bytesPerSecond = null;
+      notifyListeners();
       _validateReplacement(task.game);
       final imported = await _transfer.importPackage(
         temporary,
@@ -212,6 +268,7 @@ class GameDownloadQueue extends ChangeNotifier {
       );
       await _onImported(imported);
       task.status = GameDownloadStatus.completed;
+      task.phase = GameDownloadPhase.completed;
       task.progress = 1;
     } on _DownloadCancelled {
       task.status = GameDownloadStatus.stopped;
@@ -790,6 +847,11 @@ class GameCatalogController extends ChangeNotifier {
         if (raw is! Map) throw const FormatException('游戏条目必须是对象');
         final json = Map<String, Object?>.from(raw);
         final iconRaw = json.remove('icon');
+        final packageSizeRaw = json.remove('packageSizeBytes');
+        if (packageSizeRaw != null &&
+            (packageSizeRaw is! int || packageSizeRaw <= 0)) {
+          throw const FormatException('packageSizeBytes 必须是正整数');
+        }
         final catalogAuthor = json['author'] is String
             ? json['author']! as String
             : '';
@@ -804,10 +866,16 @@ class GameCatalogController extends ChangeNotifier {
         }
         games.add(
           OnlineCatalogGame(
-            manifest: GameManifest.fromJson(json),
+            // Catalog 条目是下载候选的元数据。SDK 是否受当前 App 支持属于
+            // 游戏包安装校验；不能因此把整个 go-server 源标记为不兼容。
+            manifest: GameManifest.fromJson(
+              json,
+              validateSdkCompatibility: false,
+            ),
             source: source,
             icon: icon,
             catalogAuthor: catalogAuthor,
+            packageSizeBytes: packageSizeRaw as int?,
           ),
         );
       }

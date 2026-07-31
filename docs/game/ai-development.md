@@ -61,7 +61,7 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 
 游戏开发 AI 只需要知道：
 
-- 可调用的 Game SDK / App Bridge SDK；
+- 可调用的 Game SDK / App SDK；
 - 当前项目树、模式、角色和能力声明；项目文件内容通过 Developer API 按任务需要读取；
 - Developer Operation API；
 - 校验结果、运行状态和当前设备日志。
@@ -77,7 +77,9 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 ## 完成检查
 
 - 项目校验不存在 `error`。
-- 游戏只访问 `/app`、`/playmesh` 和 SDK 返回的 `/bucket`。
+- 游戏只访问外层物理 `app/` 映射出的运行时根 `/`、平台 `/playmesh/**` 和 SDK
+  返回的 `/bucket/**`。用户首段 `app` 合法：物理 `app/app/**` 映射为
+  `/app/**`，只有 `playmesh`、`bucket` 是保留首段。
 - 多人最终结果由 Authority 决定。
 - 页面不会根据加入链路分叉协议。
 - 能力先声明、再确认、再创建，并在退出时释放。
@@ -90,5 +92,5 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 - [AgentAI 使用方法](agent-ai-development.md)
 - [游戏开发指南](development-guide.md)
 - [网页开发者通道](web-dev-channel.md)
-- [Game SDK / App Bridge SDK](sdk-v1.md)
+- [Game SDK / App SDK](sdk-v1.md)
 - [游戏包与 main.json](package-format.md)

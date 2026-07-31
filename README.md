@@ -43,34 +43,38 @@ Playmesh 还把 AI 接入游戏开发全流程：平台会根据当前项目、�
   设备能力插件。
 - **内置 AI 开发闭环**：为 ChatAI 与 AgentAI 生成完整项目提示词，并提供代码编辑、
   Diff、本地历史、校验、真实运行、日志、对话控制台和 Agent API。
-- 提供 Go 编写的 `playmesh-cli`，支持在 IDEA 等外部 IDE 中创建、拉取、发布、
-  运行项目并跟随日志。
+- 提供 Go 编写的 [`playmesh-cli`](dev-cli/README.md)，支持在 IDEA 等外部 IDE
+  中初始化或恢复工程、代理本地开发资源、正式构建运行和独立跟随日志，并通过统一
+  项目适配器接入 JavaScript、TypeScript 与 Cocos Creator 3.x。
 - 支持 Android，AndroidTV 与 Windows 发布构建；桌面包自动携带 Go Core 与 Developer CLI。
 
 ## 架构概览
 
 ```text
 Flutter App
-  ├─ 游戏库、用户资料、开发者工作区和 WebView 宿主
+  ├─ 游戏库、安装与开发者工作区
+  ├─ GamePage / GameLauncher / WebView
+  ├─ GameWebResourceSource
+  │    ├─ Installed：已安装包 app/
+  │    └─ Development：CLI 临时开发代理
   ├─ Game SDK / App Bridge SDK
-  └─ 平台能力插件
-        │
-        ▼
-Go Core
-  ├─ Session WebSocket
-  ├─ Binary WebSocket / Channel
-  └─ 玩家、Authority、凭证和消息路由
-        │
-        ▼
-HTML Game Runtime
-  ├─ Player 页面
-  ├─ Authority 规则
-  └─ 只通过公开 SDK 使用平台能力
+  ├─ Go Core：会话、玩家、Authority、凭证和消息路由
+  └─ 原生宿主：WebView 与平台能力插件
+
+External Developer CLI
+  └─ adapter.Adapter -> Developer Gateway -> Development 资源源
 
 可选 Go Server
   ├─ Catalog / 游戏包分享、上传与分发
   └─ 公共 Relay / 端到端加密字节中转
 ```
+
+普通游戏运行链为“首页/游戏库 -> `GamePage` -> `InstalledGameWebResourceSource` ->
+本地资源网关 -> WebView -> SDK/Bridge”；外部开发链则先由 CLI Adapter 建立临时资源
+映射和开发会话，再从 `DevelopmentGameWebResourceSource` 汇入同一 WebView 与
+SDK/Bridge。App 只区分正式已安装资源和临时开发资源。未来新增 Godot 等引擎只增加
+CLI `adapter.Adapter` 实现和注册项，不修改 App。
+局域网、公共中转、主机、加入端和浏览器描述共享传输方式，与这两种资源状态正交。
 
 完整边界见[技术架构](docs/01-architecture.md)，工程约束见
 [工程开发规范](docs/06-engineering-standards.md)。
@@ -132,9 +136,16 @@ Playmesh 不是只提供一段通用系统提示词，而是为当前游戏动�
 两种方式都通过同一套 Developer Operation API 工作；删除、WebView JavaScript 等
 危险操作会暂停并在工作区请求开发者审批。
 
-Playmesh 只翻译 App 自己的界面。游戏在 `playmesh.ready` 后可用
-`playmesh.runtime.getLocale()` 读取当前显示端 locale，但不会获得 App 词典；游戏
-业务文案仍由游戏包自行提供和切换。
+Playmesh 只翻译 App 自己的界面。面向游戏开发者的唯一全局对象是
+`window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
+`window.playmeshApp` 不存在，`playmesh.main` 与 `playmesh.app` 也不暴露任何
+`__*` 内部桥接成员。游戏先等待根 `playmesh.ready`；它复用
+`playmesh.main.ready` 初始化链，而 `main.ready` 内部先等待
+`playmesh.app.ready`，最终获得 `{main, app}`。Game/App 类型文件固定为
+`playmesh-main.d.ts` 与 `playmesh-app.d.ts`，旧 Game 类型文件不兼容、不保留。
+游戏通过
+`playmesh.app.runtime.getLocale()` 读取当前显示端 locale，但不会获得 App 词典；
+游戏业务文案仍由游戏包自行提供和切换。
 
 ### IDEA / CLI 开发
 
@@ -144,12 +155,22 @@ Playmesh 只翻译 App 自己的界面。游戏在 `playmesh.ready` 后可用
 playmesh-cli to "http://<app-ip>:16666/dev/<workspace-id>/workspace?token=<token>"
 mkdir my-game
 cd my-game
-playmesh-cli create
-playmesh-cli dev
+playmesh-cli init
+npm run dev
 ```
 
-已有项目使用 `playmesh-cli get <project-id>`。CLI 的完整命令、目录映射和发布边界见
+`init` 会用数字选择 JavaScript 或 TypeScript，并生成 IDEA 可直接运行的 npm
+`build/dev/run/logs/update` 脚本；`dev` 通过本地资源代理在真实 App 中调试，
+`run` 执行正式构建与完整上传。`playmesh-cli get <project-id>` 可把 App 中的编译发布
+包恢复为 JavaScript 2.0 工程；TypeScript 与 Cocos 源码仍须由源码版本库保存。完整
+命令、Cocos Creator 3.x 集成、破坏性目录变更和发布边界见
 [Developer CLI](dev-cli/README.md)。
+
+CLI 2.0 项目把发布包固定隔离在 `playmesh/package/`，SDK 与类型固定在
+`playmesh/sdk/`。上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根
+`icon.png` 与必需 `app/`；SDK 目录永不上传。清单必须显式声明 `entries.game`，
+单屏多人另须 `entries.controller`，多人另须 `authority.entry`，缺失时不回退模板
+路径。
 
 ## 平台开发
 
@@ -158,7 +179,7 @@ playmesh-cli dev
 | 主题 | 文档 | 核心约束 |
 | --- | --- | --- |
 | 能力插件 | [能力开发约定](docs/platform/capability-development.md) | 描述符、实例生命周期、平台适配、自检和注册只有一份定义 |
-| SDK | [SDK 开发约定](docs/platform/sdk-development.md) | TypeScript、类型声明、宿主执行器、兼容发行版和版本执行器同源 |
+| SDK | [SDK 开发约定](docs/platform/sdk-development.md) | TypeScript、类型声明、宿主执行器、精确版本发行定义和版本执行器同源 |
 | 开发者工作区 | [开发者工作区开发约定](docs/platform/developer-workspace-development.md) | Operation Definition 同时驱动路由、文档、权限、审批和 AI 操作目录 |
 | Go Server | [Go Server 开发约定](docs/platform/go-server-development.md) | 游戏包源与公共中转共用轻量部署载体，但接口、存储、鉴权和协议版本保持独立 |
 

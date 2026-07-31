@@ -232,6 +232,7 @@ void main() {
         name: 'Same game',
         author: 'Online Publisher',
         version: '2.0.0',
+        packageSizeBytes: 2 * 1024 * 1024,
       );
       final controller = _FakeCatalogController(
         root: root,
@@ -289,13 +290,29 @@ void main() {
       );
 
       await tester.tap(find.text('仍要下载'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(
         find.byKey(const ValueKey('catalog-download-progress-dialog')),
         findsOneWidget,
       );
       expect(controller.startedTask, isNotNull);
+      expect(find.text('正在准备游戏包…'), findsOneWidget);
+      expect(find.text('2 MB'), findsOneWidget);
+      expect(find.text('0 B / 2 MB'), findsOneWidget);
+
+      controller.startedTask!
+        ..phase = GameDownloadPhase.downloading
+        ..progress = 0.5
+        ..bytesReceived = 1024 * 1024
+        ..bytesPerSecond = 512 * 1024;
+      controller.notifyDownloadChanged();
+      await tester.pump();
+      expect(find.text('正在下载 50%'), findsOneWidget);
+      expect(find.text('512 KB/s'), findsOneWidget);
+      expect(find.text('1 MB / 2 MB'), findsOneWidget);
+
       await tester.binding.handlePopRoute();
       await tester.pump();
       expect(
@@ -388,10 +405,15 @@ class _FakeCatalogController extends GameCatalogController {
     }
     final task = GameDownloadTask(id: 'fake-download', game: offer)
       ..status = GameDownloadStatus.downloading
-      ..progress = 0.35;
+      ..phase = GameDownloadPhase.preparing
+      ..progress = null;
     startedTask = task;
     _downloadNotifier.notifyListeners();
     return task;
+  }
+
+  void notifyDownloadChanged() {
+    _downloadNotifier.notifyListeners();
   }
 
   @override
@@ -454,9 +476,11 @@ OnlineCatalogGame _offer(
   String author = 'Publisher value / 原样',
   String version = '1.0.0',
   DateTime? lastModifiedAt,
+  int? packageSizeBytes,
 }) {
   return OnlineCatalogGame(
     source: source,
+    packageSizeBytes: packageSizeBytes,
     manifest: GameManifest(
       id: id,
       name: name,
@@ -464,16 +488,16 @@ OnlineCatalogGame _offer(
       lastModifiedAt: lastModifiedAt ?? DateTime.utc(2026, 7, 26),
       remarks: 'API remarks / 原样',
       version: version,
-      sdkVersion: '1.0.0',
-      appSdkVersion: '1.0.0',
+      sdkVersion: '4.0.0',
+      appSdkVersion: '3.2.0',
       orientation: GameOrientation.landscape,
       modes: const {GameMode.solo},
       displayModes: const {GameDisplayMode.multiScreen},
       players: const GamePlayerLimits(min: 1, max: 1),
       tags: const ['API tag / 原样'],
       entries: const GameEntriesManifest(
-        game: 'app/index.html',
-        controller: 'app/controller/index.html',
+        game: 'index.html',
+        controller: 'controller/index.html',
       ),
     ),
   );
@@ -495,5 +519,5 @@ GameSummary _installedGame({
   displayModeLabel: 'Multi screen',
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
-  entry: const LocalGameEntry(assetPath: 'app/index.html', statusLabel: 'SDK'),
+  entry: const LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'SDK'),
 );

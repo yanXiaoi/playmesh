@@ -37,7 +37,6 @@ type Player struct {
 	Role         string  `json:"role"`
 	Source       string  `json:"source"`
 	Connected    bool    `json:"connected"`
-	LatencyMS    *int    `json:"latencyMs"`
 	AvatarDigest string  `json:"-"`
 	access       playerAccess
 }
@@ -373,9 +372,6 @@ func (s *Store) SetConnected(record *record, playerID string, connected bool) Sn
 	defer record.mutex.Unlock()
 	if playerID == record.authority.ID {
 		record.authority.Connected = connected
-		if !connected {
-			record.authority.LatencyMS = nil
-		}
 		if _, isPlayer := record.players[playerID]; isPlayer {
 			player := record.authority
 			record.players[playerID] = player
@@ -383,9 +379,6 @@ func (s *Store) SetConnected(record *record, playerID string, connected bool) Sn
 	} else {
 		player := record.players[playerID]
 		player.Connected = connected
-		if !connected {
-			player.LatencyMS = nil
-		}
 		record.players[playerID] = player
 	}
 	if !connected && playerID != record.authority.ID {
@@ -397,24 +390,6 @@ func (s *Store) SetConnected(record *record, playerID string, connected bool) Sn
 	}
 	if !connected && playerID == record.authority.ID && record.state == StateRunning {
 		record.state = StatePaused
-	}
-	return record.snapshotLocked()
-}
-
-func (s *Store) SetLatency(record *record, playerID string, latencyMS *int) Snapshot {
-	record.mutex.Lock()
-	defer record.mutex.Unlock()
-	if playerID == record.authority.ID {
-		record.authority.LatencyMS = latencyMS
-		if _, isPlayer := record.players[playerID]; isPlayer {
-			record.players[playerID] = record.authority
-		}
-		return record.snapshotLocked()
-	}
-	player, exists := record.players[playerID]
-	if exists {
-		player.LatencyMS = latencyMS
-		record.players[playerID] = player
 	}
 	return record.snapshotLocked()
 }

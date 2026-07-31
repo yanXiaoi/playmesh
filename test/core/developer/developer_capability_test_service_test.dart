@@ -10,11 +10,13 @@ void main() {
     final plugin = _FakeCapabilityPlugin();
     final emitted = <Map<String, Object?>>[];
     final service = DeveloperCapabilityTestService(
-      registry: CapabilityRegistry([plugin]),
+      registry: CapabilityRegistry([
+        plugin,
+      ], platform: CapabilityPlatform.ANDROID),
       emitEvent: emitted.add,
     );
 
-    final descriptions = service.describe();
+    final descriptions = await service.describe();
     expect(descriptions, hasLength(1));
     expect(descriptions.single['code'], 'test.streaming');
     expect(
@@ -78,7 +80,9 @@ void main() {
 
   test('不可用能力不能创建交互测试实例', () async {
     final service = DeveloperCapabilityTestService(
-      registry: CapabilityRegistry([_FakeCapabilityPlugin(available: false)]),
+      registry: CapabilityRegistry([
+        _FakeCapabilityPlugin(available: false),
+      ], platform: CapabilityPlatform.ANDROID),
       emitEvent: (_) {},
     );
 
@@ -89,12 +93,51 @@ void main() {
 
     await service.dispose();
   });
+
+  test('能力自检使用默认参数创建实例并立即释放', () async {
+    final plugin = _FakeCapabilityPlugin();
+    final service = DeveloperCapabilityTestService(
+      registry: CapabilityRegistry([
+        plugin,
+      ], platform: CapabilityPlatform.ANDROID),
+      emitEvent: (_) {},
+    );
+
+    final results = await service.run(codes: const ['test.streaming']);
+
+    expect(results.single, containsPair('status', 'passed'));
+    expect(results.single, containsPair('created', true));
+    expect(results.single, containsPair('disposed', true));
+    expect(plugin.createdOptions, isEmpty);
+    expect(plugin.instance?.disposed, isTrue);
+    await service.dispose();
+  });
+
+  test('能力实例创建失败时自检直接失败', () async {
+    final plugin = _FakeCapabilityPlugin(
+      createError: StateError('native create failed'),
+    );
+    final service = DeveloperCapabilityTestService(
+      registry: CapabilityRegistry([
+        plugin,
+      ], platform: CapabilityPlatform.ANDROID),
+      emitEvent: (_) {},
+    );
+
+    final results = await service.run(codes: const ['test.streaming']);
+
+    expect(results.single, containsPair('status', 'failed'));
+    expect(results.single['message'], contains('native create failed'));
+    expect(plugin.instance, isNull);
+    await service.dispose();
+  });
 }
 
 class _FakeCapabilityPlugin implements CapabilityPlugin {
-  _FakeCapabilityPlugin({this.available = true});
+  _FakeCapabilityPlugin({this.available = true, this.createError});
 
   final bool available;
+  final Object? createError;
   Map<String, Object?>? createdOptions;
   _FakeCapabilityInstance? instance;
   bool disposed = false;
@@ -105,6 +148,7 @@ class _FakeCapabilityPlugin implements CapabilityPlugin {
     name: 'Streaming Test',
     description: 'Definition-driven test capability.',
     apiVersion: '1.0.0',
+    supportedPlatforms: [CapabilityPlatform.ANDROID],
     optionsSchema: {
       'type': 'object',
       'properties': {
@@ -140,13 +184,10 @@ class _FakeCapabilityPlugin implements CapabilityPlugin {
   @override
   Future<CapabilityInstance> create(Map<String, Object?> options) async {
     createdOptions = Map<String, Object?>.from(options);
+    final error = createError;
+    if (error != null) throw error;
     return instance = _FakeCapabilityInstance();
   }
-
-  @override
-  Future<Map<String, Object?>> test(Duration timeout) async => {
-    'available': available,
-  };
 
   @override
   Future<void> dispose() async {

@@ -57,7 +57,7 @@ void main() {
           request.response.headers.contentType = ContentType.json;
           request.response.write(
             jsonEncode({
-              'catalogApiVersion': '2.0.0',
+              'catalogApiVersion': gameCatalogApiVersion,
               'name': 'Remote Dynamic Source / 原样',
               'author': 'Remote Publisher / 原样',
               'supportsGameRelay': false,
@@ -134,7 +134,7 @@ void main() {
           request.response.headers.contentType = ContentType.json;
           request.response.write(
             jsonEncode({
-              'catalogApiVersion': '2.0.0',
+              'catalogApiVersion': gameCatalogApiVersion,
               'name': 'Fresh API Source / 原样',
               'author': 'Fresh API Publisher / 原样',
               'supportsGameRelay': false,
@@ -186,9 +186,9 @@ void main() {
     },
   );
 
-  test('Catalog 2.0 声明严格校验 userUpload 能力', () {
+  test('Catalog 3.0 声明严格校验 userUpload 能力', () {
     final declaration = GameCatalogDeclaration.fromJson({
-      'catalogApiVersion': '2.0.0',
+      'catalogApiVersion': gameCatalogApiVersion,
       'name': 'Source',
       'supportsGameRelay': false,
       'userUpload': {'supported': false},
@@ -342,7 +342,12 @@ void main() {
         'total': 20,
         'current': page,
         'size': 5,
-        'data': [_manifest(id: 'com.example.first$page').toJson()],
+        'data': [
+          {
+            ..._manifest(id: 'com.example.first$page').toJson(),
+            'packageSizeBytes': 1024 * 1024,
+          },
+        ],
       };
     });
     final secondServer = await _startCatalogServer((request) {
@@ -376,6 +381,22 @@ void main() {
     expect(
       {for (final section in result.sections) section.source.id: section.page},
       {'first': 2, 'second': 3},
+    );
+    expect(
+      result.sections
+          .singleWhere((section) => section.source.id == 'first')
+          .offers
+          .single
+          .packageSizeBytes,
+      1024 * 1024,
+    );
+    expect(
+      result.sections
+          .singleWhere((section) => section.source.id == 'second')
+          .offers
+          .single
+          .packageSizeBytes,
+      isNull,
     );
   });
 
@@ -413,6 +434,31 @@ void main() {
     ]);
   });
 
+  test('游戏源拒绝非正整数的游戏包大小', () async {
+    final server = await _startCatalogServer(
+      (_) => {
+        'total': 1,
+        'data': [
+          {..._manifest().toJson(), 'packageSizeBytes': 0},
+        ],
+      },
+    );
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-source-invalid-size-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'invalid-size-source'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.loadHomeSource('invalid-size-source');
+
+    expect(result.offers, isEmpty);
+    expect(result.error, contains('packageSizeBytes'));
+  });
+
   test('后台更新检查读取每个源的全部分页', () async {
     final requestedPages = <int>[];
     final server = await _startCatalogServer((request) {
@@ -441,6 +487,46 @@ void main() {
     expect(requestedPages, [1, 2]);
     expect(result.candidates.single.versions.single.targetVersion, '2.0.0');
     expect(result.sourceErrors, isEmpty);
+  });
+
+  test('后台更新检查把游戏 SDK 不兼容延后到下载校验', () async {
+    final server = await _startCatalogServer(
+      (_) => {
+        'total': 1,
+        'data': [
+          {..._manifest(version: '2.0.0').toJson(), 'sdkVersion': '3.0.0'},
+        ],
+      },
+    );
+    addTearDown(() => server.close(force: true));
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-update-package-sdk-compatibility-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final controller = await _catalogController(root, [
+      _sourceFor(server, id: 'package-sdk-source'),
+    ]);
+    addTearDown(controller.close);
+
+    final result = await controller.checkUpdates([
+      _summary(root.path, version: '1.0.0'),
+    ]);
+
+    expect(result.sourceErrors, isEmpty);
+    expect(result.candidates, hasLength(1));
+    expect(
+      result
+          .candidates
+          .single
+          .versions
+          .single
+          .sources
+          .single
+          .offer
+          .manifest
+          .sdkVersion,
+      '3.0.0',
+    );
   });
 
   test('latest 协议错误保留同源合法游戏并只采用最高版本', () async {
@@ -602,7 +688,7 @@ void main() {
     expect(result.sourceErrors.single.message, contains('FormatException'));
   });
 
-  test('App Catalog 暴露 2.0 info/icon/带版本 download', () async {
+  test('App Catalog 暴露 3.0 info/icon/带版本 download', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-catalog-v2-');
     addTearDown(() => root.delete(recursive: true));
     final package = Directory(
@@ -642,7 +728,10 @@ void main() {
 
     final info = await http.get(base.resolve('/apps/info'), headers: headers);
     expect(info.statusCode, HttpStatus.ok);
-    expect(jsonDecode(info.body), containsPair('catalogApiVersion', '2.0.0'));
+    expect(
+      jsonDecode(info.body),
+      containsPair('catalogApiVersion', gameCatalogApiVersion),
+    );
     expect((jsonDecode(info.body) as Map)['userUpload'], {'supported': false});
 
     final list = await http.get(base.resolve('/apps/list'), headers: headers);
@@ -754,16 +843,16 @@ GameManifest _manifest({
   lastModifiedAt: lastModifiedAt ?? DateTime.utc(2026, 7, 26),
   remarks: 'Catalog test',
   version: version,
-  sdkVersion: '1.0.0',
-  appSdkVersion: '1.0.0',
+  sdkVersion: '4.0.0',
+  appSdkVersion: '3.2.0',
   orientation: GameOrientation.landscape,
   modes: const {GameMode.solo},
   displayModes: const {GameDisplayMode.multiScreen},
   players: const GamePlayerLimits(min: 1, max: 1),
   tags: const [],
   entries: const GameEntriesManifest(
-    game: 'app/index.html',
-    controller: 'app/controller/index.html',
+    game: 'index.html',
+    controller: 'controller/index.html',
   ),
 );
 
@@ -786,7 +875,7 @@ GameSummary _summary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
   entry: LocalGameEntry(
-    assetPath: 'app/index.html',
+    gameEntryPath: 'index.html',
     statusLabel: 'SDK',
     packageRootFilePath: packagePath,
   ),
@@ -808,7 +897,7 @@ Future<HttpServer> _startCatalogServer(
     } else if (request.uri.path == '/apps/info') {
       request.response.write(
         jsonEncode({
-          'catalogApiVersion': '2.0.0',
+          'catalogApiVersion': gameCatalogApiVersion,
           'supportsGameRelay': false,
           'userUpload': {'supported': false},
         }),

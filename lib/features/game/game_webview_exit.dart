@@ -4,12 +4,11 @@ import 'package:flutter/foundation.dart';
 
 const gameExitBlankPage = 'about:blank';
 
-/// Requests a blank game document and immediately continues the menu exit.
+/// 请求加载空白游戏文档，并立即继续退出到菜单。
 ///
-/// Flutter WebViews use [loadRequest] while the Windows WebView uses
-/// [runJavaScript] because its controller is owned by the platform-specific
-/// widget. The navigation is deliberately not awaited: whether it completes or
-/// fails never delays the original exit callback.
+/// Flutter WebView 使用 [loadRequest]，Windows WebView 使用 [runJavaScript]，
+/// 因为其控制器由平台专用组件持有。这里有意不等待导航完成：
+/// 无论成功或失败，都不延迟原退出回调。
 Future<void> exitGameMenuWithBlankPage({
   required Future<void> Function() exit,
   Future<void> Function(Uri uri)? loadRequest,

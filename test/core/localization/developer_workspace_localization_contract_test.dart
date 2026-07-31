@@ -7,6 +7,21 @@ void main() {
   const developerRoot = 'assets/playmesh-library/public/developer';
   const localizationRoot = 'assets/playmesh-localization';
 
+  test('能力选择器只渲染 supportedPlatforms 中的平台', () {
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+
+    expect(
+      script,
+      contains(
+        "CAPABILITY_PLATFORMS=Object.freeze({WINDOWS:'WINDOWS',ANDROID:'ANDROID',HTML:'HTML'})",
+      ),
+    );
+    expect(script, contains('supportedPlatforms.map(supportBadge)'));
+    expect(script, isNot(contains('definition.appSupported')));
+    expect(script, isNot(contains('definition.htmlSupported')));
+    expect(script, isNot(contains("supportBadge('App'")));
+  });
+
   test('Developer Workspace consumes only the unified App localization', () {
     final html = File('$developerRoot/workspace.html').readAsStringSync();
     final script = File('$developerRoot/workspace.js').readAsStringSync();
@@ -220,6 +235,11 @@ void main() {
     );
     expect(
       script,
+      contains('if(result.detail)meta.push(result.detail)'),
+      reason: 'Publish failures must render the sanitized server detail.',
+    );
+    expect(
+      script,
       contains(
         "phaseText=phases.has(data.phase)?tr('workspace.run_status.'+data.phase):data.message||data.phase",
       ),
@@ -404,13 +424,17 @@ void main() {
     );
     expect(
       manifestBuilder,
-      contains(
-        "entries:{game:q('manifestGameEntry').value.trim(),"
-        "controller:q('manifestControllerEntry').value.trim()}",
-      ),
+      contains("entries:{game:q('manifestGameEntry').value.trim()}"),
       reason:
           'The form must write a fresh object containing only current fields; '
           'unknown main.json fields are silently omitted.',
+    );
+    expect(
+      manifestBuilder,
+      contains(
+        "if(mode==='multiplayer'&&displayMode==='single_screen_multiplayer')"
+        "{manifest.entries.controller=q('manifestControllerEntry').value.trim();",
+      ),
     );
     expect(
       '$html\n$script',
@@ -430,9 +454,16 @@ void main() {
     expect(
       script,
       contains(
-        "defaultProjectEntryPaths=Object.freeze({game:'app/index.html',"
-        "controller:'app/controller/index.html',"
-        "authority:'app/static/js/service/index.js'})",
+        "defaultManifestEntryPaths=Object.freeze({game:'index.html',"
+        "controller:'controller/index.html',"
+        "authority:'static/js/service/index.js'})",
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "defaultProjectEntryPaths=Object.freeze({game:'app/'+"
+        "defaultManifestEntryPaths.game",
       ),
     );
     expect(script, contains('manifest?.entries?.game'));
@@ -897,6 +928,8 @@ const _dynamicWorkspaceKeys = <String>{
   'workspace.capability.device_midi.description',
   'workspace.capability.device_vibration.name',
   'workspace.capability.device_vibration.description',
+  'workspace.capability.sensor_pose6d.name',
+  'workspace.capability.sensor_pose6d.description',
   'workspace.prompt.category.common',
   'workspace.prompt.category.mode',
   'workspace.prompt.category.display',
@@ -924,6 +957,8 @@ const _dynamicWorkspaceKeys = <String>{
   'workspace.diagnostic.symbolic_link_forbidden.hint',
   'workspace.diagnostic.forbidden_publish_file.message',
   'workspace.diagnostic.forbidden_publish_file.hint',
+  'workspace.diagnostic.reserved_runtime_namespace.message',
+  'workspace.diagnostic.reserved_runtime_namespace.hint',
   'workspace.diagnostic.manifest_missing.message',
   'workspace.diagnostic.manifest_missing.hint',
   'workspace.diagnostic.entry_missing.message',

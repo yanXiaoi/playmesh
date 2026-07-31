@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../assets/playmesh-library/public/sdk/v1/playmesh.js", import.meta.url), "utf8");
+const appSource = fs.readFileSync(
+  new URL("../assets/playmesh-library/public/sdk/v1/playmesh-app.js", import.meta.url),
+  "utf8",
+);
+const source = fs.readFileSync(new URL("../assets/playmesh-library/public/sdk/v1/playmesh-main.js", import.meta.url), "utf8");
+const appInternalKey = Symbol.for("playmesh.app.internal.v1");
+const mainInternalKey = Symbol.for("playmesh.main.internal.v1");
+const receiveMain = (page, message) => page[mainInternalKey].receive(message);
+assert.doesNotMatch(source, /class="panel"|performanceButton|querySelector\("\.fps"\)|querySelector\("\.latency"\)/);
 assert.match(
   source,
   /avatar: value\?\.avatar \?\? null/,
@@ -10,8 +18,8 @@ assert.match(
 );
 assert.match(
   source,
-  /if \(playmesh\.session\.isAuthority\(\)\) \{\s+await post\("session\.reset", \{\}\);/s,
-  "the Authority restart adapter must reset the session before reloading",
+  /const multiplayer = main\.gameInfo\.getCurrent\(\)\?\.multiplayer === true;\s+if \(multiplayer && main\.session\.isAuthority\(\)\) \{\s+await post\("session\.reset", \{\}\);/s,
+  "restart must reset multiplayer sessions without sending session.reset in solo mode",
 );
 const localizationManifest = JSON.parse(
   fs.readFileSync(
@@ -157,8 +165,8 @@ function createPage(
     };
   }
   const elements = Object.fromEntries([
-    ".panel", ".fps", ".latency", ".edit", ".overlay", ".enter", ".card", "form", "h2", "input", ".error", ".close", ".save",
-    ".performance", ".menu-fab", ".sidebar-layer", ".sidebar", ".sidebar-title",
+    ".edit", ".overlay", ".enter", ".card", "form", "h2", "input", ".error", ".close", ".save",
+    ".menu-fab", ".sidebar-layer", ".sidebar", ".sidebar-title",
     ".sidebar-scrim", ".continue", ".reload", ".enter-fullscreen",
     ".exit-fullscreen", ".exit", ".info", ".logs", ".info-overlay",
     ".info-close", ".info-title", ".game-name", ".session-info",
@@ -166,7 +174,6 @@ function createPage(
     ".allow", ".deny", ".actions", ".capability-copy", ".capability-title",
   ].map((selector) => [selector, fakeElement(selector)]));
   elements[".edit"].hidden = true;
-  elements[".latency"].hidden = true;
   elements[".overlay"].hidden = true;
   elements[".sidebar-layer"].hidden = true;
   elements[".info-overlay"].hidden = true;
@@ -532,19 +539,44 @@ function createPage(
     setInterval,
     clearInterval,
   };
+  window.window = window;
   if (appIdentity) {
-    window[Symbol.for("playmesh.platform-ui.configuration")] =
-      platformConfiguration(appLocaleId);
-    window.playmeshApp = {
+    const publicAppApi = {
+      version: "3.2.0",
       ready: Promise.resolve({
         available: true,
+        sdkVersion: "3.2.0",
         runtime: {
           coreBase: "http://127.0.0.1:43000/",
           playerSource: "lan_app",
         },
       }),
       isAvailable: () => true,
-      __configureRuntimeGame: async (declaration) => {
+      runtime: {
+        getLocale: () => appLocaleId,
+      },
+      identity: { getCurrent: () => ({ ...appIdentity }) },
+      capabilities: {
+        getRegistry: () => [],
+        getAvailable: () => [],
+        getDeclared: () => [],
+      },
+      device: {
+        getPlatform: () => "android",
+        setFullscreen: async (enabled, orientation) => {
+          fullscreenRequests.push({ enabled, orientation });
+        },
+      },
+    };
+    let privatePlatformConfiguration = platformConfiguration(appLocaleId);
+    window[appInternalKey] = {
+      publicApi: publicAppApi,
+      takePlatformUiConfiguration() {
+        const configuration = privatePlatformConfiguration;
+        privatePlatformConfiguration = null;
+        return configuration;
+      },
+      configureRuntimeGame: async (declaration) => {
         runtimeGameDeclarations.push(structuredClone(declaration));
         return {
           available: true,
@@ -562,25 +594,13 @@ function createPage(
           },
         };
       },
-      identity: { getCurrent: () => ({ ...appIdentity }) },
-      capabilities: {
-        getRegistry: () => [],
-        getAvailable: () => [],
-        getDeclared: () => [],
-      },
-      device: {
-        getPlatform: () => "android",
-        setFullscreen: async (enabled, orientation) => {
-          fullscreenRequests.push({ enabled, orientation });
-        },
-      },
-      showGameSidebar: async () => {
-        nativeSidebarRequests.push("show");
-      },
+      syncAvatar: async () => {},
     };
+  } else {
+    vm.runInNewContext(appSource, window, { filename: "playmesh-app.js" });
+    window[appInternalKey].publicApi.ui.configure({ fallbackUi: false });
   }
-  window.window = window;
-  vm.runInNewContext(source, window, { filename: "playmesh.js" });
+  vm.runInNewContext(source, window, { filename: "playmesh-main.js" });
   window.__platformBackIntent = vm.runInNewContext(
     'window[Symbol.for("playmesh.platform-ui.back")]',
     window,
@@ -658,14 +678,11 @@ assert.equal(
 const playerJoinEvents = [];
 const playerLeaveEvents = [];
 const playerReconnectEvents = [];
-firstPage.playmesh.session.onPlayerJoin((event) => playerJoinEvents.push(event));
-firstPage.playmesh.session.onPlayerLeave((event) => playerLeaveEvents.push(event));
-firstPage.playmesh.session.onPlayerReconnect((event) => playerReconnectEvents.push(event));
-assert.equal(Object.isFrozen(firstPage.playmesh.runtime), true);
-assert.throws(
-  () => firstPage.playmesh.runtime.getLocale(),
-  /requires await playmesh\.ready/,
-);
+firstPage.playmesh.main.session.onPlayerJoin((event) => playerJoinEvents.push(event));
+firstPage.playmesh.main.session.onPlayerLeave((event) => playerLeaveEvents.push(event));
+firstPage.playmesh.main.session.onPlayerReconnect((event) => playerReconnectEvents.push(event));
+assert.equal(typeof firstPage.playmesh.app.runtime.getLocale, "function");
+assert.equal(firstPage.playmesh.app.runtime.getLocale(), "zh-CN");
 while (!firstPage.__ui.form.onsubmit) {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -704,9 +721,18 @@ assert.equal(
 firstPage.__ui.input.value = "缓存玩家";
 await firstPage.__ui.form.onsubmit({ preventDefault() {} });
 const firstBootstrap = await firstPage.playmesh.ready;
+assert.strictEqual(
+  firstBootstrap.app,
+  await firstPage.playmesh.app.ready,
+  "根 ready 的 app 结果必须与 playmesh.app.ready 保持同一引用",
+);
+assert.deepEqual(Object.keys(firstPage.playmesh).sort(), ["app", "main", "ready"]);
+assert.equal(firstBootstrap.main.sdkVersion, "4.0.0");
+assert.equal(firstPage.playmesh.app.version, "3.2.0");
+assert.equal(firstBootstrap.app.available, false);
 assert.equal(JSON.stringify(firstBootstrap).includes("sidebar.title"), false);
-assert.equal(Object.isFrozen(firstPage.playmesh.gameInfo), true);
-const currentGameInfo = firstPage.playmesh.gameInfo.getCurrent();
+assert.equal(Object.isFrozen(firstPage.playmesh.main.gameInfo), true);
+const currentGameInfo = firstPage.playmesh.main.gameInfo.getCurrent();
 assert.equal(currentGameInfo.id, "com.playmesh.browser-test");
 assert.equal(currentGameInfo.name, "浏览器测试游戏");
 assert.deepEqual([...currentGameInfo.tags], ["派对", "本地多人"]);
@@ -714,16 +740,16 @@ assert.equal(currentGameInfo.multiplayer, true);
 assert.equal(currentGameInfo.displayMode, "multi_screen");
 assert.deepEqual([...currentGameInfo.requiredCapabilities], []);
 assert.deepEqual(
-  Object.keys(firstBootstrap.player).sort(),
+  Object.keys(firstBootstrap.main.player).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
 assert.deepEqual(
-  Object.keys(firstBootstrap.session.players[0]).sort(),
+  Object.keys(firstBootstrap.main.session.players[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-assert.equal(firstPage.playmesh.runtime.getLocale(), "zh-CN");
-assert.equal("messages" in firstPage.playmesh.runtime, false);
-assert.equal(JSON.stringify(firstPage.playmesh.runtime), "{}");
+assert.equal(firstPage.playmesh.app.runtime.getLocale(), "zh-CN");
+assert.equal("messages" in firstPage.playmesh.app.runtime, false);
+assert.equal(JSON.stringify(firstPage.playmesh.app.runtime), "{}");
 assert.equal(joins, 1);
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(
@@ -741,8 +767,8 @@ assert.deepEqual(
 );
 assert.equal(firstPage.playmesh.app.isAvailable(), false);
 assert.equal(firstPage.playmesh.app.identity.getCurrent(), null);
-assert.equal(firstPage.playmesh.session.isAuthority(), false);
-assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-profile"), true);
+assert.equal(firstPage.playmesh.main.session.isAuthority(), false);
+assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), true);
 assert.equal(
   firstPage.__mountedHosts.includes("playmesh-browser-fullscreen"),
   false,
@@ -750,246 +776,9 @@ assert.equal(
 );
 // 菜单、日志和性能覆盖层已迁移到 playmesh-app.js；对应 DOM 与输入
 // 契约由 test_app_platform_ui_sdk.mjs 独立覆盖。
-if (false) {
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏菜单")), true);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("继续游戏")), true);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("运行日志")), true);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("logs-output")), true);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("游戏设置")), false);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("编辑玩家昵称")), true);
-assert.equal(firstPage.__shadowHtml.some((html) => html.includes("退出游戏")), true);
-assert.equal(
-  firstPage.__ui[".sidebar-layer"].hidden,
-  true,
-  "浏览器游戏侧边栏初始必须关闭",
-);
-const browserMenuButton = firstPage.__ui[".menu-fab"];
-assert.equal(browserMenuButton.hidden, false, "浏览器必须显示 SDK 悬浮菜单入口");
-assert.equal(browserMenuButton.getAttribute("aria-label"), "游戏菜单");
-browserMenuButton.click();
-assert.equal(
-  firstPage.__ui[".sidebar-layer"].hidden,
-  false,
-  "SDK 悬浮按钮必须打开浏览器侧边栏",
-);
-assert.equal(browserMenuButton.hidden, true, "侧边栏打开时必须隐藏悬浮按钮");
-firstPage.__ui[".continue"].click();
-assert.equal(browserMenuButton.hidden, false, "关闭侧边栏后必须恢复悬浮按钮");
-browserMenuButton.emit("pointerdown", {
-  button: 0,
-  pointerId: 7,
-  clientX: 0,
-  clientY: 0,
-});
-browserMenuButton.emit("pointermove", {
-  pointerId: 7,
-  clientX: 200,
-  clientY: 160,
-});
-browserMenuButton.emit("pointerup", {
-  pointerId: 7,
-  clientX: 200,
-  clientY: 160,
-});
-assert.equal(browserMenuButton.style.left, "200px");
-assert.equal(browserMenuButton.style.top, "160px");
-browserMenuButton.click();
-assert.equal(
-  firstPage.__ui[".sidebar-layer"].hidden,
-  true,
-  "拖动结束后的合成点击不得误开侧边栏",
-);
-browserMenuButton.click();
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
-firstPage.__ui[".continue"].click();
-const browserEscape = emitWindowKey(
-  firstPage,
-  firstPage.__gameFocusTarget,
-  "Escape",
-);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
-assert.equal(browserEscape.defaultPrevented, true);
-assert.equal(browserEscape.immediatePropagationStopped, true);
-firstPage.__ui[".continue"].click();
-const browserMenu = emitWindowKey(
-  firstPage,
-  firstPage.__gameFocusTarget,
-  "ContextMenu",
-);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
-assert.equal(browserMenu.defaultPrevented, true);
-firstPage.__ui[".continue"].click();
-assert.equal(
-  firstPage.__historyOperations.filter((operation) => operation.type === "push").length,
-  1,
-  "浏览器应安装一个同页返回守卫",
-);
-assert.equal(
-  firstPage.__ui[".panel"].hidden,
-  true,
-  "浏览器性能信息默认必须关闭",
-);
-firstPage.__ui[".performance"].onclick();
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.__ui[".panel"].hidden, false, "浏览器工具区应能显示性能信息");
-firstPage.__ui[".performance"].onclick();
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.__ui[".panel"].hidden, true, "浏览器工具区应能关闭性能信息");
-while (firstPage.__ui[".edit"].hidden) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-let pauseEventCount = 0;
-firstPage.playmesh.lifecycle.onPause(() => pauseEventCount += 1);
-firstPage.__dispatchWindowEvent("popstate", {});
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".continue"]);
-assert.equal(pauseEventCount, 0, "打开游戏侧边栏不得触发 pause 生命周期");
-assert.equal(firstPage.__ui[".continue"].getAttribute("tabindex"), "0");
-assert.equal(firstPage.__ui[".reload"].getAttribute("tabindex"), "-1");
-const sidebarArrow = emitKey(
-  firstPage.__ui[".sidebar"],
-  firstPage.__ui[".continue"],
-  "ArrowDown",
-);
-assert.equal(sidebarArrow.defaultPrevented, true);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".reload"]);
-assert.equal(firstPage.__ui[".continue"].getAttribute("tabindex"), "-1");
-assert.equal(firstPage.__ui[".reload"].getAttribute("tabindex"), "0");
-emitKey(
-  firstPage.__ui[".sidebar"],
-  firstPage.__ui[".reload"],
-  "End",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".exit"]);
-emitKey(
-  firstPage.__ui[".sidebar"],
-  firstPage.__ui[".exit"],
-  "Escape",
-);
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, true);
-assert.equal(
-  firstPage.document.activeElement,
-  firstPage.__gameFocusTarget,
-  "关闭侧边栏必须把焦点还给游戏内容",
-);
-assert.equal(pauseEventCount, 0, "关闭游戏侧边栏也不得触发 pause 生命周期");
-firstPage.__dispatchWindowEvent("popstate", {});
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, false);
-firstPage.__ui[".sidebar-scrim"].click();
-assert.equal(firstPage.__ui[".sidebar-layer"].hidden, true);
-assert.equal(
-  firstPage.document.activeElement,
-  firstPage.__gameFocusTarget,
-  "点击侧边栏外部必须关闭并继续游戏",
-);
-firstPage.__dispatchWindowEvent("popstate", {});
-firstPage.__ui[".info"].click();
-assert.equal(firstPage.__ui[".info-overlay"].hidden, false);
-assert.equal(firstPage.__ui[".game-name"].textContent, "Playmesh 游戏");
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".info-close"]);
-emitKey(
-  firstPage.__ui[".info-overlay"],
-  firstPage.__ui[".info-close"],
-  "Tab",
-);
-assert.equal(
-  firstProfileRoot.activeElement,
-  firstPage.__ui[".edit"],
-  "browser profile editing belongs inside the information dialog",
-);
-emitKey(
-  firstPage.__ui[".info-overlay"],
-  firstPage.__ui[".info-close"],
-  "Escape",
-);
-assert.equal(firstPage.__ui[".info-overlay"].hidden, true);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.document.activeElement, firstPage.__gameFocusTarget);
-firstPage.console.log("浏览器本地日志", { score: 7 });
-firstPage.__dispatchWindowEvent("unhandledrejection", {
-  reason: "浏览器 Promise 失败",
-});
-firstPage.__dispatchWindowEvent("popstate", {});
-firstPage.__ui[".logs"].click();
-assert.equal(firstPage.__ui[".logs-overlay"].hidden, false);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".logs-close"]);
-emitKey(
-  firstPage.__ui[".logs-overlay"],
-  firstPage.__ui[".logs-close"],
-  "Tab",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".logs-clear"]);
-emitKey(
-  firstPage.__ui[".logs-overlay"],
-  firstPage.__ui[".logs-clear"],
-  "End",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".logs-close"]);
-emitKey(
-  firstPage.__ui[".logs-overlay"],
-  firstPage.__ui[".logs-close"],
-  "Home",
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui[".logs-clear"]);
-assert.match(firstPage.__ui[".logs-output"].textContent, /浏览器本地日志 \{"score":7\}/);
-assert.match(firstPage.__ui[".logs-output"].textContent, /unhandled\.rejection/);
-assert.match(
-  firstPage.__ui[".logs-output"].textContent,
-  /\[[^\]]+\] \[(?:log|info|warn|error|debug)\]/,
-);
-emitKey(
-  firstPage.__ui[".logs-overlay"],
-  firstPage.__ui[".logs-clear"],
-  " ",
-);
-assert.equal(firstPage.__ui[".logs-output"].textContent, "暂无运行日志");
-firstPage.playmesh.__receive({
-  type: "platform.ui.configure",
-  configuration: platformConfiguration("en-US", "light"),
-});
-while (firstPage.__ui[".info"].__label.textContent !== "Game information") {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-assert.equal(
-  firstPage.playmesh.runtime.getLocale(),
-  "zh-CN",
-  "browser game locale must remain the browser system locale when only the overlay changes",
-);
-assert.equal(firstPage.__ui[".logs"].getAttribute("aria-label"), "Runtime logs");
-assert.equal(firstPage.__ui[".logs-output"].textContent, "No runtime logs yet");
-assert.equal(
-  firstProfileRoot.host.getAttribute("data-theme"),
-  "light",
-  "浏览器平台覆盖层必须跟随主题配置",
-);
-firstPage.console.warn(
-  "日志正文 Ω 必须原样 / platform.game.logs.empty",
-  { sourceName: "用户源名称" },
-);
-assert.match(
-  firstPage.__ui[".logs-output"].textContent,
-  /日志正文 Ω 必须原样 \/ platform\.game\.logs\.empty \{"sourceName":"用户源名称"\}/,
-  "runtime log payloads must remain verbatim after the overlay locale changes",
-);
-emitKey(
-  firstPage.__ui[".logs-overlay"],
-  firstPage.__ui[".logs-close"],
-  "GoBack",
-);
-assert.equal(firstPage.__ui[".logs-overlay"].hidden, true);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(firstPage.document.activeElement, firstPage.__gameFocusTarget);
-firstPage.__ui[".performance"].onclick();
-await new Promise((resolve) => setTimeout(resolve, 0));
-}
 const persistedBrowserId = browserLocalStorage.get("playmesh.player-id.v1");
 assert.match(persistedBrowserId, /^p_[a-f0-9]{32}$/);
-assert.equal(firstPage.playmesh.player.getCurrent().id, persistedBrowserId);
+assert.equal(firstPage.playmesh.main.player.getCurrent().id, persistedBrowserId);
 assert.equal(playerJoinEvents.length, 1);
 assert.equal(playerJoinEvents[0].player.id, persistedBrowserId);
 assert.equal(playerJoinEvents[0].isCurrentPlayer, true);
@@ -997,8 +786,8 @@ assert.deepEqual(
   Object.keys(playerJoinEvents[0].player).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-const connectedSession = firstPage.playmesh.session.getCurrent();
-firstPage.playmesh.__receive({
+const connectedSession = firstPage.playmesh.main.session.getCurrent();
+receiveMain(firstPage, {
   type: "transport.message",
   message: {
     type: "session.state",
@@ -1009,7 +798,7 @@ firstPage.playmesh.__receive({
   },
 });
 assert.equal(playerLeaveEvents.length, 1);
-firstPage.playmesh.__receive({
+receiveMain(firstPage, {
   type: "transport.message",
   message: { type: "session.state", session: connectedSession },
 });
@@ -1017,21 +806,21 @@ assert.equal(playerReconnectEvents.length, 1);
 assert.equal(
   firstPage.__consoleEntries.some(
     (entry) =>
-      entry.args[0] === "Playmesh 新玩家已加入房间" &&
-      entry.args[1].onlinePlayers === 1 &&
-      entry.args[1].roomType === "multi_screen",
+      String(entry.args[0]).includes("Playmesh 新玩家已加入房间") &&
+      String(entry.args[0]).includes('"onlinePlayers":1') &&
+      String(entry.args[0]).includes('"roomType":"multi_screen"'),
   ),
   true,
 );
 assert.equal(
   firstPage.__consoleEntries.some(
-    (entry) => entry.args[0] === "Playmesh 玩家已掉线或退出房间",
+    (entry) => String(entry.args[0]).includes("Playmesh 玩家已掉线或退出房间"),
   ),
   true,
 );
 assert.notEqual(
-  firstPage.playmesh.player.getCurrent().id,
-  firstPage.playmesh.session.getCurrent().authorityClientId,
+  firstPage.playmesh.main.player.getCurrent().id,
+  firstPage.playmesh.main.session.getCurrent().authorityClientId,
   "浏览器首个加入玩家不能成为 Authority",
 );
 
@@ -1041,84 +830,49 @@ const appPage = createPage(
   ["zh-CN"],
   "en-US",
 );
-await appPage.playmesh.ready;
+const appReadyResult = await appPage.playmesh.app.ready;
+const appRootReadyResult = await appPage.playmesh.ready;
+assert.strictEqual(
+  appRootReadyResult.app,
+  appReadyResult,
+  "运行时能力配置返回新对象时，根 ready 仍必须复用原 app.ready 结果",
+);
 assert.equal(appPage.playmesh.app.isAvailable(), true);
 assert.deepEqual(appPage.__runtimeGameDeclarations, [{
   requiredCapabilities: [],
 }]);
-assert.equal(appPage.playmesh.runtime.getLocale(), "en-US");
-appPage.playmesh.__receive({
+assert.equal(appPage.playmesh.app.runtime.getLocale(), "en-US");
+receiveMain(appPage, {
   type: "platform.ui.configure",
   configuration: platformConfiguration("zh-CN", "light"),
 });
 assert.equal(
-  appPage.playmesh.runtime.getLocale(),
-  "zh-CN",
-  "App-hosted game locale must follow live displaying-App locale updates",
+  appPage.playmesh.app.runtime.getLocale(),
+  "en-US",
+  "a test App adapter owns its locale independently from Game SDK UI messages",
 );
 assert.equal(
-  Symbol.for("playmesh.platform-ui.configuration") in appPage,
-  false,
-  "App locale messages must be consumed from private bootstrap state",
+  appPage.playmeshApp,
+  undefined,
+  "App SDK must not expose a second public global",
 );
+assert.deepEqual(Object.keys(appPage.playmesh.main).filter((key) => key.startsWith("__")), []);
 assert.deepEqual(appPage.__fullscreenRequests, [
   { enabled: true, orientation: "portrait" },
 ]);
 assert.equal(joinCommands.at(-1).playerId, "u-current-app");
 assert.equal(joinCommands.at(-1).nickname, "App 玩家");
 assert.equal(appPage.__ui[".edit"].hidden, true);
-assert.equal(appPage.__mountedHosts.includes("playmesh-browser-profile"), false);
+assert.equal(appPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), false);
 // Game SDK 不再桥接 App 菜单按键，也不再创建平台菜单覆盖层。
-if (false) {
-assert.equal(appPage.__mountedHosts.includes("playmesh-performance"), true);
-const appEscape = emitWindowKey(
-  appPage,
-  appPage.__gameFocusTarget,
-  "Escape",
-);
-const appMenu = emitWindowKey(
-  appPage,
-  appPage.__gameFocusTarget,
-  "F10",
-);
+assert.equal(firstPage.playmesh.app.performance.getLatency() >= 0, true);
 assert.equal(
-  appPage.__platformBackIntent(),
-  true,
-  "Android/system back intent must be delegated to the App sidebar",
-);
-assert.equal(
-  appPage.__platformMenuIntent(),
-  true,
-  "native menu intent must be delegated to the App sidebar",
-);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.deepEqual(appPage.__nativeSidebarRequests, [
-  "show",
-  "show",
-  "show",
-  "show",
-]);
-assert.equal(appEscape.defaultPrevented, true);
-assert.equal(appMenu.defaultPrevented, true);
-assert.equal(appPage.__mountedHosts.includes("playmesh-browser-profile"), false);
-assert.equal(
-  appPage.__shadowRoots.at(-1).host.getAttribute("data-theme"),
-  "light",
-  "App 性能覆盖层必须跟随实际显示 App 主题",
-);
-assert.equal(firstPage.__ui[".panel"].hidden, false);
-assert.equal(firstPage.__ui[".latency"].hidden, false);
-await firstPage.__ui[".enter-fullscreen"].onclick();
-assert.deepEqual(firstPage.__orientationLocks, ["portrait", "portrait"]);
-}
-assert.equal(firstPage.playmesh.performance.getLatency() >= 0, true);
-assert.equal(
-  firstPage.playmesh.session.getCurrent().players[0].connected,
+  firstPage.playmesh.main.session.getCurrent().players[0].connected,
   true,
   "WebSocket open 后立即到达的最新会话快照不得丢失",
 );
 assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), "缓存玩家");
-const hostBucket = firstPage.playmesh.storage.getBucket("browser_save");
+const hostBucket = firstPage.playmesh.main.storage.getBucket("browser_save");
 assert.equal(hostBucket.flush, undefined);
 await hostBucket.setData("score", 18);
 assert.equal(await hostBucket.getData("score"), 18);
@@ -1144,40 +898,15 @@ assert.equal(uploadCommands[0].options.body, uploadedFile);
 const refreshedPage = createPage();
 await refreshedPage.playmesh.ready;
 assert.equal(joins, 3, "刷新必须使用持久化浏览器身份重新加入");
-assert.equal(refreshedPage.playmesh.player.getCurrent().id, persistedBrowserId);
-assert.equal(refreshedPage.playmesh.player.getCurrent().nickname, "缓存玩家");
+assert.equal(refreshedPage.playmesh.main.player.getCurrent().id, persistedBrowserId);
+assert.equal(refreshedPage.playmesh.main.player.getCurrent().nickname, "缓存玩家");
 assert.equal(
-  refreshedPage.playmesh.player.getCurrent().id,
-  firstPage.playmesh.player.getCurrent().id,
+  refreshedPage.playmesh.main.player.getCurrent().id,
+  firstPage.playmesh.main.player.getCurrent().id,
 );
-while (refreshedPage.__ui[".edit"].hidden) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-assert.equal(refreshedPage.__ui[".edit"].hidden, false, "浏览器应显示 SDK 昵称按钮");
-const refreshedProfileRoot = refreshedPage.__shadowRoots.at(-1);
-refreshedPage.__ui[".edit"].click();
-while (refreshedProfileRoot.activeElement !== refreshedPage.__ui.input) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-assert.equal(refreshedProfileRoot.activeElement, refreshedPage.__ui.input);
-emitKey(
-  refreshedPage.__ui[".overlay"],
-  refreshedPage.__ui.input,
-  "Escape",
-);
-assert.equal(
-  refreshedPage.__ui[".overlay"].hidden,
-  true,
-  "Escape must cancel an optional nickname dialog",
-);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(refreshedProfileRoot.activeElement, refreshedPage.__ui[".info"]);
 assert.equal(nicknameCommands.length, 0);
-refreshedPage.__ui[".edit"].click();
-await new Promise((resolve) => setTimeout(resolve, 0));
-refreshedPage.__ui.input.value = "修改后的玩家";
-await refreshedPage.__ui.form.onsubmit({ preventDefault() {} });
-assert.equal(refreshedPage.playmesh.player.getCurrent().nickname, "修改后的玩家");
+await refreshedPage.playmesh.main.player.setNickname("修改后的玩家");
+assert.equal(refreshedPage.playmesh.main.player.getCurrent().nickname, "修改后的玩家");
 assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), "修改后的玩家");
 assert.equal(nicknameCommands.length, 1);
 assert.equal(nicknameCommands[0].nickname, "修改后的玩家");
@@ -1187,7 +916,7 @@ assert.equal(joinUrls.includes("http://127.0.0.1:43000/v1/sessions/join"), true)
 
 const reconnectPage = createPage(null, true);
 const selfReconnectEvents = [];
-reconnectPage.playmesh.session.onPlayerReconnect((event) => selfReconnectEvents.push(event));
+reconnectPage.playmesh.main.session.onPlayerReconnect((event) => selfReconnectEvents.push(event));
 await reconnectPage.playmesh.ready;
 assert.equal(selfReconnectEvents.length, 1);
 assert.equal(selfReconnectEvents[0].isCurrentPlayer, true);
@@ -1201,13 +930,13 @@ while (joins < reconnectJoins + 1 || reconnectPage.__sockets.at(-1) === firstSoc
 }
 assert.equal(
   reconnectPage.__consoleEntries.some(
-    (entry) => entry.args[0] === "Playmesh 主会话 WebSocket 已掉线",
+    (entry) => String(entry.args[0]).includes("Playmesh 主会话 WebSocket 已掉线"),
   ),
   true,
 );
 assert.equal(
   reconnectPage.__consoleEntries.some(
-    (entry) => entry.args[0] === "Playmesh 主会话 WebSocket 重连成功",
+    (entry) => String(entry.args[0]).includes("Playmesh 主会话 WebSocket 重连成功"),
   ),
   true,
 );
@@ -1215,34 +944,17 @@ assert.equal(
 const englishBrowserPage = createPage(null, false, ["en-GB"]);
 await englishBrowserPage.playmesh.ready;
 assert.equal(
-  englishBrowserPage.playmesh.runtime.getLocale(),
+  englishBrowserPage.playmesh.app.runtime.getLocale(),
   "en-GB",
   "game locale must preserve the displaying browser's own locale",
 );
-if (false) {
-while (!englishBrowserPage.__shadowHtml.some(
-  (html) => html.includes("Game menu"),
-)) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-assert.equal(
-  englishBrowserPage.__shadowHtml.some((html) => html.includes("Game menu")),
-  true,
-);
-
 const japaneseBrowserPage = createPage(null, false, ["ja-JP"]);
 await japaneseBrowserPage.playmesh.ready;
 assert.equal(
-  japaneseBrowserPage.playmesh.runtime.getLocale(),
+  japaneseBrowserPage.playmesh.app.runtime.getLocale(),
   "ja-JP",
   "game locale must not be limited by Playmesh overlay translations",
 );
-assert.equal(
-  japaneseBrowserPage.__shadowHtml.some((html) => html.includes("游戏菜单")),
-  true,
-  "unsupported overlay locales must independently fall back to zh-CN",
-);
-}
 
 const unreadableNavigator = {};
 Object.defineProperty(unreadableNavigator, "languages", {
@@ -1264,7 +976,7 @@ const fallbackBrowserPage = createPage(
 );
 await fallbackBrowserPage.playmesh.ready;
 assert.equal(
-  fallbackBrowserPage.playmesh.runtime.getLocale(),
+  fallbackBrowserPage.playmesh.app.runtime.getLocale(),
   "zh",
   "browser navigator read failures must fall back to the public zh locale",
 );

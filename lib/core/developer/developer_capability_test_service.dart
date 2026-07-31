@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../app_media/app_media_runtime.dart';
+import '../app_media/default_app_media_adapters.dart';
 import '../capabilities/capability_plugin.dart';
 import '../capabilities/capability_registry.dart';
 import '../capabilities/default_capability_plugins.dart';
@@ -8,32 +10,53 @@ import 'developer_event_hub.dart';
 
 /// 开发者工作区能力自检服务。
 ///
-/// 清单、平台可用性和测试实现全部来自已注册能力插件。工作区始终展示当前
-/// App 的完整平台注册表，不按某个项目的 capabilities.json 过滤。
+/// 清单和平台注册来自已注册能力插件；一键自检统一创建默认实例后立即释放，
+/// 不维护独立硬件探测接口。工作区始终展示当前 App 的完整平台注册表，不按
+/// 某个项目的 capabilities.json 过滤。
 class DeveloperCapabilityTestService {
-  DeveloperCapabilityTestService({
+  factory DeveloperCapabilityTestService({
     VibrationDriver? vibrationDriver,
     CapabilityRegistry? registry,
     void Function(Map<String, Object?> event)? emitEvent,
-  }) : registry =
-           registry ??
-           createDefaultCapabilityRegistry(vibrationDriver: vibrationDriver),
-       _emitEvent = emitEvent ?? developerEventHub.emit;
+  }) {
+    final mediaRuntime = registry == null
+        ? createDefaultAppMediaRuntime()
+        : null;
+    return DeveloperCapabilityTestService._(
+      registry:
+          registry ??
+          createDefaultCapabilityRegistry(
+            vibrationDriver: vibrationDriver,
+            mediaSourceBroker: mediaRuntime!,
+          ),
+      mediaRuntime: mediaRuntime,
+      emitEvent: emitEvent ?? developerEventHub.emit,
+    );
+  }
+
+  DeveloperCapabilityTestService._({
+    required this.registry,
+    required this._mediaRuntime,
+    required this._emitEvent,
+  });
 
   final CapabilityRegistry registry;
+  final AppMediaRuntime? _mediaRuntime;
   final void Function(Map<String, Object?> event) _emitEvent;
   final Map<String, _DeveloperCapabilityTestInstance> _instances = {};
   int _instanceSequence = 0;
 
-  List<Map<String, Object?>> describe() => registry.plugins
-      .map(
-        (plugin) => {
-          ...plugin.descriptor.toJson(),
-          'testable': true,
-          'platformAvailable': plugin.isAvailable,
-        },
-      )
-      .toList(growable: false);
+  Future<List<Map<String, Object?>>> describe() async {
+    return registry.plugins
+        .map(
+          (plugin) => {
+            ...plugin.descriptor.toJson(),
+            'testable': true,
+            'platformAvailable': registry.isPluginAvailable(plugin),
+          },
+        )
+        .toList(growable: false);
+  }
 
   Future<List<Map<String, Object?>>> run({
     List<String>? codes,
@@ -61,7 +84,7 @@ class DeveloperCapabilityTestService {
   }) async {
     final plugin = registry.plugin(code);
     if (plugin == null) throw FormatException('未知能力 code：$code');
-    if (!plugin.isAvailable) {
+    if (!registry.isPluginAvailable(plugin)) {
       throw DeveloperCapabilityUnavailable('当前平台不支持 $code');
     }
     final CapabilityInstance instance;
@@ -170,7 +193,7 @@ class DeveloperCapabilityTestService {
     Duration timeout,
   ) async {
     final started = DateTime.now();
-    if (!plugin.isAvailable) {
+    if (!registry.isPluginAvailable(plugin)) {
       return _result(
         plugin.descriptor,
         started,
@@ -179,27 +202,32 @@ class DeveloperCapabilityTestService {
       );
     }
     try {
-      final detail = await plugin.test(timeout);
+      final createFuture = plugin.create(const <String, Object?>{});
+      late final CapabilityInstance instance;
+      try {
+        instance = await createFuture.timeout(timeout);
+      } on TimeoutException {
+        unawaited(
+          createFuture
+              .then<void>((lateInstance) => lateInstance.dispose())
+              .catchError((Object _) {}),
+        );
+        rethrow;
+      }
+      await instance.dispose();
       return _result(
         plugin.descriptor,
         started,
         status: 'passed',
-        message: '能力插件测试通过',
-        detail: detail,
+        message: '能力实例创建并释放成功',
+        detail: const {'created': true, 'disposed': true},
       );
     } on TimeoutException {
       return _result(
         plugin.descriptor,
         started,
         status: 'timeout',
-        message: '在 ${timeout.inMilliseconds}ms 内未收到能力数据',
-      );
-    } on UnsupportedError catch (error) {
-      return _result(
-        plugin.descriptor,
-        started,
-        status: 'unavailable',
-        message: error.message?.toString() ?? error.toString(),
+        message: '在 ${timeout.inMilliseconds}ms 内未完成能力实例创建',
       );
     } on Object catch (error) {
       return _result(
@@ -216,6 +244,7 @@ class DeveloperCapabilityTestService {
     _instances.clear();
     await Future.wait(instances.map((instance) => instance.close()));
     await registry.dispose();
+    await _mediaRuntime?.dispose();
   }
 
   static Map<String, Object?> _result(

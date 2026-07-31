@@ -224,6 +224,24 @@ func TestUploadKeyAndQRCodeRemainVisibleInCompactAccountStrip(t *testing.T) {
 	}
 }
 
+func TestUserUploadDisplaysServerValidationDetail(t *testing.T) {
+	script, err := assets.ReadFile("assets/user.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(script)
+	for _, required := range []string{
+		`function localizedUploadError(error)`,
+		`error.result.message.trim()`,
+		`localizedUploadError(error), version: highest`,
+		`: localizedUploadError(error);`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("用户上传错误详情展示缺少 %q", required)
+		}
+	}
+}
+
 func TestCaptchaLoadsInDialogsOnlyAfterAuthenticationSubmit(t *testing.T) {
 	userHTML, err := assets.ReadFile("assets/user.html")
 	if err != nil {

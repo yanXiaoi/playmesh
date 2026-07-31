@@ -213,14 +213,18 @@ POST /api/user/uploads
 5. 使用 ClamAV 扫描原始 ZIP；默认扫描器缺失、超时或报错都会拒绝上传。
 6. 静态检查 HTML、JavaScript、CSS 与 SVG 中的外部 HTTP/WS 地址、`file:`、
    `javascript:`、动态代码执行、Service Worker 和嵌入文档元素。
-7. 完整校验 `main.json` 后才把原包原子写入游戏包目录；`id` 只接受 1–64 个
+7. `main.json.entries.game` 与 `entries.controller` 可使用
+   `relative.html?query`；物理文件检查只使用 `?` 前的路径。云端上传扫描会把
+   查询原文及每一层百分号解码结果按 HTML 活动内容规则检查，阻止编码或多重编码的
+   外链协议绕过；`authority.entry` 仍不允许查询参数。
+8. 完整校验 `main.json` 后才把原包原子写入游戏包目录；`id` 只接受 1–64 个
    安全字符。解析器对所有未知字段一律静默忽略，不产生 finding、告警、错误或兼容
    分支；规范化使用当前已知 Manifest 字段投影，因此数据库和 ZIP 中统一丢弃所有
    未知字段。`permissions`、`icon` 只是普通未知键；能力只读取独立
    `capabilities.json`，图标只读取包根 `icon.png`。
-8. 敏感或感染文件立即删除，不创建版本、所有权或审核记录。
-9. 并发扫描数默认限制为 4；可在后台通过 `maxConcurrentScans` 调整。
-10. 下载和删除时把 SQLite 路径重新视为不可信值，解析符号链接并强制目标仍是
+9. 敏感或感染文件立即删除，不创建版本、所有权或审核记录。
+10. 并发扫描数默认限制为 4；可在后台通过 `maxConcurrentScans` 调整。
+11. 下载和删除时把 SQLite 路径重新视为不可信值，解析符号链接并强制目标仍是
     游戏包目录中的常规 ZIP；持久化写入使用目录范围文件 API。
 
 版本删除先在 SQLite 事务中标记为 `deleting` 并写入审计，再删除 ZIP、图标和派生

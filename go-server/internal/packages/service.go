@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -52,15 +53,17 @@ func (e *InputError) Error() string {
 }
 
 const (
-	maxManifestBytes    int64 = 256 << 10
-	maxActiveTextBytes  int64 = 4 << 20
-	maxFindingBytes           = 8 << 10
-	maxArchivePathBytes       = 512
-	maxRootIconBytes          = 2 << 20
-	maxRootIconEdge           = 8192
-	maxRootIconPixels   int64 = 4 * 1024 * 1024
-	maxGameTagCount           = 5
-	maxGameTagRunes           = 64
+	requiredGameSDKVersion       = "4.0.0"
+	requiredAppSDKVersion        = "3.2.0"
+	maxManifestBytes       int64 = 256 << 10
+	maxActiveTextBytes     int64 = 4 << 20
+	maxFindingBytes              = 8 << 10
+	maxArchivePathBytes          = 512
+	maxRootIconBytes             = 2 << 20
+	maxRootIconEdge              = 8192
+	maxRootIconPixels      int64 = 4 * 1024 * 1024
+	maxGameTagCount              = 5
+	maxGameTagRunes              = 64
 )
 
 var (
@@ -404,7 +407,11 @@ func (s *Service) ProcessUserUpload(
 	manifest["author"] = user.DisplayName
 	canonical, _ := json.Marshal(manifest)
 	summary.JSON = string(canonical)
-	rewrittenPath, err := s.rewriteArchiveManifest(tempPath, canonical)
+	rewrittenPath, err := s.rewriteArchiveManifest(
+		tempPath,
+		canonical,
+		len(summary.Icon) != 0,
+	)
 	if err != nil {
 		return store.Game{}, err
 	}
@@ -412,6 +419,10 @@ func (s *Service) ProcessUserUpload(
 	normalizedHash, err := fileSHA256(rewrittenPath)
 	if err != nil {
 		return store.Game{}, err
+	}
+	archiveInfo, err := os.Stat(rewrittenPath)
+	if err != nil {
+		return store.Game{}, fmt.Errorf("读取规范化游戏包大小: %w", err)
 	}
 	report.SHA256 = normalizedHash
 	storedPath, err := s.persistArchive(rewrittenPath, normalizedHash)
@@ -431,7 +442,7 @@ func (s *Service) ProcessUserUpload(
 		PackageID: summary.ID, Name: summary.Name, Author: summary.Author,
 		Version: summary.Version, Remarks: summary.Remarks, TagsText: summary.TagsText,
 		OwnerUserID: user.ID, Status: store.StatusPending, OriginalFilename: filename,
-		StoredPath: storedPath, IconPath: iconPath,
+		StoredPath: storedPath, PackageSizeBytes: archiveInfo.Size(), IconPath: iconPath,
 		ManifestJSON: summary.JSON, ScanStatus: "clean",
 		ScanReport: string(reportJSON),
 	})
@@ -507,6 +518,7 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 		return manifestSummary{}, []string{"ZIP 条目数量超过上限"}
 	}
 	seen := make(map[string]struct{})
+	publishedFiles := make(map[string]struct{})
 	var expanded uint64
 	var manifestBytes []byte
 	for _, entry := range reader.File {
@@ -532,6 +544,10 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 			findings = append(findings, "游戏包根目录包含未允许内容: "+name)
 			continue
 		}
+		if isReservedAppPath(name) {
+			findings = append(findings, "游戏包 app/ 一级目录使用平台保留名称: "+name)
+			continue
+		}
 		if entry.FileInfo().IsDir() {
 			continue
 		}
@@ -539,6 +555,7 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 			findings = append(findings, "ZIP 包含符号链接或特殊文件: "+name)
 			continue
 		}
+		publishedFiles[name] = struct{}{}
 		uncompressed := entry.UncompressedSize64
 		compressed := entry.CompressedSize64
 		// #nosec G115 -- Config.Validate requires all three limits to be
@@ -606,6 +623,10 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 		manifestFindings = append(
 			manifestFindings,
 			s.scanActiveContent("main.json", []byte(summary.JSON))...,
+		)
+		manifestFindings = append(
+			manifestFindings,
+			s.validateManifestPackageContract(summary.JSON, publishedFiles)...,
 		)
 	}
 	if iconEntry := findArchiveEntry(reader.File, "icon.png"); iconEntry != nil {
@@ -749,7 +770,11 @@ func (s *Service) persistIcon(content []byte, hash string) (string, error) {
 	return filepath.Join(s.config.Storage.GamesDirectory, finalName), nil
 }
 
-func (s *Service) rewriteArchiveManifest(source string, manifest []byte) (string, error) {
+func (s *Service) rewriteArchiveManifest(
+	source string,
+	manifest []byte,
+	keepRootIcon bool,
+) (string, error) {
 	reader, err := zip.OpenReader(source)
 	if err != nil {
 		return "", err
@@ -773,6 +798,9 @@ func (s *Service) rewriteArchiveManifest(source string, manifest []byte) (string
 	}
 	writer := zip.NewWriter(output)
 	for _, entry := range reader.File {
+		if entry.Name == "icon.png" && !keepRootIcon {
+			continue
+		}
 		header := entry.FileHeader
 		target, err := writer.CreateHeader(&header)
 		if err != nil {
@@ -815,7 +843,8 @@ func (s *Service) rewriteArchiveManifest(source string, manifest []byte) (string
 
 func safeArchivePath(name string) (string, bool) {
 	if name == "" || len(name) > maxArchivePathBytes || strings.ContainsRune(name, '\x00') ||
-		strings.Contains(name, "\\") || strings.HasPrefix(name, "/") {
+		strings.Contains(name, "\\") || strings.HasPrefix(name, "/") ||
+		strings.Contains(name, "%") {
 		return "", false
 	}
 	cleaned := path.Clean(name)
@@ -836,6 +865,15 @@ func safeArchivePath(name string) (string, bool) {
 func allowedRoot(name string) bool {
 	return name == "main.json" || name == "capabilities.json" || name == "icon.png" ||
 		name == "app" || strings.HasPrefix(name, "app/")
+}
+
+func isReservedAppPath(name string) bool {
+	segments := strings.Split(name, "/")
+	if len(segments) < 2 || !strings.EqualFold(segments[0], "app") {
+		return false
+	}
+	return strings.EqualFold(segments[1], "playmesh") ||
+		strings.EqualFold(segments[1], "bucket")
 }
 
 func findArchiveEntry(entries []*zip.File, name string) *zip.File {
@@ -968,6 +1006,371 @@ func parseManifest(content []byte) (manifestSummary, []string) {
 	}
 	summary.TagsText = strings.Join(tagValues, ",")
 	return summary, findings
+}
+
+func (s *Service) validateManifestPackageContract(
+	canonicalManifest string,
+	publishedFiles map[string]struct{},
+) []string {
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(canonicalManifest), &manifest); err != nil {
+		return nil
+	}
+	findings := make([]string, 0)
+	requireManifestExactVersion(
+		manifest,
+		"sdkVersion",
+		requiredGameSDKVersion,
+		&findings,
+	)
+	requireManifestExactVersion(
+		manifest,
+		"appSdkVersion",
+		requiredAppSDKVersion,
+		&findings,
+	)
+	entries := map[string]any{}
+	entriesValid := true
+	if value, exists := manifest["entries"]; exists {
+		var ok bool
+		entries, ok = value.(map[string]any)
+		if !ok {
+			findings = append(findings, "main.json.entries 必须是对象")
+			entriesValid = false
+		}
+	}
+	singleScreen := manifestStringListContains(
+		manifest["displayModes"],
+		"single_screen_multiplayer",
+	)
+	multiplayer := manifestStringListContains(manifest["modes"], "multiplayer")
+	controllerRequired := multiplayer && singleScreen
+	if entriesValid {
+		gameEntry, valid := manifestWebEntry(
+			entries,
+			"game",
+			"main.json.entries.game",
+			manifestWebEntryHTML,
+			&findings,
+		)
+		if valid {
+			findings = append(
+				findings,
+				s.scanManifestHTMLQuery(
+					"main.json.entries.game",
+					gameEntry.rawQuery,
+				)...,
+			)
+			requirePublishedEntry(
+				publishedFiles,
+				gameEntry,
+				"main.json.entries.game",
+				&findings,
+			)
+		}
+
+		if controllerRequired {
+			controllerEntry, valid := manifestWebEntry(
+				entries,
+				"controller",
+				"main.json.entries.controller",
+				manifestWebEntryHTML,
+				&findings,
+			)
+			if valid {
+				findings = append(
+					findings,
+					s.scanManifestHTMLQuery(
+						"main.json.entries.controller",
+						controllerEntry.rawQuery,
+					)...,
+				)
+				requirePublishedEntry(
+					publishedFiles,
+					controllerEntry,
+					"main.json.entries.controller",
+					&findings,
+				)
+			}
+		}
+	}
+
+	if multiplayer {
+		authorityValue, authorityDeclared := manifest["authority"]
+		if !authorityDeclared {
+			findings = append(findings, "多人游戏缺少 main.json.authority.entry")
+			return findings
+		}
+		authority, ok := authorityValue.(map[string]any)
+		if !ok {
+			findings = append(findings, "main.json.authority 必须是对象")
+		} else if entryValue, declared := authority["entry"]; declared {
+			authorityEntry, valid := validateManifestWebEntry(
+				entryValue,
+				"main.json.authority.entry",
+				manifestWebEntryJavaScript,
+				&findings,
+			)
+			if valid {
+				requirePublishedEntry(
+					publishedFiles,
+					authorityEntry,
+					"main.json.authority.entry",
+					&findings,
+				)
+			}
+		} else {
+			findings = append(findings, "多人游戏缺少 main.json.authority.entry")
+		}
+	}
+	return findings
+}
+
+func requireManifestExactVersion(
+	manifest map[string]any,
+	field string,
+	required string,
+	findings *[]string,
+) {
+	value, ok := manifest[field].(string)
+	if !ok || value != required {
+		*findings = append(
+			*findings,
+			fmt.Sprintf("main.json.%s 必须显式声明为 %s", field, required),
+		)
+	}
+}
+
+type manifestWebEntryKind uint8
+
+const (
+	manifestWebEntryHTML manifestWebEntryKind = iota
+	manifestWebEntryJavaScript
+)
+
+type validatedManifestWebEntry struct {
+	path     string
+	rawQuery string
+}
+
+func manifestWebEntry(
+	object map[string]any,
+	field string,
+	pathName string,
+	kind manifestWebEntryKind,
+	findings *[]string,
+) (validatedManifestWebEntry, bool) {
+	value, exists := object[field]
+	if !exists {
+		*findings = append(*findings, pathName+" 必须显式声明")
+		return validatedManifestWebEntry{}, false
+	}
+	return validateManifestWebEntry(value, pathName, kind, findings)
+}
+
+func validateManifestWebEntry(
+	value any,
+	pathName string,
+	kind manifestWebEntryKind,
+	findings *[]string,
+) (validatedManifestWebEntry, bool) {
+	entry, ok := value.(string)
+	if !ok || entry == "" ||
+		len(entry) > maxArchivePathBytes-len("app/") ||
+		strings.TrimSpace(entry) != entry ||
+		strings.Contains(entry, "#") ||
+		hasControlCharacter(entry) {
+		*findings = append(
+			*findings,
+			pathName+" 必须是相对于物理 app/ 的安全路径",
+		)
+		return validatedManifestWebEntry{}, false
+	}
+	entryPath, rawQuery, hasQuery := strings.Cut(entry, "?")
+	if hasQuery && kind == manifestWebEntryJavaScript {
+		*findings = append(
+			*findings,
+			pathName+" 不允许查询参数",
+		)
+		return validatedManifestWebEntry{}, false
+	}
+	if hasQuery && rawQuery == "" {
+		*findings = append(
+			*findings,
+			pathName+" 查询参数不能为空",
+		)
+		return validatedManifestWebEntry{}, false
+	}
+	if !isSafeWebRootEntryPath(entryPath) {
+		*findings = append(
+			*findings,
+			pathName+" 必须是相对于物理 app/ 的安全路径",
+		)
+		return validatedManifestWebEntry{}, false
+	}
+	if hasQuery {
+		if _, err := url.QueryUnescape(rawQuery); err != nil {
+			*findings = append(
+				*findings,
+				pathName+" 查询参数包含无效百分号编码",
+			)
+			return validatedManifestWebEntry{}, false
+		}
+	}
+	if !kind.accepts(entryPath) {
+		requirement := ".html"
+		if kind == manifestWebEntryJavaScript {
+			requirement = ".js 或 .mjs"
+		}
+		*findings = append(
+			*findings,
+			pathName+" 必须是 "+requirement+" 文件",
+		)
+		return validatedManifestWebEntry{}, false
+	}
+	return validatedManifestWebEntry{path: entryPath, rawQuery: rawQuery}, true
+}
+
+func (kind manifestWebEntryKind) accepts(entry string) bool {
+	extension := strings.ToLower(path.Ext(entry))
+	switch kind {
+	case manifestWebEntryHTML:
+		return extension == ".html"
+	case manifestWebEntryJavaScript:
+		return extension == ".js" || extension == ".mjs"
+	default:
+		return false
+	}
+}
+
+func isSafeWebRootEntryPath(entry string) bool {
+	if entry == "" ||
+		strings.HasPrefix(entry, "/") ||
+		strings.Contains(entry, "\\") ||
+		strings.ContainsAny(entry, "?#:") ||
+		strings.Contains(entry, "%") ||
+		hasControlCharacter(entry) {
+		return false
+	}
+	cleaned := path.Clean(entry)
+	if cleaned == "." || cleaned != entry {
+		return false
+	}
+	segments := strings.Split(entry, "/")
+	for _, segment := range segments {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	first := segments[0]
+	return !strings.EqualFold(first, "playmesh") &&
+		!strings.EqualFold(first, "bucket")
+}
+
+func requirePublishedEntry(
+	publishedFiles map[string]struct{},
+	entry validatedManifestWebEntry,
+	pathName string,
+	findings *[]string,
+) {
+	physicalPath := "app/" + entry.path
+	if _, exists := publishedFiles[physicalPath]; !exists {
+		*findings = append(
+			*findings,
+			pathName+" 对应文件不存在: "+physicalPath,
+		)
+	}
+}
+
+func (s *Service) scanManifestHTMLQuery(
+	pathName string,
+	rawQuery string,
+) []string {
+	if rawQuery == "" {
+		return nil
+	}
+	findings := make([]string, 0)
+	current := rawQuery
+	// Each successful percent decode shortens the text. The entry length limit
+	// therefore gives this loop a strict upper bound while still detecting any
+	// number of encoding layers that can fit in main.json.
+	for layer := 0; layer <= len(rawQuery); layer++ {
+		for _, rule := range s.contentRules {
+			if len(rule.extensions) > 0 {
+				if _, applies := rule.extensions[".html"]; !applies {
+					continue
+				}
+			}
+			if rule.pattern.MatchString(current) {
+				findings = append(
+					findings,
+					rule.description+" ["+rule.id+"]: "+
+						pathName+" 查询参数",
+				)
+			}
+		}
+		decoded := unescapeQueryLayer(current)
+		if decoded == current {
+			break
+		}
+		current = decoded
+	}
+	return uniqueStrings(findings)
+}
+
+func unescapeQueryLayer(value string) string {
+	var output strings.Builder
+	output.Grow(len(value))
+	changed := false
+	for index := 0; index < len(value); {
+		switch {
+		case value[index] == '%' && index+2 < len(value):
+			high, highOK := hexNibble(value[index+1])
+			low, lowOK := hexNibble(value[index+2])
+			if highOK && lowOK {
+				output.WriteByte(high<<4 | low)
+				index += 3
+				changed = true
+				continue
+			}
+			output.WriteByte(value[index])
+			index++
+		case value[index] == '+':
+			output.WriteByte(' ')
+			index++
+			changed = true
+		default:
+			output.WriteByte(value[index])
+			index++
+		}
+	}
+	if !changed {
+		return value
+	}
+	return output.String()
+}
+
+func hexNibble(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func manifestStringListContains(value any, expected string) bool {
+	values, _ := value.([]any)
+	for _, value := range values {
+		if text, ok := value.(string); ok && text == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func projectManifest(source map[string]any) map[string]any {

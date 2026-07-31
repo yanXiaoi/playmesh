@@ -8,7 +8,7 @@
 每个能力在同一插件实现中定义：
 
 - 稳定 code 和独立 `apiVersion`；
-- 中文名称、用途和 App/HTML 支持状态；
+- 中文名称、用途和 `supportedPlatforms` 平台枚举列表；
 - 创建参数、方法、事件和错误数据 Schema；
 - 有状态实例的创建、调用、事件、错误与释放；
 - 当前平台可用性和自检；
@@ -40,19 +40,27 @@ lib/core/capabilities/
 
 ## 当前完整能力注册表
 
-当前内置注册表只有以下四项。code 区分大小写，是运行时、项目声明、工作区和 SDK
+当前内置注册表只有以下五项。code 区分大小写，是运行时、项目声明、工作区和 SDK
 调用共同使用的唯一主键。
 
 | code / API 版本 | 创建参数 | 方法 | 事件 | 当前适配声明 |
 | --- | --- | --- | --- | --- |
-| `media.camera` / `1.0.0` | 不接受创建参数 | 无；游戏直接使用 `getUserMedia({video:true})` | 无 | App WebView 声明后放行权限请求；独立插件保留原生扩展入口 |
-| `media.microphone` / `1.1.0` | 不接受创建参数；同一插件同时只允许一个实例 | `toText({localeId, listenFor, pauseFor})`；两个时限均为整数秒 | `textOnSoundLevelChange({level})`、`textOnResult(SpeechRecognitionResult JSON)` | App WebView 声明后放行麦克风；App 原生适配短语音识别 |
-| `device.midi` / `1.0.0` | 不接受创建参数 | 无；游戏直接使用 `requestMIDIAccess({sysex:true})` | 无 | App WebView 声明后放行 MIDI SysEx；当前平台可用性由插件报告 |
-| `device.vibration` / `2.0.0` | 不接受创建参数 | `vibrate({duration, pattern, repeat, intensities, amplitude, sharpness, preset})`、`cancel({})` | 无 | 使用 `vibration` 插件；当前适配 Android/iOS；设备是否有振动器由自检报告 |
+| `media.camera` / `1.0.0` | 不接受创建参数 | 无；游戏直接使用 `getUserMedia({video:true})` | 无 | `WINDOWS`、`ANDROID`；App WebView 声明后放行权限请求 |
+| `media.microphone` / `1.1.0` | 不接受创建参数；同一插件同时只允许一个实例 | `toText({localeId, listenFor, pauseFor})`；两个时限均为整数秒 | `textOnSoundLevelChange({level})`、`textOnResult(SpeechRecognitionResult JSON)` | `WINDOWS`、`ANDROID`；App 原生适配短语音识别 |
+| `device.midi` / `1.0.0` | 不接受创建参数 | 无；游戏直接使用 `requestMIDIAccess({sysex:true})` | 无 | `ANDROID`；App WebView 声明后放行 MIDI SysEx |
+| `device.vibration` / `2.0.0` | 不接受创建参数 | `vibrate({duration, pattern, repeat, intensities, amplitude, sharpness, preset})`、`cancel({})` | 无 | `ANDROID`；创建实例时确认设备存在振动器 |
+| `sensor.pose6d` / `1.0.0` | `{rateHz: 1..60}`，默认 30 | `recenter({})`、`openVideo({width,height,fps})`；`createVideoSource` 为描述性别名 | `pose({captureTimestampNs,trackingState,position,rotation})` | `ANDROID`；ARCore 位姿与按需视频 |
 
 `GET /dev/api/capabilities`、App bootstrap、AI 项目提示词、工作区能力设置和能力确认
-都投影这份注册表。普通浏览器分享网关只把 `htmlSupported == true` 的 code 放入
-`availableCapabilities`；描述符仍可用于说明未适配项。
+都投影这份注册表。普通浏览器分享网关只把 `supportedPlatforms` 包含
+`CapabilityPlatform.HTML` 的 code 放入 `availableCapabilities`；描述符仍可用于
+说明未适配项。
+
+`sensor.pose6d` 的位姿和视频采用两条独立链路：轻量 `pose` 事件始终通过通用能力实例
+协议发送；只有网页调用 `openVideo()` 后再调用
+`playmesh.app.media.open(source)`，媒体适配器才开始消费相机帧。能力插件只依赖
+`AppMediaSourceBroker`，不依赖 WebRTC。媒体请求中的 `sourceOptions` 是尺寸、帧率等
+源需求，独立 `adapterOptions` 由具体媒体适配器自行解析，公共层禁止读取协议字段。
 
 ## 命名和版本
 
@@ -69,13 +77,17 @@ lib/core/capabilities/
 描述符必须完整表达：
 
 - `code`、`apiVersion`、名称和说明；
-- App 与普通 HTML 环境的支持状态；
+- `supportedPlatforms`：只能使用 `CapabilityPlatform.WINDOWS`、
+  `CapabilityPlatform.ANDROID`、`CapabilityPlatform.HTML` 枚举值；
 - 创建参数 JSON Schema；
 - 每个方法的参数、返回值和是否要求用户主动触发；
 - 每个事件的数据 Schema；
 - 可预期错误及恢复建议。
 
 工作区、Agent、能力确认和自检只能消费该描述符，不能用硬编码补充缺失信息。
+注册处不得传入 `"android"`、`"WINDOWS"` 等裸字符串，也不得维护独立的
+`appSupported/htmlSupported` 布尔值。枚举名直接序列化为同名值，现有
+`playmesh.app.platform` 等其他平台协议字段不受影响。
 
 描述符 Schema 当前是契约和发现信息，不是通用运行时自动校验器。
 `CapabilityRuntime` 只校验 code、声明、确认、平台可用性、实例 ID 和 JSON 对象形状；
@@ -151,9 +163,11 @@ Android Manifest 仍属于系统静态声明，新增能力时必须同步配置
 
 1. 在 `lib/core/capabilities/{domain}/` 实现 `CapabilityPlugin`，并提供稳定的静态
    `CapabilityDescriptor`。`descriptor.code`、`apiVersion`、options、methods 和
-   events 必须完整。
-2. 实现 `isAvailable`、`create(options)`、`test(timeout)` 和插件级 `dispose()`。
-   `isAvailable == false` 必须代表真实平台不可用，不能返回假数据。
+   events 必须完整；`supportedPlatforms` 必须显式传入非空、不重复的
+   `CapabilityPlatform` 枚举列表。
+2. 实现 `isAvailable`、`create(options)` 和插件级 `dispose()`。`isAvailable` 只能做
+   同步、零 I/O 的平台注册或适配器存在性判断；硬件、驱动、系统服务和权限是否真正
+   可用，由 `create()` 的实际创建结果决定。
 3. 权限声明型能力同时实现 `CapabilityWebPermissionPlugin`，只在插件内注册资源名和
    唯一平台授权执行器；执行器沿用 `descriptor.code`，不得另设 ID，也不得修改页面
    Widget、Windows WebView 或公共权限 switch。
@@ -189,6 +203,9 @@ _webPermissionExecutorByCode = {
 _plugins.length != 输入 plugins.length
   => 失败："能力插件 code 不能重复"
 
+任一 descriptor.supportedPlatforms 为空或重复
+  => 失败："supportedPlatforms 不能为空或重复"
+
 任一插件的 webPermissionResources 为空，或任一 resource 为空或重复
   => 失败："WebView 权限资源不能为空或重复"
 ```
@@ -196,6 +213,11 @@ _plugins.length != 输入 plugins.length
 因此两个插件的 `descriptor.code` 完全相等时启动即失败；大小写不同会被视为两个不同
 code，但能力 code 规范禁止用大小写制造别名。`defaultCapabilityDescriptors` 和
 `defaultCapabilityDescriptorRegistry` 都从同一 registration 列表派生，不能另行添加。
+
+能力注册表没有异步可用性预探测阶段。App bootstrap 和开发者能力清单禁止通过
+MethodChannel、硬件枚举或系统服务查询阻塞启动；它们只读取描述符平台列表与同步
+`isAvailable`。设备不支持、服务未安装、权限被拒绝等真实错误在用户创建能力实例时
+直接返回。开发者自检也不走另一套探测接口，而是用默认参数创建真实实例后立即释放。
 
 ## 从项目声明到 SDK 可调用的完整链路
 
@@ -231,7 +253,7 @@ capabilityRegistry
 
 device.capabilities
   = declaredCapabilities.where(
-      code => registry.plugin(code)?.isAvailable == true
+      code => registry.isAvailable(code)
     )
 
 device.declaredCapabilities
@@ -239,8 +261,9 @@ device.declaredCapabilities
 ```
 
 也就是说，某 code 只有同时满足“声明中存在完全相等 code、注册表能按该 code 找到插件、
-插件 `isAvailable == true`”才出现在 `getAvailable()`；未声明插件即使设备支持也不会
-暴露为当前游戏可用。
+描述符列表包含当前 `CapabilityPlatform`、且插件的同步 `isAvailable == true`”才出现
+在 `getAvailable()`；这表示当前平台已注册该适配器，不表示硬件已经预验证。未声明
+插件即使设备支持也不会暴露为当前游戏可用。
 
 ### 3. 每次加载确认
 
@@ -249,20 +272,22 @@ Game SDK 根据当前角色声明生成能力确认界面。用户选择允许�
 ```text
 decision == "allow"
 且 playmesh.app.isAvailable() == true
-且 __confirmCapabilities 是函数
+且私有 Symbol runtime 已提供能力确认适配器
   => request("app.capabilities.confirm")
   => CapabilityRuntime.confirm()
   => _confirmed = true
 ```
 
 拒绝不会调用 confirm，并进入退出流程。确认不持久化；WebView 重载、Bridge reset 或
-页面退出都会把 `_confirmed` 恢复为 `false`。
+页面退出都会把 `_confirmed` 恢复为 `false`。该适配器不可枚举，不得作为
+`playmesh.main`/`playmesh.app` 的 `__*` 成员公开。
 
 ### 4. `capabilities.create()` 的双层判断
 
 本节只适用于公开了方法或事件的能力。摄像头和 MIDI 当前只用于 Web 权限声明，
 不调用 `capabilities.create()`。麦克风采集可以直接使用标准 Web API；需要原生
-语音转文字时创建 `media.microphone` 实例。
+语音转文字时创建 `media.microphone` 实例。空间位姿则创建 `sensor.pose6d` 实例，
+通过事件消费 XYZ/四元数，并只在需要画面时另行创建媒体源。
 
 网页 SDK 首先判断：
 
@@ -274,7 +299,7 @@ options 不是非数组 Object
   => TypeError
 
 bootstrap 不存在
-  => 要求先等待 playmesh.ready
+  => 要求先等待根 playmesh.ready（main.ready 内部先等待 app.ready，根 ready 复用该链）
 
 bootstrap.device.declaredCapabilities 不 includes(code)
   => 当前游戏未声明
@@ -306,7 +331,7 @@ declaredCapabilities.contains(code) == false
 _confirmed == false
   => 尚未完成本次确认
 
-plugin.isAvailable == false
+registry.isPluginAvailable(plugin) == false
   => 当前设备不支持
 
 否则
@@ -379,7 +404,8 @@ GET /dev/api/capabilities
 
 GET /dev/api/capability-tests
   => registry.plugins
-  => descriptor + testable=true + platformAvailable=isAvailable
+  => descriptor + testable=true
+     + platformAvailable=registry.isPluginAvailable(plugin)
 ```
 
 `POST /dev/api/capability-tests` 先经过 Developer Token 和前台 View 中间件，再判断：
@@ -395,23 +421,22 @@ codes 包含某 code
 timeoutMs 不是 250..10000 的整数
   => 400
 
-plugin.isAvailable == false
-  => status = unavailable，不调用 test()
+registry.isPluginAvailable(plugin) == false
+  => status = unavailable，不创建实例
 
-test() 在 timeout 内完成
-  => status = passed
+plugin.create({}) 在 timeout 内完成
+  => 立即 instance.dispose()
+  => 创建和释放都成功时 status = passed
 
 抛 TimeoutException
   => status = timeout
 
-抛 UnsupportedError
-  => status = unavailable
-
-其他异常
+创建或释放抛出任何其他异常
   => status = failed
 ```
 
-自检结果不等于用户授权，也不把能力加入游戏声明；它只验证当前 App 平台适配。
+自检结果不把能力加入游戏声明；它使用和游戏相同的真实 `create()` 路径，因此可能
+触发该能力正常创建时需要的系统授权。实例创建成功后必须立即释放。
 
 交互测试同样不需要为具体能力注册工作区页面。Workspace 从同一描述符递归生成实例
 参数表单、每个方法的参数表单和持续事件区：
@@ -421,7 +446,7 @@ POST /dev/api/capability-tests/instances
   body = {"code": code, "options": optionsSchema 表单生成的对象}
   -> registry.plugin(code) == null
      => 400 invalid_request
-  -> plugin.isAvailable == false
+  -> registry.isPluginAvailable(plugin) == false
      => 409 capability_unavailable
   -> plugin.create(options)
   -> 返回 instanceId，并订阅 instance.events
@@ -463,20 +488,29 @@ Workspace 按能力 code 写死参数或测试逻辑。
   按 code 调用执行器，未声明或未知资源一律拒绝。
 - Android 摄像头和麦克风在声明检查通过后还必须申请系统运行时权限；用户拒绝时
   WebView 请求同样失败。iOS/macOS 必须配置用途说明和沙盒 entitlement。
+- `sensor.pose6d` 必须显式声明并通过本次能力确认；创建实例时才申请 Android 相机
+  权限并启动 ARCore。它不复用 `media.camera` 的 WebView 权限声明，也不会把视频
+  自动暴露给页面。媒体源只能由签发它的当前页面运行时消费，篡改、释放后或跨页面
+  复用均拒绝。
 - 原生语音识别只适合命令和短句；插件必须转发部分、最终结果和声音级别，页面释放
   时取消仍在运行的识别。平台可能早于 `listenFor` 或 `pauseFor` 结束任务。
-- 加速度计、陀螺仪、设备方向等非敏感能力直接使用标准 Web API，不进入能力
-  注册表，也不由 Playmesh WebView 权限执行器处理。
+- 原始加速度计、陀螺仪、设备方向等非敏感能力直接使用标准 Web API，不进入能力
+  注册表，也不由 Playmesh WebView 权限执行器处理。基于相机和 ARCore 的
+  `sensor.pose6d` 属于明确例外，必须经过能力声明、确认和系统权限。
 - 文件选择由 `<input type="file">` 的用户动作触发，宿主只返回用户当次选择的文件，
   不声明能力，也不允许静默读取文件。
 - 能力声明只用于敏感 WebView 权限和 Playmesh 已做多平台适配的能力，两者均按需
   声明。其他标准 Web API 由 WebView 自身的特性支持和安全策略决定。
-- 自检不得产生不可预期副作用，例如持续震动、录音或修改用户文件。
+- 自检只允许用默认参数创建真实实例后立即释放，不调用方法；插件创建本身产生的系统
+  权限提示属于预期行为，但不得在释放后继续震动、录音、跟踪或修改用户文件。
 
 ## 平台适配
 
 平台实现可以位于 Kotlin、Swift、C++ 或 Dart，但必须通过同一个插件接口进入
-运行时。平台不支持时返回明确不可用状态，不提供假数据。
+运行时。注册表先用描述符的 `supportedPlatforms` 与当前
+`CapabilityPlatform` 判断平台支持，再读取零 I/O 的同步 `isAvailable`；任一不满足
+都返回明确不可用状态。硬件或驱动不得在这里预探测，真实创建失败由 `create()` 原样
+返回，不提供假数据。
 
 新增平台适配时需要说明：
 
@@ -485,6 +519,13 @@ Workspace 按能力 code 写死参数或测试逻辑。
 - 前后台、锁屏和页面销毁行为；
 - 数据单位、坐标系、频率或精度；
 - 真机验证方式和当前未验证边界。
+
+Android `sensor.pose6d` 当前使用 ARCore 世界坐标：位置单位为米，四元数顺序为
+`[x,y,z,w]`，相机观察方向为局部 `-Z`，`+Y` 向上。`captureTimestampNs` 用十进制
+字符串传递原生纳秒时间戳，避免 JavaScript 64 位整数精度损失。Activity 后台时暂停
+Session，回到前台恢复；最后一个实例释放、WebView reset 或 Activity 销毁时关闭
+Session。`openVideo()` 的尺寸和帧率是请求偏好，实际图像尺寸仍由设备与
+ARCore 决定。
 
 ## 新增插件步骤
 
@@ -508,5 +549,5 @@ Workspace 按能力 code 写死参数或测试逻辑。
 - App Authority/加入端角色隔离正确；普通浏览器不进入执行器链。
 - WebView 权限资源无重复；未知、未声明、不可用和执行器拒绝均不能放行。
 - 本地端、加入端和 Windows 宿主不包含具体权限能力的 code/resource 分支。
-- 自检有超时、明确状态且无危险副作用。
-- Android/iOS/桌面支持状态与真实实现一致。
+- 自检用默认参数创建并立即释放实例，有超时、明确状态且无持续副作用。
+- `WINDOWS`、`ANDROID`、`HTML` 支持列表与真实实现一致，未列出的平台视为不支持。

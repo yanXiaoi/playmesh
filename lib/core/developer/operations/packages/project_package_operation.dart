@@ -35,9 +35,6 @@ class _ProjectPackageOperation implements _DeveloperHttpOperation {
         orElse: () => throw StateError('开发者项目不存在'),
       );
       final rootFilePath = project.rootFilePath;
-      if (rootFilePath == null) {
-        throw StateError('该项目没有可拉取的本地工作区');
-      }
       final game = GameSummary(
         id: project.id,
         name: project.name,
@@ -50,7 +47,7 @@ class _ProjectPackageOperation implements _DeveloperHttpOperation {
         displayMode: 'multi_screen',
         orientation: GameOrientation.landscape,
         entry: LocalGameEntry(
-          assetPath: 'app/index.html',
+          gameEntryPath: 'index.html',
           statusLabel: '',
           packageRootFilePath: rootFilePath,
         ),

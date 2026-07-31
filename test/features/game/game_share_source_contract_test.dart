@@ -54,7 +54,10 @@ void main() {
     expect(appUiSource, contains('returnFocus.focus({ preventScroll: true })'));
     expect(appUiSource, contains('request("app.ui.openSharePanel"'));
     expect(runtimeSource, contains('platform.ui.restoreGameFocus'));
-    expect(runtimeSource, contains('appSdk.__restoreGameContentFocus?.()'));
+    expect(
+      runtimeSource,
+      contains('appInternalRuntime.restoreGameContentFocus?.()'),
+    );
   });
 
   test('Windows 游戏 WebView 挂载完成后主动取得原生键盘焦点', () {
@@ -118,7 +121,7 @@ void main() {
     expect(source, contains('_exitBeforeAppSdkTakeover()'));
     expect(source, contains('onInputTakeover: _takeOverAppSdkInput'));
     expect(source, contains('absorbing: !_appSdkInputTakenOver'));
-    expect(source, contains('window.playmeshApp?.__handleNativeBack?.()'));
+    expect(source, contains('appSdkHandleNativeBackScript()'));
     expect(source, contains('canPop: !_appSdkInputTakenOver'));
     expect(source, contains('onSystemBackHandlerChanged'));
     expect(source, isNot(contains('key == LogicalKeyboardKey.contextMenu')));
@@ -129,6 +132,6 @@ void main() {
       contains('onSystemBackHandlerChanged: _setGameSystemBackHandler'),
     );
     expect(appSource, contains('request("app.input.takeover")'));
-    expect(appSource, contains('__handleNativeBack()'));
+    expect(appSource, contains('handleNativeBack()'));
   });
 }

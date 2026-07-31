@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:playmesh/app.dart';
 import 'package:playmesh/core/developer/developer_event_hub.dart';
+import 'package:playmesh/core/developer/developer_run_controller.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
@@ -35,7 +36,7 @@ const _primaryGame = GameSummary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
   entry: LocalGameEntry(
-    assetPath: 'test-game/app/index.html',
+    gameEntryPath: 'index.html',
     statusLabel: 'Game SDK 1.0',
   ),
 );
@@ -51,7 +52,7 @@ const _updatedGame = GameSummary(
   displayMode: 'multi_screen',
   orientation: GameOrientation.portrait,
   entry: LocalGameEntry(
-    assetPath: 'updated-game/app/index.html',
+    gameEntryPath: 'index.html',
     statusLabel: 'Game SDK 2.3',
   ),
 );
@@ -201,7 +202,7 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 3.1.0'), findsOneWidget);
+    expect(find.text('Playmesh 4.0.0'), findsOneWidget);
     expect(find.text('Core 0.1.0'), findsOneWidget);
   });
 
@@ -285,6 +286,7 @@ void main() {
     WidgetTester tester,
   ) async {
     final navigatorKey = GlobalKey<NavigatorState>();
+    GameLaunchArguments? launched;
     await tester.pumpWidget(
       localizedTestApp(
         navigatorKey: navigatorKey,
@@ -292,6 +294,7 @@ void main() {
         routes: {'/developer-workspace': (_) => const Text('WORKSPACE')},
         onGenerateRoute: (settings) {
           if (settings.name != GamePage.routeName) return null;
+          launched = settings.arguments! as GameLaunchArguments;
           return MaterialPageRoute<void>(
             settings: settings,
             builder: (_) => const Text('DEVELOPER_GAME'),
@@ -308,11 +311,13 @@ void main() {
       navigatorKey.currentState!,
       const GameLaunchArguments(
         game: _primaryGame,
+        enterFullscreenOnLaunch: false,
         developerProjectId: 'com.playmesh.test-game',
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('DEVELOPER_GAME'), findsOneWidget);
+    expect(launched?.enterFullscreenOnLaunch, isFalse);
 
     navigatorKey.currentState!.pop();
     await tester.pumpAndSettle();
@@ -328,10 +333,11 @@ void main() {
       localizedTestApp(
         home: GamePage(
           game: _primaryGame,
+          enterFullscreenOnLaunch: true,
           orientationController: const _ImmediateOrientationController(),
           previewBuilder: (game) => ColoredBox(
             color: Colors.black,
-            child: Text('Fake WebView: ${game.entry.assetPath}'),
+            child: Text('Fake WebView: ${game.entry.gameEntryPath}'),
           ),
         ),
       ),
@@ -345,19 +351,17 @@ void main() {
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
     expect(find.byKey(const Key('game-sidebar')), findsNothing);
     expect(find.text('-- FPS'), findsNothing);
-    expect(find.text('Fake WebView: test-game/app/index.html'), findsOneWidget);
+    expect(find.text('Fake WebView: index.html'), findsOneWidget);
   });
 
   testWidgets('native game page does not intercept SDK menu shortcuts', (
     WidgetTester tester,
   ) async {
-    final visibilityChanges = <bool>[];
     await tester.pumpWidget(
       localizedTestApp(
         home: GamePage(
           game: _primaryGame,
-          initialPerformanceVisible: true,
-          onPerformanceVisibilityChanged: visibilityChanges.add,
+          enterFullscreenOnLaunch: true,
           orientationController: const _ImmediateOrientationController(),
           previewBuilder: (_) => const ColoredBox(color: Colors.black),
         ),
@@ -371,7 +375,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('显示性能信息'), findsNothing);
     expect(find.byKey(const Key('game-sidebar')), findsNothing);
-    expect(visibilityChanges, isEmpty);
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
   });
 
@@ -383,6 +386,7 @@ void main() {
         home: GamePage(
           key: ValueKey('reused-game-page'),
           game: _primaryGame,
+          enterFullscreenOnLaunch: true,
           orientationController: _ImmediateOrientationController(),
           previewBuilder: _gamePreview,
         ),
@@ -395,6 +399,7 @@ void main() {
         home: GamePage(
           key: ValueKey('reused-game-page'),
           game: _updatedGame,
+          enterFullscreenOnLaunch: true,
           orientationController: _ImmediateOrientationController(),
           previewBuilder: _gamePreview,
         ),
@@ -412,6 +417,56 @@ void main() {
     expect(find.byKey(const Key('game-tool-dock-handle')), findsNothing);
     expect(find.byKey(const Key('game-sidebar')), findsNothing);
     expect(find.text('显示性能信息'), findsNothing);
+  });
+
+  testWidgets('rotating a developer resource session remounts the runtime', (
+    WidgetTester tester,
+  ) async {
+    final firstSession = DeveloperResourceSession(
+      projectId: _primaryGame.id,
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'a').join(),
+      expiresAt: DateTime.utc(2026, 7, 30, 13),
+    );
+    final secondSession = DeveloperResourceSession(
+      projectId: _primaryGame.id,
+      resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
+      credential: List<String>.filled(40, 'b').join(),
+      expiresAt: DateTime.utc(2026, 7, 30, 14),
+    );
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          key: const ValueKey('developer-session-game-page'),
+          game: _primaryGame,
+          enterFullscreenOnLaunch: false,
+          developerProjectId: _primaryGame.id,
+          developerResourceSession: firstSession,
+          orientationController: const _ImmediateOrientationController(),
+          previewBuilder: _gamePreview,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(GamePage.runtimeKey(0)), findsOneWidget);
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          key: const ValueKey('developer-session-game-page'),
+          game: _primaryGame,
+          enterFullscreenOnLaunch: false,
+          developerProjectId: _primaryGame.id,
+          developerResourceSession: secondSession,
+          orientationController: const _ImmediateOrientationController(),
+          previewBuilder: _gamePreview,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(GamePage.runtimeKey(1)), findsOneWidget);
   });
 
   testWidgets('single-screen authority display receives only required', (
@@ -438,9 +493,9 @@ void main() {
         },
       ),
       entry: LocalGameEntry(
-        assetPath: 'app/index.html',
-        gameEntryPath: 'app/index.html',
-        controllerEntryPath: 'app/controller/index.html',
+        gameEntryPath:
+            'index.html?scene=current_scene&mode=touch&mode=keyboard',
+        controllerEntryPath: 'controller/index.html',
         statusLabel: 'Game SDK test',
         packageRootFilePath: 'test-role-capabilities',
       ),
@@ -460,7 +515,10 @@ void main() {
     final webView = tester.widget<LocalGameWebView>(
       find.byType(LocalGameWebView),
     );
-    expect(webView.assetPath, 'app/index.html');
+    expect(
+      webView.entryPath,
+      'index.html?scene=current_scene&mode=touch&mode=keyboard',
+    );
     expect(webView.declaredCapabilities, isEmpty);
   });
 
@@ -476,6 +534,7 @@ void main() {
       localizedTestApp(
         home: GamePage(
           game: _primaryGame,
+          enterFullscreenOnLaunch: true,
           orientationController: const _ImmediateOrientationController(),
           previewBuilder: (_) => const ColoredBox(color: Colors.black),
         ),
@@ -506,7 +565,7 @@ void main() {
       displayMode: 'multi_screen',
       orientation: GameOrientation.portrait,
       entry: LocalGameEntry(
-        assetPath: 'assets/added/app/index.html',
+        gameEntryPath: 'index.html',
         statusLabel: 'Game SDK 1.0',
       ),
     );
@@ -559,6 +618,78 @@ void main() {
     expect(find.text('已发现 2 个游戏。'), findsOneWidget);
   });
 
+  testWidgets('windowed developer launch does not request startup fullscreen', (
+    WidgetTester tester,
+  ) async {
+    final orientationController = _RecordingOrientationController();
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          game: _primaryGame,
+          enterFullscreenOnLaunch: false,
+          orientationController: orientationController,
+          previewBuilder: (_) => const Text('窗口化开发游戏'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(orientationController.entered, isEmpty);
+    expect(find.text('窗口化开发游戏'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    expect(orientationController.exitFullscreenCalls, 1);
+    expect(orientationController.restoreCalls, 1);
+  });
+
+  testWidgets('controller role remains fullscreen when launch flag is false', (
+    WidgetTester tester,
+  ) async {
+    const controllerGame = GameSummary(
+      id: 'com.playmesh.controller-fullscreen',
+      name: '控制器全屏测试',
+      version: '1.0.0',
+      description: '控制器角色始终默认全屏',
+      minPlayers: 2,
+      maxPlayers: 4,
+      supportsMultiplayer: true,
+      displayModeLabel: '单屏多人',
+      displayMode: 'single_screen_multiplayer',
+      orientation: GameOrientation.landscape,
+      controllerOrientation: GameOrientation.portrait,
+      entry: LocalGameEntry(
+        gameEntryPath: 'index.html',
+        controllerEntryPath: 'controller/index.html',
+        statusLabel: 'Ready',
+      ),
+    );
+    final orientationController = _RecordingOrientationController();
+
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: GamePage(
+          game: controllerGame,
+          enterFullscreenOnLaunch: false,
+          joinRequest: GameJoinRequest(
+            coreEndpoint: Uri.parse('http://127.0.0.1:43210/'),
+            joinCode: 'ABC123',
+            nickname: 'Controller',
+          ),
+          orientationController: orientationController,
+          previewBuilder: (_) => const Text('控制器页面'),
+        ),
+      ),
+    );
+
+    expect(orientationController.entered, [GameOrientation.portrait]);
+    orientationController.completeEnter();
+    await tester.pumpAndSettle();
+    expect(find.text('控制器页面'), findsOneWidget);
+  });
+
   testWidgets('requests orientation without blocking WebView and restores it', (
     WidgetTester tester,
   ) async {
@@ -568,6 +699,7 @@ void main() {
       localizedTestApp(
         home: GamePage(
           game: _primaryGame,
+          enterFullscreenOnLaunch: true,
           orientationController: orientationController,
           previewBuilder: (_) => const Text('方向就绪后的 WebView'),
         ),
@@ -598,6 +730,7 @@ void main() {
       localizedTestApp(
         home: GamePage(
           game: _primaryGame,
+          enterFullscreenOnLaunch: true,
           orientationController: orientationController,
           previewBuilder: (_) => const Text('Game or controller HTML'),
         ),
@@ -619,6 +752,7 @@ void main() {
 class _RecordingOrientationController implements GameOrientationController {
   final Completer<void> _enterCompleter = Completer<void>();
   final List<GameOrientation> entered = [];
+  int exitFullscreenCalls = 0;
   int restoreCalls = 0;
 
   void completeEnter() => _enterCompleter.complete();
@@ -630,7 +764,9 @@ class _RecordingOrientationController implements GameOrientationController {
   }
 
   @override
-  Future<void> exitFullscreen() async {}
+  Future<void> exitFullscreen() async {
+    exitFullscreenCalls += 1;
+  }
 
   @override
   Future<void> restore() async {

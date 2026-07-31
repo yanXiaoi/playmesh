@@ -1,10 +1,10 @@
 import 'game_asset_gateway_contract.dart';
+import 'game_web_resource_source.dart';
 import '../storage/game_storage_service.dart';
 
 Future<GameAssetGateway> startPlatformGameAssetGateway({
-  String? gameRootAssetPath,
-  String? gameRootFilePath,
-  required String entryAssetPath,
+  required GameWebResourceSource source,
+  required String entryPath,
   String? gameSdkVersion,
   String? appSdkVersion,
   GameStorageService? storage,

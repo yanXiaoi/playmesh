@@ -34,15 +34,6 @@ const developerContracts = path.join(
   "developer",
   "contracts",
 );
-const developerPrompts = path.join(
-  repositoryRoot,
-  "assets",
-  "playmesh-library",
-  "public",
-  "developer",
-  "prompts",
-);
-
 function loadDartSdkSources() {
   const registry = fs.readFileSync(sourceRegistryPath, "utf8");
   const partPaths = [
@@ -266,6 +257,8 @@ function generate({
   source,
   sourceName,
   outputName,
+  javascriptOutputName = outputName,
+  declarationOutputName = outputName,
   declarationName,
   versionName,
   placeholder,
@@ -301,8 +294,16 @@ function generate({
   fs.mkdirSync(sourceDirectory, { recursive: true });
   fs.writeFileSync(sourcePath, resolvedSource, "utf8");
   fs.mkdirSync(outputDirectory, { recursive: true });
-  fs.writeFileSync(path.join(outputDirectory, `${outputName}.js`), javascript, "utf8");
-  fs.writeFileSync(path.join(outputDirectory, `${outputName}.d.ts`), declaration, "utf8");
+  fs.writeFileSync(
+    path.join(outputDirectory, `${javascriptOutputName}.js`),
+    javascript,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(outputDirectory, `${declarationOutputName}.d.ts`),
+    declaration,
+    "utf8",
+  );
   return version;
 }
 
@@ -320,6 +321,8 @@ const gameSdkVersion = generate({
   source: dartSdkSources.game,
   sourceName: "playmesh.ts",
   outputName: "playmesh",
+  javascriptOutputName: "playmesh-main",
+  declarationOutputName: "playmesh-main",
   declarationName: "PLAYMESH_DECLARATION",
   versionName: "PLAYMESH_SDK_VERSION",
   placeholder: "__PLAYMESH_SDK_VERSION__",
@@ -327,7 +330,9 @@ const gameSdkVersion = generate({
     __PLAYMESH_APP_SDK_VERSION__: appSdkVersion,
   },
 });
-for (const name of ["playmesh.ts", "playmesh.js", "playmesh.d.ts"]) {
+fs.rmSync(path.join(outputDirectory, "playmesh.js"), { force: true });
+fs.rmSync(path.join(outputDirectory, "playmesh.d.ts"), { force: true });
+for (const name of ["playmesh.ts", "playmesh-main.js", "playmesh-main.d.ts"]) {
   if (
     fs
       .readFileSync(
@@ -341,7 +346,7 @@ for (const name of ["playmesh.ts", "playmesh.js", "playmesh.d.ts"]) {
     throw new Error(`${name} 仍包含未替换的 App SDK 版本占位符`);
   }
 }
-for (const name of ["playmesh.d.ts", "playmesh-app.d.ts"]) {
+for (const name of ["playmesh-main.d.ts", "playmesh-app.d.ts"]) {
   if (fs.readFileSync(path.join(outputDirectory, name), "utf8").includes("__PLAYMESH")) {
     throw new Error(`${name} 仍包含未替换的版本占位符`);
   }
@@ -356,13 +361,19 @@ function updateJson(filePath, update) {
 updateJson(path.join(developerContracts, "sdk-manifest.json"), (manifest) => {
   manifest.version = gameSdkVersion;
   manifest.channelVersion = appSdkVersion;
+  manifest.script = "/playmesh/sdk/v1/playmesh-main.js";
   const versionMember = manifest.namespaces
-    ?.find((namespace) => namespace.name === "playmesh")
+    ?.find((namespace) => namespace.name === "playmesh.main")
     ?.members?.find((member) => member.name === "version");
   if (versionMember) versionMember.value = gameSdkVersion;
+  const appVersionMember = manifest.namespaces
+    ?.find((namespace) => namespace.name === "playmesh.app")
+    ?.members?.find((member) => member.name === "version");
+  if (appVersionMember) appVersionMember.value = appSdkVersion;
 });
 updateJson(path.join(developerContracts, "schemas", "sdk-v1.json"), (schema) => {
-  schema.$defs.SdkBootstrap.properties.sdkVersion.const = gameSdkVersion;
+  schema.$defs.PlaymeshBootstrap.properties.sdkVersion.const = gameSdkVersion;
+  schema.$defs.PlaymeshAppBootstrap.properties.sdkVersion.const = appSdkVersion;
 });
 updateJson(
   path.join(
@@ -381,19 +392,6 @@ updateJson(
     manifest.appSdkVersion = appSdkVersion;
   },
 );
-
-for (const promptName of ["common.txt", "agent-common.txt"]) {
-  const promptPath = path.join(developerPrompts, promptName);
-  const prompt = fs.readFileSync(promptPath, "utf8");
-  const updated = prompt.replace(
-    /当前 Game SDK 版本字符串，当前为 \d+\.\d+\.\d+。/,
-    `当前 Game SDK 版本字符串，当前为 ${gameSdkVersion}。`,
-  );
-  if (updated === prompt && !prompt.includes(`当前为 ${gameSdkVersion}。`)) {
-    throw new Error(`${promptName} 缺少 Game SDK 版本摘要标记`);
-  }
-  fs.writeFileSync(promptPath, updated, "utf8");
-}
 
 if (!process.argv.includes("--quiet")) {
   console.log(`Generated Game SDK ${gameSdkVersion} and App SDK ${appSdkVersion}`);
