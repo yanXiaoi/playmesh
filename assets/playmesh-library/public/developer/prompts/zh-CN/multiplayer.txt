@@ -1,0 +1,56 @@
+【当前模式规则：联机游戏公共规则】
+这是联机游戏。玩家页面只提交业务意图，Authority 通过 playmesh.main.sync 验证输入并维护唯一权威状态。SDK 负责 tick、输入限频/合并、快照版本与分发；Go Core 只路由协议，不执行游戏规则。只有非 Authority 的多人页面会在就绪时自动请求最新快照；Authority 页面重载会重建同步 runtime，需要恢复的权威状态必须先从 playmesh.main.storage 读取，再作为 initialState 启动。
+不同加入方式的底层传输由平台透明处理；游戏代码始终使用同一套 Game SDK，不得探测传输实现、读取分享参数或按加入方式分叉会话协议。
+
+强制交付：
+1. `main.json` 必须显式声明 `authority.entry`；它指向的文件必须真实存在，并导出可工作的 Authority 状态规则，不得省略或依赖默认入口。
+2. Authority 页面必须加载该 service，并且只在 playmesh.main.session.isAuthority() 为 true 时调用 playmesh.main.sync.startAuthority。
+3. 每一种 playmesh.main.sync.submitAction 的 input.type 都必须在 onInput 中有对应处理分支。
+4. 所有页面必须使用 playmesh.main.sync.observe 展示最新快照，不能把本地预测当作最终结果。
+5. 身份只能使用 context.senderPlayerId 和 context.members[].id；不存在 player.playerId 或 member.playerId。
+6. 需要跨 Authority 页面重载保存的状态，必须在状态变化时写入 storage；不能把非 Authority 自动请求快照误当成 Authority 持久化。
+7. 必须实现一个等待界面，直到所有玩家就绪才能开始游戏。
+8. Authority 固定为创建并运行当前会话的 App 主机端。不得通过 session.players[0]、玩家数组顺序、首个输入发送者或“第一个玩家”推断 Authority；页面只使用 playmesh.main.session.isAuthority()，权威规则只使用 session.authorityClientId 校验 Authority 身份。
+
+SDK：
+- playmesh.main.session.getCurrent(): 当前 SessionSnapshot 或 null。
+- playmesh.main.session.onStateChange(callback): 立即及后续接收会话快照，返回取消订阅函数。
+- playmesh.main.session.onPlayerJoin(callback)、onPlayerLeave(callback)、onPlayerReconnect(callback): 分别处理首次加入、掉线和同 ID 重连，均返回取消订阅函数。不要用昵称或 players 数组位置判断同一玩家。
+- playmesh.main.session.isAuthority(): 当前页面是否为创建并运行会话的 App Authority Client；玩家加入顺序不会改变结果。
+- playmesh.main.session.start(): 仅 Authority 请求 Core 把满足基础人数条件的会话切换为 running。SDK 不判断准备、倒计时或玩法开始条件；这些业务状态由游戏通过 sync 输入和 Authority 权威状态实现。
+- playmesh.main.session.finish(): 仅 Authority 在游戏规则已确认本局真正结束后，请求 Core 切换为 stopped 并清理本局离线成员。SDK 不判断胜负或结束条件；不要把页面隐藏、临时断线或暂停当作游戏结束。
+- playmesh.main.player.getCurrent(): 当前 Player；公共显示端可能为 null。
+- playmesh.main.player.setNickname(name): 仅浏览器联机玩家可用，App WebView 和浏览器单机不可用；SDK 已提供昵称界面，游戏不重复制作昵称控件。
+- playmesh.main.sync.startAuthority(options): 仅 Authority 可用。initialState 必填；stateType 可选；tickRate 可选且默认为 10，必须是 1 至 20 的整数；onInput 和 onTick 均可选。
+- startAuthority 返回控制器：getState()、setState(nextState, publish?)、publish(targetPlayerIds?)、stop()。
+- onInput(input, context) 可同步或异步返回下一状态；context 包含 senderPlayerId、state、inputId、inputType、key、receivedAt、session、members。
+- onTick(context) 可同步或异步返回下一状态；context 包含 state、inputs、tick、dt、now、session、members。连续输入按 inputs[playerId][key] = { value, inputId, receivedAt } 合并，不能把该对象直接当作原始 value。
+- playmesh.main.sync.submitAction(input): 提交一次性 JSON 业务意图，Promise resolve 为 inputId。
+- playmesh.main.sync.submitState(key, value, {rateHz}): key 必须匹配 ^[A-Za-z0-9._-]{1,64}$；rateHz 默认为 20 且必须在 1 至 20 之间；同一 key 限频并只保留最新值。其 Promise 只表示输入已进入本地发送队列，不是远端处理确认。
+- playmesh.main.sync.observe(callback)、getSnapshot()、requestSnapshot(): 读取或请求带版本的完整权威快照；只有非 Authority 多人页面会在就绪时自动 requestSnapshot。
+- 高级自定义通道：playmesh.main.game.submitAction(action)、onMessage(callback)、onEvent(callback，onMessage 的别名)；Authority 使用 playmesh.main.authority.onService(handler) 返回取消注册函数。默认项目不要把同一输入同时走 sync 和高级通道。
+- authority handler 接收 (action, {senderPlayerId, session, members})，可返回 {targetPlayerIds, message}、结果数组、null 或 Promise；目标通常使用 members[].id，公共显示端需要接收时加入 session.authorityClientId 并去重。
+
+关键类型：
+Player = { id, nickname, role: "authority" | "authority_player" | "player", connected }
+SessionSnapshot = { id, joinCode, gameId, displayMode: "multi_screen" | "single_screen_multiplayer", state: "lobby" | "running" | "paused" | "stopped", minPlayers, maxPlayers, authorityClientId, players }
+SyncSnapshot = { protocolVersion, stateType, full, revision, sequence, timestamp, sourceTick, state }
+
+Authority 最小结构：
+
+export function startAuthoritySync() {
+  return playmesh.main.sync.startAuthority({
+    initialState: { value: 0, updatedBy: null },
+    tickRate: 10,
+    onInput(input, context) {
+      if (input?.type !== "state.increment") return context.state;
+      return { value: context.state.value + 1, updatedBy: context.senderPlayerId };
+    },
+  });
+}
+
+浏览器 SDK 会把随机玩家 ID 和昵称持久化到当前来源的 localStorage，App 玩家使用自动注入的自身 ID 和昵称；游戏代码不得手动设置、改写或从 URL 携带玩家 ID。同一玩家 ID 同时只能有一个在线连接，旧连接断开后才允许同 ID 重连。
+
+Core 只在 running 或 paused 状态保留掉线成员，以便中途加入、等待与重连；lobby 掉线直接释放成员，stopped 不保留离线成员。游戏应通过连接事件更新等待/重连 UI，并通过权威快照恢复玩法状态。
+
+不得信任 input 自报的玩家 ID、角色、分数、答案、胜负或最终结果。多人状态只能由 Authority 修改，Player 页面最终以最新 Authority 快照为准。

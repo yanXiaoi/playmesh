@@ -7,12 +7,13 @@
 
 | 版本 | 文档 | 范围 |
 | --- | --- | --- |
+| Playmesh `4.1.0+27` | [4.1.0 正式实现与验证](../version/4.1.0.md) | 英文默认 README、多语言 AI 提示词目录与清单、全局 locale/文案复用、Developer API 4.1 locale 查询、工作区语言联动与分语言用户覆盖 |
 | Playmesh `4.0.0+26` | [4.0.0 正式实现与验证](../version/4.0.0.md) | 根 Web 运行时、外部工程与 CLI 2.0、Game SDK 4.0 / App SDK 3.2 双命名空间和成对注入、Developer API 4、Catalog/Relay 3、普通网页 ZIP 转换 |
 | Playmesh `3.2.0+25` | [3.0.0 历史本地功能实现基线](playmesh-3.0.0-local-implementation.md) | 4.0 之前的 Catalog 2.0、本地数据 v2、工作区多源发布、Go Server 账号与治理、头像与 SDK、统一 App 国际化、主题、键盘/TV、主页 GitHub 入口、居中游戏菜单、统一 WebView 权限、Android ARCore 位姿与按需终端媒体 |
 
 ## 使用规则
 
-- 当前行为先查 4.0.0 版本文档，再按领域查看 `docs/game/`、`docs/platform/` 和
+- 当前行为先查 4.1.0 版本文档，再按领域查看 `docs/game/`、`docs/platform/` 和
   `docs/catalog-api.md`；3.0.0 实现文档只作为历史基线。
 - 版本状态与升级原因查 `docs/version/`；实际命令和结果查 `docs/verification/`。
 - App 内置工作区和平台注入 Web UI 都是 App 表面，显示文案只来自各 locale 的

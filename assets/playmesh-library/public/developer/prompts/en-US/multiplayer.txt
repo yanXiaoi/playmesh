@@ -1,0 +1,56 @@
+[Current mode rules: shared multiplayer rules]
+This is a multiplayer game. Player pages submit game intent only. Authority validates input through `playmesh.main.sync` and maintains the single authoritative state. The SDK handles ticks, input throttling/coalescing, snapshot revisions, and distribution; Go Core routes the protocol and does not execute game rules. Only non-Authority multiplayer pages automatically request the latest snapshot when ready. Reloading an Authority page rebuilds the synchronization runtime, so authoritative state that must survive a reload must first be restored from `playmesh.main.storage` and then passed as `initialState`.
+The platform transparently handles transport differences between join methods. Game code always uses the same Game SDK; never detect the transport, read share parameters, or branch the session protocol by join method.
+
+Required deliverables:
+1. `main.json` must explicitly declare `authority.entry`. The referenced file must exist and export working Authority state rules; never omit it or rely on a default entry.
+2. The Authority page must load that service and call `playmesh.main.sync.startAuthority` only when `playmesh.main.session.isAuthority()` is true.
+3. Every `input.type` submitted through `playmesh.main.sync.submitAction` must have a matching `onInput` branch.
+4. Every page must present the latest snapshot through `playmesh.main.sync.observe`; local prediction is never the final result.
+5. Identity comes only from `context.senderPlayerId` and `context.members[].id`; `player.playerId` and `member.playerId` do not exist.
+6. State that must survive an Authority-page reload must be written to storage when it changes. Do not confuse the automatic non-Authority snapshot request with Authority persistence.
+7. Implement a waiting state so the game does not begin until all players are ready.
+8. The App host that creates and runs the session is always Authority. Never infer Authority from `session.players[0]`, player-array order, the first input sender, or "the first player". Pages use only `playmesh.main.session.isAuthority()`; authoritative rules use only `session.authorityClientId` to verify Authority identity.
+
+SDK:
+- `playmesh.main.session.getCurrent()`: current `SessionSnapshot`, or null.
+- `playmesh.main.session.onStateChange(callback)`: receives the current session snapshot immediately and future snapshots; returns an unsubscribe function.
+- `playmesh.main.session.onPlayerJoin(callback)`, `onPlayerLeave(callback)`, and `onPlayerReconnect(callback)`: handle first join, disconnect, and reconnection with the same ID; each returns an unsubscribe function. Never use nickname or position in `players` to identify the same player.
+- `playmesh.main.session.isAuthority()`: whether this page belongs to the App Authority Client that created and runs the session. Player join order never changes the result.
+- `playmesh.main.session.start()`: Authority only. Requests that Core move a session satisfying the base player-count constraint to `running`. The SDK does not determine readiness, countdown, or game-specific start conditions; implement those states with sync input and authoritative game state.
+- `playmesh.main.session.finish()`: Authority only. Call only after game rules confirm the round has truly ended. Requests that Core move the session to `stopped` and clear disconnected members. The SDK does not decide victory or end conditions; page visibility, a temporary disconnect, or pause is not game completion.
+- `playmesh.main.player.getCurrent()`: current Player; may be null on a public display.
+- `playmesh.main.player.setNickname(name)`: available only to browser multiplayer players. It is unavailable in App WebViews and browser solo mode. The SDK already provides nickname UI; do not duplicate it in the game.
+- `playmesh.main.sync.startAuthority(options)`: Authority only. `initialState` is required. `stateType` is optional. `tickRate` is optional, defaults to 10, and must be an integer from 1 through 20. `onInput` and `onTick` are optional.
+- `startAuthority` returns a controller with `getState()`, `setState(nextState, publish?)`, `publish(targetPlayerIds?)`, and `stop()`.
+- `onInput(input, context)` may synchronously or asynchronously return the next state. `context` contains `senderPlayerId`, `state`, `inputId`, `inputType`, `key`, `receivedAt`, `session`, and `members`.
+- `onTick(context)` may synchronously or asynchronously return the next state. `context` contains `state`, `inputs`, `tick`, `dt`, `now`, `session`, and `members`. Continuous input is coalesced as `inputs[playerId][key] = { value, inputId, receivedAt }`; do not treat that object as the raw value.
+- `playmesh.main.sync.submitAction(input)`: submits a one-shot JSON game intent; the Promise resolves to an `inputId`.
+- `playmesh.main.sync.submitState(key, value, {rateHz})`: `key` must match `^[A-Za-z0-9._-]{1,64}$`; `rateHz` defaults to 20 and must be from 1 through 20. Each key is throttled and only its latest value is retained. The Promise means only that the input entered the local send queue, not that the remote side processed it.
+- `playmesh.main.sync.observe(callback)`, `getSnapshot()`, and `requestSnapshot()`: read or request a complete, revisioned authoritative snapshot. Only non-Authority multiplayer pages call `requestSnapshot` automatically when ready.
+- Advanced custom channel: `playmesh.main.game.submitAction(action)`, `onMessage(callback)`, and `onEvent(callback)` (an alias of `onMessage`). Authority uses `playmesh.main.authority.onService(handler)`, which returns an unregister function. Default projects must not send the same input through both sync and the advanced channel.
+- The Authority handler receives `(action, {senderPlayerId, session, members})` and may return `{targetPlayerIds, message}`, an array of results, null, or a Promise. Targets normally use `members[].id`. To include the public display, add `session.authorityClientId` and deduplicate.
+
+Key types:
+`Player = { id, nickname, role: "authority" | "authority_player" | "player", connected }`
+`SessionSnapshot = { id, joinCode, gameId, displayMode: "multi_screen" | "single_screen_multiplayer", state: "lobby" | "running" | "paused" | "stopped", minPlayers, maxPlayers, authorityClientId, players }`
+`SyncSnapshot = { protocolVersion, stateType, full, revision, sequence, timestamp, sourceTick, state }`
+
+Minimal Authority structure:
+
+export function startAuthoritySync() {
+  return playmesh.main.sync.startAuthority({
+    initialState: { value: 0, updatedBy: null },
+    tickRate: 10,
+    onInput(input, context) {
+      if (input?.type !== "state.increment") return context.state;
+      return { value: context.state.value + 1, updatedBy: context.senderPlayerId };
+    },
+  });
+}
+
+The browser SDK persists a random player ID and nickname in localStorage for the current origin. App players use their automatically injected ID and nickname. Game code must not manually set, rewrite, or carry player IDs in URLs. Only one online connection may use a player ID at a time; reconnection with the same ID is allowed only after the previous connection closes.
+
+Core retains disconnected members only while a session is `running` or `paused`, enabling mid-game join, waiting, and reconnection. A disconnect in `lobby` releases the member immediately; `stopped` retains no disconnected members. Update waiting/reconnection UI from connection events and restore gameplay from authoritative snapshots.
+
+Never trust a player ID, role, score, answer, winner, or final result claimed by input. Only Authority may change multiplayer state, and Player pages use the latest Authority snapshot as the final result.

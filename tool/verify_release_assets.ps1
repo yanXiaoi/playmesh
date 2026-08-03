@@ -200,6 +200,19 @@ function Get-SourceSnapshot {
     throw 'AI prompt manifest must contain templates.'
   }
 
+  $localizationFiles = @(Get-LocalizationFiles)
+  $localizationManifest = (
+    Get-StrictUtf8Text -Path $localizationManifestPath
+  ) | ConvertFrom-Json
+  $enabledLocaleIds = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal
+  )
+  foreach ($locale in @($localizationManifest.locales)) {
+    if ($locale.enabled) {
+      $null = $enabledLocaleIds.Add([string]$locale.id)
+    }
+  }
+
   $ids = [Collections.Generic.HashSet[string]]::new(
     [StringComparer]::Ordinal
   )
@@ -208,22 +221,43 @@ function Get-SourceSnapshot {
   )
   foreach ($template in @($manifest.templates)) {
     $id = [string]$template.id
-    $file = [string]$template.file
     if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') {
       throw "Invalid AI prompt template id: $id"
-    }
-    if ($file -notmatch '^[^/\\]+\.txt$' -or $file.Contains('..')) {
-      throw "Invalid AI prompt template file: $file"
     }
     if (-not $ids.Add($id)) {
       throw "Duplicate AI prompt template id: $id"
     }
-    if (-not $files.Add($file)) {
-      throw "Duplicate AI prompt template file: $file"
+    if ([string]::IsNullOrWhiteSpace([string]$template.category)) {
+      throw "AI prompt template '$id' is missing category."
     }
-    foreach ($field in @('name', 'category', 'categoryName')) {
-      if ([string]::IsNullOrWhiteSpace([string]$template.$field)) {
-        throw "AI prompt template '$id' is missing $field."
+    if ($null -eq $template.files) {
+      throw "AI prompt template '$id' is missing locale files."
+    }
+
+    $mappedLocaleIds = [Collections.Generic.HashSet[string]]::new(
+      [StringComparer]::Ordinal
+    )
+    foreach ($mapping in @($template.files.PSObject.Properties)) {
+      $localeId = [string]$mapping.Name
+      $file = [string]$mapping.Value
+      $escapedLocaleId = [Regex]::Escape($localeId)
+      if (-not $enabledLocaleIds.Contains($localeId)) {
+        throw "AI prompt template '$id' maps an unknown or disabled locale: $localeId"
+      }
+      if ($file -notmatch "^$escapedLocaleId/[^/\\]+\.txt$" -or
+          $file.Contains('..')) {
+        throw "Invalid AI prompt template file for '$id' locale '$localeId': $file"
+      }
+      if (-not $mappedLocaleIds.Add($localeId)) {
+        throw "AI prompt template '$id' maps locale '$localeId' more than once."
+      }
+      if (-not $files.Add($file)) {
+        throw "Duplicate AI prompt template file: $file"
+      }
+    }
+    foreach ($localeId in $enabledLocaleIds) {
+      if (-not $mappedLocaleIds.Contains($localeId)) {
+        throw "AI prompt template '$id' is missing enabled locale '$localeId'."
       }
     }
   }
@@ -233,10 +267,11 @@ function Get-SourceSnapshot {
     }
   }
 
-  $actualTextFiles = Get-ChildItem -LiteralPath $promptsRoot -File -Filter '*.txt'
+  $actualTextFiles = Get-ChildItem -LiteralPath $promptsRoot -Recurse -File -Filter '*.txt'
   foreach ($file in $actualTextFiles) {
-    if (-not $files.Contains($file.Name)) {
-      throw "Orphan AI prompt template: $($file.Name)"
+    $relative = $file.FullName.Substring($promptsRoot.Length + 1) -replace '\\', '/'
+    if (-not $files.Contains($relative)) {
+      throw "Orphan AI prompt template: $relative"
     }
   }
   if (@($actualTextFiles).Count -ne $files.Count) {
@@ -248,7 +283,7 @@ function Get-SourceSnapshot {
   foreach ($file in ($files | Sort-Object)) {
     $relativeFiles.Add("$promptsRelativeRoot/$file")
   }
-  foreach ($relative in Get-LocalizationFiles) {
+  foreach ($relative in $localizationFiles) {
     $relativeFiles.Add($relative)
   }
   $relativeFiles = @($relativeFiles | Sort-Object -Unique)

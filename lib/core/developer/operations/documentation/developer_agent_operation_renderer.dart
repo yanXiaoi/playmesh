@@ -1,11 +1,14 @@
 import 'dart:convert';
 
+import '../../developer_ai_prompt_templates.dart';
 import '../developer_operation_definition.dart';
 import 'developer_operation_document_renderer.dart';
 
 class DeveloperAgentOperationRenderer
     implements DeveloperOperationDocumentRenderer {
-  const DeveloperAgentOperationRenderer();
+  const DeveloperAgentOperationRenderer({required this.resources});
+
+  final DeveloperAiPromptResources resources;
 
   @override
   String get id => 'agent';
@@ -15,23 +18,21 @@ class DeveloperAgentOperationRenderer
     Iterable<DeveloperOperationDefinition> operations,
     DeveloperOperationDocumentContext context,
   ) {
+    String text(String key) => resources.text(key);
     final visible = operations
         .where((operation) => operation.agentEnabled)
         .toList(growable: false);
     final output = StringBuffer()
-      ..writeln('Playmesh Agent Developer API 操作目录')
+      ..writeln(text('agent.title'))
       ..writeln('catalogVersion: ${context.catalogVersion}')
       ..writeln('baseUrl: ${context.baseUrl}')
       ..writeln('projectId: ${context.projectId}')
-      ..writeln('鉴权：Authorization: Bearer ${context.token}')
-      ..writeln('AI 通道：$developerAiChannelHeader: agent')
+      ..writeln('${text('agent.authorization')}: Bearer ${context.token}')
+      ..writeln('${text('agent.aiChannel')}: $developerAiChannelHeader: agent')
       ..writeln()
-      ..writeln('所有操作都来自运行时实际路由使用的同一注册表。')
-      ..writeln(
-        '每个 Agent 请求都必须携带 `$developerAiChannelHeader: agent`；'
-        '危险操作会暂停执行并等待开发者审批，拒绝返回 403，30 秒未决定返回 408。',
-      )
-      ..writeln('修改现有文件前读取 revision；非幂等请求不得盲目重试。');
+      ..writeln(text('agent.registry'))
+      ..writeln(text('agent.approval'))
+      ..writeln(text('agent.revision'));
     for (final operation in visible) {
       final path = operation.path.replaceAll(
         '{projectId}',
@@ -42,28 +43,36 @@ class DeveloperAgentOperationRenderer
         ..writeln(
           '### ${operation.id} — ${operation.normalizedMethod} '
           '${context.baseUrl.resolve(path)}',
-        )
-        ..writeln(operation.summary)
-        ..writeln(
-          'permission=${operation.permission} risk=${operation.risk.name} '
-          'idempotent=${operation.idempotent} '
-          'dangerous=${operation.dangerous}',
         );
-      if (operation.description.isNotEmpty) {
+      if (resources.includeSourceMetadata) {
+        output.writeln(operation.summary);
+      }
+      output.writeln(
+        'permission=${operation.permission} risk=${operation.risk.name} '
+        'idempotent=${operation.idempotent} '
+        'dangerous=${operation.dangerous}',
+      );
+      if (resources.includeSourceMetadata && operation.description.isNotEmpty) {
         output.writeln(operation.description);
       }
       if (operation.parameters.isNotEmpty) {
-        output.writeln('参数：');
+        output.writeln(text('common.parameters'));
         for (final parameter in operation.parameters) {
+          final requirement = parameter.required
+              ? text('common.required')
+              : text('common.optional');
+          final description = resources.includeSourceMetadata
+              ? ': ${parameter.description}'
+              : '';
           output.writeln(
-            '- ${parameter.location.name}.${parameter.name}: '
-            '${parameter.description}',
+            '- ${parameter.location.name}.${parameter.name} '
+            '($requirement)$description',
           );
         }
       }
       if (operation.requestExample != null) {
         output
-          ..writeln('application/json 示例：')
+          ..writeln(text('agent.jsonExample'))
           ..writeln('```json')
           ..writeln(
             const JsonEncoder.withIndent(

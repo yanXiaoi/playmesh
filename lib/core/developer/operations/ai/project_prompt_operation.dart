@@ -10,7 +10,14 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       method: 'GET',
       path: '/dev/api/projects/{projectId}/chat-prompt.txt',
       summary: '导出包含对话控制台基础指令的项目对话提示词',
-      parameters: [developerProjectIdParameter],
+      parameters: [
+        developerProjectIdParameter,
+        DeveloperOperationParameter(
+          name: 'locale',
+          location: DeveloperOperationParameterLocation.query,
+          description: 'BCP 47 提示词 locale；按提示词清单匹配，未命中使用 defaultLocale',
+        ),
+      ],
       chatEnabled: false,
     ),
     DeveloperOperationDefinition(
@@ -24,6 +31,11 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
           name: 'baseUrl',
           location: DeveloperOperationParameterLocation.query,
           description: '当前设备状态接口枚举出的可访问 Base URL',
+        ),
+        DeveloperOperationParameter(
+          name: 'locale',
+          location: DeveloperOperationParameterLocation.query,
+          description: 'BCP 47 提示词 locale；按提示词清单匹配，未命中使用 defaultLocale',
         ),
       ],
       chatEnabled: false,
@@ -50,6 +62,11 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
     String projectId, {
     required bool isAgent,
   }) async {
+    final locale = await gateway.promptTemplates.resolveLocale(
+      request.requestedUri.queryParameters['locale'],
+    );
+    final resources = await gateway.promptTemplates.resources(locale: locale);
+    String text(String key) => resources.text(key);
     final manifestFile = await gateway.catalog.readFile(projectId, 'main.json');
     final decodedManifest = jsonDecode(utf8.decode(manifestFile.bytes));
     if (decodedManifest is! Map) {
@@ -134,7 +151,7 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
     }
 
     Future<String> promptTemplate(String id) async =>
-        (await gateway.promptTemplates.read(id)).content;
+        (await gateway.promptTemplates.read(id, locale: locale)).content;
     final promptParts = <String>[
       await promptTemplate(isAgent ? 'agent-common' : 'common'),
       await promptTemplate('custom-ideas'),
@@ -144,8 +161,14 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
           isSingleScreen ? 'single-screen-multiplayer' : 'multi-screen',
         ),
     ];
-    final gameSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh-main.d.ts');
-    final appSdkDeclaration = SdkFeatureRegistry.sdkFile('playmesh-app.d.ts');
+    final gameSdkDeclaration = _localizedPromptSdkDeclaration(
+      SdkFeatureRegistry.sdkFile('playmesh-main.d.ts'),
+      includeSourceDocumentation: resources.includeSourceMetadata,
+    );
+    final appSdkDeclaration = _localizedPromptSdkDeclaration(
+      SdkFeatureRegistry.sdkFile('playmesh-app.d.ts'),
+      includeSourceDocumentation: resources.includeSourceMetadata,
+    );
     final allDirectories = [...await gateway.catalog.listDirectories(projectId)]
       ..sort();
     final allFiles = [...projectFiles]..sort();
@@ -170,19 +193,19 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       catalogVersion: _DeveloperOperationRegistry.catalogVersion,
     );
     final operationDocument = isAgent
-        ? const DeveloperAgentOperationRenderer().render(
-            _developerOperationRegistry.definitions,
-            documentContext,
-          )
-        : const DeveloperChatOperationRenderer(
+        ? DeveloperAgentOperationRenderer(
+            resources: resources,
+          ).render(_developerOperationRegistry.definitions, documentContext)
+        : DeveloperChatOperationRenderer(
             bootstrapOnly: true,
+            resources: resources,
           ).render(_developerOperationRegistry.definitions, documentContext);
 
     final output = StringBuffer()
       ..writeln(promptParts.map((part) => part.trim()).join('\n\n'))
       ..writeln()
       ..writeln('============================================================')
-      ..writeln('统一 SDK TypeScript 声明（唯一游戏接口事实源）')
+      ..writeln(text('project.sdkTitle'))
       ..writeln('============================================================')
       ..writeln('===== BEGIN SDK DECLARATION: playmesh-main.d.ts =====')
       ..writeln(gameSdkDeclaration.trim())
@@ -193,21 +216,27 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       ..writeln('===== END SDK DECLARATION: playmesh-app.d.ts =====')
       ..writeln()
       ..writeln('============================================================')
-      ..writeln('当前项目')
+      ..writeln(text('project.current'))
       ..writeln('============================================================')
       ..writeln('projectId: $projectId')
       ..writeln('modes: ${modes.join(', ')}')
       ..writeln('displayModes: ${displayModes.join(', ')}')
       ..writeln('entries.game: $gameEntry')
-      ..writeln('entries.controller: ${controllerEntry ?? '未声明'}')
-      ..writeln('authority.entry: ${authorityEntry ?? '未声明'}')
+      ..writeln(
+        'entries.controller: '
+        '${controllerEntry ?? text('project.notDeclared')}',
+      )
+      ..writeln(
+        'authority.entry: '
+        '${authorityEntry ?? text('project.notDeclared')}',
+      )
       ..writeln(
         'capabilities.required: '
-        '${requiredCapabilities.isEmpty ? '未声明' : requiredCapabilities.join(', ')}',
+        '${requiredCapabilities.isEmpty ? text('project.notDeclared') : requiredCapabilities.join(', ')}',
       )
       ..writeln(
         'capabilities.controllerRequired: '
-        '${controllerCapabilities.isEmpty ? '未声明' : controllerCapabilities.join(', ')}',
+        '${controllerCapabilities.isEmpty ? text('project.notDeclared') : controllerCapabilities.join(', ')}',
       );
 
     if (!isAgent) {
@@ -217,26 +246,38 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       };
       final selectedDefinitions = gateway.capabilityTests.registry.descriptors
           .where((item) => selectedCodes.contains(item.code))
-          .map((item) => item.toJson())
+          .map((item) {
+            final json = item.toJson();
+            final prefix =
+                'workspace.capability.'
+                '${item.code.replaceAll('.', '_')}';
+            return {
+              ...json,
+              'name': resources.appText('$prefix.name'),
+              'description': resources.appText('$prefix.description'),
+            };
+          })
           .toList(growable: false);
       output
         ..writeln()
-        ..writeln('当前项目已声明的平台能力：')
+        ..writeln(text('project.capabilities'))
         ..writeln(
           selectedDefinitions.isEmpty
-              ? '未声明平台能力。'
+              ? text('project.noCapabilities')
               : const JsonEncoder.withIndent('  ').convert(selectedDefinitions),
         );
     }
     output
       ..writeln()
       ..writeln('============================================================')
-      ..writeln(isAgent ? '统一 Agent 操作目录' : '对话控制台默认基础指令')
+      ..writeln(
+        text(isAgent ? 'project.agentCatalog' : 'project.chatBootstrap'),
+      )
       ..writeln('============================================================')
       ..writeln(operationDocument)
       ..writeln()
       ..writeln('============================================================')
-      ..writeln('当前项目树')
+      ..writeln(text('project.tree'))
       ..writeln('============================================================');
     for (final directory in directories) {
       output.writeln('- [directory] $directory/');
@@ -247,21 +288,21 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
     output
       ..writeln()
       ..writeln('============================================================')
-      ..writeln('按需读取项目文件')
+      ..writeln(text('project.readTitle'))
       ..writeln('============================================================')
-      ..writeln('为避免无关文件占用上下文，本提示词不预载任何项目文件内容。')
-      ..writeln('根据当前项目树、用户指定的页面和任务范围，通过 files.read 读取必要的文本文件。')
-      ..writeln('不要遍历读取与任务无关的文件；修改现有文件时使用读取响应中的 revision。')
+      ..writeln(text('project.readNoPreload'))
+      ..writeln(text('project.readRequired'))
+      ..writeln(text('project.readBoundary'))
       ..writeln()
       ..writeln('============================================================')
-      ..writeln('最终执行要求')
+      ..writeln(text('project.finalTitle'))
       ..writeln('============================================================')
-      ..writeln('只能按照当前项目声明的模式、显示类型和公开 SDK 修改项目。')
-      ..writeln('修改完成后必须执行 projects.validate 并修复全部 error。');
+      ..writeln(text('project.finalScope'))
+      ..writeln(text('project.finalValidate'));
     if (isAgent) {
-      output.writeln('必须直接调用上面的 Developer API 完成工作，不要只返回代码。');
+      output.writeln(text('project.finalAgent'));
     } else {
-      output.writeln('最终回答只能包含一个可直接粘贴到对话控制台的 JSON 指令对象或数组。');
+      output.writeln(text('project.finalChat'));
     }
 
     final kind = isAgent ? 'agent' : 'chat';
@@ -269,13 +310,30 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
       ..contentType = ContentType('text', 'plain', charset: 'utf-8')
       ..set(
         'Content-Disposition',
-        'attachment; filename="$projectId-playmesh-$kind-prompt.txt"',
+        'attachment; filename="$projectId-playmesh-$kind-$locale-prompt.txt"',
       );
     final bytes = <int>[0xef, 0xbb, 0xbf, ...utf8.encode(output.toString())];
     request.response.contentLength = bytes.length;
     request.response.add(bytes);
     await request.response.close();
   }
+}
+
+String _localizedPromptSdkDeclaration(
+  String declaration, {
+  required bool includeSourceDocumentation,
+}) {
+  if (includeSourceDocumentation) return declaration;
+  return declaration
+      .replaceAllMapped(RegExp(r'/\*\*[\s\S]*?\*/'), (match) {
+        final completions = RegExp(
+          r'@playmesh-completion\s+[A-Za-z0-9_.]+',
+        ).allMatches(match.group(0)!).map((item) => item.group(0)!).toList();
+        return completions.isEmpty ? '' : '/* ${completions.join(' ')} */';
+      })
+      .replaceAll(RegExp(r'^\s*///.*$', multiLine: true), '')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
 }
 
 String _requiredPromptManifestEntry(

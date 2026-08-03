@@ -1,12 +1,17 @@
 import 'dart:convert';
 
+import '../../developer_ai_prompt_templates.dart';
 import '../developer_operation_definition.dart';
 import 'developer_operation_document_renderer.dart';
 
 class DeveloperChatOperationRenderer
     implements DeveloperOperationDocumentRenderer {
-  const DeveloperChatOperationRenderer({this.bootstrapOnly = false});
+  const DeveloperChatOperationRenderer({
+    required this.resources,
+    this.bootstrapOnly = false,
+  });
 
+  final DeveloperAiPromptResources resources;
   final bool bootstrapOnly;
 
   @override
@@ -17,6 +22,7 @@ class DeveloperChatOperationRenderer
     Iterable<DeveloperOperationDefinition> operations,
     DeveloperOperationDocumentContext context,
   ) {
+    String text(String key) => resources.text(key);
     final visible = operations
         .where(
           (operation) =>
@@ -25,36 +31,35 @@ class DeveloperChatOperationRenderer
         )
         .toList(growable: false);
     final output = StringBuffer()
-      ..writeln('Playmesh 对话控制台指令协议')
+      ..writeln(text('chat.title'))
       ..writeln('catalogVersion: ${context.catalogVersion}')
       ..writeln('projectId: ${context.projectId}')
       ..writeln()
-      ..writeln('把一个 JSON 对象或 JSON 数组粘贴到“对话控制台”。')
-      ..writeln('控制台只执行当前工作区同源的 /dev/api/** 请求，并把结构化结果返回给 AI。')
-      ..writeln(
-        '控制台会自动附加 `$developerAiChannelHeader: chat`；'
-        '危险操作会等待开发者审批，拒绝返回 403，30 秒未决定返回 408。',
-      )
-      ..writeln('指令格式：')
+      ..writeln(text('chat.paste'))
+      ..writeln(text('chat.sameOrigin'))
+      ..writeln(text('chat.approval'))
+      ..writeln(text('chat.instructionFormat'))
       ..writeln('```json')
       ..writeln(
         const JsonEncoder.withIndent('  ').convert({
-          'id': '由 AI 生成的关联 ID',
+          'id': '<correlation-id>',
           'method': 'GET|POST|PUT|PATCH|DELETE',
           'path': '/dev/api/...',
-          'body': {'仅在接口需要 JSON 请求体时提供': true},
+          'body': {'<field>': true},
         }),
       )
       ..writeln('```')
       ..writeln()
-      ..writeln('规则：')
-      ..writeln('- path 必须使用下面声明的真实 Developer API 路径。')
-      ..writeln('- 路径参数必须替换，查询参数必须进行 URL 编码。')
-      ..writeln('- 修改现有文件前先读取 revision，并提交 baseRevision。')
-      ..writeln('- 高风险操作只有在用户明确要求时才能生成；dangerous=true 的接口还必须经过开发者审批。')
-      ..writeln('- 不得生成系统命令、外部 URL 或 /dev/api/** 之外的请求。')
+      ..writeln(text('chat.rules'))
+      ..writeln('- ${text('chat.rulePath')}')
+      ..writeln('- ${text('chat.ruleParameters')}')
+      ..writeln('- ${text('chat.ruleRevision')}')
+      ..writeln('- ${text('chat.ruleRisk')}')
+      ..writeln('- ${text('chat.ruleBoundary')}')
       ..writeln()
-      ..writeln(bootstrapOnly ? '默认基础指令：' : '完整指令目录：');
+      ..writeln(
+        text(bootstrapOnly ? 'chat.bootstrapTitle' : 'chat.catalogTitle'),
+      );
     for (final operation in visible) {
       final path = operation.path.replaceAll(
         '{projectId}',
@@ -62,28 +67,36 @@ class DeveloperChatOperationRenderer
       );
       output
         ..writeln()
-        ..writeln('### ${operation.id} — ${operation.normalizedMethod} $path')
-        ..writeln(operation.summary)
-        ..writeln(
-          '权限 `${operation.permission}`；风险 `${operation.risk.name}`；'
-          '幂等 `${operation.idempotent}`；'
-          '危险操作 `${operation.dangerous}`。',
-        );
-      if (operation.description.isNotEmpty) {
+        ..writeln('### ${operation.id} — ${operation.normalizedMethod} $path');
+      if (resources.includeSourceMetadata) {
+        output.writeln(operation.summary);
+      }
+      output.writeln(
+        'permission `${operation.permission}`; risk `${operation.risk.name}`; '
+        'idempotent `${operation.idempotent}`; '
+        'dangerous `${operation.dangerous}`.',
+      );
+      if (resources.includeSourceMetadata && operation.description.isNotEmpty) {
         output.writeln(operation.description);
       }
       if (operation.parameters.isNotEmpty) {
-        output.writeln('参数：');
+        output.writeln(text('common.parameters'));
         for (final parameter in operation.parameters) {
+          final requirement = parameter.required
+              ? text('common.required')
+              : text('common.optional');
+          final description = resources.includeSourceMetadata
+              ? ': ${parameter.description}'
+              : '';
           output.writeln(
             '- `${parameter.name}` (${parameter.location.name}, '
-            '${parameter.required ? '必填' : '可选'})：${parameter.description}',
+            '$requirement)$description',
           );
         }
       }
       if (operation.requestExample != null) {
         output
-          ..writeln('请求体示例：')
+          ..writeln(text('chat.requestExample'))
           ..writeln('```json')
           ..writeln(
             const JsonEncoder.withIndent(

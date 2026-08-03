@@ -26,7 +26,7 @@ class _ProjectCopyOperation implements _DeveloperHttpOperation {
       successStatus: 201,
       parameters: [developerProjectIdParameter],
       requestBodySchema: _schema,
-      requestExample: {'id': 'com.example.copied-game', 'name': '复制的游戏'},
+      requestExample: {'id': 'com.example.copied-game', 'name': 'Copied game'},
     ),
   ];
 

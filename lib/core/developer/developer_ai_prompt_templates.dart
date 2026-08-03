@@ -3,21 +3,48 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import '../library/playmesh_library_root.dart';
+import '../localization/playmesh_localization.dart';
+
+class DeveloperAiPromptResources {
+  const DeveloperAiPromptResources({
+    required this.locale,
+    required this.messages,
+    required this.appMessages,
+    required this.includeSourceMetadata,
+  });
+
+  final String locale;
+  final Map<String, String> messages;
+  final Map<String, String> appMessages;
+  final bool includeSourceMetadata;
+
+  String text(String key) {
+    final value = messages[key];
+    if (value == null || value.isEmpty) {
+      throw FormatException('AI 提示词语言 $locale 缺少 runtime key: $key');
+    }
+    return value;
+  }
+
+  String appText(String key) {
+    final value = appMessages[key];
+    if (value == null || value.isEmpty) {
+      throw FormatException('App 语言资源 $locale 缺少 key: $key');
+    }
+    return value;
+  }
+}
 
 class DeveloperAiPromptTemplateDescriptor {
   const DeveloperAiPromptTemplateDescriptor({
     required this.id,
-    required this.name,
     required this.category,
-    required this.categoryName,
-    required this.assetPath,
+    required this.assetPaths,
   });
 
   final String id;
-  final String name;
   final String category;
-  final String categoryName;
-  final String assetPath;
+  final Map<String, String> assetPaths;
 }
 
 class DeveloperAiPromptTemplate {
@@ -26,22 +53,37 @@ class DeveloperAiPromptTemplate {
     required this.content,
     required this.defaultContent,
     required this.customized,
+    required this.locale,
   });
 
   final DeveloperAiPromptTemplateDescriptor descriptor;
   final String content;
   final String defaultContent;
   final bool customized;
+  final String locale;
 
   Map<String, Object?> toJson() => {
     'id': descriptor.id,
-    'name': descriptor.name,
     'category': descriptor.category,
-    'categoryName': descriptor.categoryName,
     'content': content,
     'defaultContent': defaultContent,
     'customized': customized,
+    'locale': locale,
   };
+}
+
+class _DeveloperAiPromptManifest {
+  const _DeveloperAiPromptManifest({
+    required this.defaultLocale,
+    required this.locales,
+    required this.localizationCatalog,
+    required this.templates,
+  });
+
+  final String defaultLocale;
+  final List<String> locales;
+  final PlaymeshLocalizationCatalog localizationCatalog;
+  final List<DeveloperAiPromptTemplateDescriptor> templates;
 }
 
 class DeveloperAiPromptTemplateStore {
@@ -57,60 +99,104 @@ class DeveloperAiPromptTemplateStore {
   final AssetBundle _bundle;
   final Directory? _injectedRoot;
   Directory? _resolvedRoot;
-  Future<List<DeveloperAiPromptTemplateDescriptor>>? _descriptorsOperation;
+  Future<_DeveloperAiPromptManifest>? _manifestOperation;
+  final Map<String, DeveloperAiPromptResources> _resources = {};
 
-  Future<List<DeveloperAiPromptTemplate>> list() async {
+  Future<String> resolveLocale(String? requested) async {
+    final manifest = await _manifest();
+    final normalized = requested?.trim().replaceAll('_', '-').toLowerCase();
+    if (normalized == null || normalized.isEmpty) return manifest.defaultLocale;
+    for (final locale in manifest.locales) {
+      if (locale.toLowerCase() == normalized) return locale;
+    }
+    final language = normalized.split('-').first;
+    for (final locale in manifest.locales) {
+      if (locale.toLowerCase().split('-').first == language) return locale;
+    }
+    return manifest.defaultLocale;
+  }
+
+  Future<DeveloperAiPromptResources> resources({String? locale}) async {
+    final resolved = await resolveLocale(locale);
+    final cached = _resources[resolved];
+    if (cached != null) return cached;
+    final manifest = await _manifest();
+    const prefix = 'developer.prompt.runtime.';
+    final allMessages = manifest.localizationCatalog.resolvedMessages(
+      resolved,
+      PlaymeshLocalizationBundle.app,
+    );
+    final messages = <String, String>{
+      for (final entry in allMessages.entries)
+        if (entry.key.startsWith(prefix))
+          entry.key.substring(prefix.length): entry.value,
+    };
+    if (messages.isEmpty) {
+      throw FormatException('App 语言资源 $resolved 缺少 $prefix 命名空间');
+    }
+    return _resources[resolved] = DeveloperAiPromptResources(
+      locale: resolved,
+      messages: Map.unmodifiable(messages),
+      appMessages: allMessages,
+      includeSourceMetadata: resolved == manifest.defaultLocale,
+    );
+  }
+
+  Future<List<DeveloperAiPromptTemplate>> list({String? locale}) async {
     final templates = <DeveloperAiPromptTemplate>[];
     for (final descriptor in await descriptors()) {
-      templates.add(await read(descriptor.id));
+      templates.add(await read(descriptor.id, locale: locale));
     }
     return List.unmodifiable(templates);
   }
 
-  Future<List<DeveloperAiPromptTemplateDescriptor>> descriptors() {
-    return _descriptorsOperation ??= _loadDescriptors();
+  Future<List<DeveloperAiPromptTemplateDescriptor>> descriptors() async {
+    return (await _manifest()).templates;
   }
 
-  Future<DeveloperAiPromptTemplate> read(String id) async {
+  Future<DeveloperAiPromptTemplate> read(String id, {String? locale}) async {
     final descriptor = await _descriptor(id);
-    final defaultContent = await _readDefault(descriptor);
-    final override = File(
-      '${(await _root()).path}${Platform.pathSeparator}$id.txt',
-    );
+    final resolvedLocale = await resolveLocale(locale);
+    final defaultContent = await _readDefault(descriptor, resolvedLocale);
+    final override = await _overrideFile(id, resolvedLocale);
     final customized = await override.exists();
     return DeveloperAiPromptTemplate(
       descriptor: descriptor,
       content: customized ? await override.readAsString() : defaultContent,
       defaultContent: defaultContent,
       customized: customized,
+      locale: resolvedLocale,
     );
   }
 
-  Future<DeveloperAiPromptTemplate> save(String id, String content) async {
+  Future<DeveloperAiPromptTemplate> save(
+    String id,
+    String content, {
+    String? locale,
+  }) async {
     await _descriptor(id);
+    final resolvedLocale = await resolveLocale(locale);
     if (content.trim().isEmpty) {
       throw const FormatException('提示模板不能为空');
     }
     if (utf8.encode(content).length > _maxTemplateBytes) {
       throw const FormatException('单个提示模板不能超过 512 KiB');
     }
-    final root = await _root();
-    await root.create(recursive: true);
-    final target = File('${root.path}${Platform.pathSeparator}$id.txt');
+    final target = await _overrideFile(id, resolvedLocale);
+    await target.parent.create(recursive: true);
     final temporary = File('${target.path}.tmp');
     await temporary.writeAsString(content, flush: true);
     if (await target.exists()) await target.delete();
     await temporary.rename(target.path);
-    return read(id);
+    return read(id, locale: resolvedLocale);
   }
 
-  Future<DeveloperAiPromptTemplate> reset(String id) async {
+  Future<DeveloperAiPromptTemplate> reset(String id, {String? locale}) async {
     await _descriptor(id);
-    final file = File(
-      '${(await _root()).path}${Platform.pathSeparator}$id.txt',
-    );
+    final resolvedLocale = await resolveLocale(locale);
+    final file = await _overrideFile(id, resolvedLocale);
     if (await file.exists()) await file.delete();
-    return read(id);
+    return read(id, locale: resolvedLocale);
   }
 
   Future<DeveloperAiPromptTemplateDescriptor> _descriptor(String id) async {
@@ -120,7 +206,11 @@ class DeveloperAiPromptTemplateStore {
     throw FormatException('未知 AI 提示模板: $id');
   }
 
-  Future<List<DeveloperAiPromptTemplateDescriptor>> _loadDescriptors() async {
+  Future<_DeveloperAiPromptManifest> _manifest() {
+    return _manifestOperation ??= _loadManifest();
+  }
+
+  Future<_DeveloperAiPromptManifest> _loadManifest() async {
     final manifestText = await _bundle.loadString(manifestAssetPath);
     final decoded = jsonDecode(manifestText);
     if (decoded is! Map) {
@@ -136,42 +226,53 @@ class DeveloperAiPromptTemplateStore {
         'AI 提示词 manifestVersion 必须使用严格 MAJOR.MINOR.PATCH',
       );
     }
+    final localizationCatalog = await PlaymeshLocalizationCatalog.load(
+      bundle: _bundle,
+    );
+    final defaultLocale = localizationCatalog.manifest.defaultLocale;
+    final locales = localizationCatalog.manifest.enabledLocales
+        .map((locale) => locale.id)
+        .toList(growable: false);
+
     final rawTemplates = manifest['templates'];
     if (rawTemplates is! List || rawTemplates.isEmpty) {
       throw const FormatException('AI 提示词清单 templates 必须是非空数组');
     }
     final ids = <String>{};
-    final files = <String>{};
-    final result = <DeveloperAiPromptTemplateDescriptor>[];
+    final localizedFiles = <String>{};
+    final templates = <DeveloperAiPromptTemplateDescriptor>[];
     for (final raw in rawTemplates) {
-      if (raw is! Map) {
-        throw const FormatException('AI 提示词清单模板必须是对象');
-      }
+      if (raw is! Map) throw const FormatException('AI 提示词模板必须是对象');
       final item = Map<String, Object?>.from(raw);
       final id = _requiredManifestString(item, 'id');
-      final file = _requiredManifestString(item, 'file');
       if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$').hasMatch(id)) {
         throw FormatException('AI 提示词模板 id 无效: $id');
       }
-      if (!RegExp(r'^[^/\\]+\.txt$').hasMatch(file) ||
-          file.contains('..') ||
-          file.contains('/') ||
-          file.contains(r'\')) {
-        throw FormatException('AI 提示词模板 file 必须是当前目录内的 .txt 文件: $file');
+      if (!ids.add(id)) throw FormatException('AI 提示词清单包含重复 id: $id');
+      final rawFiles = item['files'];
+      if (rawFiles is! Map) {
+        throw FormatException('AI 提示词模板 $id 的 files 必须是对象');
       }
-      if (!ids.add(id)) {
-        throw FormatException('AI 提示词清单包含重复 id: $id');
+      final assetPaths = <String, String>{};
+      for (final locale in locales) {
+        final file = rawFiles[locale];
+        if (file is! String ||
+            !_isSafeFile(file, '.txt') ||
+            !file.startsWith('$locale/')) {
+          throw FormatException(
+            'AI 提示词模板 $id 的 files.$locale 必须是当前目录内的 .txt 文件',
+          );
+        }
+        if (!localizedFiles.add('$locale:$file')) {
+          throw FormatException('AI 提示词清单包含重复文件: $locale:$file');
+        }
+        assetPaths[locale] = '$promptsRoot/$file';
       }
-      if (!files.add(file)) {
-        throw FormatException('AI 提示词清单包含重复 file: $file');
-      }
-      result.add(
+      templates.add(
         DeveloperAiPromptTemplateDescriptor(
           id: id,
-          name: _requiredManifestString(item, 'name'),
           category: _requiredManifestString(item, 'category'),
-          categoryName: _requiredManifestString(item, 'categoryName'),
-          assetPath: '$promptsRoot/$file',
+          assetPaths: Map.unmodifiable(assetPaths),
         ),
       );
     }
@@ -179,16 +280,48 @@ class DeveloperAiPromptTemplateStore {
     if (missingReserved.isNotEmpty) {
       throw FormatException('AI 提示词清单缺少保留模板: ${missingReserved.join(', ')}');
     }
-    for (final descriptor in result) {
-      await _readDefault(descriptor);
+    final result = _DeveloperAiPromptManifest(
+      defaultLocale: defaultLocale,
+      locales: List.unmodifiable(locales),
+      localizationCatalog: localizationCatalog,
+      templates: List.unmodifiable(templates),
+    );
+    for (final locale in locales) {
+      const prefix = 'developer.prompt.runtime.';
+      final allMessages = localizationCatalog.resolvedMessages(
+        locale,
+        PlaymeshLocalizationBundle.app,
+      );
+      final messages = <String, String>{
+        for (final entry in allMessages.entries)
+          if (entry.key.startsWith(prefix))
+            entry.key.substring(prefix.length): entry.value,
+      };
+      if (messages.isEmpty) {
+        throw FormatException('App 语言资源 $locale 缺少 $prefix 命名空间');
+      }
+      _resources[locale] = DeveloperAiPromptResources(
+        locale: locale,
+        messages: Map.unmodifiable(messages),
+        appMessages: allMessages,
+        includeSourceMetadata: locale == defaultLocale,
+      );
+      for (final descriptor in templates) {
+        await _readDefault(descriptor, locale);
+      }
     }
-    return List.unmodifiable(result);
+    return result;
   }
 
   Future<String> _readDefault(
     DeveloperAiPromptTemplateDescriptor descriptor,
+    String locale,
   ) async {
-    final data = await _bundle.load(descriptor.assetPath);
+    final assetPath = descriptor.assetPaths[locale];
+    if (assetPath == null) {
+      throw FormatException('AI 提示词模板 ${descriptor.id} 缺少 $locale 版本');
+    }
+    final data = await _bundle.load(assetPath);
     if (data.lengthInBytes == 0 || data.lengthInBytes > _maxTemplateBytes) {
       throw FormatException('AI 提示词模板 ${descriptor.id} 必须在 1 B 至 512 KiB 之间');
     }
@@ -201,6 +334,18 @@ class DeveloperAiPromptTemplateStore {
       throw FormatException('AI 提示词模板 ${descriptor.id} 不能为空');
     }
     return content;
+  }
+
+  Future<File> _overrideFile(String id, String locale) async {
+    final root = await _root();
+    final manifest = await _manifest();
+    if (locale == manifest.defaultLocale) {
+      return File('${root.path}${Platform.pathSeparator}$id.txt');
+    }
+    return File(
+      '${root.path}${Platform.pathSeparator}$locale'
+      '${Platform.pathSeparator}$id.txt',
+    );
   }
 
   Future<Directory> _root() async {
@@ -222,4 +367,15 @@ String _requiredManifestString(Map<String, Object?> json, String field) {
     throw FormatException('AI 提示词清单 $field 必须是非空字符串');
   }
   return value.trim();
+}
+
+bool _isSafeFile(String value, String extension) {
+  final segments = value.split('/');
+  return value.endsWith(extension) &&
+      !value.startsWith('/') &&
+      !value.contains(r'\') &&
+      segments.isNotEmpty &&
+      segments.every(
+        (segment) => segment.isNotEmpty && segment != '.' && segment != '..',
+      );
 }

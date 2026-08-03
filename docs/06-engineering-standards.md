@@ -166,6 +166,34 @@ WebView -> GameAssetGateway -> DevelopmentGameWebResourceProvider
 - Go Core 必须监听系统分配端口并由宿主上报实际地址；页面、游戏和 Client 不得写死或猜测端口。
 - 只有出现真实复用场景或明确的边界职责时才抽象，不为了减少文件数量创建无意义的工具层。
 
+## 文档撰写规则
+
+- 仓库根 `README.md` 是默认英文项目入口；完整中文版本固定为 `README.zh-CN.md`。
+  两份 README 必须在顶部互相链接，并在同一个变更中同步产品定位、能力、命令、版本、
+  链接和已知边界；英文版不能只是中文摘要。代码标识、API 路径、Schema 字段、命令、
+  文件名、日志和错误 code 保持原文，只翻译说明文字。
+- `docs/` 下的架构、开发、版本、状态和验证文档保持现有中文，不要求创建英文镜像。
+  根英文 README 可以链接这些中文权威资料，但必须让读者从链接标题或上下文知道目标是
+  详细资料；不要为了形式上的双语复制历史文档或建立无法同步的机器翻译副本。
+- AI 提示词正文属于开发文档，遵守相同的语义同步要求。模板固定放在
+  `assets/playmesh-library/public/developer/prompts/{locale}/`，每个模板由同一
+  `prompts/manifest.json` 的 `files` 映射声明。可用 locale、默认 locale 和 fallback
+  只读取 `assets/playmesh-localization/manifest.json`；提示词目录不得再维护语言清单、
+  fallback 或 App 级翻译副本。
+- 项目提示词动态标题、说明和操作目录文案统一使用全局 `app.json` 的
+  `developer.prompt.runtime.*` 命名空间。Developer Workspace 只传递当前 locale；
+  Dart/JavaScript 公共逻辑按全局清单解析 locale、fallback、模板和文案，不得出现
+  `if (locale == ...)`、中英字符串表或按语言复制生成流程。新增语言只增加统一语言声明、
+  对应 `app.json` 文案、提示词语言目录及清单文件映射，不修改提示词业务代码。
+- 自动检查必须覆盖：所有已启用 locale 具有完全相同的提示词条目，提示词模板非空，
+  全局 `developer.prompt.runtime.*` 键集合一致，清单路径不能逃逸语言目录，生成接口按
+  BCP 47 locale 选择精确语言或统一 fallback，且一个语言的自定义模板不能覆盖另一语言。
+
+The root `README.md` is the default English project document and must remain semantically aligned
+with `README.zh-CN.md`. Documents under `docs/` remain Chinese and do not require translated mirrors.
+AI prompt localization is still manifest-driven: adding a locale changes global localization assets,
+the locale prompt directory, and the prompt manifest only—never a language-specific code path.
+
 ## 数据和协议规范
 
 - JSON 字段使用明确、稳定、可读的命名；同一概念只能有一个字段名，例如统一使用 `sessionId`，不混用 `roomId`。

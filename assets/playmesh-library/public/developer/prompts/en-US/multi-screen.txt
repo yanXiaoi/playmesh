@@ -1,0 +1,39 @@
+[Current display type: standard multiscreen multiplayer]
+Every device loads the explicitly declared `main.json.entries.game`. The entry must exist; never omit it or rely on a default entry. The App host that creates and runs the current game session is always the Authority Client; Authority is not elected from player join order. The host App may also be a real Player, so `playmesh.main.player.getCurrent()` is non-null with role `authority_player`, but its position in `session.players` has no Authority meaning. Later participants are ordinary Players.
+
+Strictly prohibited:
+- Do not create, reference, or implement `entries.controller`.
+- Do not infer Authority from `session.players[0]`, array order, "the first player to join", or local player order. Use only `playmesh.main.session.isAuthority()`; server-side checks may compare only `session.authorityClientId`.
+
+Minimal page structure:
+
+import { startAuthoritySync } from "../service/index.js";
+await playmesh.ready;
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+
+try {
+  if (playmesh.main.session.isAuthority()) {
+    startAuthoritySync();
+  }
+} catch (error) {
+  showError(error);
+}
+
+playmesh.main.session.onStateChange(renderSession);
+playmesh.main.sync.observe((snapshot) => render(snapshot.state));
+
+document.querySelector("#action").addEventListener("click", async () => {
+  try {
+    await playmesh.main.sync.submitAction({ type: "state.increment" });
+  } catch (error) {
+    showError(error);
+  }
+});
+
+The same `entries.game` page must support both the App host player and joining players. Starting Authority synchronization must be guarded by `isAuthority`; no joining client may start the Authority runtime, regardless of join order.

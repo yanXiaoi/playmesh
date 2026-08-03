@@ -54,12 +54,40 @@ const defaultGameManifest = JSON.parse(
     "utf8",
   ),
 );
-const promptSources = [
-  "assets/playmesh-library/public/developer/prompts/common.txt",
-  "assets/playmesh-library/public/developer/prompts/agent-common.txt",
-].map((path) => fs.readFileSync(path, "utf8"));
+const promptRoot = "assets/playmesh-library/public/developer/prompts";
+const promptManifest = JSON.parse(
+  fs.readFileSync(`${promptRoot}/manifest.json`, "utf8"),
+);
+const localizationRoot = "assets/playmesh-localization";
+const localizationManifest = JSON.parse(
+  fs.readFileSync(`${localizationRoot}/manifest.json`, "utf8"),
+);
+const enabledPromptLocales = localizationManifest.locales.filter(
+  ({ enabled }) => enabled,
+);
+const pubspecSource = fs.readFileSync("pubspec.yaml", "utf8");
+for (const { id } of enabledPromptLocales) {
+  assert(
+    pubspecSource.includes(
+      `assets/playmesh-library/public/developer/prompts/${id}/`,
+    ),
+    `pubspec.yaml 必须打包 ${id} 提示词目录`,
+  );
+}
+const promptSourcesByLocale = new Map(
+  enabledPromptLocales.map(({ id }) => [
+    id,
+    promptManifest.templates.map(({ files }) =>
+      fs.readFileSync(`${promptRoot}/${files[id]}`, "utf8"),
+    ),
+  ]),
+);
+const promptSources = promptManifest.templates
+  .filter(({ id }) => ["common", "agent-common"].includes(id))
+  .map(({ files }) => fs.readFileSync(`${promptRoot}/${files["zh-CN"]}`, "utf8"));
+const allPromptSources = [...promptSourcesByLocale.values()].flat();
 const developerSources = [
-  ...promptSources,
+  ...allPromptSources,
   ...[
     "assets/playmesh-library/public/developer/templates/default-game/package/app/index.html",
     "assets/playmesh-library/public/developer/templates/default-game/package/app/controller/index.html",
@@ -387,6 +415,36 @@ for (const source of promptSources) {
     source.includes(defaultGameManifest.appSdkVersion),
     false,
     "提示词不得复制 App SDK 版本，版本事实源属于类型声明",
+  );
+}
+assert.equal(localizationManifest.defaultLocale, "zh-CN");
+assert(promptSourcesByLocale.has("en-US"), "提示词清单必须声明英文 locale");
+for (const [locale, sources] of promptSourcesByLocale) {
+  assert.equal(
+    sources.length,
+    promptManifest.templates.length,
+    `${locale} 必须为每个提示词模板声明文件`,
+  );
+  for (const source of sources) {
+    assert(source.trim().length > 0, `${locale} 提示词模板不能为空`);
+  }
+}
+const runtimeKeySets = enabledPromptLocales.map(({ id, bundles }) => {
+  const messages = JSON.parse(
+    fs.readFileSync(`${localizationRoot}/${bundles.app}`, "utf8"),
+  );
+  return [
+    id,
+    Object.keys(messages)
+      .filter((key) => key.startsWith("developer.prompt.runtime."))
+      .sort(),
+  ];
+});
+for (const [locale, keys] of runtimeKeySets.slice(1)) {
+  assert.deepEqual(
+    keys,
+    runtimeKeySets[0][1],
+    `${locale} runtime 提示词资源键必须与 ${runtimeKeySets[0][0]} 一致`,
   );
 }
 

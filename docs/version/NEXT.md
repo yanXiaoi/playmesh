@@ -2,12 +2,29 @@
 
 ## 状态
 
-- 状态：`4.0.0+26` 已于 2026-07-31 正式发布；当前没有新的未发布版本变更。
-- 当前发行基线：App `4.0.0+26`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+- 状态：`4.1.0+27` 已于 2026-08-03 正式发布；当前没有未发布变更。
+- 当前发行基线：App `4.1.0+27`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.0.0`、App Bridge SDK `3.2.0`、Catalog API `3.0.0`、
-  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.0.0.md`；本文件以下内容为该版本发布归档，
-  后续开发应在新的版本号下继续记录。
+  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`。
+- 最新正式发布日志：`docs/version/4.1.0.md`；本文件保留 4.1.0 与 4.0.0 发布归档。
+
+## 4.1.0 发布归档
+
+- 根 `README.md` 改为完整英文默认入口，原中文内容保留为 `README.zh-CN.md`，两者在
+  顶部互链；`docs/` 继续作为中文权威资料，不建立英文镜像。
+- AI 提示词模板按全局 locale 分入
+  `assets/playmesh-library/public/developer/prompts/{locale}/`，同一清单为全局语言配置中
+  每个启用 locale 声明完整模板映射。英文版覆盖 ChatAI、AgentAI、单机、多人及两种
+  显示模式，中文模板内容保持不变。
+- 提示词不再维护 App 级文案或第二份 locale/fallback 配置。模板名称、分类、动态标题、
+  说明和能力描述统一读取全局 `app.json`；默认 locale、启用语言和 fallback 统一读取
+  `assets/playmesh-localization/manifest.json`。Dart/JavaScript 只保留公共解析与拼装逻辑。
+- Developer API / OpenAPI 兼容升级到 `4.1.0`：提示词模板列表、保存、恢复和项目提示词
+  导出接受可选 BCP 47 `locale` 查询参数，返回解析后的 locale；未精确命中时按全局语言
+  清单选择同语言资源或 default locale。不同 locale 的用户模板覆盖相互隔离。
+- Developer Workspace 自动把当前 App locale 传给模板与项目提示词接口。新增语言只需
+  补齐全局语言声明、对应 `app.json`、提示词语言目录、清单映射和 Flutter 资产目录，
+  不修改提示词业务代码。
 
 ## 4.0.0 发布归档
 

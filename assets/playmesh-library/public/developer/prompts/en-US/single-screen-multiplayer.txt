@@ -1,0 +1,57 @@
+[Current display type: single-screen multiplayer]
+`main.json` must declare the main-screen `orientation` and controller `controllerOrientation` separately. On entering fullscreen, the SDK/host requests the orientation for the current page role. Pages must still use responsive layouts in case the browser refuses orientation locking.
+`capabilities.json.required` applies only to the `entries.game` main screen, while `controllerRequired` applies only to the `entries.controller` controller. An empty array means that endpoint declares no capabilities; never fall back to or merge the other endpoint's declarations. Neither endpoint may use capabilities declared only for the other role.
+The host loads the explicitly declared and existing `main.json.entries.game` as the public display and Authority Client. Every player loads the explicitly declared and existing `entries.controller`. Neither entry may be omitted or use a default. The public display is not in `session.players`; treat `playmesh.main.player.getCurrent()` as null.
+
+Required deliverables:
+- `entries.game`: public display, session presentation, Authority registration, and authoritative state presentation only; it provides no player input.
+- `entries.controller`: player input, `submitAction`, and synchronized snapshot consumption.
+- Authority service: processes controller input through `playmesh.main.sync` and updates authoritative state; the SDK automatically distributes snapshots to the public display and players.
+
+Strictly prohibited:
+- The controller page must not import or register the Authority service.
+- The public display must not assume `player` is non-null or add the host to `players`.
+- Do not generate the standard multiscreen flow where every device runs the same game entry.
+- Do not generate a solo-only flow.
+
+Minimal public-display structure:
+
+import { startAuthoritySync } from "../service/index.js";
+await playmesh.ready;
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+
+try {
+  if (playmesh.main.session.isAuthority()) {
+    startAuthoritySync();
+  }
+} catch (error) {
+  showError(error);
+}
+playmesh.main.session.onStateChange(renderSession);
+playmesh.main.sync.observe((snapshot) => render(snapshot.state));
+
+Minimal controller structure:
+
+await playmesh.ready;
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+document.querySelector("#action").addEventListener("click", async () => {
+  try {
+    await playmesh.main.sync.submitAction({ type: "state.increment" });
+  } catch (error) {
+    showError(error);
+  }
+});
+playmesh.main.sync.observe((snapshot) => render(snapshot.state));
+
+Single-screen multiplayer has no public-display "Start game" button for players to click. Players submit ready state from controllers. The Authority determines player count, ready state, and countdown inside authoritative `onInput`/`onTick`, then calls `playmesh.main.session.start()` and handles errors. That method only asks Core to change the base session state; it does not decide game-specific conditions. Do not assume undeclared methods such as `readyPlayer` or `setReady` exist.

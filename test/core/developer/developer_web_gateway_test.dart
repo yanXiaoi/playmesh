@@ -874,6 +874,69 @@ void main() {
       soloTemplate['content'],
       contains('playmesh.main.authority 或 playmesh.main.sync'),
     );
+    final englishTemplates = await http.get(
+      base.resolve(
+        '/dev/api/ai-prompt-templates'
+        '?token=custom-dev-token&locale=en-GB',
+      ),
+    );
+    expect(englishTemplates.statusCode, HttpStatus.ok);
+    final englishCategories =
+        (jsonDecode(englishTemplates.body)['categories'] as List)
+            .cast<Map<String, Object?>>();
+    final englishCommon =
+        (englishCategories.firstWhere(
+                  (category) => category['id'] == 'common',
+                )['items']
+                as List)
+            .cast<Map>()
+            .firstWhere((item) => item['id'] == 'common');
+    expect(englishCommon['locale'], 'en-US');
+    expect(
+      englishCommon['name'],
+      'Shared chat AI rules',
+    );
+    expect(
+      englishCommon['content'],
+      contains('PLAYMESH CHAT AI GAME DEVELOPMENT PROMPT'),
+    );
+    final englishPrompt = await http.get(
+      base.resolve(
+        '/dev/api/projects/demo/chat-prompt.txt'
+        '?token=custom-dev-token&locale=en-US',
+      ),
+    );
+    expect(englishPrompt.statusCode, HttpStatus.ok);
+    expect(englishPrompt.body, contains('Current project'));
+    expect(englishPrompt.body, contains('Read project files on demand'));
+    expect(englishPrompt.body, isNot(contains('当前项目')));
+    expect(englishPrompt.body, isNot(matches(RegExp(r'[\u3400-\u9fff]'))));
+    final customizedEnglish = await http.put(
+      base.resolve(
+        '/dev/api/ai-prompt-templates/common'
+        '?token=custom-dev-token&locale=en-US',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'content': 'CUSTOM_ENGLISH_PROMPT'}),
+    );
+    expect(customizedEnglish.statusCode, HttpStatus.ok);
+    expect(jsonDecode(customizedEnglish.body)['template']['locale'], 'en-US');
+    final chineseAfterEnglishCustomization = await http.get(
+      base.resolve(
+        '/dev/api/projects/demo/chat-prompt.txt?token=custom-dev-token',
+      ),
+    );
+    expect(
+      chineseAfterEnglishCustomization.body,
+      isNot(contains('CUSTOM_ENGLISH_PROMPT')),
+    );
+    final resetEnglish = await http.delete(
+      base.resolve(
+        '/dev/api/ai-prompt-templates/common'
+        '?token=custom-dev-token&locale=en-US',
+      ),
+    );
+    expect(resetEnglish.statusCode, HttpStatus.ok);
     final customized = await http.put(
       base.resolve(
         '/dev/api/ai-prompt-templates/common?token=custom-dev-token',
@@ -1031,7 +1094,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '4.0.0');
+    expect((openApiJson['info'] as Map)['version'], '4.1.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );

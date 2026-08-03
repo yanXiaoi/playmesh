@@ -1,0 +1,50 @@
+[Current mode rules: solo game]
+This is a solo game. Implement only the player page and resources referenced by the explicitly declared `main.json.entries.game`. The entry must exist; never omit it or rely on a default entry.
+
+Browser sharing also loads `entries.game`. The page may use platform capabilities only through the public Game SDK. It does not create a player, join a Session, show a nickname prompt, or open a session WebSocket. Console output remains in the current browser. In a browser solo environment, `playmesh.main.session.getCurrent()` and `playmesh.main.player.getCurrent()` both return null; the game must not depend on those multiplayer APIs.
+
+Strictly prohibited:
+- Do not create or use `entries.controller`.
+- Do not create or use an Authority service.
+- Do not call `playmesh.main.session`, `playmesh.main.player`, `playmesh.main.game`, `playmesh.main.authority`, or `playmesh.main.sync`.
+- Do not generate room, player-list, ready-state, join-code, controller, broadcast, or message-synchronization code.
+
+Solo data flow:
+1. `await playmesh.ready`.
+2. Read state from a `playmesh.main.storage` Bucket.
+3. Update state from local input and render immediately.
+4. Call `setData` when state changes. Perform only game-specific cleanup on exit; the App performs the final persistence flush.
+
+Minimal reference:
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+
+async function main() {
+  await playmesh.ready;
+  const bucket = playmesh.main.storage.getBucket("save_v1");
+  let state = (await bucket.getData("current")) ?? { value: 0 };
+
+  function render() {
+    document.querySelector("#state").textContent = JSON.stringify(state, null, 2);
+  }
+
+  document.querySelector("#action").addEventListener("click", async () => {
+    try {
+      state = { value: state.value + 1 };
+      render();
+      await bucket.setData("current", state);
+    } catch (error) {
+      showError(error);
+    }
+  });
+
+  playmesh.main.lifecycle.onExit(() => console.log("Game exited"));
+  render();
+}
+
+main().catch(showError);

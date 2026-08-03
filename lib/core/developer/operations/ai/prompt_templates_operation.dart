@@ -19,6 +19,13 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
       path: '/dev/api/ai-prompt-templates',
       summary: '读取分组后的全局 AI 提示模板',
       permission: 'ai.prompt.read',
+      parameters: [
+        DeveloperOperationParameter(
+          name: 'locale',
+          location: DeveloperOperationParameterLocation.query,
+          description: 'BCP 47 提示词 locale；按提示词清单匹配，未命中使用 defaultLocale',
+        ),
+      ],
       chatEnabled: false,
     ),
     DeveloperOperationDefinition(
@@ -36,9 +43,14 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
           description: '提示模板 ID',
           required: true,
         ),
+        DeveloperOperationParameter(
+          name: 'locale',
+          location: DeveloperOperationParameterLocation.query,
+          description: '要保存的提示词语言',
+        ),
       ],
       requestBodySchema: _saveSchema,
-      requestExample: {'content': '自定义提示模板内容'},
+      requestExample: {'content': 'Custom prompt template content'},
       chatEnabled: false,
     ),
     DeveloperOperationDefinition(
@@ -56,6 +68,11 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
           description: '提示模板 ID',
           required: true,
         ),
+        DeveloperOperationParameter(
+          name: 'locale',
+          location: DeveloperOperationParameterLocation.query,
+          description: '要恢复默认值的提示词语言',
+        ),
       ],
       chatEnabled: false,
     ),
@@ -69,8 +86,10 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
     DeveloperOperationDefinition definition,
     Map<String, String> pathParameters,
   ) async {
+    final locale = request.requestedUri.queryParameters['locale'];
     if (definition.id == 'prompts.templates.list') {
-      final templates = await gateway.promptTemplates.list();
+      final templates = await gateway.promptTemplates.list(locale: locale);
+      final resources = await gateway.promptTemplates.resources(locale: locale);
       final categories = <String, Map<String, Object?>>{};
       for (final template in templates) {
         final descriptor = template.descriptor;
@@ -78,11 +97,15 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
           descriptor.category,
           () => {
             'id': descriptor.category,
-            'name': descriptor.categoryName,
+            'name': resources.appText(
+              'workspace.prompt.category.${descriptor.category}',
+            ),
             'items': <Object?>[],
           },
         );
-        (category['items']! as List<Object?>).add(template.toJson());
+        (category['items']! as List<Object?>).add(
+          _localizedPromptTemplateJson(template, resources),
+        );
       }
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
@@ -97,27 +120,53 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
       if (content is! String) {
         throw const FormatException('content 必须是字符串');
       }
-      final template = await gateway.promptTemplates.save(templateId, content);
+      final template = await gateway.promptTemplates.save(
+        templateId,
+        content,
+        locale: locale,
+      );
       developerEventHub.emit({
         'type': 'ai.prompt-template.saved',
         'templateId': templateId,
+        'locale': template.locale,
         'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
       });
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
-        'template': template.toJson(),
+        'template': _localizedPromptTemplateJson(
+          template,
+          await gateway.promptTemplates.resources(locale: template.locale),
+        ),
       });
       return;
     }
-    final template = await gateway.promptTemplates.reset(templateId);
+    final template = await gateway.promptTemplates.reset(
+      templateId,
+      locale: locale,
+    );
     developerEventHub.emit({
       'type': 'ai.prompt-template.reset',
       'templateId': templateId,
+      'locale': template.locale,
       'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
     });
     await _json(request.response, HttpStatus.ok, {
       'requestId': requestId,
-      'template': template.toJson(),
+      'template': _localizedPromptTemplateJson(
+        template,
+        await gateway.promptTemplates.resources(locale: template.locale),
+      ),
     });
   }
+}
+
+Map<String, Object?> _localizedPromptTemplateJson(
+  DeveloperAiPromptTemplate template,
+  DeveloperAiPromptResources resources,
+) {
+  final localizationId = template.descriptor.id.replaceAll('-', '_');
+  return {
+    ...template.toJson(),
+    'name': resources.appText('workspace.prompt.template.$localizationId'),
+  };
 }

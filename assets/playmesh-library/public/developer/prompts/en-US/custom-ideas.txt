@@ -1,0 +1,3 @@
+# User-defined ideas
+Use English for project language.
+Do not put all logic and assets in one file or directory. Group folders and files by module, then import or call them from the appropriate entry points so entry code stays clean.

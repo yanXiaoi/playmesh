@@ -73,6 +73,15 @@ lib/core/developer/operations/{domain}/
 | 平台能力 | `GET /dev/api/capabilities` → `capabilities.list`<br>`GET /dev/api/capability-tests` → `capability_tests.list`<br>`POST /dev/api/capability-tests` → `capability_tests.run`<br>`POST /dev/api/capability-tests/instances` → `capability_tests.instances.create`<br>`POST /dev/api/capability-tests/instances/{instanceId}/invoke` → `capability_tests.instances.invoke`<br>`DELETE /dev/api/capability-tests/instances/{instanceId}` → `capability_tests.instances.dispose` |
 | AI 与提示词 | `GET /dev/api/operations` → `operations.list`<br>`GET /dev/api/ai-context` → `operations.context`<br>`GET /dev/api/projects/{projectId}/chat-prompt.txt` → `prompts.project.chat`<br>`GET /dev/api/projects/{projectId}/agent-prompt.txt` → `prompts.project.agent`<br>`GET /dev/api/ai-prompt-templates` → `prompts.templates.list`<br>`PUT /dev/api/ai-prompt-templates/{templateId}` → `prompts.templates.save`<br>`DELETE /dev/api/ai-prompt-templates/{templateId}` → `prompts.templates.reset`<br>`GET /dev/api/ai-approvals` → `ai_approvals.list`<br>`POST /dev/api/ai-approvals/{approvalId}` → `ai_approvals.decide` |
 
+AI 提示词的 locale 与 App 使用同一个事实源。模板正文位于
+`assets/playmesh-library/public/developer/prompts/{locale}/`，文件映射只在同目录
+`manifest.json` 声明；启用语言、默认语言和 fallback 读取全局
+`assets/playmesh-localization/manifest.json`。生成器固定文案来自对应 locale 的
+`app.json` 中 `developer.prompt.runtime.*`，工作区调用模板和项目提示词接口时只传当前
+BCP 47 locale。模板列表、读取、保存、恢复和项目导出使用同一 locale 解析流程；非默认
+语言的用户覆盖按 locale 隔离。不得在提示词目录增加第二份 App 文案、语言清单或 fallback，
+也不得在 Dart/JavaScript 中按语言分支。完整撰写要求见[工程开发规范](../06-engineering-standards.md#文档撰写规则)。
+
 `GET /dev/{workspacePath}/workspace` 和 `/playmesh/**` 静态资源由 Gateway 外壳处理，
 不是 Operation。它们不能被复制进上表或 `/dev/api/operations` 冒充业务 API。
 

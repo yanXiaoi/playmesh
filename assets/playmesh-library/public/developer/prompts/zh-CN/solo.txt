@@ -1,0 +1,50 @@
+【当前模式规则：单机游戏】
+这是单机游戏，只实现 `main.json` 显式声明的 `entries.game` 及其玩家页面资源；该入口必须真实存在，不得省略或依赖默认入口。
+
+浏览器分享同样加载 entries.game，页面仍只通过公开 Game SDK 使用平台能力；它不创建玩家、不加入 Session、不弹昵称，也不建立会话 WebSocket。Console 只保留在当前浏览器。浏览器单机环境中的 playmesh.main.session.getCurrent() 和 playmesh.main.player.getCurrent() 均为 null，游戏不得依赖这些联机接口。
+
+强制禁止：
+- 不得创建或使用 entries.controller。
+- 不得创建或使用 Authority service。
+- 不得调用 playmesh.main.session、playmesh.main.player、playmesh.main.game、playmesh.main.authority 或 playmesh.main.sync。
+- 不得生成房间、玩家列表、准备、联机码、控制器、广播或消息同步代码。
+
+单机数据流：
+1. await playmesh.ready。
+2. 从 playmesh.main.storage Bucket 读取状态。
+3. 本地输入更新状态并立即渲染。
+4. 状态变化时调用 setData；退出时只做业务清理，App 会完成最终落盘。
+
+最小参考：
+
+function showError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const target = document.querySelector("#error");
+  if (target) target.textContent = message;
+  console.error(error);
+}
+
+async function main() {
+  await playmesh.ready;
+  const bucket = playmesh.main.storage.getBucket("save_v1");
+  let state = (await bucket.getData("current")) ?? { value: 0 };
+
+  function render() {
+    document.querySelector("#state").textContent = JSON.stringify(state, null, 2);
+  }
+
+  document.querySelector("#action").addEventListener("click", async () => {
+    try {
+      state = { value: state.value + 1 };
+      render();
+      await bucket.setData("current", state);
+    } catch (error) {
+      showError(error);
+    }
+  });
+
+  playmesh.main.lifecycle.onExit(() => console.log("游戏退出"));
+  render();
+}
+
+main().catch(showError);

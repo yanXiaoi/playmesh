@@ -1,54 +1,61 @@
 {
-  "manifestVersion": "1.0.0",
+  "manifestVersion": "2.0.0",
   "templates": [
     {
       "id": "common",
-      "name": "对话 AI 公共规则（仅项目能力）",
       "category": "common",
-      "categoryName": "公共",
-      "file": "common.txt"
+      "files": {
+        "zh-CN": "zh-CN/common.txt",
+        "en-US": "en-US/common.txt"
+      }
     },
     {
       "id": "agent-common",
-      "name": "Agent 公共规则（能力与测试 API）",
       "category": "common",
-      "categoryName": "公共",
-      "file": "agent-common.txt"
+      "files": {
+        "zh-CN": "zh-CN/agent-common.txt",
+        "en-US": "en-US/agent-common.txt"
+      }
     },
     {
       "id": "custom-ideas",
-      "name": "自定义想法",
       "category": "common",
-      "categoryName": "公共",
-      "file": "custom-ideas.txt"
+      "files": {
+        "zh-CN": "zh-CN/custom-ideas.txt",
+        "en-US": "en-US/custom-ideas.txt"
+      }
     },
     {
       "id": "solo",
-      "name": "单机游戏",
       "category": "mode",
-      "categoryName": "游戏模式",
-      "file": "solo.txt"
+      "files": {
+        "zh-CN": "zh-CN/solo.txt",
+        "en-US": "en-US/solo.txt"
+      }
     },
     {
       "id": "multiplayer",
-      "name": "联机游戏公共规则",
       "category": "mode",
-      "categoryName": "游戏模式",
-      "file": "multiplayer.txt"
+      "files": {
+        "zh-CN": "zh-CN/multiplayer.txt",
+        "en-US": "en-US/multiplayer.txt"
+      }
     },
     {
       "id": "multi-screen",
-      "name": "普通多人多屏",
       "category": "display",
-      "categoryName": "显示模式",
-      "file": "multi-screen.txt"
+      "files": {
+        "zh-CN": "zh-CN/multi-screen.txt",
+        "en-US": "en-US/multi-screen.txt"
+      }
     },
     {
       "id": "single-screen-multiplayer",
-      "name": "单屏多人",
       "category": "display",
-      "categoryName": "显示模式",
-      "file": "single-screen-multiplayer.txt"
+      "files": {
+        "zh-CN": "zh-CN/single-screen-multiplayer.txt",
+        "en-US": "en-US/single-screen-multiplayer.txt"
+      }
     }
   ]
 }
