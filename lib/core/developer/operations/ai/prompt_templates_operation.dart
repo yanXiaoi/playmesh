@@ -25,6 +25,11 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
           location: DeveloperOperationParameterLocation.query,
           description: 'BCP 47 提示词 locale；按提示词清单匹配，未命中使用 defaultLocale',
         ),
+        DeveloperOperationParameter(
+          name: 'surface',
+          location: DeveloperOperationParameterLocation.query,
+          description: '提示词入口；默认 source，可选 gdevelop',
+        ),
       ],
       chatEnabled: false,
     ),
@@ -88,7 +93,12 @@ class _PromptTemplatesOperation implements _DeveloperHttpOperation {
   ) async {
     final locale = request.requestedUri.queryParameters['locale'];
     if (definition.id == 'prompts.templates.list') {
-      final templates = await gateway.promptTemplates.list(locale: locale);
+      final surface =
+          request.requestedUri.queryParameters['surface'] ?? 'source';
+      final templates = await gateway.promptTemplates.list(
+        locale: locale,
+        surface: surface,
+      );
       final resources = await gateway.promptTemplates.resources(locale: locale);
       final categories = <String, Map<String, Object?>>{};
       for (final template in templates) {

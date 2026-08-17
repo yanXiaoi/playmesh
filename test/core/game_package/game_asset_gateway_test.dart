@@ -8,6 +8,8 @@ import 'package:playmesh/core/game_package/game_asset_gateway.dart';
 import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
 
+import '../storage/standard_json_bucket_test_support.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
@@ -29,8 +31,8 @@ void main() {
     final gateway = await startGameAssetGateway(
       source: InstalledGameWebResourceSource(packageRootPath: packageRoot.path),
       entryPath: 'index.html',
-      gameSdkVersion: '4.0.0',
-      appSdkVersion: '3.2.0',
+      gameSdkVersion: '4.1.0',
+      appSdkVersion: '3.3.0',
       storage: storage,
     );
     addTearDown(gateway.close);
@@ -47,7 +49,7 @@ void main() {
     expect(sdk.statusCode, HttpStatus.ok);
     expect(
       sdk.body,
-      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
     );
     expect(sdk.body, isNot(contains('/playmesh/developer/log')));
     expect(sdk.body, contains('Playmesh Game SDK 注入成功'));
@@ -58,7 +60,7 @@ void main() {
     expect(appSdk.statusCode, HttpStatus.ok);
     expect(
       appSdk.body,
-      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.2.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.3.0'),
     );
     expect(appSdk.body, contains('Symbol.for("playmesh.app.internal.v1")'));
     expect(appSdk.body, isNot(contains('global.playmesh =')));
@@ -81,6 +83,38 @@ void main() {
     final binary = await http.get(gateway.entryUri.resolve(uploadedUrl));
     expect(binary.statusCode, HttpStatus.ok);
     expect(binary.bodyBytes, <int>[0, 1, 255, 7]);
+
+    final standardInitial = await sendStandardJsonBucketRequest(
+      baseUri: gateway.entryUri,
+      requestId: 'asset-authority-get-initial-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+    );
+    expect(standardInitial.statusCode, HttpStatus.ok);
+    final standardSet = await sendStandardJsonBucketRequest(
+      baseUri: gateway.entryUri,
+      requestId: 'asset-authority-set-0001',
+      gameId: storage.gameId,
+      operation: 'set',
+      bucket: 'save',
+      key: 'checkpoint',
+      value: 7,
+      expectedRevision: standardJsonBucketRevision(standardInitial),
+    );
+    expect(standardSet.statusCode, HttpStatus.ok);
+    final standardGet = await sendStandardJsonBucketRequest(
+      baseUri: gateway.entryUri,
+      requestId: 'asset-authority-get-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+    );
+    expect(standardGet.statusCode, HttpStatus.ok);
+    expect(standardJsonBucketValue(standardGet), 7);
+
     expect(
       (await http.get(gateway.entryUri.resolve('/bucket/media'))).statusCode,
       HttpStatus.notFound,
@@ -214,8 +248,8 @@ void main() {
         expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 5)),
       ),
       entryPath: 'index.html',
-      gameSdkVersion: '4.0.0',
-      appSdkVersion: '3.2.0',
+      gameSdkVersion: '4.1.0',
+      appSdkVersion: '3.3.0',
     );
     addTearDown(gateway.close);
 

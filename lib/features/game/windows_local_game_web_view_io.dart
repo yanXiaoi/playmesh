@@ -6,9 +6,11 @@ import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
+import '../../core/game_sdk/webview_sdk_navigation_queue.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/developer/developer_run_controller.dart';
+import '../../core/developer/developer_external_navigation.dart';
 
 class WindowsLocalGameWebView extends StatefulWidget {
   const WindowsLocalGameWebView({
@@ -22,6 +24,9 @@ class WindowsLocalGameWebView extends StatefulWidget {
     this.onNavigationStarted,
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
+    this.onOpenExternalUri,
+    this.additionalDocumentCreatedScripts = const [],
+    this.onWebMessage,
   });
 
   final String assetPath;
@@ -34,6 +39,9 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;
+  final Future<void> Function(Uri uri)? onOpenExternalUri;
+  final List<String> additionalDocumentCreatedScripts;
+  final bool Function(Object? message)? onWebMessage;
 
   @override
   State<WindowsLocalGameWebView> createState() =>
@@ -54,10 +62,12 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   StreamSubscription<LoadingState>? _loadingStateSubscription;
   StreamSubscription<bool>? _focusChangedSubscription;
   StreamSubscription<String>? _bridgeSubscription;
+  late final WebViewSdkNavigationQueue _sdkMessages;
 
   @override
   void initState() {
     super.initState();
+    _sdkMessages = WebViewSdkNavigationQueue(_controller.executeScript);
     unawaited(_initialize());
   }
 
@@ -94,12 +104,16 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       _loadingStateSubscription = _controller.loadingState.listen((state) {
         if (state == LoadingState.loading) {
           _navigationCompleted = false;
+          _sdkMessages.notifyNavigationLoading();
           _resetInitialFocus();
           widget.onNavigationStarted?.call();
           widget.onEvaluateJavaScriptReady?.call(null);
         } else if (state == LoadingState.navigationCompleted) {
           _navigationCompleted = true;
           widget.onEvaluateJavaScriptReady?.call(_controller.executeScript);
+          widget.onRunJavaScriptReady?.call(_controller.executeScript);
+          final generation = _sdkMessages.generation;
+          unawaited(_resumeSdkMessages(generation));
           _scheduleInitialFocus();
         }
       });
@@ -123,12 +137,21 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
         )) {
           return;
         }
+        final externalUri = widget.onOpenExternalUri == null
+            ? null
+            : parsePlaymeshExternalNavigationMessage(message);
+        if (externalUri != null) {
+          unawaited(widget.onOpenExternalUri!(externalUri));
+          return;
+        }
+        if (widget.onWebMessage?.call(message) == true) return;
         if (message is String) {
           if (message.contains('"command":"app.')) {
+            final generation = _sdkMessages.generation;
             unawaited(
               widget.appBridge?.handleJavaScriptMessage(
                 message,
-                _sendAppMessage,
+                (reply) => _sendAppMessage(reply, generation),
               ),
             );
           } else {
@@ -139,15 +162,20 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       await _controller.addScriptToExecuteOnDocumentCreated(
         windowsWebViewConsoleCaptureScript,
       );
+      if (widget.onOpenExternalUri != null) {
+        await _controller.addScriptToExecuteOnDocumentCreated(
+          playmeshExternalNavigationScript,
+        );
+      }
+      for (final script in widget.additionalDocumentCreatedScripts) {
+        await _controller.addScriptToExecuteOnDocumentCreated(script);
+      }
       _bridgeSubscription = widget.bridge?.outboundMessages.listen(
         (message) => unawaited(_sendToWebView(message)),
       );
       await _controller.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
+      _sdkMessages.beginNavigation();
       await _controller.loadUrl(widget.entryUri.toString());
-      widget.onRunJavaScriptReady?.call((script) async {
-        await _controller.executeScript(script);
-      });
-      widget.onEvaluateJavaScriptReady?.call(_controller.executeScript);
 
       if (mounted) {
         setState(() => _ready = true);
@@ -170,15 +198,19 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   }
 
   Future<void> _sendToWebView(String message) async {
-    if (_restoresGameContentFocus(message)) {
-      try {
-        await _focusNativeWebView();
-      } on Object catch (error) {
-        debugPrint('Windows 游戏 WebView 焦点恢复失败: $error');
-      }
-    }
     try {
-      await _controller.executeScript(gameSdkReceiveScript(message));
+      await _sdkMessages.addGame(
+        gameSdkReceiveScript(message),
+        beforeSend: _restoresGameContentFocus(message)
+            ? () async {
+                try {
+                  await _focusNativeWebView();
+                } on Object catch (error) {
+                  debugPrint('Windows 游戏 WebView 焦点恢复失败: $error');
+                }
+              }
+            : null,
+      );
     } on Object catch (error) {
       debugPrint('向 Windows 游戏 WebView 发送 SDK 消息失败: $error');
     }
@@ -262,8 +294,34 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
     }
   }
 
-  Future<void> _sendAppMessage(String message) async {
-    await _controller.executeScript(appSdkReceiveScript(message));
+  Future<void> _sendAppMessage(String message, int generation) async {
+    await _sdkMessages.addApp(
+      appSdkReceiveScript(message),
+      generation: generation,
+    );
+  }
+
+  Future<void> _resumeSdkMessages(int generation) async {
+    if (!mounted) return;
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await _sdkMessages.completeNavigation(generation);
+        return;
+      } on Object catch (error) {
+        if (!mounted ||
+            !_navigationCompleted ||
+            generation != _sdkMessages.generation) {
+          return;
+        }
+        if (attempt == 2) {
+          debugPrint('恢复 Windows 游戏 WebView SDK 消息失败: $error');
+          return;
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: attempt == 0 ? 16 : 64),
+        );
+      }
+    }
   }
 
   Future<WebviewPermissionDecision> _handlePermissionRequest(
@@ -286,6 +344,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   @override
   void dispose() {
     widget.onEvaluateJavaScriptReady?.call(null);
+    _sdkMessages.dispose();
     _initialFocusRetryTimer?.cancel();
     unawaited(_webMessageSubscription?.cancel());
     unawaited(_loadErrorSubscription?.cancel());

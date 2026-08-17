@@ -6,16 +6,17 @@ import 'package:archive/archive.dart';
 
 import '../../models/game_summary.dart';
 import '../../models/game_manifest.dart';
-import '../../models/game_id.dart';
 import '../../models/game_capabilities.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../../models/local_game_entry.dart';
 import '../game_package/game_library_repository.dart';
 import '../game_package/game_package_transfer_service.dart';
 import '../game_package/ordinary_web_package_importer.dart';
+import '../game_sdk/sdk_feature_registry.dart';
 import '../library/playmesh_library_root.dart';
 import 'developer_local_history.dart';
 import 'developer_project_validation.dart';
+import 'project_provisioning_service.dart';
 
 export 'developer_local_history.dart';
 export 'developer_project_validation.dart';
@@ -224,10 +225,12 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     this.repository, {
     AssetBundle? bundle,
     Directory? workspaceRoot,
+    ProjectProvisioningService? projectProvisioning,
     GamePackageTransferService? packageTransfer,
     OrdinaryWebPackageImporter? ordinaryWebPackageImporter,
   }) : bundle = bundle ?? rootBundle,
        _injectedWorkspaceRoot = workspaceRoot,
+       _injectedProjectProvisioning = projectProvisioning,
        _packageTransfer = packageTransfer ?? GamePackageTransferService(),
        _ordinaryWebPackageImporter =
            ordinaryWebPackageImporter ?? const OrdinaryWebPackageImporter();
@@ -239,12 +242,14 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
   final GameLibraryRepository repository;
   final AssetBundle bundle;
   final Directory? _injectedWorkspaceRoot;
+  final ProjectProvisioningService? _injectedProjectProvisioning;
   final GamePackageTransferService _packageTransfer;
   final OrdinaryWebPackageImporter _ordinaryWebPackageImporter;
   final DeveloperLocalHistoryStore _localHistory = DeveloperLocalHistoryStore();
   final DeveloperProjectValidator _validator =
       const DeveloperProjectValidator();
   Directory? _resolvedWorkspaceRoot;
+  ProjectProvisioningService? _resolvedProjectProvisioning;
   final Map<String, int> _revisions = {};
 
   @override
@@ -380,70 +385,63 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
             draft.maxPlayers != 1)) {
       throw const FormatException('单机项目必须使用 multi_screen 且玩家人数为 1');
     }
-    if ((await listProjects()).any((project) => project.id == id)) {
-      throw StateError('项目 ID 已存在');
-    }
-
-    final root = await _workspaceRoot();
-    final target = Directory('${root.path}${Platform.pathSeparator}$id');
-    if (await target.exists()) throw StateError('项目目录已存在');
-    final staging = Directory(
-      '${root.path}${Platform.pathSeparator}.playmesh-create-'
-      '${DateTime.now().toUtc().microsecondsSinceEpoch}',
-    );
-    try {
-      await staging.create(recursive: true);
-      await _copyProjectTemplate(staging);
-      final manifestFile = _resolveFile(staging, 'main.json');
-      final decoded = jsonDecode(await manifestFile.readAsString());
-      if (decoded is! Map) throw StateError('默认项目模板清单无效');
-      final manifestJson =
-          projectGameManifestJson(Map<String, Object?>.from(decoded))
-            ..['id'] = id
-            ..['name'] = name
-            ..['author'] = author
-            ..['lastModifiedAt'] = draft.lastModifiedAt.millisecondsSinceEpoch
-            ..['remarks'] = description
-            ..['orientation'] = draft.orientation.manifestValue
-            ..['modes'] = [draft.mode]
-            ..['displayModes'] = [draft.displayMode]
-            ..['tags'] = draft.tags.map((tag) => tag.trim()).toSet().toList()
-            ..['players'] = {'min': draft.minPlayers, 'max': draft.maxPlayers};
-      if (draft.controllerOrientation case final controllerOrientation?) {
-        manifestJson['controllerOrientation'] =
-            controllerOrientation.manifestValue;
-      } else {
-        manifestJson.remove('controllerOrientation');
-      }
-      if (draft.mode == 'solo') {
-        manifestJson.remove('authority');
-        await _replaceWithSoloSkeleton(staging);
-      } else if (draft.displayMode == 'multi_screen') {
-        await _removeControllerSkeleton(staging);
-      }
-      GameManifest.fromJson(manifestJson);
-      await manifestFile.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(manifestJson),
-        flush: true,
-      );
-      if (draft.requiredCapabilities.isNotEmpty ||
-          draft.controllerRequiredCapabilities.isNotEmpty) {
-        await _resolveFile(staging, 'capabilities.json').writeAsString(
-          const JsonEncoder.withIndent('  ').convert({
-            'required': draft.requiredCapabilities.toSet().toList(),
-            if (draft.controllerRequiredCapabilities.isNotEmpty)
-              'controllerRequired': draft.controllerRequiredCapabilities
-                  .toSet()
-                  .toList(),
-          }),
+    final provisioned = await (await _projectProvisioning()).createProject(
+      gameId: id,
+      name: name,
+      kind: PlaymeshProjectKind.source,
+      initialize: (staging) async {
+        await _copyProjectTemplate(staging);
+        final manifestFile = _resolveFile(staging, 'main.json');
+        final decoded = jsonDecode(await manifestFile.readAsString());
+        if (decoded is! Map) throw StateError('默认项目模板清单无效');
+        final manifestJson =
+            projectGameManifestJson(Map<String, Object?>.from(decoded))
+              ..['id'] = id
+              ..['name'] = name
+              ..['author'] = author
+              ..['lastModifiedAt'] = draft.lastModifiedAt.millisecondsSinceEpoch
+              ..['remarks'] = description
+              ..['orientation'] = draft.orientation.manifestValue
+              ..['modes'] = [draft.mode]
+              ..['displayModes'] = [draft.displayMode]
+              ..['tags'] = draft.tags.map((tag) => tag.trim()).toSet().toList()
+              ..['players'] = {
+                'min': draft.minPlayers,
+                'max': draft.maxPlayers,
+              };
+        if (draft.controllerOrientation case final controllerOrientation?) {
+          manifestJson['controllerOrientation'] =
+              controllerOrientation.manifestValue;
+        } else {
+          manifestJson.remove('controllerOrientation');
+        }
+        if (draft.mode == 'solo') {
+          manifestJson.remove('authority');
+          await _replaceWithSoloSkeleton(staging);
+        } else if (draft.displayMode == 'multi_screen') {
+          await _removeControllerSkeleton(staging);
+        }
+        GameManifest.fromJson(manifestJson);
+        await manifestFile.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(manifestJson),
           flush: true,
         );
-      }
-      await _renameDirectoryWithRetry(staging, target.path);
-    } on Object {
-      if (await staging.exists()) await staging.delete(recursive: true);
-      rethrow;
-    }
+        if (draft.requiredCapabilities.isNotEmpty ||
+            draft.controllerRequiredCapabilities.isNotEmpty) {
+          await _resolveFile(staging, 'capabilities.json').writeAsString(
+            const JsonEncoder.withIndent('  ').convert({
+              'required': draft.requiredCapabilities.toSet().toList(),
+              if (draft.controllerRequiredCapabilities.isNotEmpty)
+                'controllerRequired': draft.controllerRequiredCapabilities
+                    .toSet()
+                    .toList(),
+            }),
+            flush: true,
+          );
+        }
+      },
+    );
+    final target = provisioned.root;
     final game = await _customGame(target);
     repository.upsert(game);
     return DeveloperProject(
@@ -821,7 +819,9 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     final projected = projectGameManifestJson(manifest)
       ..['id'] = currentId
       ..['author'] = current['author']
-      ..['lastModifiedAt'] = current['lastModifiedAt'];
+      ..['lastModifiedAt'] = current['lastModifiedAt']
+      ..['sdkVersion'] = SdkFeatureRegistry.gameSdkVersion
+      ..['appSdkVersion'] = SdkFeatureRegistry.appSdkVersion;
     final normalized = GameManifest.fromJson(projected).toJson();
     final encoded = utf8.encode(
       '${const JsonEncoder.withIndent('  ').convert(normalized)}\n',
@@ -1138,36 +1138,10 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
   @override
   Future<GameSummary> prepareGame(String projectId) async {
     final directory = await _ensureWorkspace(projectId);
-    final installed = repository.cachedGames.where(
-      (candidate) => candidate.id == projectId,
-    );
-    if (installed.isEmpty) return _customGame(directory);
-    final game = installed.first;
-    return GameSummary(
-      id: game.id,
-      name: game.name,
-      version: game.version,
-      author: game.author,
-      lastModifiedAt: game.lastModifiedAt,
-      sdkVersion: game.sdkVersion,
-      appSdkVersion: game.appSdkVersion,
-      description: game.description,
-      minPlayers: game.minPlayers,
-      maxPlayers: game.maxPlayers,
-      supportsMultiplayer: game.supportsMultiplayer,
-      displayModeLabel: game.displayModeLabel,
-      displayMode: game.displayMode,
-      orientation: game.orientation,
-      controllerOrientation: game.controllerOrientation,
-      tags: game.tags,
-      capabilities: await _readCustomCapabilities(directory),
-      entry: LocalGameEntry(
-        gameEntryPath: game.entry.gameEntryPath,
-        controllerEntryPath: game.entry.controllerEntryPath,
-        statusLabel: game.entry.statusLabel,
-        packageRootFilePath: directory.path,
-      ),
-    );
+    // The built-in source workspace edits this managed directory directly.
+    // Parse every launch field from that same saved directory so a cached
+    // library entry with the same id cannot contribute stale metadata.
+    return _customGame(directory);
   }
 
   Future<List<DeveloperProject>> _customProjects() async {
@@ -1292,12 +1266,26 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       await root.create(recursive: true);
       return _resolvedWorkspaceRoot = root;
     }
+    final injectedProvisioning = _injectedProjectProvisioning;
+    if (injectedProvisioning != null) {
+      return _resolvedWorkspaceRoot = await injectedProvisioning.projectsRoot();
+    }
     final libraryRoot = await PlaymeshLibraryRoot.resolve();
     final resolved = Directory(
       '${libraryRoot.path}${Platform.pathSeparator}packages',
     );
     await resolved.create(recursive: true);
     return _resolvedWorkspaceRoot = resolved;
+  }
+
+  Future<ProjectProvisioningService> _projectProvisioning() async {
+    final injected = _injectedProjectProvisioning;
+    if (injected != null) return injected;
+    final cached = _resolvedProjectProvisioning;
+    if (cached != null) return cached;
+    return _resolvedProjectProvisioning = ProjectProvisioningService(
+      projectsRoot: await _workspaceRoot(),
+    );
   }
 
   Future<Directory> _ensureWorkspace(String projectId) async {
@@ -1313,6 +1301,11 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       '${directory.path}${Platform.pathSeparator}app',
     );
     if (await manifestFile.exists() && await appDirectory.exists()) {
+      await (await _projectProvisioning()).bindProject(
+        gameId: project.id,
+        name: project.name,
+        kind: PlaymeshProjectKind.source,
+      );
       return directory;
     }
     final source = Directory(project.rootFilePath);
@@ -1330,6 +1323,11 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     }
     await directory.create(recursive: true);
     await _copyDirectoryContents(source, directory);
+    await (await _projectProvisioning()).bindProject(
+      gameId: project.id,
+      name: project.name,
+      kind: PlaymeshProjectKind.source,
+    );
     return directory;
   }
 
@@ -1424,16 +1422,13 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     required String author,
     required DateTime lastModifiedAt,
   }) {
-    final normalizedId = id.trim();
-    final normalizedName = name.trim();
+    final identity = ProjectProvisioningService.validateIdentity(
+      gameId: id,
+      name: name,
+    );
+    final normalizedId = identity.gameId;
+    final normalizedName = identity.name;
     final normalizedAuthor = author.trim();
-    if (!isValidPlaymeshGameId(normalizedId) ||
-        !RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(normalizedId)) {
-      throw const FormatException('项目 ID 必须是小写反向域名格式');
-    }
-    if (normalizedName.isEmpty || normalizedName.length > 80) {
-      throw const FormatException('项目名称长度必须为 1 到 80 个字符');
-    }
     if (normalizedAuthor.isEmpty || normalizedAuthor.length > 80) {
       throw const FormatException('发布者名称长度必须为 1 到 80 个字符');
     }

@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:playmesh/core/developer/developer_channel.dart';
 import 'package:playmesh/core/protocol/go_core_status.dart';
 import 'package:playmesh/core/services/go_core_status_service.dart';
+import 'package:playmesh/core/download/endpoint_probe_contract.dart';
+import 'package:playmesh/core/download/named_download_endpoint.dart';
+import 'package:playmesh/core/update/app_update_models.dart';
+import 'package:playmesh/core/update/app_update_service.dart';
+import 'package:playmesh/core/version/semantic_version.dart';
 import 'package:playmesh/features/settings/settings_page.dart';
-import 'package:playmesh/ui/playmesh_ui.dart';
 
 import '../../support/localized_test_app.dart';
 
@@ -55,9 +58,9 @@ void main() {
     );
     await _pumpAsync(tester);
 
-    expect(find.text('Playmesh 4.1.0'), findsOneWidget);
+    expect(find.text('Playmesh 4.2.0'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Playmesh 4.1.0')).dy,
+      tester.getTopLeft(find.text('Playmesh 4.2.0')).dy,
       lessThan(tester.getTopLeft(find.text('Core 0.1.0')).dy),
     );
     expect(find.text('在线'), findsOneWidget);
@@ -107,156 +110,99 @@ void main() {
     expect(find.text('Go Core 返回了无法识别的状态。'), findsOneWidget);
   });
 
-  testWidgets('enables developer mode with default port and custom token', (
-    tester,
-  ) async {
-    final statusProvider = _QueueStatusProvider([
-      GoCoreStatusResult.online(_onlineStatus('req-settings-dev-1')),
-      GoCoreStatusResult.online(_onlineStatus('req-settings-dev-2')),
+  testWidgets('does not expose developer mode from Settings', (tester) async {
+    final provider = _QueueStatusProvider([
+      GoCoreStatusResult.online(_onlineStatus('req-settings-no-developer')),
     ]);
-    final developerProvider = _FakeDeveloperProvider();
 
     await tester.pumpWidget(
-      localizedTestApp(
-        home: SettingsPage(
-          statusProvider: statusProvider,
-          developerProvider: developerProvider,
-        ),
-      ),
+      localizedTestApp(home: SettingsPage(statusProvider: provider)),
     );
     await _pumpAsync(tester);
 
-    final portField = tester.widget<TextField>(
-      find.byWidgetPredicate(
-        (widget) => widget is TextField && widget.decoration?.labelText == '端口',
-      ),
-    );
-    expect(portField.controller?.text, '16666');
-
-    await tester.enterText(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField && widget.decoration?.labelText == 'Token',
-      ),
-      'my-dev-token',
-    );
-    await tester.tap(find.byType(Switch));
-    await _pumpAsync(tester);
-
-    expect(developerProvider.boundPort, 16666);
-    expect(developerProvider.enabledToken, 'my-dev-token');
-    expect(
-      find.text(
-        'http://192.168.1.10:16666/dev/devpath/workspace?token=my-dev-token',
-      ),
-      findsOneWidget,
-    );
-    expect(find.byType(SelectableText), findsWidgets);
-  });
-
-  testWidgets('loads the persistent developer workspace identity', (
-    tester,
-  ) async {
-    final statusProvider = _QueueStatusProvider([
-      GoCoreStatusResult.online(_onlineStatus('req-settings-port')),
-    ]);
-    final developerProvider = _FakeDeveloperProvider(
-      preferredPort: 17777,
-      preferredToken: 'saved-dev-token',
-    );
-
-    await tester.pumpWidget(
-      localizedTestApp(
-        home: SettingsPage(
-          statusProvider: statusProvider,
-          developerProvider: developerProvider,
-        ),
-      ),
-    );
-    await _pumpAsync(tester);
-
-    final portField = find.byWidgetPredicate(
-      (widget) => widget is TextField && widget.decoration?.labelText == '端口',
-    );
-    expect(tester.widget<TextField>(portField).controller?.text, '17777');
-    final tokenField = find.byWidgetPredicate(
-      (widget) =>
-          widget is TextField && widget.decoration?.labelText == 'Token',
-    );
-    expect(
-      tester.widget<TextField>(tokenField).controller?.text,
-      'saved-dev-token',
-    );
-    await tester.enterText(portField, '18888');
-    await tester.tap(find.byType(Switch));
-    await _pumpAsync(tester);
-
-    expect(developerProvider.boundPort, 18888);
-    expect(developerProvider.enabledToken, 'saved-dev-token');
+    expect(find.text('开发者模式'), findsNothing);
+    expect(find.text('制作游戏'), findsNothing);
   });
 
   testWidgets(
-    'developer switch reflects the target state before startup ends',
+    'does not expose GDevelop distribution notices in Settings/About',
     (tester) async {
-      final statusProvider = _QueueStatusProvider([
-        GoCoreStatusResult.online(_onlineStatus('req-settings-responsive')),
+      final provider = _QueueStatusProvider([
+        GoCoreStatusResult.online(_onlineStatus('req-settings-no-gdevelop')),
       ]);
-      final developerProvider = _DelayedDeveloperProvider();
+
       await tester.pumpWidget(
-        localizedTestApp(
-          home: SettingsPage(
-            statusProvider: statusProvider,
-            developerProvider: developerProvider,
-          ),
-        ),
+        localizedTestApp(home: SettingsPage(statusProvider: provider)),
       );
       await _pumpAsync(tester);
 
-      await tester.tap(find.byType(Switch));
-      await tester.pump();
-
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
-      expect(find.text('正在启动开发者通道并准备工作区地址…'), findsOneWidget);
-
-      developerProvider.completeEnable();
-      await _pumpAsync(tester);
-      expect(find.textContaining('已开启，Token 尾号'), findsOneWidget);
+      expect(
+        find.byKey(const Key('game-creation-gdevelop-notices')),
+        findsNothing,
+      );
+      expect(find.text('开源与第三方声明'), findsNothing);
+      expect(find.textContaining('GDevelop'), findsNothing);
     },
   );
 
-  testWidgets(
-    'developer workspace selection keeps readable dark-theme colors',
-    (tester) async {
-      final statusProvider = _QueueStatusProvider([
-        GoCoreStatusResult.online(_onlineStatus('req-settings-dark-selection')),
-      ]);
-      final developerProvider = _FakeDeveloperProvider();
+  testWidgets('shows update details and opens a route in the browser', (
+    tester,
+  ) async {
+    final provider = _QueueStatusProvider([
+      GoCoreStatusResult.online(_onlineStatus('req-settings-update')),
+    ]);
+    final checker = _FakeUpdateChecker();
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: SettingsPage(statusProvider: provider, updateChecker: checker),
+      ),
+    );
+    await _pumpAsync(tester);
 
-      await tester.pumpWidget(
-        localizedTestApp(
-          home: Theme(
-            data: PlaymeshTheme.dark(),
-            child: SettingsPage(
-              statusProvider: statusProvider,
-              developerProvider: developerProvider,
-            ),
-          ),
-        ),
-      );
-      await _pumpAsync(tester);
-      await tester.tap(find.byType(Switch));
-      await _pumpAsync(tester);
+    await tester.tap(find.byKey(const Key('check-app-update-button')));
+    await _pumpAsync(tester);
 
-      final selectedTile = tester.widget<ListTile>(
-        find.byWidgetPredicate(
-          (widget) => widget is ListTile && widget.selected,
+    expect(find.byKey(const Key('app-update-dialog')), findsOneWidget);
+    expect(find.text('发现新版本'), findsOneWidget);
+    expect(find.text('4.2.0'), findsOneWidget);
+    expect(find.text('4.3.0'), findsOneWidget);
+    expect(find.text('新增手动检查更新。'), findsOneWidget);
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('延迟 36 毫秒'), findsOneWidget);
+
+    await tester.tap(find.text('浏览器打开'));
+    await _pumpAsync(tester);
+
+    expect(checker.opened.single.endpoint.name, 'GitHub');
+    expect(find.text('已交给系统默认浏览器打开'), findsOneWidget);
+  });
+
+  testWidgets('keeps update controls usable on a narrow screen', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 780));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final provider = _QueueStatusProvider([
+      GoCoreStatusResult.online(_onlineStatus('req-settings-update-narrow')),
+    ]);
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: SettingsPage(
+          statusProvider: provider,
+          updateChecker: _FakeUpdateChecker(),
         ),
-      );
-      final colors = PlaymeshTheme.dark().colorScheme;
-      expect(selectedTile.selectedTileColor, colors.secondaryContainer);
-      expect(selectedTile.selectedColor, colors.onSecondaryContainer);
-    },
-  );
+      ),
+    );
+    await _pumpAsync(tester);
+
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const Key('check-app-update-button')));
+    await _pumpAsync(tester);
+
+    expect(find.byKey(const Key('app-update-dialog')), findsOneWidget);
+    expect(find.text('新版本说明'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _QueueStatusProvider implements GoCoreStatusProvider {
@@ -298,94 +244,48 @@ class _DelayedStatusProvider implements GoCoreStatusProvider {
   Future<void> close() async {}
 }
 
-class _FakeDeveloperProvider
-    implements DeveloperModeProvider, DeveloperWorkspacePreferenceProvider {
-  _FakeDeveloperProvider({
-    this.preferredPort = defaultDeveloperPort,
-    this.preferredToken = 'persisted-dev-token',
-  });
-
-  final int preferredPort;
-  final String preferredToken;
-  int? boundPort;
-  String? enabledToken;
+final class _FakeUpdateChecker implements AppUpdateChecker {
+  final List<AppUpdateDownload> opened = [];
 
   @override
-  Future<DeveloperSession> enableDeveloperMode({
-    required int port,
-    String? token,
-  }) async {
-    boundPort = port;
-    enabledToken = token;
-    return DeveloperSession(
-      enabled: true,
-      port: port,
-      path: 'devpath',
-      token: token,
-      tokenHint: token?.substring(token.length - 6),
-      workspacePath: '/dev/devpath/workspace',
-      docsPath: '/dev/docs',
-      openApiPath: '/dev/openapi.json',
-      sdkManifestPath: '/dev/sdk-manifest.json',
-      createdAt: DateTime.utc(2026, 7, 16),
+  Future<AppUpdateCheckResult> checkForUpdates() async {
+    final endpoint = NamedDownloadEndpoint(
+      name: 'GitHub',
+      url: Uri.parse('https://example.com/playmesh.exe'),
+    );
+    return AppUpdateCheckResult(
+      currentVersion: SemanticVersion.parse('4.2.0'),
+      latestVersion: SemanticVersion.parse('4.3.0'),
+      releaseNotes: '新增手动检查更新。',
+      source: NamedDownloadEndpoint(
+        name: 'Gitee',
+        url: Uri.parse('https://example.com/app_update.json'),
+      ),
+      platform: 'windows',
+      platformAvailable: true,
+      downloads: [
+        AppUpdateDownload(
+          endpoint: endpoint,
+          probe: EndpointProbeResult(
+            url: endpoint.url,
+            state: EndpointProbeState.reachable,
+            latency: const Duration(milliseconds: 36),
+          ),
+        ),
+      ],
+      sourceCount: 2,
+      successfulSourceCount: 2,
     );
   }
 
   @override
-  Future<DeveloperSession> developerModeStatus() async {
-    return const DeveloperSession(enabled: false);
+  Future<bool> openDownload(AppUpdateDownload download) async {
+    opened.add(download);
+    return true;
   }
 
   @override
-  Future<DeveloperWorkspacePreference>
-  loadDeveloperWorkspacePreference() async => DeveloperWorkspacePreference(
-    port: preferredPort,
-    token: preferredToken,
-    path: 'devpath',
-  );
-
-  @override
-  Future<void> disableDeveloperMode() async {}
-
-  @override
-  Future<List<Uri>> developerWorkspaceLinks(DeveloperSession session) async {
-    return [
-      Uri.parse(
-        'http://192.168.1.10:${boundPort ?? 16666}${session.workspacePath}?token=${session.token}',
-      ),
-    ];
-  }
-}
-
-class _DelayedDeveloperProvider extends _FakeDeveloperProvider {
-  final Completer<DeveloperSession> _enableCompleter = Completer();
-
-  @override
-  Future<DeveloperSession> enableDeveloperMode({
-    required int port,
-    String? token,
-  }) {
-    boundPort = port;
-    enabledToken = token;
-    return _enableCompleter.future;
-  }
-
-  void completeEnable() {
-    _enableCompleter.complete(
-      DeveloperSession(
-        enabled: true,
-        port: boundPort,
-        path: 'devpath',
-        token: enabledToken,
-        tokenHint: enabledToken?.substring(enabledToken!.length - 6),
-        workspacePath: '/dev/devpath/workspace',
-        docsPath: '/dev/docs',
-        openApiPath: '/dev/openapi.json',
-        sdkManifestPath: '/dev/sdk-manifest.json',
-        createdAt: DateTime.utc(2026, 7, 18),
-      ),
-    );
-  }
+  void close() {}
 }
 
 Future<void> _pumpAsync(WidgetTester tester) async {

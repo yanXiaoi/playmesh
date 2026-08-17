@@ -109,14 +109,17 @@ class _DocumentationOperation implements _DeveloperHttpOperation {
       case 'docs.human':
         await _text(
           request.response,
-          _humanDocumentation(),
+          _humanDocumentation(gateway),
           'text/markdown; charset=utf-8',
         );
       case 'docs.openapi':
         await _json(
           request.response,
           HttpStatus.ok,
-          _developerOperationRegistry.openApi(),
+          _developerOperationRegistry.openApi(
+            where: (operation) => gateway.gdevelopAiFeaturePolicy
+                .exposesOperationId(operation.id),
+          ),
         );
       case 'docs.sdk_manifest':
         await _serveDeveloperAsset(request, 'contracts/sdk-manifest.json');
@@ -157,7 +160,7 @@ class _DocumentationOperation implements _DeveloperHttpOperation {
     }
   }
 
-  String _humanDocumentation() {
+  String _humanDocumentation(_IoDeveloperWebGateway gateway) {
     final output = StringBuffer()
       ..writeln('# Playmesh Developer Channel API')
       ..writeln()
@@ -174,6 +177,9 @@ class _DocumentationOperation implements _DeveloperHttpOperation {
       ..writeln()
       ..writeln('## 已注册操作');
     for (final operation in _developerOperationRegistry.definitions) {
+      if (!gateway.gdevelopAiFeaturePolicy.exposesOperationId(operation.id)) {
+        continue;
+      }
       output
         ..writeln()
         ..writeln(
@@ -195,6 +201,7 @@ const _sessionSchema = {
     'path': {'type': 'string'},
     'tokenHint': {'type': 'string'},
     'workspacePath': {'type': 'string'},
+    'gdevelopWorkspacePath': {'type': 'string'},
     'createdAt': {'type': 'integer'},
   },
 };

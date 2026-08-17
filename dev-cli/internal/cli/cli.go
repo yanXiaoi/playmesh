@@ -27,6 +27,8 @@ func Run(ctx context.Context, args []string) error {
 		return commandTo(ctx, args[1:])
 	case "get":
 		return commandGet(ctx, args[1:])
+	case "convert":
+		return commandConvert(ctx, args[1:])
 	case "init":
 		return commandInit(ctx, args[1:])
 	case "run":
@@ -67,10 +69,11 @@ func printUsage() {
 用法：
   playmesh-cli to <workspace-url>  连接并切换目标 App
   playmesh-cli get <project-id>    将 App 发布包恢复为 JavaScript 工程
+  playmesh-cli convert             将当前 main.json + app/ 包转换为 JavaScript 工程
   playmesh-cli init                初始化原生项目并选择 JavaScript/TypeScript
   playmesh-cli init cocos          初始化当前 Cocos Creator 3.x 项目
   playmesh-cli update              更新 SDK，并由项目适配器升级集成
-  playmesh-cli run                 上传、校验并运行，不附加日志
+  playmesh-cli run                 临时上传、校验并运行，不发布且不附加日志
   playmesh-cli logs                实时输出当前项目运行日志
   playmesh-cli dev [adapter-args]  使用适配器准备本地开发资源并在真实 App 中运行
   playmesh-cli capabilities --json 输出目标 App 当前注册的能力目录

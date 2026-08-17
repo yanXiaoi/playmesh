@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'core/game_package/file_game_library_scanner.dart';
 import 'core/game_package/game_library_local_metadata.dart';
@@ -16,6 +17,7 @@ import 'core/localization/playmesh_localization.dart';
 import 'core/localization/playmesh_ui_controller.dart';
 import 'core/localization/playmesh_ui_preferences.dart';
 import 'core/developer/developer_background_host.dart';
+import 'core/developer/developer_channel.dart';
 import 'core/developer/developer_game_catalog_publisher.dart';
 import 'core/developer/developer_project_catalog.dart';
 import 'core/developer/developer_run_controller.dart';
@@ -29,6 +31,7 @@ import 'features/game/game_page.dart';
 import 'features/game/game_orientation_controller.dart';
 import 'features/game/join_game_page.dart';
 import 'features/game/standalone_html_page.dart';
+import 'features/developer/game_creation_page.dart';
 import 'features/games/game_detail_page.dart';
 import 'features/games/game_library_page.dart';
 import 'features/games/online_game_library_page.dart';
@@ -59,6 +62,7 @@ class PlaymeshApp extends StatefulWidget {
     this.games,
     this.uiBootstrap,
     this.gameLibraryScan,
+    this.onShutdownStarted,
   });
 
   final GoCoreStatusProvider? goCoreStatusProvider;
@@ -69,6 +73,9 @@ class PlaymeshApp extends StatefulWidget {
   @visibleForTesting
   final GameLibraryScan? gameLibraryScan;
 
+  @visibleForTesting
+  final VoidCallback? onShutdownStarted;
+
   static UserProfile createLocalUser() => UserProfile(
     userId: UserProfileStore.generateUserId(),
     nickname: playmeshDefaultLocalNickname,
@@ -78,7 +85,8 @@ class PlaymeshApp extends StatefulWidget {
   State<PlaymeshApp> createState() => _PlaymeshAppState();
 }
 
-class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
+class _PlaymeshAppState extends State<PlaymeshApp>
+    with WidgetsBindingObserver, WindowListener {
   GoCoreRuntime? _runtime;
   late final GoCoreStatusProvider _statusProvider;
   late final bool _ownsRuntime;
@@ -99,14 +107,21 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
   late final DeveloperWorkspaceLocalizationBridge
   _developerWorkspaceLocalizationBridge;
   late UserProfile _profile;
+  bool _windowCloseDialogVisible = false;
+  bool _windowCloseConfirmed = false;
+  bool _shutdownStarted = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (!kIsWeb && Platform.isWindows) {
+      windowManager.addListener(this);
+    }
     _developerWorkspaceLocalizationBridge =
         DeveloperWorkspaceLocalizationBridge(
           current: _currentDeveloperWorkspaceLocalization,
+          resolve: _resolveDeveloperWorkspaceLocalization,
           useLocale: _useDeveloperWorkspaceLocale,
           useTheme: _useDeveloperWorkspaceTheme,
         );
@@ -216,15 +231,90 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _beginShutdown();
     WidgetsBinding.instance.removeObserver(this);
+    if (!kIsWeb && Platform.isWindows) {
+      windowManager.removeListener(this);
+    }
     _uiController?.removeListener(_uiChanged);
     _uiController?.dispose();
     _incomingFiles?.dispose();
-    unawaited(_catalogController.close());
-    if (_ownsRuntime) {
-      unawaited(_runtime?.close());
-    }
     super.dispose();
+  }
+
+  void _beginShutdown() {
+    if (_shutdownStarted) return;
+    _shutdownStarted = true;
+    widget.onShutdownStarted?.call();
+
+    final runtime = _runtime;
+    if (_ownsRuntime && runtime != null) {
+      unawaited(_observeShutdownOperation('Go Core', runtime.close()));
+    }
+    unawaited(_observeShutdownOperation('游戏目录服务', _catalogController.close()));
+  }
+
+  Future<void> _observeShutdownOperation(
+    String name,
+    Future<void> operation,
+  ) async {
+    try {
+      await operation;
+    } on Object catch (error, stackTrace) {
+      debugPrint('$name 关闭失败: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  @override
+  void onWindowClose() {
+    if (_windowCloseConfirmed) return;
+    unawaited(_confirmWindowClose());
+  }
+
+  Future<void> _confirmWindowClose() async {
+    if (_windowCloseDialogVisible || !mounted) return;
+    final dialogContext = _navigatorKey.currentContext;
+    if (dialogContext == null || !dialogContext.mounted) return;
+
+    _windowCloseDialogVisible = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: dialogContext,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: Text(context.tr('app.exit_confirm_title')),
+          content: Text(context.tr('app.exit_confirm_message')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(context.tr('common.cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(context.tr('app.exit_confirm_action')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        _windowCloseConfirmed = true;
+        _beginShutdown();
+        await windowManager.setPreventClose(false);
+        await windowManager.close();
+      }
+    } on Object catch (error, stackTrace) {
+      _windowCloseConfirmed = false;
+      try {
+        await windowManager.setPreventClose(true);
+      } on Object {
+        // 保留原始关闭错误，恢复拦截失败不覆盖诊断。
+      }
+      debugPrint('关闭 Windows 应用窗口失败: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    } finally {
+      _windowCloseDialogVisible = false;
+    }
   }
 
   @override
@@ -329,6 +419,54 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
                 .resolvedMessages(localeId, PlaymeshLocalizationBundle.app)
                 .entries)
           if (entry.key.startsWith('workspace.')) entry.key: entry.value,
+      }),
+    );
+  }
+
+  DeveloperWorkspaceLocalization _resolveDeveloperWorkspaceLocalization(
+    String requestedLocaleId,
+  ) {
+    final ui = _uiController;
+    if (ui == null) {
+      throw StateError('app_localization_not_ready');
+    }
+    final current = _currentDeveloperWorkspaceLocalization();
+    final manifest = ui.catalog.manifest;
+    final normalized = requestedLocaleId.trim().replaceAll('_', '-');
+    final enabled = manifest.enabledLocales.toList(growable: false);
+    final exact = enabled
+        .where(
+          (candidate) => candidate.id.toLowerCase() == normalized.toLowerCase(),
+        )
+        .firstOrNull;
+    final language = normalized.split('-').first.toLowerCase();
+    final resolvedLocale =
+        exact?.id ??
+        enabled
+            .where(
+              (candidate) =>
+                  candidate.locale.languageCode.toLowerCase() == language,
+            )
+            .firstOrNull
+            ?.id ??
+        manifest.defaultLocale;
+    final resolvedMessages = ui.catalog.resolvedMessages(
+      resolvedLocale,
+      PlaymeshLocalizationBundle.app,
+    );
+    return DeveloperWorkspaceLocalization(
+      localeId: resolvedLocale,
+      localeMode: current.localeMode,
+      defaultLocale: current.defaultLocale,
+      allowLocaleSwitch: current.allowLocaleSwitch,
+      themeMode: current.themeMode,
+      effectiveTheme: current.effectiveTheme,
+      allowThemeSwitch: current.allowThemeSwitch,
+      locales: current.locales,
+      messages: Map.unmodifiable({
+        for (final entry in resolvedMessages.entries)
+          if (entry.key.startsWith('workspace.gdevelop_'))
+            entry.key: entry.value,
       }),
     );
   }
@@ -463,6 +601,11 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
           catalogController: widget.games == null ? _catalogController : null,
           uiController: uiController,
         ),
+        GameCreationPage.routeName: (_) => GameCreationPage(
+          developerProvider: _statusProvider is DeveloperModeProvider
+              ? _statusProvider as DeveloperModeProvider
+              : null,
+        ),
         OnlineGameLibraryPage.routeName: (_) => OnlineGameLibraryPage(
           controller: _catalogController,
           usage: {
@@ -505,7 +648,9 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
                   null => null,
                 };
           if (launchArguments == null) return null;
-          unawaited(_recordGameOpened(launchArguments.game.id));
+          if (launchArguments.developerProjectId == null) {
+            unawaited(_recordGameOpened(launchArguments.game.id));
+          }
 
           return MaterialPageRoute<void>(
             settings: settings,
@@ -520,7 +665,6 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
               catalogController: widget.games == null
                   ? _catalogController
                   : null,
-              joinRequest: launchArguments.joinRequest,
               developerProjectId: launchArguments.developerProjectId,
               developerRunId: launchArguments.developerRunId,
               developerResourceSession:
@@ -715,7 +859,12 @@ class _PlaymeshAppState extends State<PlaymeshApp> with WidgetsBindingObserver {
   ) async {
     await _games;
     final projectId = request.projectId;
-    final game = await _developerCatalog.prepareGame(projectId);
+    final game = switch (request.source) {
+      DeveloperSavedProjectLaunchSource(:final game) => game,
+      DeveloperResourceSessionLaunchSource(:final session) =>
+        session.runtimeDeclaration?.toDevelopmentGame() ??
+            (throw const DeveloperPreviewPackageRequired()),
+    };
     var navigator = _navigatorKey.currentState;
     if (navigator == null) {
       await WidgetsBinding.instance.endOfFrame;

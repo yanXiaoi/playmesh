@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "catalogRevision": "gdevelop-v5.6.276-catalog-1",
+  "engine": {
+    "version": "5.6.276",
+    "tag": "v5.6.276",
+    "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
+  },
+  "sources": {
+    "extensions": {
+      "repository": "GDevelopApp/GDevelop-extensions",
+      "remote": "https://github.com/GDevelopApp/GDevelop-extensions.git",
+      "transport": "exact-commit-json-with-sha256-manifest",
+      "branch": "main",
+      "commit": "de361fba046e0670a8414cbc657dd53788dbfc48",
+      "rootTreeSha": "a153f751e377ea04c05aedafc47eadbf092f3291",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/GDevelopApp/GDevelop-extensions/blob/de361fba046e0670a8414cbc657dd53788dbfc48/LICENSE"
+    },
+    "examples": {
+      "repository": "GDevelopApp/GDevelop-examples",
+      "remote": "https://github.com/GDevelopApp/GDevelop-examples.git",
+      "transport": "exact-commit-sparse-checkout-with-sha256-manifest",
+      "branch": "main",
+      "commit": "c55c87d88ac48de01653844dc484c253adecd9c7",
+      "rootTreeSha": "cee1e71d82ca53c49fc8efa7a8392a832cc4bfed",
+      "license": "MIT unless an example directory states otherwise",
+      "licenseUrl": "https://github.com/GDevelopApp/GDevelop-examples/blob/c55c87d88ac48de01653844dc484c253adecd9c7/LICENSE"
+    }
+  },
+  "limits": {
+    "catalogFileBytes": 8388608,
+    "extensionBytes": 8388608,
+    "exampleProjectBytes": 33554432,
+    "exampleResourceBytes": 67108864,
+    "exampleTotalBytes": 268435456,
+    "exampleResourceCount": 2048,
+    "licenseFileBytes": 1048576,
+    "licenseFileCount": 32,
+    "downloadConcurrency": 4,
+    "requestTimeoutMs": 30000,
+    "retryCount": 2
+  },
+  "treeMetadata": {
+    "repository": "GDevelopApp/GDevelop-examples",
+    "commit": "c55c87d88ac48de01653844dc484c253adecd9c7",
+    "rootTreeSha": "cee1e71d82ca53c49fc8efa7a8392a832cc4bfed",
+    "entryCount": 8062
+  },
+  "features": {
+    "extensions": {
+      "path": "extensions-manifest.v1.json",
+      "bytes": 977,
+      "sha256": "cf696412be7c358daf8a241f08edaf56e36f0cf1d1e5baa686abe4efbbe37787",
+      "mediaType": "application/json"
+    },
+    "examples": {
+      "path": "examples-manifest.v1.json",
+      "bytes": 1249,
+      "sha256": "8e88c793ba3f62c7134dff601aa5e12e6d9e7cb3bdd2b1a92bc6d0f7c516b9c4",
+      "mediaType": "application/json"
+    },
+    "localizations": {
+      "zh-CN": {
+        "path": "i18n/zh-CN.json",
+        "bytes": 526,
+        "sha256": "6a1844a53549b9ced03ae5b9639f29fc3a93feaa5b82f43f98abece174ea5083",
+        "mediaType": "application/json"
+      }
+    }
+  },
+  "counts": {
+    "extensions": 219,
+    "behaviors": 152,
+    "examples": 284,
+    "unavailableExamples": 3
+  }
+}

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:archive/archive.dart';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +15,9 @@ import 'package:playmesh/core/developer/developer_project_catalog.dart';
 import 'package:playmesh/core/developer/developer_preferences.dart';
 import 'package:playmesh/core/developer/developer_run_controller.dart';
 import 'package:playmesh/core/developer/developer_web_gateway.dart';
+import 'package:playmesh/core/developer/gdevelop_project_history.dart';
+import 'package:playmesh/core/developer/gdevelop_project_root_resolver.dart';
+import 'package:playmesh/core/developer/gdevelop_web_ide_source.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
@@ -23,6 +28,8 @@ import 'package:playmesh/core/services/go_core_runtime.dart';
 import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
+import '../../support/gdevelop_editor_lease_test_client.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
@@ -31,6 +38,9 @@ void main() {
     final port = await _availablePort();
     final promptRoot = await Directory.systemTemp.createTemp(
       'playmesh-ai-prompts-',
+    );
+    final gdevelopProjectsRoot = await Directory.systemTemp.createTemp(
+      'playmesh-gdevelop-gateway-projects-',
     );
     var restartCount = 0;
     var stopCount = 0;
@@ -68,6 +78,12 @@ void main() {
       developerPreferences: DeveloperPreferences(libraryRoot: promptRoot),
       developerRunController: runController,
       developerCapabilityTests: DeveloperCapabilityTestService(),
+      developerGDevelopWebIdeSource: _MemoryGDevelopWebIdeSource(),
+      developerGDevelopHistory: GDevelopProjectHistoryAdapter(
+        rootResolver: FileSystemGDevelopProjectRootResolver(
+          projectsRoot: gdevelopProjectsRoot,
+        ),
+      ),
       developerWorkspaceLocalizationBridge:
           DeveloperWorkspaceLocalizationBridge(
             current: () => DeveloperWorkspaceLocalization(
@@ -86,6 +102,34 @@ void main() {
                 'workspace.title': workspaceLocaleId == 'zh-CN'
                     ? 'Playmesh 开发者工作区'
                     : 'Playmesh Developer Workspace',
+                'workspace.gdevelop_ai.title': 'AI 开发',
+                'workspace.gdevelopLeak': 'must not enter bootstrap',
+                'developer.prompt.runtime.gdevelop.secret':
+                    'must not enter localization',
+              },
+            ),
+            resolve: (localeId) => DeveloperWorkspaceLocalization(
+              localeId: localeId.toLowerCase().startsWith('en')
+                  ? 'en-US'
+                  : 'zh-CN',
+              localeMode: workspaceLocaleMode,
+              defaultLocale: 'zh-CN',
+              allowLocaleSwitch: true,
+              themeMode: workspaceThemeMode,
+              effectiveTheme: workspaceEffectiveTheme,
+              allowThemeSwitch: true,
+              locales: const [
+                DeveloperWorkspaceLocale(id: 'zh-CN', label: '简体中文'),
+                DeveloperWorkspaceLocale(id: 'en-US', label: 'English'),
+              ],
+              messages: {
+                'workspace.gdevelop_ai.title':
+                    localeId.toLowerCase().startsWith('en')
+                    ? 'Local AI'
+                    : '本地 AI',
+                'workspace.gdevelopLeak': 'must not enter query response',
+                'developer.prompt.runtime.gdevelop.secret':
+                    'must not enter localization',
               },
             ),
             useLocale: (localeId) async {
@@ -100,20 +144,127 @@ void main() {
     );
     addTearDown(runtime.close);
     addTearDown(() => promptRoot.delete(recursive: true));
+    addTearDown(() => gdevelopProjectsRoot.delete(recursive: true));
 
     final session = await runtime.enableDeveloperMode(
       port: port,
       token: 'custom-dev-token',
     );
-    final links = await runtime.developerWorkspaceLinks(session);
+    final links = await runtime.sourceWorkspaceLinks(session);
+    final visualLinks = await runtime.gdevelopWorkspaceLinks(session);
 
     expect(session.port, port);
     expect(runtime.endpoint.port, 43210);
     expect(links, isNotEmpty);
-    expect(links.first.port, port);
-    expect(links.first.queryParameters['token'], 'custom-dev-token');
+    expect(links.first.uri.port, port);
+    expect(links.first.uri.queryParameters['token'], 'custom-dev-token');
+    expect(visualLinks, isNotEmpty);
+    expect(visualLinks.first.uri.path, '/dev/${session.path}/gdevelop/');
 
-    final workspace = await http.get(links.first);
+    // A normal LAN browser has no App-injected channel. It exchanges the
+    // one-shot query token for an HttpOnly cookie, removes the token from the
+    // redirected URL, and then uses that cookie for every App-authoritative
+    // project operation (including non-GET requests).
+    final browserClient = _plainHttpClient();
+    addTearDown(browserClient.close);
+    final browserBootstrapRequest = _plainHttpRequest(
+      'GET',
+      visualLinks.first.uri,
+    )..followRedirects = false;
+    final browserBootstrap = await browserClient.send(browserBootstrapRequest);
+    final browserLocation = browserBootstrap.headers['location'];
+    final browserSetCookie = browserBootstrap.headers['set-cookie'];
+    await browserBootstrap.stream.drain<void>();
+    expect(browserBootstrap.statusCode, HttpStatus.seeOther);
+    expect(browserLocation, visualLinks.first.uri.path);
+    expect(browserLocation, isNot(contains('token=')));
+    expect(browserSetCookie, isNotNull);
+    final browserCookie = browserSetCookie!.split(';').first;
+    final browserLease = await GDevelopEditorLeaseTestClient.acquire(
+      baseUri: visualLinks.first.uri,
+      developerToken: 'custom-dev-token',
+    );
+    addTearDown(browserLease.release);
+    final browserHeaders = <String, String>{
+      HttpHeaders.cookieHeader: browserCookie,
+      ...browserLease.leaseHeaders,
+    };
+    final browserProjectsBefore = await browserClient.get(
+      visualLinks.first.uri.resolve('/dev/api/gdevelop/projects'),
+      headers: browserHeaders,
+    );
+    expect(browserProjectsBefore.statusCode, HttpStatus.ok);
+    final browserCreate = await browserClient.post(
+      visualLinks.first.uri.resolve('/dev/api/gdevelop/projects'),
+      headers: {
+        ...browserHeaders,
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: jsonEncode({
+        'gameId': 'com.playmesh.test.lanbrowser',
+        'origin': 'create',
+        'fileIdentifier': 'lan-browser-file',
+        'name': 'LAN browser project',
+      }),
+    );
+    expect(
+      browserCreate.statusCode,
+      HttpStatus.created,
+      reason: browserCreate.body,
+    );
+    final browserOpen = await browserClient.post(
+      visualLinks.first.uri.resolve(
+        '/dev/api/gdevelop/projects/com.playmesh.test.lanbrowser/open',
+      ),
+      headers: {
+        ...browserHeaders,
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: jsonEncode({
+        'fileIdentifier': 'lan-browser-file',
+        'name': 'LAN browser project',
+      }),
+    );
+    expect(browserOpen.statusCode, HttpStatus.ok, reason: browserOpen.body);
+    final browserCurrent = await browserClient.get(
+      visualLinks.first.uri.resolve(
+        '/dev/api/gdevelop/projects/com.playmesh.test.lanbrowser/history/current',
+      ),
+      headers: browserHeaders,
+    );
+    expect(
+      browserCurrent.statusCode,
+      HttpStatus.ok,
+      reason: browserCurrent.body,
+    );
+
+    final gdevelop = await _openWorkspaceBootstrapLink(visualLinks.first.uri);
+    expect(gdevelop.statusCode, HttpStatus.ok);
+    expect(gdevelop.body, contains('PLAYMESH_GDEVELOP_TEST'));
+    expect(gdevelop.headers['content-type'], contains('text/html'));
+    expect(
+      gdevelop.body,
+      contains('__PLAYMESH_GDEVELOP_LOCALIZATION_BOOTSTRAP__'),
+    );
+    expect(gdevelop.body, contains('__PLAYMESH_GDEVELOP_AI_FEATURE_POLICY__'));
+    expect(gdevelop.body, contains(r'"enabled":true'));
+    expect(gdevelop.body, contains('"localeId":"zh-CN"'));
+    expect(gdevelop.body, contains('workspace.gdevelop_ai.title'));
+    expect(gdevelop.body, isNot(contains('workspace.gdevelopLeak')));
+    expect(
+      gdevelop.body,
+      isNot(contains('developer.prompt.runtime.gdevelop.secret')),
+    );
+    expect(
+      gdevelop.headers['cache-control'],
+      'no-store, no-cache, must-revalidate',
+    );
+    expect(
+      gdevelop.body.indexOf('__PLAYMESH_GDEVELOP_LOCALIZATION_BOOTSTRAP__'),
+      lessThan(gdevelop.body.indexOf('PLAYMESH_GDEVELOP_TEST')),
+    );
+
+    final workspace = await _openWorkspaceBootstrapLink(links.first.uri);
     expect(workspace.statusCode, HttpStatus.ok);
     expect(workspace.headers['referrer-policy'], 'no-referrer');
     expect(workspace.headers['x-content-type-options'], 'nosniff');
@@ -122,8 +273,15 @@ void main() {
     expect(
       workspace.body,
       contains(
-        '{"themeMode":"system","effectiveTheme":"light",'
-        '"allowThemeSwitch":true}',
+        '"themeMode":"system","effectiveTheme":"light",'
+        '"allowThemeSwitch":true',
+      ),
+    );
+    expect(
+      workspace.body,
+      contains(
+        '"features":{"gdevelopAi":{"formatVersion":"1.0.0",'
+        '"enabled":true',
       ),
     );
     expect(workspace.body, isNot(contains('__PLAYMESH_APP_UI_BOOTSTRAP__')));
@@ -137,6 +295,17 @@ void main() {
     expect(workspace.body, contains('id="copyProjectFromPicker"'));
     expect(workspace.body, contains('id="deleteProjectFromPicker"'));
     expect(workspace.body, contains('id="manifestForm"'));
+    expect(
+      workspace.body,
+      contains(
+        'id="manifestSdkVersion" name="manifestSdkVersion" required '
+        'pattern="\\d+\\.\\d+\\.\\d+" autocomplete="off" readonly',
+      ),
+    );
+    expect(
+      workspace.body,
+      contains('data-i18n="workspace.sdk_version_managed_help"'),
+    );
     expect(workspace.body, isNot(contains('id="manifestId"')));
     expect(workspace.body, isNot(contains('id="manifestAuthor"')));
     expect(workspace.body, isNot(contains('id="manifestIcon"')));
@@ -191,6 +360,8 @@ void main() {
     expect(workspace.body, isNot(matches(RegExp(r'[\u3400-\u9fff]'))));
 
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
+    final http = _DeveloperBearerClient('custom-dev-token');
+    addTearDown(http.close);
     final localization = await http.get(
       base.resolve('/dev/api/localization?token=custom-dev-token'),
     );
@@ -214,6 +385,59 @@ void main() {
       localizationJson['messages'],
       containsPair('workspace.title', 'Playmesh 开发者工作区'),
     );
+
+    final exactSessionLocalization = await http.get(
+      base.resolve('/dev/api/localization?token=custom-dev-token&locale=en-US'),
+    );
+    expect(exactSessionLocalization.statusCode, HttpStatus.ok);
+    expect(
+      jsonDecode(exactSessionLocalization.body),
+      allOf(
+        containsPair('localeId', 'en-US'),
+        containsPair('resolvedLocale', 'en-US'),
+      ),
+    );
+    expect(
+      exactSessionLocalization.body,
+      isNot(contains('workspace.gdevelopLeak')),
+    );
+    expect(
+      exactSessionLocalization.body,
+      isNot(contains('developer.prompt.runtime.gdevelop.secret')),
+    );
+    final baseSessionLocalization = await http.get(
+      base.resolve('/dev/api/localization?token=custom-dev-token&locale=en_GB'),
+    );
+    expect(baseSessionLocalization.statusCode, HttpStatus.ok);
+    expect(
+      jsonDecode(baseSessionLocalization.body),
+      containsPair('localeId', 'en-US'),
+    );
+    final fallbackSessionLocalization = await http.get(
+      base.resolve('/dev/api/localization?token=custom-dev-token&locale=xx-ZZ'),
+    );
+    expect(fallbackSessionLocalization.statusCode, HttpStatus.ok);
+    expect(
+      jsonDecode(fallbackSessionLocalization.body),
+      containsPair('localeId', 'zh-CN'),
+    );
+    final unchangedLocalization = await http.get(
+      base.resolve('/dev/api/localization?token=custom-dev-token'),
+    );
+    expect(
+      jsonDecode(unchangedLocalization.body),
+      allOf(
+        containsPair('localeId', 'zh-CN'),
+        isNot(contains('resolvedLocale')),
+      ),
+      reason: '只读 session locale 解析不得调用 App updater',
+    );
+    final invalidSessionLocalization = await http.get(
+      base.resolve(
+        '/dev/api/localization?token=custom-dev-token&locale=en%0d%0aevil',
+      ),
+    );
+    expect(invalidSessionLocalization.statusCode, HttpStatus.badRequest);
 
     final switchedLocalization = await http.put(
       base.resolve('/dev/api/localization?token=custom-dev-token'),
@@ -280,7 +504,12 @@ void main() {
     expect(workspaceScript.statusCode, HttpStatus.ok);
     expect(workspaceScript.headers['referrer-policy'], 'no-referrer');
     expect(workspaceScript.headers['x-content-type-options'], 'nosniff');
-    expect(workspaceScript.body, contains('localStorage.setItem'));
+    expect(workspaceScript.body, isNot(contains('localStorage')));
+    expect(
+      workspaceScript.body,
+      contains('webviewJavaScriptHistoryByProject=new Map()'),
+    );
+    expect(workspaceScript.body, contains('data.activeProjectId'));
     expect(workspaceScript.body, contains('openProjectPicker()'));
     expect(workspaceScript.body, contains('positionAnchoredMenu'));
     expect(workspaceScript.body, contains('CodeMirror.MergeView'));
@@ -312,7 +541,22 @@ void main() {
     expect(workspaceScript.body, isNot(contains('...manifestSource')));
     expect(
       workspaceScript.body,
-      contains('appSdkVersion:manifestSource.appSdkVersion'),
+      contains('manifestFromForm(sdk.gameSdkVersion,sdk.appSdkVersion)'),
+    );
+    expect(workspaceScript.body, contains("sdk=await api('/dev/api/status')"));
+    final projectSettingsSdkLookup = workspaceScript.body.indexOf(
+      "sdk=await api('/dev/api/status')",
+    );
+    expect(
+      workspaceScript.body.indexOf(
+        "api(endpoint('manifest',''),{method:'PUT'",
+        projectSettingsSdkLookup,
+      ),
+      greaterThan(projectSettingsSdkLookup),
+    );
+    expect(
+      workspaceScript.body,
+      isNot(contains("sdkVersion:q('manifestSdkVersion').value")),
     );
     expect(workspaceScript.body, isNot(contains('uploadKey')));
     final gatewaySource = await File(
@@ -375,15 +619,19 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '4.0.0');
-    expect(statusJson['appSdkVersion'], '3.2.0');
+    expect(statusJson['gameSdkVersion'], '4.1.0');
+    expect(statusJson['appSdkVersion'], '3.3.0');
     expect(
       statusJson['gameSdkCompatibility'],
-      contains(containsPair('minimumRequestedVersion', '4.0.0')),
+      contains(containsPair('minimumRequestedVersion', '4.1.0')),
     );
     expect(
       statusJson['appSdkCompatibility'],
-      contains(containsPair('maximumRequestedVersion', '3.2.0')),
+      contains(containsPair('minimumRequestedVersion', '3.2.0')),
+    );
+    expect(
+      statusJson['appSdkCompatibility'],
+      contains(containsPair('maximumRequestedVersion', '3.3.0')),
     );
 
     final sdkBundle = await http.get(
@@ -391,15 +639,15 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '4.0.0');
-    expect(sdkBundleJson['appSdkVersion'], '3.2.0');
+    expect(sdkBundleJson['gameSdkVersion'], '4.1.0');
+    expect(sdkBundleJson['appSdkVersion'], '3.3.0');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '4.0.0')),
+      contains(containsPair('bundleVersion', '4.1.0')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
-      contains(containsPair('bundleVersion', '3.2.0')),
+      contains(containsPair('bundleVersion', '3.3.0')),
     );
     expect(
       (sdkBundleJson['files'] as Map).keys,
@@ -533,9 +781,9 @@ void main() {
     expect((logs.last as Map)['message'], 'gateway-line-59');
     expect((logs.last as Map)['eventId'], isNotEmpty);
 
-    final sseClient = http.Client();
+    final sseClient = http.streamingClient();
     addTearDown(sseClient.close);
-    final sseRequest = http.Request(
+    final sseRequest = http.request(
       'GET',
       base.resolve('/dev/api/events?token=custom-dev-token'),
     );
@@ -602,8 +850,31 @@ void main() {
     expect(jsonDecode(cleared.body)['directory'], 'data');
     expect(jsonDecode(cleared.body)['cachePreserved'], isTrue);
 
+    final stagedPackage = await http.post(
+      base.resolve(
+        '/dev/api/projects/demo/development/package?token=custom-dev-token',
+      ),
+      headers: const {HttpHeaders.contentTypeHeader: 'application/zip'},
+      body: _developmentPackage('demo'),
+    );
+    expect(
+      stagedPackage.statusCode,
+      HttpStatus.created,
+      reason: stagedPackage.body,
+    );
+    final packageId = jsonDecode(stagedPackage.body)['packageId'] as String;
     final run = await http.post(
-      base.resolve('/dev/api/projects/demo/run?token=custom-dev-token'),
+      base.resolve('/dev/api/projects/demo/development?token=custom-dev-token'),
+      headers: const {HttpHeaders.contentTypeHeader: 'application/json'},
+      body: jsonEncode({
+        'resourceBaseUrl': 'http://127.0.0.1:4173/',
+        'credential': List<String>.filled(40, 'c').join(),
+        'expiresAt': DateTime.now()
+            .toUtc()
+            .add(const Duration(minutes: 30))
+            .millisecondsSinceEpoch,
+        'packageId': packageId,
+      }),
     );
     expect(run.statusCode, HttpStatus.accepted, reason: run.body);
     expect(jsonDecode(run.body)['runId'], isNotEmpty);
@@ -689,7 +960,9 @@ void main() {
       headers: const {'Authorization': 'Bearer custom-dev-token'},
     );
     expect(projects.statusCode, HttpStatus.ok);
-    expect(jsonDecode(projects.body)['projects'], hasLength(1));
+    final projectsBody = jsonDecode(projects.body) as Map;
+    expect(projectsBody['projects'], hasLength(1));
+    expect(projectsBody['activeProjectId'], 'demo');
 
     final files = await http.get(
       base.resolve('/dev/api/projects/demo/files?token=custom-dev-token'),
@@ -711,7 +984,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-main.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "4.0.0"'));
+    expect(aiPrompt.body, contains('readonly version: "4.1.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -745,7 +1018,7 @@ void main() {
     expect(aiPrompt.body, contains('对话控制台默认基础指令'));
     expect(aiPrompt.body, contains('X-Playmesh-AI-Channel: chat'));
     expect(aiPrompt.body, isNot(contains('----replace_file:')));
-    expect(aiPrompt.body, contains('只有非 Authority 的多人页面'));
+    expect(aiPrompt.body, contains('只有非 Authority 多人页面'));
     expect(aiPrompt.body, contains('stateType 可选'));
     expect(aiPrompt.body, contains('getState()'));
     expect(aiPrompt.body, contains('仅浏览器联机玩家可用'));
@@ -892,10 +1165,7 @@ void main() {
             .cast<Map>()
             .firstWhere((item) => item['id'] == 'common');
     expect(englishCommon['locale'], 'en-US');
-    expect(
-      englishCommon['name'],
-      'Shared chat AI rules',
-    );
+    expect(englishCommon['name'], 'Shared chat AI rules');
     expect(
       englishCommon['content'],
       contains('PLAYMESH CHAT AI GAME DEVELOPMENT PROMPT'),
@@ -1094,7 +1364,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '4.1.0');
+    expect((openApiJson['info'] as Map)['version'], '4.2.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );
@@ -1135,6 +1405,10 @@ void main() {
       (aiContextJson['aiExecution'] as Map)['channelHeader'],
       'X-Playmesh-AI-Channel',
     );
+    expect((aiContextJson['rules'] as Map)['mainJsonManagedFields'], [
+      'sdkVersion',
+      'appSdkVersion',
+    ]);
     final allOperationsResponse = await http.get(
       base.resolve('/dev/api/operations?target=all&token=custom-dev-token'),
     );
@@ -1168,7 +1442,9 @@ void main() {
     );
     expect(exposedOperationRoutes.toSet(), documentedOperations);
 
-    final unauthorized = await http.get(base.resolve('/dev/api/projects'));
+    final unauthorized = await http.unauthenticatedGet(
+      base.resolve('/dev/api/projects'),
+    );
     expect(unauthorized.statusCode, HttpStatus.unauthorized);
     expect(unauthorized.headers['x-request-id'], isNotEmpty);
     expect(unauthorized.headers['referrer-policy'], 'no-referrer');
@@ -1191,7 +1467,7 @@ void main() {
       port: port,
       token: 'custom-dev-token',
     );
-    final oldLink = (await firstRuntime.developerWorkspaceLinks(first)).first;
+    final oldLink = (await firstRuntime.sourceWorkspaceLinks(first)).first.uri;
     await firstRuntime.close();
 
     final secondRuntime = GoCoreRuntime(
@@ -1204,10 +1480,15 @@ void main() {
       port: port,
       token: '',
     );
-    final newLink = (await secondRuntime.developerWorkspaceLinks(second)).first;
+    final newLink = (await secondRuntime.sourceWorkspaceLinks(
+      second,
+    )).first.uri;
 
     expect(newLink, oldLink);
-    expect((await http.get(newLink)).statusCode, HttpStatus.ok);
+    expect(
+      (await _openWorkspaceBootstrapLink(newLink)).statusCode,
+      HttpStatus.ok,
+    );
 
     await secondRuntime.disableDeveloperMode();
     await expectLater(http.get(newLink), throwsA(isA<http.ClientException>()));
@@ -1419,7 +1700,9 @@ void main() {
           ..['tags'] = ['party', 'motion']
           ..['permissions'] = ['keyboard']
           ..['icon'] = 'app/legacy.png'
-          ..['redundant'] = {'nested': true};
+          ..['redundant'] = {'nested': true}
+          ..['sdkVersion'] = '0.0.1'
+          ..['appSdkVersion'] = '0.0.2';
     final updatedManifest = await catalog.updateManifest(
       project.id,
       manifestJson,
@@ -1434,6 +1717,16 @@ void main() {
     );
     expect(utf8.decode(updatedManifest.bytes), isNot(contains('"icon"')));
     expect(utf8.decode(updatedManifest.bytes), isNot(contains('"redundant"')));
+    final updatedManifestJson =
+        jsonDecode(utf8.decode(updatedManifest.bytes)) as Map;
+    expect(
+      updatedManifestJson,
+      containsPair('sdkVersion', SdkFeatureRegistry.gameSdkVersion),
+    );
+    expect(
+      updatedManifestJson,
+      containsPair('appSdkVersion', SdkFeatureRegistry.appSdkVersion),
+    );
     final manifestDiff = await catalog.diffFile(project.id, 'main.json');
     expect(manifestDiff.changed, isTrue);
     expect(manifestDiff.original, contains('"name": "Created Game"'));
@@ -1679,7 +1972,7 @@ void main() {
       manifest['lastModifiedAt'],
       DateTime.utc(2026, 7, 25).millisecondsSinceEpoch,
     );
-    for (final internalName in ['data', 'cache', '.playmesh']) {
+    for (final internalName in ['data', 'cache']) {
       expect(
         await Directory(
           '${copiedDirectory.path}${Platform.pathSeparator}$internalName',
@@ -1687,6 +1980,16 @@ void main() {
         isFalse,
       );
     }
+    final copiedMetadataDirectory = Directory(
+      '${copiedDirectory.path}${Platform.pathSeparator}.playmesh',
+    );
+    expect(await copiedMetadataDirectory.exists(), isTrue);
+    expect(
+      await File(
+        '${copiedMetadataDirectory.path}${Platform.pathSeparator}private.bin',
+      ).exists(),
+      isFalse,
+    );
 
     await catalog.deleteProject(copied.id);
 
@@ -1731,30 +2034,50 @@ void main() {
     final port = await _availablePort();
     await runtime.enableDeveloperMode(port: port, token: 'manifest-api-token');
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
-    Uri endpoint(String suffix) => base.resolve(
-      '/dev/api/projects/${project.id}/$suffix?token=manifest-api-token',
-    );
+    Uri endpoint(String suffix) =>
+        base.resolve('/dev/api/projects/${project.id}/$suffix');
+    const auth = {'Authorization': 'Bearer manifest-api-token'};
 
-    final read = await http.get(endpoint('manifest'));
+    final read = await http.get(endpoint('manifest'), headers: auth);
     final readBody = jsonDecode(read.body) as Map<String, Object?>;
     final manifest = Map<String, Object?>.from(readBody['manifest']! as Map)
       ..['name'] = '可视化设置游戏'
-      ..['tags'] = ['体感', '聚会'];
+      ..['tags'] = ['体感', '聚会']
+      ..['sdkVersion'] = '0.0.1'
+      ..['appSdkVersion'] = '0.0.2';
     final saved = await http.put(
       endpoint('manifest'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: const {...auth, 'Content-Type': 'application/json'},
       body: jsonEncode({
         'manifest': manifest,
         'baseRevision': readBody['revision'],
       }),
     );
     expect(saved.statusCode, HttpStatus.ok, reason: saved.body);
-    expect((jsonDecode(saved.body) as Map)['manifest']['id'], project.id);
-    expect((jsonDecode(saved.body) as Map)['manifest']['tags'], ['体感', '聚会']);
+    final savedManifest = (jsonDecode(saved.body) as Map)['manifest'] as Map;
+    expect(savedManifest['id'], project.id);
+    expect(savedManifest['tags'], ['体感', '聚会']);
+    expect(savedManifest['sdkVersion'], SdkFeatureRegistry.gameSdkVersion);
+    expect(savedManifest['appSdkVersion'], SdkFeatureRegistry.appSdkVersion);
+    final persistedManifest =
+        jsonDecode(
+              utf8.decode(
+                (await catalog.readFile(project.id, 'main.json')).bytes,
+              ),
+            )
+            as Map;
+    expect(
+      persistedManifest,
+      containsPair('sdkVersion', SdkFeatureRegistry.gameSdkVersion),
+    );
+    expect(
+      persistedManifest,
+      containsPair('appSdkVersion', SdkFeatureRegistry.appSdkVersion),
+    );
 
     final changedId = await http.put(
       endpoint('manifest'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: const {...auth, 'Content-Type': 'application/json'},
       body: jsonEncode({
         'manifest': {...manifest, 'id': 'com.example.changed'},
       }),
@@ -1763,7 +2086,7 @@ void main() {
 
     final savedCapabilities = await http.put(
       endpoint('capabilities'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: const {...auth, 'Content-Type': 'application/json'},
       body: jsonEncode({
         'required': ['media.camera'],
         'baseRevision': 0,
@@ -1771,14 +2094,20 @@ void main() {
     );
     expect(savedCapabilities.statusCode, HttpStatus.ok);
     expect((jsonDecode(savedCapabilities.body) as Map)['exists'], isTrue);
-    final capabilityPrompt = await http.get(endpoint('agent-prompt.txt'));
+    final capabilityPrompt = await http.get(
+      endpoint('agent-prompt.txt'),
+      headers: auth,
+    );
     expect(capabilityPrompt.statusCode, HttpStatus.ok);
     expect(
       capabilityPrompt.body,
       contains('capabilities.required: media.camera'),
     );
     expect(capabilityPrompt.body, isNot(contains('"code": "media.camera"')));
-    final capabilityChatPrompt = await http.get(endpoint('chat-prompt.txt'));
+    final capabilityChatPrompt = await http.get(
+      endpoint('chat-prompt.txt'),
+      headers: auth,
+    );
     expect(capabilityChatPrompt.statusCode, HttpStatus.ok);
     expect(capabilityChatPrompt.body, contains('当前项目已声明的平台能力'));
     expect(capabilityChatPrompt.body, contains('"code": "media.camera"'));
@@ -1793,7 +2122,7 @@ void main() {
         (jsonDecode(savedCapabilities.body) as Map)['revision'];
     final removedCapabilities = await http.put(
       endpoint('capabilities'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: const {...auth, 'Content-Type': 'application/json'},
       body: jsonEncode({
         'required': <String>[],
         'baseRevision': capabilityRevision,
@@ -1804,7 +2133,7 @@ void main() {
 
     final copied = await http.post(
       endpoint('copy'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: const {...auth, 'Content-Type': 'application/json'},
       body: jsonEncode({
         'id': 'com.example.visual-settings-copy',
         'name': 'Visual Settings Copy',
@@ -1829,8 +2158,9 @@ void main() {
     final deleted = await http.delete(
       base.resolve(
         '/dev/api/projects/com.example.visual-settings-copy'
-        '?token=manifest-api-token&clientId=test-client',
+        '?clientId=test-client',
       ),
+      headers: auth,
     );
     expect(deleted.statusCode, HttpStatus.ok, reason: deleted.body);
     expect((jsonDecode(deleted.body) as Map)['deleted'], isTrue);
@@ -2039,26 +2369,27 @@ void main() {
       'Developer mode',
     );
     final base = Uri(scheme: 'http', host: '127.0.0.1', port: port);
-    Uri api(String path) => base.resolve('$path?token=background-dev-token');
+    Uri api(String path) => base.resolve(path);
+    const auth = {'Authorization': 'Bearer background-dev-token'};
 
-    final status = await http.get(api('/dev/api/status'));
+    final status = await http.get(api('/dev/api/status'), headers: auth);
     expect(status.statusCode, HttpStatus.ok);
     expect(jsonDecode(status.body)['appView']['reason'], 'device_locked');
     expect(
-      (await http.get(api('/dev/api/projects'))).statusCode,
+      (await http.get(api('/dev/api/projects'), headers: auth)).statusCode,
       HttpStatus.ok,
     );
 
     for (final request in [
-      http.post(api('/dev/api/projects/demo/run')),
+      http.post(api('/dev/api/projects/demo/run'), headers: auth),
       http.post(
         api('/dev/api/capability-tests'),
-        headers: const {'Content-Type': 'application/json'},
+        headers: const {...auth, 'Content-Type': 'application/json'},
         body: '{}',
       ),
       http.post(
         api('/dev/api/projects/demo/webview/javascript'),
-        headers: const {'Content-Type': 'application/json'},
+        headers: const {...auth, 'Content-Type': 'application/json'},
         body: jsonEncode({'source': 'document.title'}),
       ),
     ]) {
@@ -2071,7 +2402,10 @@ void main() {
     }
     expect(launchCount, 0);
 
-    final stopped = await http.post(api('/dev/api/projects/demo/run/stop'));
+    final stopped = await http.post(
+      api('/dev/api/projects/demo/run/stop'),
+      headers: auth,
+    );
     expect(stopped.statusCode, HttpStatus.ok, reason: stopped.body);
     expect(stopCount, 1);
     expect(backgroundHost.active, isTrue);
@@ -2240,6 +2574,20 @@ void main() {
     };
     final credential = List<String>.filled(40, 'c').join();
     final expiresAt = now.add(const Duration(minutes: 30));
+    final stagedResponse = await http.post(
+      base.resolve('/dev/api/projects/demo/development/package'),
+      headers: const {
+        HttpHeaders.authorizationHeader: 'Bearer development-session-token',
+        HttpHeaders.contentTypeHeader: 'application/zip',
+      },
+      body: _developmentPackage('demo'),
+    );
+    expect(
+      stagedResponse.statusCode,
+      HttpStatus.created,
+      reason: stagedResponse.body,
+    );
+    final packageId = jsonDecode(stagedResponse.body)['packageId'] as String;
 
     final foreign = await http.post(
       base.resolve('/dev/api/projects/demo/development'),
@@ -2248,6 +2596,7 @@ void main() {
         'resourceBaseUrl': 'http://192.0.2.10:4173/',
         'credential': credential,
         'expiresAt': expiresAt.millisecondsSinceEpoch,
+        'packageId': packageId,
       }),
     );
     expect(foreign.statusCode, HttpStatus.badRequest);
@@ -2260,6 +2609,7 @@ void main() {
         'resourceBaseUrl': 'http://127.0.0.1:4173/',
         'credential': credential,
         'expiresAt': 9223372036854775807,
+        'packageId': packageId,
       }),
     );
     expect(invalidExpiry.statusCode, HttpStatus.badRequest);
@@ -2272,6 +2622,7 @@ void main() {
         'resourceBaseUrl': 'http://127.0.0.1:4173/',
         'credential': credential,
         'expiresAt': expiresAt.millisecondsSinceEpoch,
+        'packageId': packageId,
       }),
     );
     expect(started.statusCode, HttpStatus.accepted, reason: started.body);
@@ -2312,6 +2663,107 @@ void main() {
     expect(stopped, 1);
     expect(runController.resourceSession('demo'), isNull);
   });
+
+  test('源码运行校验并显式启动已保存的受管项目', () async {
+    final port = await _availablePort();
+    final catalog = _CountingPrepareCatalog();
+    final launches = <DeveloperProjectLaunchRequest>[];
+    late DeveloperRunController runController;
+    runController = DeveloperRunController(
+      onLaunch: (request) async {
+        launches.add(request);
+        runController.registerStopHandler(
+          request.projectId,
+          () async {},
+          expectedRunId: request.runId,
+        );
+      },
+    );
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: 'saved-source-run-token',
+      catalog: catalog,
+      runController: runController,
+    );
+    addTearDown(gateway.close);
+
+    final response = await http.post(
+      Uri.parse('http://127.0.0.1:$port/dev/api/projects/demo/run'),
+      headers: const {
+        HttpHeaders.authorizationHeader: 'Bearer saved-source-run-token',
+      },
+    );
+
+    expect(response.statusCode, HttpStatus.accepted, reason: response.body);
+    final body = jsonDecode(response.body) as Map;
+    expect(body['phase'], 'starting');
+    expect(catalog.prepareCount, 1);
+    expect(launches, hasLength(1));
+    expect(launches.single.source, isA<DeveloperSavedProjectLaunchSource>());
+    expect(launches.single.resourceSession, isNull);
+    expect(
+      launches.single.savedProject?.entry.packageRootFilePath,
+      '/managed/packages/demo',
+    );
+  });
+
+  test('源码运行在服务端校验失败时不准备或启动项目', () async {
+    final port = await _availablePort();
+    final catalog = _InvalidPublishCatalog();
+    var launches = 0;
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: 'invalid-source-run-token',
+      catalog: catalog,
+      runController: DeveloperRunController(onLaunch: (_) async => launches++),
+    );
+    addTearDown(gateway.close);
+
+    final response = await http.post(
+      Uri.parse('http://127.0.0.1:$port/dev/api/projects/demo/run'),
+      headers: const {
+        HttpHeaders.authorizationHeader: 'Bearer invalid-source-run-token',
+      },
+    );
+
+    expect(
+      response.statusCode,
+      HttpStatus.unprocessableEntity,
+      reason: response.body,
+    );
+    final body = jsonDecode(response.body) as Map;
+    expect(body['error'], containsPair('code', 'package_validation_failed'));
+    expect(body['validation'], containsPair('valid', false));
+    expect(catalog.prepareCount, 0);
+    expect(launches, 0);
+  });
+}
+
+List<int> _developmentPackage(String gameId) {
+  final manifest = utf8.encode(
+    jsonEncode({
+      'id': gameId,
+      'name': 'Development package',
+      'author': 'Tester',
+      'lastModifiedAt': 0,
+      'remarks': 'Temporary only',
+      'version': '1.0.0',
+      'sdkVersion': '4.1.0',
+      'appSdkVersion': '3.3.0',
+      'orientation': 'landscape',
+      'modes': ['solo'],
+      'displayModes': ['multi_screen'],
+      'players': {'min': 1, 'max': 1},
+      'entries': {'game': 'index.html'},
+      'tags': <String>[],
+    }),
+  );
+  final index = utf8.encode('<!doctype html><title>Development</title>');
+  return ZipEncoder().encode(
+    Archive()
+      ..addFile(ArchiveFile('main.json', manifest.length, manifest))
+      ..addFile(ArchiveFile('app/index.html', index.length, index)),
+  )!;
 }
 
 GameSummary _installedDeveloperGame({
@@ -2342,7 +2794,8 @@ Future<Map<String, Object?>> _waitForAiApproval(
   final deadline = DateTime.now().add(const Duration(seconds: 3));
   while (DateTime.now().isBefore(deadline)) {
     final response = await http.get(
-      base.resolve('/dev/api/ai-approvals?token=$token'),
+      base.resolve('/dev/api/ai-approvals'),
+      headers: {HttpHeaders.authorizationHeader: 'Bearer $token'},
     );
     expect(response.statusCode, HttpStatus.ok, reason: response.body);
     final approvals = (jsonDecode(response.body) as Map)['approvals'] as List;
@@ -2353,6 +2806,103 @@ Future<Map<String, Object?>> _waitForAiApproval(
   }
   throw TimeoutException('没有收到 AI 危险操作审批请求');
 }
+
+/// Sends ordinary Developer API requests with the persistent bearer and strips
+/// the URL bootstrap token used by the legacy test URLs. The bootstrap token is
+/// therefore exercised only by [_openWorkspaceBootstrapLink].
+final class _DeveloperBearerClient {
+  _DeveloperBearerClient(this.token);
+
+  final String token;
+  final http.Client _client = http.Client();
+
+  Future<http.Response> get(Uri url, {Map<String, String>? headers}) =>
+      _client.get(_withoutBootstrapToken(url), headers: _headers(headers));
+
+  Future<http.Response> post(
+    Uri url, {
+    Map<String, String>? headers,
+    Object? body,
+    Encoding? encoding,
+  }) => _client.post(
+    _withoutBootstrapToken(url),
+    headers: _headers(headers),
+    body: body,
+    encoding: encoding,
+  );
+
+  Future<http.Response> put(
+    Uri url, {
+    Map<String, String>? headers,
+    Object? body,
+    Encoding? encoding,
+  }) => _client.put(
+    _withoutBootstrapToken(url),
+    headers: _headers(headers),
+    body: body,
+    encoding: encoding,
+  );
+
+  Future<http.Response> delete(
+    Uri url, {
+    Map<String, String>? headers,
+    Object? body,
+    Encoding? encoding,
+  }) => _client.delete(
+    _withoutBootstrapToken(url),
+    headers: _headers(headers),
+    body: body,
+    encoding: encoding,
+  );
+
+  http.Client streamingClient() => http.Client();
+
+  http.Request request(String method, Uri url) =>
+      http.Request(method, _withoutBootstrapToken(url))
+        ..headers.addAll(_headers(null));
+
+  Future<http.Response> unauthenticatedGet(Uri url) => _client.get(url);
+
+  Uri _withoutBootstrapToken(Uri url) {
+    if (!url.queryParameters.containsKey('token')) return url;
+    final query = Map<String, String>.from(url.queryParameters)
+      ..remove('token');
+    return url.replace(queryParameters: query);
+  }
+
+  Map<String, String> _headers(Map<String, String>? headers) => {
+    ...?headers,
+    HttpHeaders.authorizationHeader: 'Bearer $token',
+  };
+
+  void close() => _client.close();
+}
+
+Future<http.Response> _openWorkspaceBootstrapLink(Uri link) async {
+  final client = http.Client();
+  try {
+    final request = http.Request('GET', link)..followRedirects = false;
+    final bootstrap = await client.send(request);
+    final location = bootstrap.headers['location'];
+    final setCookie = bootstrap.headers['set-cookie'];
+    await bootstrap.stream.drain<void>();
+    expect(bootstrap.statusCode, HttpStatus.seeOther);
+    expect(location, isNotNull);
+    expect(setCookie, isNotNull);
+    final cookie = setCookie!.split(';').first;
+    return await client.get(
+      link.resolve(location!),
+      headers: {HttpHeaders.cookieHeader: cookie},
+    );
+  } finally {
+    client.close();
+  }
+}
+
+http.Client _plainHttpClient() => http.Client();
+
+http.Request _plainHttpRequest(String method, Uri url) =>
+    http.Request(method, url);
 
 Future<int> _availablePort() async {
   final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -2369,7 +2919,7 @@ class _FakeCatalog implements DeveloperProjectCatalog {
         ),
         'main.json': Uint8List.fromList(
           utf8.encode(
-            '{"id":"demo","sdkVersion":"4.0.0","appSdkVersion":"3.2.0",'
+            '{"id":"demo","sdkVersion":"4.1.0","appSdkVersion":"3.3.0",'
             '"modes":["multiplayer"],'
             '"displayModes":["multi_screen"],'
             '"entries":{"game":"index.html"},'
@@ -2556,7 +3106,11 @@ class _FakeCatalog implements DeveloperProjectCatalog {
     displayModeLabel: '多屏',
     displayMode: 'multi_screen',
     orientation: GameOrientation.landscape,
-    entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: '开发项目'),
+    entry: LocalGameEntry(
+      gameEntryPath: 'index.html',
+      statusLabel: '开发项目',
+      packageRootFilePath: '/managed/packages/demo',
+    ),
   );
 }
 
@@ -2583,6 +3137,16 @@ class _InvalidPublishCatalog extends _FakeCatalog {
   @override
   Future<GameSummary> prepareGame(String projectId) {
     prepareCount += 1;
+    return super.prepareGame(projectId);
+  }
+}
+
+class _CountingPrepareCatalog extends _FakeCatalog {
+  int prepareCount = 0;
+
+  @override
+  Future<GameSummary> prepareGame(String projectId) async {
+    prepareCount++;
     return super.prepareGame(projectId);
   }
 }
@@ -2695,6 +3259,19 @@ class _FakeDeveloperBackgroundHost implements DeveloperBackgroundHost {
 
   @override
   Future<DeveloperViewAvailability> viewAvailability() async => availability;
+}
+
+class _MemoryGDevelopWebIdeSource implements GDevelopWebIdeSource {
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<Uint8List?> read(String relativePath) async {
+    if (relativePath != 'index.html') return null;
+    return Uint8List.fromList(
+      utf8.encode('<!doctype html><p>PLAYMESH_GDEVELOP_TEST</p>'),
+    );
+  }
 }
 
 class _StubHost implements GoCoreHost {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/features/game/game_page.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
+import 'package:playmesh/features/developer/game_creation_page.dart';
 import 'package:playmesh/features/games/game_library_page.dart';
 import 'package:playmesh/features/home/home_page.dart';
 import 'package:playmesh/features/profile/profile_page.dart';
@@ -163,7 +164,7 @@ void main() {
     );
   });
 
-  testWidgets('首页在 320dp 保持两项主入口和右上角扫码、GitHub、设置', (tester) async {
+  testWidgets('首页在 320dp 保持三项主入口和右上角扫码、GitHub、设置', (tester) async {
     tester.view.physicalSize = const Size(320, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -181,11 +182,35 @@ void main() {
     expect(find.text('加入对局'), findsOneWidget);
     await tester.ensureVisible(find.text('在线游戏库'));
     expect(find.text('在线游戏库'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(HomePage.createGameKey));
+    expect(find.text('制作游戏'), findsOneWidget);
     expect(find.byKey(HomePage.scanJoinKey), findsOneWidget);
     expect(find.byKey(HomePage.githubKey), findsOneWidget);
     expect(find.byTooltip('GitHub 开源仓库'), findsOneWidget);
     expect(find.byTooltip('设置'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('制作游戏入口位于主操作下方并进入制作页', (tester) async {
+    await tester.pumpWidget(
+      localizedTestApp(
+        home: const HomePage(user: _user),
+        routes: {
+          GameCreationPage.routeName: (_) =>
+              const Scaffold(body: Text('CREATE_GAME_ROUTE')),
+        },
+      ),
+    );
+
+    final joinTop = tester.getTopLeft(find.text('加入对局')).dy;
+    final createTop = tester.getTopLeft(find.text('制作游戏')).dy;
+    expect(createTop, greaterThan(joinTop));
+
+    await tester.drag(find.byType(ListView), const Offset(0, -140));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('制作游戏'));
+    await tester.pumpAndSettle();
+    expect(find.text('CREATE_GAME_ROUTE'), findsOneWidget);
   });
 
   testWidgets('主页 GitHub 图标使用外部浏览器打开开源仓库', (tester) async {

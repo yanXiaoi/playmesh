@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash, webcrypto } from "node:crypto";
 import fs from "node:fs";
 import vm from "node:vm";
 
 const commands = [];
 const binaryFrames = [];
 const uploads = [];
+const standardStorageRequests = [];
+const standardStorageData = new Map();
+const synchronousStorageRequests = [];
+const synchronousStorageLedger = new Map();
+let dropNextSynchronousStorageResponse = false;
 const appInternalKey = Symbol.for("playmesh.app.internal.v1");
 const mainInternalKey = Symbol.for("playmesh.main.internal.v1");
 const receiveMain = (message) => window[mainInternalKey].receive(message);
@@ -66,6 +72,119 @@ class MockFile {
     this.bytes = bytes;
     this.name = name;
     this.size = bytes.length;
+  }
+}
+
+function synchronousBucketRevision(bucket) {
+  const values = Object.fromEntries(
+    [...standardStorageData.entries()]
+      .filter(([key]) => key.startsWith(`${bucket}:`))
+      .map(([key, value]) => [key.slice(bucket.length + 1), value]),
+  );
+  return createHash("sha256").update(JSON.stringify(values)).digest("hex");
+}
+
+class MockXMLHttpRequest {
+  constructor() {
+    this.headers = {};
+    this.status = 0;
+    this.responseText = "";
+  }
+
+  open(method, url, asynchronous = true) {
+    assert.equal(asynchronous, false, "sync storage must use blocking XHR");
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name, value) {
+    this.headers[name] = value;
+  }
+
+  send(body) {
+    assert.equal(this.headers["X-Playmesh-Storage-Sync"], "1");
+    let encodedBody;
+    if (this.method === "GET") {
+      assert.equal(body, null);
+      const payload = new URL(this.url, "http://playmesh.local").searchParams.get("payload");
+      assert.ok(payload);
+      encodedBody = Buffer.from(payload, "base64url").toString("utf8");
+    } else {
+      assert.equal(this.method, "PUT");
+      assert.equal(this.url, "/bucket/_playmesh-json/v1");
+      assert.equal(this.headers["Content-Type"], "application/json");
+      encodedBody = body;
+    }
+    const digest = createHash("sha256").update(encodedBody).digest("hex");
+    assert.equal(this.headers["X-Playmesh-Content-Sha256"], digest);
+    const envelope = JSON.parse(encodedBody);
+    synchronousStorageRequests.push({
+      method: this.method,
+      url: this.url,
+      headers: { ...this.headers },
+      envelope,
+      body: encodedBody,
+    });
+    const replay = synchronousStorageLedger.get(envelope.requestId);
+    if (replay) {
+      assert.equal(replay.digest, digest);
+      this.status = replay.status;
+      this.responseText = replay.responseText;
+      return;
+    }
+    const key = `${envelope.bucket}:${envelope.key}`;
+    let status = 200;
+    let result;
+    let error = null;
+    if (this.method === "GET") {
+      assert.equal(envelope.operation, "sync.get");
+      result = {
+        value: standardStorageData.has(key) ? standardStorageData.get(key) : null,
+        revision: synchronousBucketRevision(envelope.bucket),
+      };
+    } else {
+      assert.equal(envelope.operation, "sync.set");
+      const currentRevision = synchronousBucketRevision(envelope.bucket);
+      if (envelope.expectedRevision !== currentRevision) {
+        status = 409;
+        error = {
+          code: "storage_revision_conflict",
+          message: "存储修订已发生变化，已拒绝覆盖",
+        };
+      } else {
+        const nextValues = Object.fromEntries(
+          [...standardStorageData.entries()]
+            .filter(([existing]) => existing.startsWith(`${envelope.bucket}:`))
+            .map(([existing, current]) => [existing.slice(envelope.bucket.length + 1), current]),
+        );
+        nextValues[envelope.key] = envelope.value;
+        if (Buffer.byteLength(JSON.stringify(nextValues)) > 10 * 1024 * 1024) {
+          status = 413;
+          error = {
+            code: "standard_bucket_too_large",
+            message: "Bucket JSON 序列化总量超过 10 MiB",
+          };
+        } else {
+          standardStorageData.set(key, envelope.value);
+          result = { revision: synchronousBucketRevision(envelope.bucket) };
+        }
+      }
+    }
+    this.status = status;
+    this.responseText = JSON.stringify({
+      protocolVersion: "1.0.0",
+      requestId: envelope.requestId,
+      ...(error ? { error } : { result }),
+    });
+    synchronousStorageLedger.set(envelope.requestId, {
+      digest,
+      status: this.status,
+      responseText: this.responseText,
+    });
+    if (dropNextSynchronousStorageResponse && status === 200) {
+      dropNextSynchronousStorageResponse = false;
+      throw new Error("simulated response loss after commit");
+    }
   }
 }
 
@@ -177,7 +296,7 @@ const gameFocusTarget = {
 };
 const appReadyBootstrap = {
   available: true,
-  sdkVersion: "3.2.0",
+  sdkVersion: "3.3.0",
   capabilityRegistry: [],
   device: {
     platform: "windows",
@@ -197,7 +316,7 @@ const appReadyThenable = {
   },
 };
 const appPublicApi = {
-  version: "3.2.0",
+  version: "3.3.0",
   ready: appReadyThenable,
   isAvailable() {
     return true;
@@ -250,13 +369,77 @@ globalThis.window = {
   setTimeout,
   clearTimeout,
   WebSocket: MockWebSocket,
+  XMLHttpRequest: MockXMLHttpRequest,
   TextEncoder,
   TextDecoder,
   Uint8Array,
   ArrayBuffer,
   DataView,
   File: MockFile,
+  crypto: webcrypto,
   async fetch(url, options) {
+    if (String(url).startsWith("/bucket/_playmesh-json/v1")) {
+      const encodedBody = options.body || Buffer.from(
+        new URL(String(url), "http://playmesh.local").searchParams.get("payload"),
+        "base64url",
+      ).toString("utf8");
+      const envelope = JSON.parse(encodedBody);
+      const calculatedDigest = Buffer.from(
+        await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode(encodedBody)),
+      ).toString("hex");
+      assert.equal(options.headers["X-Playmesh-Content-Sha256"], calculatedDigest);
+      standardStorageRequests.push({ url, options, envelope });
+      const key = `${envelope.bucket}:${envelope.key}`;
+      let status = 200;
+      let result;
+      let error;
+      if (envelope.operation === "get") {
+        result = {
+          value: standardStorageData.has(key) ? standardStorageData.get(key) : null,
+          revision: synchronousBucketRevision(envelope.bucket),
+        };
+      } else if (envelope.operation === "set") {
+        const currentRevision = synchronousBucketRevision(envelope.bucket);
+        if (envelope.expectedRevision !== currentRevision) {
+          status = 409;
+          error = { code: "storage_revision_conflict", message: "revision conflict" };
+        } else {
+          standardStorageData.set(key, envelope.value);
+          result = { revision: synchronousBucketRevision(envelope.bucket) };
+        }
+      } else if (envelope.operation === "remove") {
+        const currentRevision = synchronousBucketRevision(envelope.bucket);
+        if (envelope.expectedRevision !== currentRevision) {
+          status = 409;
+          error = { code: "storage_revision_conflict", message: "revision conflict" };
+        } else {
+          standardStorageData.delete(key);
+          result = { revision: synchronousBucketRevision(envelope.bucket) };
+        }
+      } else if (envelope.operation === "clear") {
+        const currentRevision = synchronousBucketRevision(envelope.bucket);
+        if (envelope.expectedRevision !== currentRevision) {
+          status = 409;
+          error = { code: "storage_revision_conflict", message: "revision conflict" };
+        } else {
+          for (const existing of standardStorageData.keys()) {
+            if (existing.startsWith(`${envelope.bucket}:`)) standardStorageData.delete(existing);
+          }
+          result = { revision: synchronousBucketRevision(envelope.bucket) };
+        }
+      }
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        async json() {
+          return {
+            protocolVersion: "1.0.0",
+            requestId: envelope.requestId,
+            ...(error ? { error } : { result }),
+          };
+        },
+      };
+    }
     uploads.push({ url, options });
     return {
       ok: true,
@@ -291,8 +474,16 @@ globalThis.window = {
         receiveMain(JSON.stringify({
           type: "sdk.bootstrap",
           requestId: command.requestId,
-          sdkVersion: "4.0.0",
+          sdkVersion: "4.1.0",
           isAuthority: true,
+          gameInfo: {
+            id: "com.playmesh.test-game",
+            name: "SDK 测试游戏",
+            tags: [],
+            multiplayer: true,
+            displayMode: "multi_screen",
+            requiredCapabilities: [],
+          },
           player: null,
           binaryTransport: { url: "ws://127.0.0.1/binary?token=secret" },
           session: {
@@ -393,10 +584,10 @@ assert.deepEqual(
   Object.keys(window.playmesh.main.session.getCurrent().players[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-assert.equal(window.playmesh.main.version, "4.0.0");
+assert.equal(window.playmesh.main.version, "4.1.0");
 assert.deepEqual(Object.keys(window.playmesh).sort(), ["app", "main", "ready"]);
-assert.equal(sdkBootstrap.main.sdkVersion, "4.0.0");
-assert.equal(sdkBootstrap.app.sdkVersion, "3.2.0");
+assert.equal(sdkBootstrap.main.sdkVersion, "4.1.0");
+assert.equal(sdkBootstrap.app.sdkVersion, "3.3.0");
 const unrelatedPlatformFocusTarget = { isConnected: true };
 window.document.activeElement = unrelatedPlatformFocusTarget;
 receiveMain({ type: "platform.ui.restoreGameFocus" });
@@ -537,21 +728,114 @@ assert.equal(uploadedUrl, "/bucket/fishing_save/1777777777777.bin");
 assert.equal(uploads[0].url, "/bucket/fishing_save?name=snapshot.bin");
 assert.equal(uploads[0].options.method, "POST");
 assert.deepEqual([...uploads[0].options.body.bytes], [0, 255, 7]);
-const setOperation = bucket.setData("coins", 9);
-const setCommand = commands.findLast((command) => command.command === "storage.set");
-assert.equal(setCommand.payload.bucket, "fishing_save");
-assert.equal(setCommand.payload.value, 9);
-receiveMain({
-  type: "command.result", requestId: setCommand.requestId, result: null,
+await bucket.setData("coins", 9);
+assert.equal(await bucket.getData("coins"), 9);
+await bucket.removeData("coins");
+assert.equal(await bucket.getData("coins"), null);
+await bucket.setData("level", 2);
+await bucket.clearData();
+assert.equal(await bucket.getData("level"), null);
+assert.deepEqual(
+  standardStorageRequests.map((request) => request.envelope.operation),
+  ["get", "set", "get", "remove", "get", "set", "clear", "get"],
+);
+assert.equal(
+  standardStorageRequests.every(
+    (request) => String(request.url).startsWith("/bucket/_playmesh-json/v1") &&
+      request.options.method === ({ get: "GET", set: "PUT", remove: "DELETE", clear: "DELETE" })[request.envelope.operation] &&
+      request.options.credentials === "same-origin" &&
+      request.envelope.gameId === "com.playmesh.test-game" &&
+      request.envelope.requestId.startsWith("storage-") &&
+      request.envelope.shareToken === undefined,
+  ),
+  true,
+);
+assert.equal(commands.some((command) => command.command.startsWith("storage.")), false);
+
+const gdevelopBucketName = `目录/存档.${"长".repeat(200)}`;
+const gdevelopRootKey = "$playmesh.gdevelop.root.v1";
+const synchronousBucket = window.playmesh.main.storage.getBucket(gdevelopBucketName);
+assert.equal(typeof synchronousBucket.getDataSync, "function");
+assert.equal(typeof synchronousBucket.setDataSync, "function");
+assert.equal(synchronousBucket.getSync, undefined);
+assert.equal(synchronousBucket.setSync, undefined);
+assert.equal(window.playmesh.main.storage.getBucketSync, undefined);
+assert.equal(synchronousBucket.getDataSync(gdevelopRootKey), null);
+synchronousBucket.setDataSync(gdevelopRootKey, { scene: 3, title: "你好" });
+assert.deepEqual(synchronousBucket.getDataSync(gdevelopRootKey), {
+  scene: 3,
+  title: "你好",
 });
-await setOperation;
-assert.throws(() => window.playmesh.main.storage.getBucket("../save"), /无效的 bucket/);
-assert.throws(() => window.playmesh.main.storage.getBucket("bad.bucket"), /无效的 bucket/);
-assert.throws(() => window.playmesh.main.storage.getBucket("_save"), /无效的 bucket/);
-assert.throws(() => window.playmesh.main.storage.getBucket("-save"), /无效的 bucket/);
-assert.throws(() => window.playmesh.main.storage.getBucket("存档"), /无效的 bucket/);
-assert.throws(() => window.playmesh.main.storage.getBucket("save\n"), /无效的 bucket/);
-assert.throws(() => window.playmesh.main.storage.getBucket(`a${"b".repeat(64)}`), /无效的 bucket/);
+assert.deepEqual(
+  synchronousStorageRequests.slice(0, 3).map((request) => request.method),
+  ["GET", "PUT", "GET"],
+);
+assert.equal(
+  synchronousStorageRequests.every(
+    (request) => request.envelope.gameId === "com.playmesh.test-game" &&
+      request.envelope.bucket === gdevelopBucketName &&
+      request.envelope.requestId.startsWith("storage-") &&
+      request.envelope.shareToken === undefined &&
+      request.headers["X-Playmesh-Content-Sha256"] ===
+        createHash("sha256").update(request.body).digest("hex"),
+  ),
+  true,
+);
+
+dropNextSynchronousStorageResponse = true;
+const beforeReplay = synchronousStorageRequests.length;
+synchronousBucket.setDataSync(gdevelopRootKey, { scene: 4 });
+const replayRequests = synchronousStorageRequests.slice(beforeReplay);
+assert.equal(replayRequests.length, 2);
+assert.equal(replayRequests[0].envelope.requestId, replayRequests[1].envelope.requestId);
+assert.equal(replayRequests[0].body, replayRequests[1].body);
+assert.equal(replayRequests[0].headers["X-Playmesh-Content-Sha256"], replayRequests[1].headers["X-Playmesh-Content-Sha256"]);
+
+standardStorageData.set(`${gdevelopBucketName}:${gdevelopRootKey}`, { scene: 99 });
+assert.throws(
+  () => synchronousBucket.setDataSync(gdevelopRootKey, { scene: 5 }),
+  (error) => error?.code === "storage_revision_conflict",
+);
+assert.deepEqual(synchronousBucket.getDataSync(gdevelopRootKey), { scene: 99 });
+synchronousBucket.setDataSync(gdevelopRootKey, { scene: 5 });
+
+const originalXMLHttpRequest = window.XMLHttpRequest;
+window.XMLHttpRequest = undefined;
+assert.throws(
+  () => window.playmesh.main.storage.getBucket("no_xhr").getDataSync("value"),
+  /不支持同步 XMLHttpRequest/,
+);
+window.XMLHttpRequest = originalXMLHttpRequest;
+
+for (const invalidBucket of [
+  "../save",
+  "bad.bucket",
+  "_save",
+  "-save",
+  "存档",
+  "save\n",
+  `a${"b".repeat(64)}`,
+]) {
+  const invalidForAsync = window.playmesh.main.storage.getBucket(invalidBucket);
+  assert.throws(() => invalidForAsync.getData("value"), /无效的 bucket/);
+  assert.throws(() => invalidForAsync.setData("value", 1), /无效的 bucket/);
+  assert.throws(() => invalidForAsync.removeData("value"), /无效的 bucket/);
+  assert.throws(() => invalidForAsync.clearData(), /无效的 bucket/);
+}
+assert.throws(
+  () => window.playmesh.main.storage.getBucket("长".repeat(1366) + "a"),
+  /4096 个 UTF-8 字节/,
+);
+
+const largeSyncBucket = window.playmesh.main.storage.getBucket("sync_large");
+const emptyLargeBucketBytes = Buffer.byteLength(JSON.stringify({ blob: "" }));
+const acceptedLargeValue = "x".repeat(10 * 1024 * 1024 - emptyLargeBucketBytes);
+largeSyncBucket.setDataSync("blob", acceptedLargeValue);
+assert.equal(largeSyncBucket.getDataSync("blob").length, acceptedLargeValue.length);
+assert.throws(
+  () => largeSyncBucket.setDataSync("blob", `${acceptedLargeValue}+`),
+  (error) => error?.code === "standard_bucket_too_large",
+);
 
 let received = null;
 window.playmesh.main.game.onMessage((message) => { received = message; });
@@ -562,7 +846,7 @@ receiveMain({
 assert.equal(received.correct, true);
 
 let authorityContext = null;
-window.playmesh.main.authority.onService((action, context) => {
+const unregisterEchoAuthority = window.playmesh.main.authority.onService((action, context) => {
   authorityContext = context;
   return {
     targetPlayerIds: [context.senderPlayerId],
@@ -597,6 +881,167 @@ assert.deepEqual(
   Object.keys(authorityContext.members[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
+unregisterEchoAuthority();
+
+assert.equal(
+  window.playmesh.main.authority.defaultNamespace,
+  "playmesh.authority.default.v1",
+);
+assert.throws(
+  () => window.playmesh.main.authority.onService(() => {}, { namespace: "" }),
+  /namespace 无效/,
+);
+assert.throws(
+  () => window.playmesh.main.game.submitAction({}, { namespace: "" }),
+  /namespace 无效/,
+);
+const captureSubmittedAuthorityPayload = async (action, options) => {
+  const operation = options === undefined
+    ? window.playmesh.main.game.submitAction(action)
+    : window.playmesh.main.game.submitAction(action, options);
+  const command = commands.findLast(
+    (candidate) => candidate.command === "game.submitAction",
+  );
+  receiveMain({
+    type: "command.result",
+    requestId: command.requestId,
+    result: null,
+  });
+  await operation;
+  return command.payload;
+};
+const dispatchSubmittedAuthorityPayload = async (payload) => {
+  receiveMain({
+    type: "transport.message",
+    message: {
+      type: "authority.action",
+      senderPlayerId: "p-guest",
+      payload,
+      session: {
+        id: "session-authority-routing",
+        players: [
+          {
+            id: "p-guest", nickname: "Guest", avatar: null,
+            role: "player", connected: true,
+          },
+        ],
+      },
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+const authorityResultTypesAfter = (count) => commands
+  .filter((command) => command.command === "authority.result")
+  .slice(count)
+  .map((command) => command.payload.type);
+
+const defaultCalls = [];
+const unregisterOldDefault = window.playmesh.main.authority.onService((action) => {
+  defaultCalls.push(`old:${action.type}`);
+});
+const unregisterDefault = window.playmesh.main.authority.onService((action) => {
+  defaultCalls.push(`new:${action.type}`);
+  return { targetPlayerIds: ["p-guest"], message: { type: "default.result" } };
+});
+unregisterOldDefault();
+const legacyActionWithNamespaceField = {
+  type: "legacy.with-namespace-field",
+  namespace: "game.payload.value",
+};
+const legacyPayload = await captureSubmittedAuthorityPayload(
+  legacyActionWithNamespaceField,
+);
+assert.deepEqual(legacyPayload, legacyActionWithNamespaceField);
+const resultsBeforeDefault = commands.filter(
+  (command) => command.command === "authority.result",
+).length;
+await dispatchSubmittedAuthorityPayload(legacyPayload);
+assert.deepEqual(defaultCalls, ["new:legacy.with-namespace-field"]);
+assert.deepEqual(authorityResultTypesAfter(resultsBeforeDefault), ["default.result"]);
+
+const routedCalls = [];
+const namespaceA = "example.game.inventory.v1";
+const namespaceB = "example.game.chat.v1";
+const unregisterNamespaceA = window.playmesh.main.authority.onService(
+  (action) => {
+    routedCalls.push(`a:${action.type}`);
+    return { targetPlayerIds: ["p-guest"], message: { type: "a.result" } };
+  },
+  { namespace: namespaceA },
+);
+const unregisterNamespaceB = window.playmesh.main.authority.onService(
+  (action) => {
+    routedCalls.push(`b:${action.type}`);
+    return { targetPlayerIds: ["p-guest"], message: { type: "b.result" } };
+  },
+  { namespace: namespaceB },
+);
+assert.throws(
+  () => window.playmesh.main.authority.onService(() => {}, { namespace: namespaceA }),
+  /namespace 已注册/,
+);
+const namespaceAPayload = await captureSubmittedAuthorityPayload(
+  { type: "inventory.take", itemId: "coin" },
+  { namespace: namespaceA },
+);
+const namespaceBPayload = await captureSubmittedAuthorityPayload(
+  { type: "chat.send", text: "hello" },
+  { namespace: namespaceB },
+);
+const resultsBeforeNamed = commands.filter(
+  (command) => command.command === "authority.result",
+).length;
+await dispatchSubmittedAuthorityPayload(namespaceAPayload);
+await dispatchSubmittedAuthorityPayload(namespaceBPayload);
+assert.deepEqual(routedCalls, ["a:inventory.take", "b:chat.send"]);
+assert.deepEqual(authorityResultTypesAfter(resultsBeforeNamed), ["a.result", "b.result"]);
+assert.deepEqual(defaultCalls, ["new:legacy.with-namespace-field"]);
+
+const unknownPayload = await captureSubmittedAuthorityPayload(
+  { type: "unknown.action" },
+  { namespace: "example.game.unknown.v1" },
+);
+const resultsBeforeUnknown = commands.filter(
+  (command) => command.command === "authority.result",
+).length;
+await dispatchSubmittedAuthorityPayload(unknownPayload);
+assert.deepEqual(authorityResultTypesAfter(resultsBeforeUnknown), []);
+assert.deepEqual(defaultCalls, ["new:legacy.with-namespace-field"]);
+
+unregisterNamespaceA();
+unregisterNamespaceA();
+const resultsBeforeCancelled = commands.filter(
+  (command) => command.command === "authority.result",
+).length;
+await dispatchSubmittedAuthorityPayload(namespaceAPayload);
+assert.deepEqual(authorityResultTypesAfter(resultsBeforeCancelled), []);
+
+let authorityLifecycleError = null;
+const unregisterAuthorityLifecycle = window.playmesh.main.lifecycle.onChange((event) => {
+  if (event.state === "error") authorityLifecycleError = event.error;
+});
+const unregisterFailingNamespace = window.playmesh.main.authority.onService(
+  () => {
+    throw new Error("expected isolated authority failure");
+  },
+  { namespace: "example.game.failure.v1" },
+);
+const failingPayload = await captureSubmittedAuthorityPayload(
+  { type: "failure.test" },
+  { namespace: "example.game.failure.v1" },
+);
+await dispatchSubmittedAuthorityPayload(failingPayload);
+assert.match(authorityLifecycleError, /expected isolated authority failure/);
+await dispatchSubmittedAuthorityPayload(legacyPayload);
+assert.deepEqual(defaultCalls, [
+  "new:legacy.with-namespace-field",
+  "new:legacy.with-namespace-field",
+]);
+
+unregisterFailingNamespace();
+unregisterAuthorityLifecycle();
+unregisterNamespaceB();
+unregisterDefault();
 
 const syncController = window.playmesh.main.sync.startAuthority({
   initialState: { score: 0 },

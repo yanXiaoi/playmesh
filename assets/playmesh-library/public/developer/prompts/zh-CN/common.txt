@@ -29,7 +29,7 @@ PLAYMESH 对话 AI 游戏开发提示
 
 【SDK 与能力】
 - 本提示随后附带同一次 SDK 构建生成的完整 `playmesh-main.d.ts` 和 `playmesh-app.d.ts`，它们是方法、参数、返回值、类型、版本和中文 JSDoc 的唯一事实源。不得臆造声明中不存在的成员。
-- `playmesh.main.storage.getBucket(name)` 返回 Bucket；JSON 数据保持私有，上传文件通过返回的 `/bucket/...` 地址在运行时读取。
+- `playmesh.main.storage.getBucket(name)` 返回 Authority 主机上的持久 JSON Bucket，用于存档、长期进度和游戏配置；上传文件可通过返回的 `/bucket/...` 地址在运行时读取。
 - `playmesh.main.binary` 只用于多人原始 Uint8Array 通信；禁止自行创建 WebSocket。
 - `playmesh.app` 表示当前设备身份与平台能力。等待 `playmesh.ready` 后，通过 `playmesh.app.capabilities.getRegistry/getDeclared/getAvailable` 读取状态；只有描述符公开了方法或事件的原生适配能力才用 `create(code, options)` 创建实例。
 - 游戏业务文案和资源由游戏项目自行维护国际化；平台不会翻译游戏 DOM、玩家昵称、标签、日志或其他动态内容。需要选择游戏自己的语言资源时，在 `await playmesh.ready` 后读取只读的 `playmesh.app.runtime.getLocale()`：App WebView 返回当前实际显示该页面的 App 语言，普通浏览器返回浏览器系统语言并在读取失败时回退 `zh`。不要尝试读取 Authority 主机语言或平台内部词典。

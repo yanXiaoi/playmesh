@@ -15,7 +15,7 @@ void main() {
     );
   });
 
-  test('单机 bridge 响应 sdk.ready 并提供本地存储', () async {
+  test('单机 bridge 响应 sdk.ready 且不再接受旧 WS 存储命令', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-solo-bridge-');
     addTearDown(() => root.delete(recursive: true));
     final storage = await GameStorageService.create(
@@ -49,13 +49,6 @@ void main() {
         'payload': {'bucket': 'progress', 'key': 'level', 'value': 3},
       }),
     );
-    await bridge.handleJavaScriptMessage(
-      jsonEncode({
-        'command': 'storage.get',
-        'requestId': 'get-1',
-        'payload': {'bucket': 'progress', 'key': 'level'},
-      }),
-    );
     await Future<void>.delayed(Duration.zero);
 
     expect(messages.first['type'], 'sdk.bootstrap');
@@ -63,8 +56,9 @@ void main() {
     expect(messages.first['session'], isNull);
     expect((messages.first['player']! as Map)['id'], 'u_test');
     expect((messages.first['player']! as Map)['role'], 'authority_player');
-    expect(messages.last['type'], 'command.result');
-    expect(messages.last['requestId'], 'get-1');
-    expect(messages.last['result'], 3);
+    expect(messages.last['type'], 'command.error');
+    expect(messages.last['requestId'], 'set-1');
+    expect(messages.last['error'], contains('storage.set'));
+    expect(await storage.getData('progress', 'level'), isNull);
   });
 }

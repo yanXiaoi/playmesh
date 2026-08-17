@@ -1,9 +1,11 @@
 {
-  "manifestVersion": "2.0.0",
+  "manifestVersion": "2.2.0",
   "templates": [
     {
       "id": "common",
       "category": "common",
+      "surface": "source",
+      "mode": "chat",
       "files": {
         "zh-CN": "zh-CN/common.txt",
         "en-US": "en-US/common.txt"
@@ -12,6 +14,8 @@
     {
       "id": "agent-common",
       "category": "common",
+      "surface": "source",
+      "mode": "agent",
       "files": {
         "zh-CN": "zh-CN/agent-common.txt",
         "en-US": "en-US/agent-common.txt"
@@ -20,6 +24,8 @@
     {
       "id": "custom-ideas",
       "category": "common",
+      "surface": "source",
+      "mode": "shared",
       "files": {
         "zh-CN": "zh-CN/custom-ideas.txt",
         "en-US": "en-US/custom-ideas.txt"
@@ -28,6 +34,8 @@
     {
       "id": "solo",
       "category": "mode",
+      "surface": "source",
+      "mode": "shared",
       "files": {
         "zh-CN": "zh-CN/solo.txt",
         "en-US": "en-US/solo.txt"
@@ -36,6 +44,8 @@
     {
       "id": "multiplayer",
       "category": "mode",
+      "surface": "source",
+      "mode": "shared",
       "files": {
         "zh-CN": "zh-CN/multiplayer.txt",
         "en-US": "en-US/multiplayer.txt"
@@ -44,6 +54,8 @@
     {
       "id": "multi-screen",
       "category": "display",
+      "surface": "source",
+      "mode": "shared",
       "files": {
         "zh-CN": "zh-CN/multi-screen.txt",
         "en-US": "en-US/multi-screen.txt"
@@ -52,9 +64,31 @@
     {
       "id": "single-screen-multiplayer",
       "category": "display",
+      "surface": "source",
+      "mode": "shared",
       "files": {
         "zh-CN": "zh-CN/single-screen-multiplayer.txt",
         "en-US": "en-US/single-screen-multiplayer.txt"
+      }
+    },
+    {
+      "id": "gdevelop-chat",
+      "category": "gdevelop",
+      "surface": "gdevelop",
+      "mode": "chat",
+      "files": {
+        "zh-CN": "zh-CN/gdevelop-chat.txt",
+        "en-US": "en-US/gdevelop-chat.txt"
+      }
+    },
+    {
+      "id": "gdevelop-agent",
+      "category": "gdevelop",
+      "surface": "gdevelop",
+      "mode": "agent",
+      "files": {
+        "zh-CN": "zh-CN/gdevelop-agent.txt",
+        "en-US": "en-US/gdevelop-agent.txt"
       }
     }
   ]

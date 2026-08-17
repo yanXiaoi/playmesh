@@ -58,3 +58,7 @@ app.*.map.json
 /skills-lock.json
 /dev-cli/playmesh-cli.exe~
 /x.name.includes('webview_flutter')
+
+# 一次性官方 GDevelop 源码树
+/GDevelop-*/
+/work/gdevelop-webide-build-cache/

@@ -45,8 +45,8 @@ func TestGetInitializesJavaScriptArchitectureInEmptyDirectory(t *testing.T) {
 				AppSDKVersion:  requiredAppSDKVersion,
 				Encoding:       "base64",
 				Files: map[string]string{
-					"playmesh-main.js":   encoded(`const PLAYMESH_SDK_VERSION = "4.0.0";`),
-					"playmesh-app.js":    encoded(`const PLAYMESH_APP_SDK_VERSION = "3.2.0";`),
+					"playmesh-main.js":   encoded(`const PLAYMESH_SDK_VERSION = "4.1.0";`),
+					"playmesh-app.js":    encoded(`const PLAYMESH_APP_SDK_VERSION = "3.3.0";`),
 					"playmesh-main.d.ts": encoded("declare const playmesh: unknown;"),
 					"playmesh-app.d.ts":  encoded("declare const playmeshApp: unknown;"),
 				},
@@ -135,10 +135,10 @@ func TestUpdateWithoutProjectConfigOnlyRefreshesNativeSDK(t *testing.T) {
 			Encoding:       "base64",
 			Files: map[string]string{
 				"playmesh-main.js": encoded(
-					`const PLAYMESH_SDK_VERSION = "4.0.0";`,
+					`const PLAYMESH_SDK_VERSION = "4.1.0";`,
 				),
 				"playmesh-app.js": encoded(
-					`const PLAYMESH_APP_SDK_VERSION = "3.2.0";`,
+					`const PLAYMESH_APP_SDK_VERSION = "3.3.0";`,
 				),
 				"playmesh-main.d.ts": encoded(
 					"declare const playmesh: unknown;",
@@ -204,8 +204,8 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 	writeTestFile(t, filepath.Join(packageRoot, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(packageRoot, "app", "index.html"), "<!doctype html>")
 	writeTestBytes(t, filepath.Join(packageRoot, rootIconName), validRootIcon(t))
-	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.0.0";`)
-	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.2.0";`)
+	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.1.0";`)
+	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.3.0";`)
 
 	var uploaded []byte
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -216,7 +216,7 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 		switch request.URL.Path {
 		case "/dev/api/status":
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"enabled": true, "gameSdkVersion": "4.0.0", "appSdkVersion": "3.2.0",
+				"enabled": true, "gameSdkVersion": "4.1.0", "appSdkVersion": "3.3.0",
 			})
 		case "/dev/api/packages/import":
 			uploaded, _ = io.ReadAll(request.Body)
@@ -292,7 +292,7 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 	if err != nil || json.Unmarshal(data, &manifest) != nil {
 		t.Fatalf("read normalized manifest: %v", err)
 	}
-	if manifest["sdkVersion"] != "4.0.0" || manifest["appSdkVersion"] != "3.2.0" {
+	if manifest["sdkVersion"] != "4.1.0" || manifest["appSdkVersion"] != "3.3.0" {
 		t.Fatalf("manifest SDK versions were not normalized: %#v", manifest)
 	}
 }
@@ -347,36 +347,32 @@ func TestRunUploadsConfiguredPackageAndStartsWithoutLogs(t *testing.T) {
 	}`)
 	writeTestFile(t, filepath.Join(packageRoot, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(packageRoot, "app", "index.html"), "<!doctype html>")
-	writeTestFile(t, filepath.Join(sdkRoot, "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.0.0";`)
-	writeTestFile(t, filepath.Join(sdkRoot, "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.2.0";`)
+	writeTestFile(t, filepath.Join(sdkRoot, "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.1.0";`)
+	writeTestFile(t, filepath.Join(sdkRoot, "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.3.0";`)
 
-	var imports atomic.Int32
-	var starts atomic.Int32
+	var formalImports atomic.Int32
+	var previews atomic.Int32
 	var logRequests atomic.Int32
 	var uploaded []byte
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/dev/api/status":
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"enabled": true, "gameSdkVersion": "4.0.0", "appSdkVersion": "3.2.0",
+				"enabled": true, "gameSdkVersion": "4.1.0", "appSdkVersion": "3.3.0",
 			})
 		case "/dev/api/packages/import":
-			imports.Add(1)
+			formalImports.Add(1)
+			http.Error(response, "formal import forbidden", http.StatusConflict)
+		case "/dev/api/projects/com.example.cocos/preview":
+			previews.Add(1)
 			uploaded, _ = io.ReadAll(request.Body)
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"committed": true,
-				"project": map[string]any{
-					"id": "com.example.cocos", "version": "1.0.0",
+				"gameId": "com.example.cocos",
+				"run": runStatus{
+					ProjectID: "com.example.cocos",
+					RunID:     "run-cocos",
+					Phase:     "running",
 				},
-			})
-		case "/dev/api/run":
-			_ = json.NewEncoder(response).Encode(map[string]any{"run": nil})
-		case "/dev/api/projects/com.example.cocos/run":
-			starts.Add(1)
-			_ = json.NewEncoder(response).Encode(runStatus{
-				ProjectID: "com.example.cocos",
-				RunID:     "run-cocos",
-				Phase:     "running",
 			})
 		case "/dev/api/logs", "/dev/api/events":
 			logRequests.Add(1)
@@ -403,8 +399,12 @@ func TestRunUploadsConfiguredPackageAndStartsWithoutLogs(t *testing.T) {
 	if err := commandRun(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if imports.Load() != 1 || starts.Load() != 1 {
-		t.Fatalf("run did not upload and start: imports=%d starts=%d", imports.Load(), starts.Load())
+	if formalImports.Load() != 0 || previews.Load() != 1 {
+		t.Fatalf(
+			"run must use one temporary preview and no formal import: previews=%d imports=%d",
+			previews.Load(),
+			formalImports.Load(),
+		)
 	}
 	if logRequests.Load() != 0 {
 		t.Fatalf("run must not attach logs: %d requests", logRequests.Load())
@@ -573,12 +573,12 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(sdkRoot, "playmesh-main.js"),
-		`const PLAYMESH_SDK_VERSION = "4.0.0";`,
+		`const PLAYMESH_SDK_VERSION = "4.1.0";`,
 	)
 	writeTestFile(
 		t,
 		filepath.Join(sdkRoot, "playmesh-app.js"),
-		`const PLAYMESH_APP_SDK_VERSION = "3.2.0";`,
+		`const PLAYMESH_APP_SDK_VERSION = "3.3.0";`,
 	)
 
 	var imported []byte
@@ -594,17 +594,17 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 		case request.URL.Path == "/dev/api/status":
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"enabled":        true,
-				"gameSdkVersion": "4.0.0",
-				"appSdkVersion":  "3.2.0",
+				"gameSdkVersion": "4.1.0",
+				"appSdkVersion":  "3.3.0",
 			})
-		case request.URL.Path == "/dev/api/packages/import":
+		case request.URL.Path ==
+			"/dev/api/projects/com.example.dev/development/package":
 			imports.Add(1)
 			imported, _ = io.ReadAll(request.Body)
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"committed": true,
-				"project": map[string]any{
-					"id": "com.example.dev", "version": "1.0.0",
-				},
+				"packageId": "package-0123456789abcdef0123456789abcdef",
+				"gameId":    "com.example.dev",
+				"expiresAt": time.Now().Add(15 * time.Minute).UnixMilli(),
 			})
 		case request.Method == "POST" &&
 			request.URL.Path ==
@@ -616,7 +616,7 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 				return
 			}
 			if payload.ExpiresAt <= time.Now().UnixMilli() ||
-				payload.Credential == "" {
+				payload.Credential == "" || payload.PackageID == "" {
 				http.Error(response, "invalid development session", http.StatusBadRequest)
 				return
 			}
@@ -768,7 +768,7 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 	}
 	if imports.Load() != 2 {
 		t.Fatalf(
-			"every dev session must upload current base metadata: imports=%d",
+			"every dev session must stage current base metadata: stages=%d",
 			imports.Load(),
 		)
 	}

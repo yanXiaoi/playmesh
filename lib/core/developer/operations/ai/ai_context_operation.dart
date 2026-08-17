@@ -66,11 +66,14 @@ class _AiContextOperation implements _DeveloperHttpOperation {
         'projects': endpoint('/dev/api/projects'),
       },
       'operations': _developerOperationRegistry.catalog(
-        where: (operation) => operation.agentEnabled,
+        where: (operation) =>
+            gateway.gdevelopAiFeaturePolicy.exposesOperationId(operation.id) &&
+            operation.agentEnabled,
       ),
       'rules': {
         'mainJsonWriteEndpoint': '/dev/api/projects/{projectId}/manifest',
         'mainJsonImmutableFields': ['id', 'author', 'lastModifiedAt'],
+        'mainJsonManagedFields': ['sdkVersion', 'appSdkVersion'],
         'mainJsonRawFileWriteAllowed': false,
         'capabilitiesWriteEndpoint':
             '/dev/api/projects/{projectId}/capabilities',

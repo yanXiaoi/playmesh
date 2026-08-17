@@ -1,7 +1,6 @@
 import '../capabilities/capability_runtime.dart';
 import '../app_media/app_media_runtime.dart';
 import '../session/go_core_session_client.dart';
-import '../storage/game_storage_service.dart';
 
 part 'features/app/app_capability_feature.dart';
 part 'features/app/app_core_feature.dart';
@@ -11,6 +10,7 @@ part 'features/app/app_media_webrtc_feature.dart';
 part 'features/app/app_performance_feature.dart';
 part 'features/app/app_ui_feature.dart';
 part 'features/game/game_binary_feature.dart';
+part 'features/game/game_authority_feature.dart';
 part 'features/game/game_core_feature.dart';
 part 'features/game/game_performance_feature.dart';
 part 'features/game/game_runtime_feature.dart';
@@ -172,9 +172,7 @@ abstract interface class _AppSdkCommandFeature {
 
 class GameSdkCommandContext {
   GameSdkCommandContext({
-    required this.ensureStorage,
     required this.completeLifecycle,
-    required this.routeRemoteStorage,
     this.gameInfo = const <String, Object?>{},
     this.connection,
     this.standalonePlayer,
@@ -183,14 +181,7 @@ class GameSdkCommandContext {
   final GameSessionConnection? connection;
   final Map<String, Object?>? standalonePlayer;
   final Map<String, Object?> gameInfo;
-  final Future<GameStorageService> Function() ensureStorage;
   final bool Function(String requestId) completeLifecycle;
-  final Future<void> Function(
-    String command,
-    String? requestId,
-    Map<String, Object?> payload,
-  )
-  routeRemoteStorage;
 
   bool get isStandalone => connection == null;
 }
@@ -271,6 +262,7 @@ final class SdkFeatureRegistry {
     gameBinarySdkSource,
     gameSessionSdkSource,
     gameSyncSdkSource,
+    gameAuthoritySdkSource,
     gamePerformanceSdkSource,
     gameRuntimeSdkSource,
     gameStorageLifecycleSdkSource,
@@ -304,7 +296,9 @@ final class SdkFeatureRegistry {
     ),
     SdkRelease._(
       target: SdkSourceTarget.app,
-      minimumRequestedVersion: _runtimeBundle.appVersion,
+      // App SDK 3.3.0 only adds APIs to 3.2.0, so both requested versions can
+      // safely share the current runtime bundle.
+      minimumRequestedVersion: '3.2.0',
       maximumRequestedVersion: _runtimeBundle.appVersion,
       bundleVersion: _runtimeBundle.appVersion,
       files: _sdkFilesForTarget(_runtimeBundle.files, SdkSourceTarget.app),

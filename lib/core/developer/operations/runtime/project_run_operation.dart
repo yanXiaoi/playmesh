@@ -17,7 +17,9 @@ class _ProjectRunOperation implements _DeveloperHttpOperation {
       id: 'runtime.start',
       method: 'POST',
       path: '/dev/api/projects/{projectId}/run',
-      summary: '校验并请求 App 启动项目',
+      summary: '校验并运行内置源码工作区中已保存的项目',
+      description:
+          '仅运行 Playmesh 受管项目目录中的已保存内容；临时 ZIP 与反向代理资源分别使用 preview 和 development 会话。',
       permission: 'runtime.run',
       risk: DeveloperOperationRisk.medium,
       idempotent: false,
@@ -66,8 +68,15 @@ class _ProjectRunOperation implements _DeveloperHttpOperation {
           gateway.runController.status(projectId).toJson(),
         );
       case 'runtime.start':
-        await gateway.catalog.prepareGame(projectId);
-        final status = await gateway.runController.run(projectId);
+        final validation = await gateway.catalog.validateProject(projectId);
+        if (!validation.valid) {
+          throw DeveloperProjectValidationFailure(validation);
+        }
+        final game = await gateway.catalog.prepareGame(projectId);
+        final status = await gateway.runController.runSavedProject(
+          projectId: projectId,
+          game: game,
+        );
         await _json(request.response, HttpStatus.accepted, status.toJson());
       case 'runtime.restart':
         final status = await gateway.runController.restart(projectId);

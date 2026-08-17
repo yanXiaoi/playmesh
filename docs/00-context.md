@@ -58,7 +58,7 @@ Flutter App
 
 第三阶段已实现可供游戏使用的 SDK。启动当前会话的 App 游戏运行端固定为 Authority Client；大屏公共显示端不属于 `players`，普通多屏 App 主机可同时作为 Player，但其玩家顺序不参与 Authority 判定。开发者工作区创建的项目直接写入统一 `playmesh-library/packages/{gameId}/` 游戏库，与其他已安装资源使用同一套扫描、校验、索引、运行和删除流程。
 
-第四阶段网页开发者通道已完成并归档：用户在设置中开启开发者模式后，App 使用独立固定端口（默认 `16666`）启动开发者 Gateway；端口、token 和工作区路径一并持久化，App 重启或重新开启后恢复同一工作区链接。同一局域网内的浏览器与 App 内置 WebView 使用同一工作区。当前链路支持单机/联机项目创建与复制、项目设置和删除、IDEA 风格文件树、编辑保存、文件/文件夹新建与删除、上传、Git 风格双栏 Diff 与差异块应用、快速批量操作、项目级本地历史、结构化项目校验、运行游戏、联机二维码、SSE 同步、统一日志以及 AI 可读 SDK/接口/项目文档；工作区不嵌入主页面预览。完成事实见 `status/phase-04-web-dev-channel.md`。
+第四阶段网页开发者通道已完成并归档：用户从 App 首页进入“制作游戏”，开启开发者模式并展开“源代码开发”后，App 使用独立固定端口（默认 `16666`）启动开发者 Gateway；端口、token 和工作区路径一并持久化，App 重启或重新开启后恢复同一工作区链接。同一局域网内的浏览器与 App 内置 WebView 使用同一工作区。当前链路支持单机/联机项目创建与复制、项目设置和删除、IDEA 风格文件树、编辑保存、文件/文件夹新建与删除、上传、Git 风格双栏 Diff 与差异块应用、快速批量操作、项目级本地历史、结构化项目校验、运行游戏、联机二维码、SSE 同步、统一日志以及 AI 可读 SDK/接口/项目文档；工作区不嵌入主页面预览。完成事实见 `status/phase-04-web-dev-channel.md`。
 
 第五阶段已于 2026-07-17 完成并归档：当前名为 `playmesh.main.sync` 的状态同步能力、自动权威往返延迟、App SDK 网页性能层、可配置运行入口、Playmesh 包导入/导出、工作区文件整理、游戏存储收尾、运行重启与最近日志接口、游戏数据清理、正式版移动端界面、扫码加入、资料持久化、Logo 与全平台全屏均已落地。完整代码地图和产品边界见 `status/phase-05-complete.md`，自动验证见 `verification/phase-05-complete-2026-07-17.md`。
 
@@ -80,10 +80,11 @@ Flutter App
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
 `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。当前
 当前正式版本为 Playmesh `4.0.0+26`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
-`4.0.0`、App Bridge SDK `3.2.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
+`4.0.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
 Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`；两套 SDK 已收敛为 Dart
-唯一手写源、统一 feature 注册、运行时自动组装和精确版本发行。当前只接受 Game SDK
-`4.0.0` 与 App Bridge SDK `3.2.0`，旧清单版本直接拒绝。所有游戏、
+唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。当前 Game SDK 只接受
+`4.0.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0` 的清单请求，并统一解析到兼容的
+`3.3.0` 运行包。更旧或未知版本直接拒绝。所有游戏、
 分享和 Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority
 决定玩法开始和结束条件，SDK 只提交受控会话状态请求。当前变化记录在
 `docs/version/NEXT.md`，工程落点记录在

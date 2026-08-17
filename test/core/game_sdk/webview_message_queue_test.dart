@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/game_sdk/webview_message_queue.dart';
 
@@ -44,5 +46,58 @@ void main() {
 
     await queue.resume();
     expect(sent, ['bootstrap']);
+  });
+
+  test('发送期间清空旧页队列不会越界或误删新页的同内容消息', () async {
+    final sendStarted = Completer<void>();
+    final releaseSend = Completer<void>();
+    final sent = <String>[];
+    final queue = WebViewMessageQueue((message) async {
+      if (!sendStarted.isCompleted) {
+        sendStarted.complete();
+        await releaseSend.future;
+      }
+      sent.add(message);
+    });
+
+    await queue.add('same-payload');
+    final oldDelivery = queue.resume();
+    await sendStarted.future;
+    queue.pause(clearPending: true);
+    await queue.add('same-payload');
+    releaseSend.complete();
+    await oldDelivery;
+    await queue.resume();
+
+    expect(sent, ['same-payload', 'same-payload']);
+  });
+
+  test('旧页发送在换页后失败不会暂停新页队列', () async {
+    final oldSendStarted = Completer<void>();
+    final releaseOldSend = Completer<void>();
+    final sent = <String>[];
+    var attempt = 0;
+    final queue = WebViewMessageQueue((message) async {
+      attempt += 1;
+      if (attempt == 1) {
+        oldSendStarted.complete();
+        await releaseOldSend.future;
+        throw StateError('旧文档已经销毁');
+      }
+      sent.add(message);
+    });
+
+    await queue.add('same-payload');
+    final oldDelivery = queue.resume();
+    await oldSendStarted.future;
+    queue.pause(clearPending: true);
+    await queue.add('same-payload');
+    final newDelivery = queue.resume();
+    releaseOldSend.complete();
+    await oldDelivery;
+    await newDelivery;
+
+    expect(queue.isReady, isTrue);
+    expect(sent, ['same-payload']);
   });
 }

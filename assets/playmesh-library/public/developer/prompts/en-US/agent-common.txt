@@ -26,6 +26,7 @@ You are modifying the current HTML/CSS/JavaScript game through the Playmesh Deve
 
 [SDK AND CAPABILITIES]
 - The `playmesh-main.d.ts` and `playmesh-app.d.ts` declarations below are the single source of truth for SDK interfaces. Never invent members.
+- `playmesh.main.storage.getBucket(name)` returns a persistent JSON Bucket on the Authority host for saves, long-term progress, and game settings. Uploaded files are read at runtime through the returned `/bucket/...` URL.
 - `playmesh.app` represents only current-device identity and hardware capabilities; it never replaces the authoritative Game SDK.
 - The game project owns localization for its content. The platform does not translate game DOM, player nicknames, tags, or logs. After `playmesh.ready`, use read-only `playmesh.app.runtime.getLocale()` to select the game's own language resources. In an App WebView it returns the language of the App displaying that page. In a regular browser it returns the browser system language and falls back to `zh` if detection fails. Never read the Authority host language or internal platform dictionaries.
 - `playmesh.app.performance` reports only local FPS, Session RTT, and performance overlay state for the current client. Never use those telemetry values as Authority state, a win/loss decision, or another client's performance.

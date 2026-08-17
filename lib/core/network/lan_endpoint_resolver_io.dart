@@ -1,18 +1,31 @@
 import 'dart:io';
 
-Future<List<Uri>> resolveLanEndpoints(int port) async {
+import 'lan_endpoint.dart';
+
+Future<List<LanEndpointCandidate>> resolveLanEndpointCandidates(
+  int port,
+) async {
   final interfaces = await NetworkInterface.list(
-    type: InternetAddressType.IPv4,
+    type: InternetAddressType.any,
     includeLoopback: false,
     includeLinkLocal: false,
   );
-  final hosts = <String>{};
+  final candidates = <LanEndpointCandidate>[];
   for (final interface in interfaces) {
     for (final address in interface.addresses) {
-      hosts.add(address.address);
+      if (address.isLoopback || address.isLinkLocal) continue;
+      final classification = classifyLanAddress(address.rawAddress);
+      candidates.add(
+        LanEndpointCandidate(
+          uri: Uri(scheme: 'http', host: address.address, port: port),
+          interfaceName: interface.name,
+          interfaceIndex: interface.index,
+          addressType: classification.type,
+          risk: classification.risk,
+        ),
+      );
     }
   }
-  return hosts
-      .map((host) => Uri(scheme: 'http', host: host, port: port))
-      .toList(growable: false);
+  // 顺序只表达显式的稳定偏好，不代表地址已经探测可达。
+  return sortLanEndpointCandidates(candidates);
 }

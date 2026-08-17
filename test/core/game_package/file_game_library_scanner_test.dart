@@ -20,7 +20,7 @@ void main() {
   "lastModifiedAt": 1784851200000,
   "name": "Example Game",
   "version": "1.0.0",
-  "sdkVersion": "4.0.0",
+  "sdkVersion": "4.1.0",
   "appSdkVersion": "3.2.0",
   "orientation": "portrait",
   "modes": ["solo"],
@@ -39,6 +39,8 @@ void main() {
 
     expect(games, hasLength(1));
     expect(games.single.id, 'com.example.game');
+    expect(games.single.appSdkVersion, '3.2.0');
+    expect(games.single.isRunnable, isTrue);
     expect(games.single.displayModeLabel, 'multi_screen');
     expect(games.single.entry.packageRootFilePath, package.path);
     expect(games.single.entry.controllerEntryPath, isNull);
@@ -61,8 +63,8 @@ void main() {
   "lastModifiedAt": 1784851200000,
   "name": "Example Game",
   "version": "1.0.0",
-  "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "sdkVersion": "4.1.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "portrait",
   "modes": ["solo"],
   "displayModes": ["multi_screen"],
@@ -101,8 +103,8 @@ void main() {
   "lastModifiedAt": 1784851200000,
   "name": "Custom Entry",
   "version": "1.0.0",
-  "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "sdkVersion": "4.1.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "controllerOrientation": "portrait",
@@ -156,8 +158,8 @@ void main() {
   "lastModifiedAt": 1784851200000,
   "name": "Missing Authority",
   "version": "1.0.0",
-  "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "sdkVersion": "4.1.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "modes": ["multiplayer"],
   "displayModes": ["multi_screen"],
@@ -196,7 +198,7 @@ void main() {
   "id": "com.example.no-app-sdk",
   "name": "Missing App SDK",
   "version": "1.0.0",
-  "sdkVersion": "4.0.0",
+  "sdkVersion": "4.1.0",
   "orientation": "landscape",
   "modes": ["solo"],
   "displayModes": ["multi_screen"],
@@ -209,8 +211,8 @@ void main() {
   "id": "com.example.no-game-entry",
   "name": "Missing Game Entry",
   "version": "1.0.0",
-  "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "sdkVersion": "4.1.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "modes": ["solo"],
   "displayModes": ["multi_screen"],

@@ -17,7 +17,7 @@ Games program only against the stable Game SDK. The same game code does not dist
 
 Playmesh also integrates AI throughout game development. It generates complete ChatAI and AgentAI project prompts from the current project, runtime mode, capability declarations, and SDK. A regular chat AI can assist through structured instructions, while an Agent with local tool access can directly read and change files, validate the project, run it, and diagnose logs.
 
-This project currently uses an AI-driven, centralized development model. Pull requests are not accepted for now so the architecture and code-generation workflow remain consistent. Bug reports and feature proposals are welcome through Issues.
+Playmesh is developed in the open under the MIT License. Pull requests are welcome. Please read the [contribution guide](CONTRIBUTING.md) before submitting substantial changes, especially changes to public SDKs, generated artifacts, multiplayer authority, packaging, or release workflows.
 
 ## What can it run?
 
@@ -126,7 +126,7 @@ playmesh-cli init
 npm run dev
 ```
 
-`init` offers a numeric JavaScript or TypeScript choice and generates IDEA-runnable npm scripts for `build/dev/run/logs/update`. `dev` proxies local development resources into the real App; `run` performs a production build and complete upload. `playmesh-cli get <project-id>` can restore an App build as a JavaScript 2.0 project. TypeScript and Cocos source must still be preserved in source control. See [Developer CLI](dev-cli/README.md) for commands, Cocos Creator 3.x integration, destructive directory changes, and publication boundaries.
+`init` offers a numeric JavaScript or TypeScript choice and generates IDEA-runnable npm scripts for `build/dev/run/logs/update`. `dev` proxies local development resources into the real App; `run` performs a production build and complete upload. `playmesh-cli get <project-id>` can restore an App build as a JavaScript 2.0 project; `playmesh-cli convert` converts a locally copied Developer API `main.json + app/` package into the same project layout. TypeScript and Cocos source must still be preserved in source control. See [Developer CLI](dev-cli/README.md) for commands, Cocos Creator 3.x integration, destructive directory changes, and publication boundaries.
 
 CLI 2.0 projects isolate publication output in `playmesh/package/` and SDK files in `playmesh/sdk/`. Uploads include required `main.json`, optional `capabilities.json`, optional safe root `icon.png`, and required `app/`; SDK files are never uploaded. The manifest must explicitly declare `entries.game`; single-screen multiplayer also requires `entries.controller`, and multiplayer requires `authority.entry`. Missing entries never fall back to template paths.
 
@@ -156,6 +156,7 @@ go-server/                   Package sharing, upload, Catalog distribution, and 
 dev-cli/                     Go Developer CLI
 assets/playmesh-library/     Generated SDK, Developer Workspace, and default game templates
 docs/game/                   Game-author documentation (Chinese)
+docs/gdevelop/               GDevelop feature, replay, integration, and core-upgrade conventions (Chinese)
 docs/platform/               Platform maintenance and extension conventions (Chinese)
 docs/implementation/         Current implementation locations (Chinese)
 docs/status/                 Phase-one through phase-six archive (Chinese)
@@ -221,3 +222,13 @@ See:
 - [Verification records](docs/verification/)
 
 A successful build does not replace Android device testing, multi-device multiplayer testing, Windows WebView2 testing, or production-signing acceptance. Release conclusions must distinguish automated verification, artifact inspection, and remaining manual work.
+
+## Contributing
+
+Issues, documentation improvements, bug fixes, tests, and focused feature pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development rules and verification expectations.
+
+## License
+
+Playmesh, the Developer CLI, and Go Server are licensed under the [MIT License](LICENSE). A game does not become MIT-licensed merely because it was created with Playmesh or uses Playmesh public APIs; game creators choose the license for their own original code and assets.
+
+Third-party components and assets remain under their respective licenses and notices. In particular, bundled GDevelop-derived and other third-party material must retain the license information shipped with those components. The MIT License does not grant rights to the Playmesh name, logos, or other trademarks.

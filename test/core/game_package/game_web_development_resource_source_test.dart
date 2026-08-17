@@ -52,8 +52,8 @@ void main() {
     final gateway = await startGameAssetGateway(
       source: source,
       entryPath: 'index.html',
-      gameSdkVersion: '4.0.0',
-      appSdkVersion: '3.2.0',
+      gameSdkVersion: '4.1.0',
+      appSdkVersion: '3.3.0',
     );
 
     try {

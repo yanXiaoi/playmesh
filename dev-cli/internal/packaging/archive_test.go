@@ -20,8 +20,8 @@ func TestManifestVersionsComeFromLocalSDK(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "playmesh", "sdk"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.0.0";`)
-	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.2.0";`)
+	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.1.0";`)
+	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.3.0";`)
 	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"9.9.9","appSdkVersion":"9.9.9","permissions":["keyboard"],"icon":"app/legacy.png","redundant":{"kept":false}}`)
 
 	versions, err := versionsFromSDK(root)
@@ -36,7 +36,7 @@ func TestManifestVersionsComeFromLocalSDK(t *testing.T) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest["sdkVersion"] != "4.0.0" || manifest["appSdkVersion"] != "3.2.0" {
+	if manifest["sdkVersion"] != "4.1.0" || manifest["appSdkVersion"] != "3.3.0" {
 		t.Fatalf("manifest versions were not normalized: %#v", manifest)
 	}
 	if _, exists := manifest["permissions"]; exists {
@@ -63,8 +63,8 @@ func TestInstallSDKUsesPlaymeshDirectoryAndPreservesLegacyState(t *testing.T) {
 		AppSDKVersion:  requiredAppSDKVersion,
 		Encoding:       "base64",
 		Files: map[string]string{
-			"playmesh-main.js":   encoded(`const PLAYMESH_SDK_VERSION = "4.0.0";`),
-			"playmesh-app.js":    encoded(`const PLAYMESH_APP_SDK_VERSION = "3.2.0";`),
+			"playmesh-main.js":   encoded(`const PLAYMESH_SDK_VERSION = "4.1.0";`),
+			"playmesh-app.js":    encoded(`const PLAYMESH_APP_SDK_VERSION = "3.3.0";`),
 			"playmesh-main.d.ts": encoded("declare const playmesh: unknown;"),
 			"playmesh-app.d.ts":  encoded("declare const playmeshApp: unknown;"),
 		},
@@ -89,7 +89,7 @@ func TestInstallSDKUsesPlaymeshDirectoryAndPreservesLegacyState(t *testing.T) {
 	}
 }
 
-func TestInstallSDKRejectsNonCurrentVersionsWithoutWriting(t *testing.T) {
+func TestInstallSDKRejectsUnsupportedVersionsWithoutWriting(t *testing.T) {
 	encoded := func(value string) string {
 		return base64.StdEncoding.EncodeToString([]byte(value))
 	}
@@ -149,28 +149,28 @@ func TestPackagePolicyRequiresExplicitCurrentRuntimeContract(t *testing.T) {
 			configure: func(manifest map[string]any) {
 				delete(manifest, "sdkVersion")
 			},
-			want: "main.json.sdkVersion 必须显式声明为 4.0.0",
+			want: "main.json.sdkVersion 必须显式声明为 4.1.0",
 		},
 		{
 			name: "旧 Game SDK 版本",
 			configure: func(manifest map[string]any) {
 				manifest["sdkVersion"] = "3.2.0"
 			},
-			want: "main.json.sdkVersion 必须显式声明为 4.0.0",
+			want: "main.json.sdkVersion 必须显式声明为 4.1.0",
 		},
 		{
 			name: "缺少 App SDK 版本",
 			configure: func(manifest map[string]any) {
 				delete(manifest, "appSdkVersion")
 			},
-			want: "main.json.appSdkVersion 必须显式声明为 3.2.0",
+			want: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
 		},
 		{
 			name: "旧 App SDK 版本",
 			configure: func(manifest map[string]any) {
 				manifest["appSdkVersion"] = "3.1.0"
 			},
-			want: "main.json.appSdkVersion 必须显式声明为 3.2.0",
+			want: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
 		},
 		{
 			name: "缺少游戏入口",
@@ -276,9 +276,23 @@ func TestPackagePolicyRequiresExplicitCurrentRuntimeContract(t *testing.T) {
 	}
 }
 
+func TestPackagePolicyAcceptsCompatibleAppSDKVersion(t *testing.T) {
+	manifest := map[string]any{
+		"appSdkVersion": minimumSupportedAppSDKVersion,
+	}
+	if err := requireManifestSDKVersion(
+		manifest,
+		"appSdkVersion",
+		minimumSupportedAppSDKVersion,
+		requiredAppSDKVersion,
+	); err != nil {
+		t.Fatalf("compatible App SDK version should be accepted: %v", err)
+	}
+}
+
 func TestBuildPackageExcludesPlaymeshSDK(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"},"permissions":["keyboard"],"icon":"app/legacy.png","redundant":true}`)
+	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"},"permissions":["keyboard"],"icon":"app/legacy.png","redundant":true}`)
 	writeTestFile(t, filepath.Join(root, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(root, "app", "index.html"), "<!doctype html>")
 	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), "private")
@@ -330,7 +344,7 @@ func TestBuildPackageAllowsMissingCapabilities(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, "main.json"),
-		`{"id":"com.example.optional","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`,
+		`{"id":"com.example.optional","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`,
 	)
 	writeTestFile(t, filepath.Join(root, "app", "index.html"), "<!doctype html>")
 
@@ -359,7 +373,7 @@ func TestDevelopmentBasePackageAllowsMissingCapabilities(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, "main.json"),
-		`{"id":"com.example.dev-optional","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`,
+		`{"id":"com.example.dev-optional","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`,
 	)
 
 	data, gameID, err := buildDevelopmentBasePackage(root, "")
@@ -410,8 +424,8 @@ func TestPackageBuildersIgnoreEntriesThatDoNotApplyToSoloGames(t *testing.T) {
 				filepath.Join(root, "main.json"),
 				`{
   "id":"com.example.solo-stale-entries",
-  "sdkVersion":"4.0.0",
-  "appSdkVersion":"3.2.0",
+  "sdkVersion":"4.1.0",
+  "appSdkVersion":"3.3.0",
   "modes":["solo"],
   "displayModes":["multi_screen"],
   "controllerOrientation":"portrait",
@@ -490,7 +504,7 @@ func TestPackageBuildersValidatePresentCapabilities(t *testing.T) {
 			writeTestFile(
 				t,
 				filepath.Join(root, "main.json"),
-				`{"id":"com.example.invalid-capabilities","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`,
+				`{"id":"com.example.invalid-capabilities","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`,
 			)
 			writeTestFile(
 				t,
@@ -511,7 +525,7 @@ func TestPackageBuildersValidatePresentCapabilities(t *testing.T) {
 
 func TestBuildPackageIgnoresUnsafeRootIcon(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`)
+	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`)
 	writeTestFile(t, filepath.Join(root, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(root, "app", "index.html"), "<!doctype html>")
 	writeTestFile(t, filepath.Join(root, rootIconName), "not a png")
@@ -533,7 +547,7 @@ func TestBuildPackageIgnoresUnsafeRootIcon(t *testing.T) {
 
 func TestBuildPackageRejectsRootIconDirectory(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`)
+	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`)
 	writeTestFile(t, filepath.Join(root, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(root, "app", "index.html"), "<!doctype html>")
 	if err := os.Mkdir(filepath.Join(root, rootIconName), 0o755); err != nil {
@@ -559,7 +573,7 @@ func TestBuildPackageRejectsReservedWebRootDirectories(t *testing.T) {
 			writeTestFile(
 				t,
 				filepath.Join(root, "main.json"),
-				`{"id":"com.example.reserved","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`,
+				`{"id":"com.example.reserved","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`,
 			)
 			writeTestFile(
 				t,
@@ -588,7 +602,7 @@ func TestBuildPackageAllowsUserAppDirectoryEntry(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, "main.json"),
-		`{"id":"com.example.user-app","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"app/index.html?scene=release%20menu"}}`,
+		`{"id":"com.example.user-app","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"app/index.html?scene=release%20menu"}}`,
 	)
 	writeTestFile(
 		t,
@@ -630,7 +644,7 @@ func TestBuildDevelopmentBaseKeepsUserAppDirectoryEntry(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, "main.json"),
-		`{"id":"com.example.user-app-dev","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"app/index.html?scene=development"}}`,
+		`{"id":"com.example.user-app-dev","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"app/index.html?scene=development"}}`,
 	)
 
 	data, _, err := BuildDevelopmentBase(root, "")
@@ -652,7 +666,7 @@ func TestBuildDevelopmentBaseKeepsUserAppDirectoryEntry(t *testing.T) {
 func TestBuildDevelopmentBaseOverridesOnlyArchivedGameEntry(t *testing.T) {
 	root := t.TempDir()
 	mainPath := filepath.Join(root, "main.json")
-	original := `{"id":"com.example.cocos-preview","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`
+	original := `{"id":"com.example.cocos-preview","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`
 	writeTestFile(t, mainPath, original)
 
 	data, _, err := BuildDevelopmentBase(
@@ -712,7 +726,7 @@ func TestBuildPackageAllowsNestedReservedNames(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, "main.json"),
-		`{"id":"com.example.nested","sdkVersion":"4.0.0","appSdkVersion":"3.2.0","entries":{"game":"index.html"}}`,
+		`{"id":"com.example.nested","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"}}`,
 	)
 	writeTestFile(
 		t,

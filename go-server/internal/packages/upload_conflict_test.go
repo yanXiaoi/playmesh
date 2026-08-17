@@ -77,7 +77,7 @@ func TestManifestParserProjectsOnlyKnownFields(t *testing.T) {
 	}
 }
 
-func TestUserUploadRejectsNonCurrentSDKVersions(t *testing.T) {
+func TestUserUploadRejectsUnsupportedSDKVersions(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.Storage.DatabasePath = filepath.Join(root, "server.db")
@@ -112,7 +112,7 @@ func TestUserUploadRejectsNonCurrentSDKVersions(t *testing.T) {
 		{
 			name: "旧 Game SDK",
 			manifest: `{"id":"com.example.old-game-sdk","name":"Old Game SDK",` +
-				`"version":"1.0.0","sdkVersion":"3.2.0","appSdkVersion":"3.2.0",` +
+				`"version":"1.0.0","sdkVersion":"3.2.0","appSdkVersion":"3.3.0",` +
 				`"entries":{"game":"index.html"}}`,
 			want: "main.json.sdkVersion 必须显式声明为 4.0.0",
 		},
@@ -121,7 +121,7 @@ func TestUserUploadRejectsNonCurrentSDKVersions(t *testing.T) {
 			manifest: `{"id":"com.example.old-app-sdk","name":"Old App SDK",` +
 				`"version":"1.0.0","sdkVersion":"4.0.0","appSdkVersion":"3.1.0",` +
 				`"entries":{"game":"index.html"}}`,
-			want: "main.json.appSdkVersion 必须显式声明为 3.2.0",
+			want: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
 		},
 	}
 	for _, testCase := range cases {
@@ -194,7 +194,7 @@ func TestUserUploadConflictsLeaveNoStoredOrQuarantineResidue(t *testing.T) {
 	firstFile := buildTestPackageArchive(
 		t,
 		`{"id":"com.example.conflict","name":"动态游戏名称","author":"包内伪造发布者",`+
-			`"version":"1.0.0","sdkVersion":"4.0.0","appSdkVersion":"3.2.0",`+
+			`"version":"1.0.0","sdkVersion":"4.0.0","appSdkVersion":"3.3.0",`+
 			`"remarks":"动态简介","tags":["动态标签"],`+
 			`"entries":{"game":"index.html"},`+
 			`"permissions":["http://ignored.example"],`+
@@ -350,7 +350,7 @@ func TestUnsafeRootIconsAreRemovedFromNormalizedDownload(t *testing.T) {
 			file := buildTestPackageArchive(
 				t,
 				`{"id":"`+testCase.id+`","name":"Icon","version":"1.0.0",`+
-					`"sdkVersion":"4.0.0","appSdkVersion":"3.2.0",`+
+					`"sdkVersion":"4.0.0","appSdkVersion":"3.3.0",`+
 					`"entries":{"game":"index.html"}}`,
 				testCase.icon,
 			)
@@ -427,7 +427,7 @@ func buildTestPackage(t *testing.T, version string) *os.File {
 	return buildTestPackageWithManifest(
 		t,
 		`{"id":"com.example.conflict","name":"动态游戏名称","author":"包内伪造发布者","version":"`+
-			version+`","sdkVersion":"4.0.0","appSdkVersion":"3.2.0",`+
+			version+`","sdkVersion":"4.0.0","appSdkVersion":"3.3.0",`+
 			`"remarks":"动态简介","tags":["动态标签"],`+
 			`"entries":{"game":"index.html"}}`,
 	)

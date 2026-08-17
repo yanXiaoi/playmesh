@@ -165,6 +165,8 @@ class _IoGameWebGateway implements GameWebGateway {
   final String? joinCode;
   final String shareToken;
   final GameStorageService storage;
+  final StandardJsonBucketRequestLedger _standardJsonLedger =
+      StandardJsonBucketRequestLedger();
   final String invitationToken = _randomSessionToken();
   final String browserSessionToken = _randomSessionToken();
   bool _closed = false;
@@ -206,6 +208,10 @@ class _IoGameWebGateway implements GameWebGateway {
       request,
       storage: storage,
       uploadToken: shareToken,
+      authorizeStandardJson: (request) => _hasBrowserSession(request)
+          ? StandardJsonBucketAuthorization('browser:$browserSessionToken')
+          : null,
+      standardJsonLedger: _standardJsonLedger,
     )) {
       return;
     }

@@ -4,7 +4,9 @@ const gameSyncSdkSource = SdkSourceFragment(
   id: 'game.sync',
   target: SdkSourceTarget.game,
   order: 40,
-  typeScript: r'''  function cloneJson(value, label) {
+  typeScript: r'''  let syncSnapshotSequence = 0;
+
+  function cloneJson(value, label) {
     let encoded;
     try {
       encoded = JSON.stringify(value);
@@ -13,6 +15,16 @@ const gameSyncSdkSource = SdkSourceFragment(
     }
     if (encoded === undefined) throw new Error(`${label} 不能是 undefined`);
     return JSON.parse(encoded);
+  }
+
+  function canonicalJson(value) {
+    if (value === null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+    }
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+    ).join(",")}}`;
   }
 
   function syncTargetIds(session) {
@@ -25,10 +37,129 @@ const gameSyncSdkSource = SdkSourceFragment(
   function applySyncState(runtime, nextState) {
     if (nextState === undefined) return false;
     const normalized = cloneJson(nextState, "权威状态");
-    if (JSON.stringify(normalized) === JSON.stringify(runtime.state)) return false;
+    const encoded = JSON.stringify(normalized);
+    const fingerprint = canonicalJson(normalized);
+    if (fingerprint === runtime.stateFingerprint) return false;
     runtime.state = normalized;
+    runtime.stateJson = encoded;
+    runtime.stateFingerprint = fingerprint;
     runtime.revision += 1;
     return true;
+  }
+
+  function syncBroadcastNeeded(runtime) {
+    return runtime.reconciliationSequence > runtime.lastBroadcastSequence ||
+      runtime.lastBroadcastFingerprint === null ||
+      runtime.stateFingerprint !== runtime.lastBroadcastFingerprint ||
+      (
+        runtime.activeAutoPublish &&
+        runtime.activeAutoPublish.snapshot.sequence > runtime.lastBroadcastSequence &&
+        runtime.stateFingerprint !== runtime.activeAutoPublish.stateFingerprint
+      );
+  }
+
+  function settleSyncAutoWaiters(runtime, snapshot, error) {
+    const remaining = [];
+    for (const waiter of runtime.autoWaiters) {
+      if (
+        snapshot.sequence < waiter.minimumSequence ||
+        snapshot.revision < waiter.minimumRevision
+      ) {
+        remaining.push(waiter);
+      } else if (error) {
+        waiter.reject(error);
+      } else {
+        waiter.resolve(snapshot);
+      }
+    }
+    runtime.autoWaiters = remaining;
+  }
+
+  function cancelSyncAutoWaiters(runtime) {
+    const waiters = runtime.autoWaiters;
+    runtime.autoWaiters = [];
+    for (const waiter of waiters) waiter.resolve(null);
+  }
+
+  function discardCanceledSyncAutoPublishes(runtime) {
+    while (
+      runtime.publishQueue[0]?.kind === "auto" &&
+      !syncBroadcastNeeded(runtime)
+    ) {
+      runtime.publishQueue.shift();
+      runtime.autoQueued = false;
+      runtime.autoAgain = false;
+      cancelSyncAutoWaiters(runtime);
+    }
+  }
+
+  function armSyncPublishQueue(runtime) {
+    if (runtime.stopped || runtime.publishRunning || runtime.publishTimer) return;
+    discardCanceledSyncAutoPublishes(runtime);
+    if (runtime.publishQueue.length === 0) return;
+    const wait = Math.max(0, runtime.nextPublishAt - Date.now());
+    if (wait === 0) {
+      void drainSyncPublishQueue(runtime);
+      return;
+    }
+    runtime.publishTimer = global.setTimeout(() => {
+      runtime.publishTimer = null;
+      void drainSyncPublishQueue(runtime);
+    }, Math.ceil(wait));
+    runtime.publishTimer?.unref?.();
+  }
+
+  function queueAutomaticSyncPublish(runtime) {
+    if (runtime.stopped) return;
+    if (!syncBroadcastNeeded(runtime)) {
+      runtime.autoAgain = false;
+      cancelSyncAutoWaiters(runtime);
+      return;
+    }
+    if (runtime.autoQueued) {
+      if (runtime.activeAutoPublish) runtime.autoAgain = true;
+      return;
+    }
+    runtime.autoQueued = true;
+    const task = { kind: "auto", targetPlayerIds: null };
+    runtime.publishQueue.push(task);
+    armSyncPublishQueue(runtime);
+  }
+
+  function scheduleSyncChangeWindow(runtime) {
+    if (
+      runtime.stopped || runtime.onTick || runtime.changeTimer ||
+      (runtime.autoQueued && !runtime.activeAutoPublish)
+    ) return;
+    runtime.changeTimer = global.setTimeout(() => {
+      runtime.changeTimer = null;
+      queueAutomaticSyncPublish(runtime);
+    }, runtime.publishIntervalMs);
+    runtime.changeTimer?.unref?.();
+  }
+
+  function noteSyncStateChanged(runtime) {
+    if (!runtime.onTick) scheduleSyncChangeWindow(runtime);
+  }
+
+  function waitForAutomaticSyncPublish(runtime) {
+    if (runtime.stopped || !syncBroadcastNeeded(runtime)) {
+      return Promise.resolve(null);
+    }
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    runtime.autoWaiters.push({
+      minimumSequence: syncSnapshotSequence + 1,
+      minimumRevision: runtime.revision,
+      resolve,
+      reject,
+    });
+    if (!runtime.onTick) scheduleSyncChangeWindow(runtime);
+    return promise;
   }
 
   function continuousInputs(runtime) {
@@ -43,25 +174,195 @@ const gameSyncSdkSource = SdkSourceFragment(
     return result;
   }
 
-  async function publishSyncSnapshot(runtime, targetPlayerIds) {
-    if (runtime.stopped) return null;
-    const session = bootstrap?.session;
-    if (!session) return null;
-    const snapshot = {
-      protocolVersion: 1,
-      stateType: runtime.stateType,
-      full: true,
-      revision: runtime.revision,
-      sequence: ++runtime.snapshotSequence,
-      timestamp: Date.now(),
-      sourceTick: runtime.tick,
-      state: cloneJson(runtime.state, "权威状态"),
+  function createSyncSnapshot(runtime) {
+    const stateJson = runtime.stateJson;
+    return {
+      stateFingerprint: runtime.stateFingerprint,
+      snapshot: {
+        protocolVersion: 1,
+        stateType: runtime.stateType,
+        full: true,
+        revision: runtime.revision,
+        sequence: ++syncSnapshotSequence,
+        timestamp: Date.now(),
+        sourceTick: runtime.tick,
+        state: JSON.parse(stateJson),
+      },
     };
-    applySyncSnapshot(snapshot);
-    await post("authority.result", { __playmeshSyncSnapshot: snapshot }, {
-      targetPlayerIds: targetPlayerIds || syncTargetIds(session),
+  }
+
+  function beginDefaultSyncPublish(runtime, stateFingerprint) {
+    runtime.pendingDefaultFingerprints.set(
+      stateFingerprint,
+      (runtime.pendingDefaultFingerprints.get(stateFingerprint) || 0) + 1,
+    );
+  }
+
+  function endDefaultSyncPublish(runtime, stateFingerprint) {
+    const remaining =
+      (runtime.pendingDefaultFingerprints.get(stateFingerprint) || 1) - 1;
+    if (remaining > 0) {
+      runtime.pendingDefaultFingerprints.set(stateFingerprint, remaining);
+    } else {
+      runtime.pendingDefaultFingerprints.delete(stateFingerprint);
+    }
+  }
+
+  function applyLocalSyncSnapshot(snapshot) {
+    try {
+      applySyncSnapshot(snapshot);
+    } catch (error) {
+      try {
+        emit(lifecycleListeners, { state: "error", error: String(error) });
+      } catch (_) {}
+    }
+  }
+
+  function finishSyncPublish(runtime) {
+    if (runtime.stopped) return;
+    if (!syncBroadcastNeeded(runtime)) {
+      runtime.autoAgain = false;
+      if (runtime.changeTimer) {
+        global.clearTimeout(runtime.changeTimer);
+        runtime.changeTimer = null;
+      }
+      discardCanceledSyncAutoPublishes(runtime);
+      cancelSyncAutoWaiters(runtime);
+    } else if (!runtime.onTick && !runtime.changeTimer && !runtime.autoQueued) {
+      scheduleSyncChangeWindow(runtime);
+    }
+    armSyncPublishQueue(runtime);
+  }
+
+  function publishSyncSnapshot(runtime, targetPlayerIds) {
+    if (runtime.stopped) return Promise.resolve(null);
+    const session = bootstrap?.session;
+    if (!session) return Promise.resolve(null);
+    const normalizedTargets = targetPlayerIds == null
+      ? null
+      : Array.isArray(targetPlayerIds)
+        ? [...targetPlayerIds]
+        : targetPlayerIds;
+    const defaultAudience = normalizedTargets === null;
+    const { snapshot, stateFingerprint } = createSyncSnapshot(runtime);
+    if (defaultAudience) {
+      beginDefaultSyncPublish(runtime, stateFingerprint);
+    } else if (
+      stateFingerprint !== runtime.lastBroadcastFingerprint &&
+      !runtime.pendingDefaultFingerprints.has(stateFingerprint)
+    ) {
+      runtime.reconciliationSequence = Math.max(
+        runtime.reconciliationSequence,
+        snapshot.sequence,
+      );
+      finishSyncPublish(runtime);
+    }
+
+    // 先发起 Bridge 发送，再通知本地 observer，保持重入 publish 的发送顺序与 sequence 一致。
+    let sending;
+    try {
+      sending = post("authority.result", { __playmeshSyncSnapshot: snapshot }, {
+        targetPlayerIds: defaultAudience
+          ? syncTargetIds(session)
+          : normalizedTargets,
+      });
+    } catch (error) {
+      sending = Promise.reject(error);
+    }
+    applyLocalSyncSnapshot(snapshot);
+
+    return Promise.resolve(sending).then(() => {
+      if (!runtime.stopped && defaultAudience) {
+        if (snapshot.sequence > runtime.lastBroadcastSequence) {
+          runtime.lastBroadcastSequence = snapshot.sequence;
+          runtime.lastBroadcastFingerprint = stateFingerprint;
+        }
+        settleSyncAutoWaiters(runtime, snapshot, null);
+        finishSyncPublish(runtime);
+      }
+      return snapshot;
+    }).catch((error) => {
+      if (
+        !runtime.stopped &&
+        defaultAudience &&
+        stateFingerprint !== runtime.lastBroadcastFingerprint
+      ) {
+        runtime.reconciliationSequence = Math.max(
+          runtime.reconciliationSequence,
+          snapshot.sequence,
+        );
+        finishSyncPublish(runtime);
+      }
+      throw error;
+    }).finally(() => {
+      if (defaultAudience) endDefaultSyncPublish(runtime, stateFingerprint);
     });
-    return snapshot;
+  }
+
+  async function drainSyncPublishQueue(runtime) {
+    if (runtime.stopped || runtime.publishRunning) return;
+    discardCanceledSyncAutoPublishes(runtime);
+    if (runtime.nextPublishAt > Date.now()) {
+      armSyncPublishQueue(runtime);
+      return;
+    }
+    if (!runtime.publishQueue.shift()) return;
+    const session = bootstrap?.session;
+    if (!session) {
+      runtime.autoQueued = false;
+      cancelSyncAutoWaiters(runtime);
+      armSyncPublishQueue(runtime);
+      return;
+    }
+    const { snapshot, stateFingerprint } = createSyncSnapshot(runtime);
+    runtime.publishRunning = true;
+    runtime.nextPublishAt = snapshot.timestamp + runtime.publishIntervalMs;
+    runtime.activeAutoPublish = { snapshot, stateFingerprint };
+    beginDefaultSyncPublish(runtime, stateFingerprint);
+
+    let sending;
+    try {
+      sending = post("authority.result", { __playmeshSyncSnapshot: snapshot }, {
+        targetPlayerIds: syncTargetIds(session),
+      });
+    } catch (error) {
+      sending = Promise.reject(error);
+    }
+    applyLocalSyncSnapshot(snapshot);
+
+    try {
+      await sending;
+      if (snapshot.sequence > runtime.lastBroadcastSequence) {
+        runtime.lastBroadcastSequence = snapshot.sequence;
+        runtime.lastBroadcastFingerprint = stateFingerprint;
+      }
+      settleSyncAutoWaiters(runtime, snapshot, null);
+    } catch (error) {
+      if (stateFingerprint !== runtime.lastBroadcastFingerprint) {
+        runtime.reconciliationSequence = Math.max(
+          runtime.reconciliationSequence,
+          snapshot.sequence,
+        );
+      }
+      settleSyncAutoWaiters(runtime, snapshot, error);
+      try {
+        emit(lifecycleListeners, { state: "error", error: String(error) });
+      } catch (_) {}
+    } finally {
+      endDefaultSyncPublish(runtime, stateFingerprint);
+      runtime.publishRunning = false;
+      runtime.activeAutoPublish = null;
+      runtime.autoQueued = false;
+      if (runtime.stopped) {
+        cancelSyncAutoWaiters(runtime);
+        return;
+      }
+      if (runtime.autoAgain) {
+        runtime.autoAgain = false;
+        queueAutomaticSyncPublish(runtime);
+      }
+      finishSyncPublish(runtime);
+    }
   }
 
   async function runSyncTick(runtime) {
@@ -82,13 +383,16 @@ const gameSyncSdkSource = SdkSourceFragment(
           session: bootstrap.session,
           members: bootstrap.session.players,
         });
-        applySyncState(runtime, next);
+        if (runtime.stopped) return;
+        if (applySyncState(runtime, next)) noteSyncStateChanged(runtime);
       }
-      await publishSyncSnapshot(runtime);
     } catch (error) {
-      emit(lifecycleListeners, { state: "error", error: String(error) });
+      try {
+        emit(lifecycleListeners, { state: "error", error: String(error) });
+      } catch (_) {}
     } finally {
       runtime.tickRunning = false;
+      if (!runtime.stopped) queueAutomaticSyncPublish(runtime);
     }
   }
 
@@ -123,7 +427,11 @@ const gameSyncSdkSource = SdkSourceFragment(
       });
     }
     if (runtime.onInput) {
-      applySyncState(runtime, await runtime.onInput(input, context));
+      const next = await runtime.onInput(input, context);
+      if (runtime.stopped) return true;
+      if (applySyncState(runtime, next)) {
+        noteSyncStateChanged(runtime);
+      }
     }
     return true;
   }
@@ -193,30 +501,94 @@ const gameSyncSdkSource = SdkSourceFragment(
         ? options.stateType : "game",
       onInput: typeof options.onInput === "function" ? options.onInput : null,
       onTick: typeof options.onTick === "function" ? options.onTick : null,
+      stateJson: null,
+      stateFingerprint: null,
       revision: 0,
-      snapshotSequence: 0,
       tick: 0,
       inputs: new Map(),
       lastTickAt: Date.now(),
       tickRunning: false,
       stopped: false,
       timer: null,
+      publishIntervalMs: 1000 / tickRate,
+      publishQueue: [],
+      publishRunning: false,
+      publishTimer: null,
+      changeTimer: null,
+      nextPublishAt: 0,
+      activeAutoPublish: null,
+      autoQueued: false,
+      autoAgain: false,
+      autoWaiters: [],
+      lastBroadcastSequence: 0,
+      lastBroadcastFingerprint: null,
+      reconciliationSequence: 0,
+      pendingDefaultFingerprints: new Map(),
     };
+    runtime.stateJson = JSON.stringify(runtime.state);
+    runtime.stateFingerprint = canonicalJson(runtime.state);
     syncAuthorityRuntime = runtime;
-    runtime.timer = global.setInterval(() => { void runSyncTick(runtime); }, 1000 / tickRate);
-    runtime.timer?.unref?.();
-    void publishSyncSnapshot(runtime);
+    if (runtime.onTick) {
+      runtime.timer = global.setInterval(
+        () => { void runSyncTick(runtime); },
+        runtime.publishIntervalMs,
+      );
+      runtime.timer?.unref?.();
+    }
+    void publishSyncSnapshot(runtime).catch((error) => {
+      emit(lifecycleListeners, { state: "error", error: String(error) });
+    });
     return {
       getState: () => cloneJson(runtime.state, "权威状态"),
       setState(nextState, publish = true) {
-        applySyncState(runtime, nextState);
-        return publish ? publishSyncSnapshot(runtime) : Promise.resolve(null);
+        if (applySyncState(runtime, nextState)) noteSyncStateChanged(runtime);
+        return publish
+          ? waitForAutomaticSyncPublish(runtime)
+          : Promise.resolve(null);
       },
-      publish: (targetPlayerIds) => publishSyncSnapshot(runtime, targetPlayerIds),
+      publish(stateOrTargetPlayerIds, targetPlayerIds) {
+        const legacyTargets =
+          arguments.length === 0 ||
+          stateOrTargetPlayerIds === undefined ||
+          (
+            Array.isArray(stateOrTargetPlayerIds) &&
+            stateOrTargetPlayerIds.every((value) => typeof value === "string")
+          );
+        const hasState = arguments.length >= 2 || !legacyTargets;
+        if (runtime.stopped) return Promise.resolve(null);
+        if (hasState && applySyncState(runtime, stateOrTargetPlayerIds)) {
+          noteSyncStateChanged(runtime);
+        }
+        return publishSyncSnapshot(
+          runtime,
+          hasState ? targetPlayerIds : stateOrTargetPlayerIds,
+        );
+      },
       stop() {
         if (runtime.stopped) return;
         runtime.stopped = true;
         global.clearInterval(runtime.timer);
+        if (runtime.publishTimer) global.clearTimeout(runtime.publishTimer);
+        if (runtime.changeTimer) global.clearTimeout(runtime.changeTimer);
+        runtime.publishTimer = null;
+        runtime.changeTimer = null;
+        const active = runtime.activeAutoPublish;
+        const remainingWaiters = [];
+        for (const waiter of runtime.autoWaiters) {
+          if (
+            active &&
+            active.snapshot.sequence >= waiter.minimumSequence &&
+            active.snapshot.revision >= waiter.minimumRevision
+          ) {
+            remainingWaiters.push(waiter);
+          } else {
+            waiter.resolve(null);
+          }
+        }
+        runtime.autoWaiters = remainingWaiters;
+        runtime.publishQueue = [];
+        runtime.autoQueued = active !== null;
+        runtime.autoAgain = false;
         if (syncAuthorityRuntime === runtime) syncAuthorityRuntime = null;
       },
     };

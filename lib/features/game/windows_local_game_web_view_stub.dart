@@ -16,6 +16,9 @@ class WindowsLocalGameWebView extends StatelessWidget {
     this.onNavigationStarted,
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
+    this.onOpenExternalUri,
+    this.additionalDocumentCreatedScripts = const [],
+    this.onWebMessage,
   });
 
   final String assetPath;
@@ -28,6 +31,9 @@ class WindowsLocalGameWebView extends StatelessWidget {
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;
+  final Future<void> Function(Uri uri)? onOpenExternalUri;
+  final List<String> additionalDocumentCreatedScripts;
+  final bool Function(Object? message)? onWebMessage;
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();

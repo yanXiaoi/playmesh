@@ -6,6 +6,13 @@ const source = fs.readFileSync(
   new URL("../assets/playmesh-library/public/sdk/v1/playmesh-app.js", import.meta.url),
   "utf8",
 );
+const gdevelopFpsProbeSource = fs.readFileSync(
+  new URL(
+    "../assets/playmesh-library/public/developer/gdevelop-fps-probe.js",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const commands = [];
 const latencyIntervals = [];
 const clearedLatencyIntervals = [];
@@ -117,7 +124,7 @@ const window = {
             messages: { "sidebar.title": "Game menu" },
           },
           available: true,
-          sdkVersion: "3.2.0",
+          sdkVersion: "3.3.0",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
@@ -204,7 +211,7 @@ assert.deepEqual(
     messages: { "sidebar.title": "Game menu" },
   },
 );
-assert.equal(app.version, "3.2.0");
+assert.equal(app.version, "3.3.0");
 assert.equal(app.isAvailable(), true);
 assert.equal(app.runtime.getLocale(), "en-US");
 assert.equal(app.performance.getFps(), null);
@@ -250,6 +257,29 @@ assert.equal(
   commands.some((item) => item.command === "performance.latency"),
   false,
 );
+const originalSdkRender = function originalSdkRender() {
+  return "rendered";
+};
+window.gdjs = { RuntimeScene: function RuntimeScene() {} };
+window.gdjs.RuntimeScene.prototype.render = originalSdkRender;
+window.playmesh = { app };
+vm.runInNewContext(gdevelopFpsProbeSource, window, {
+  filename: "gdevelop-fps-probe.js",
+});
+const renderedScene = new window.gdjs.RuntimeScene();
+assert.equal(renderedScene.render(), "rendered");
+assert.notEqual(
+  window.gdjs.RuntimeScene.prototype.render,
+  originalSdkRender,
+  "GDevelop FPS probe must attach to the real App SDK performance channel",
+);
+assert.equal(
+  commands.some((item) => item.command === "performance.fps"),
+  false,
+  "GDevelop FPS probe must not create a Dart FPS command channel",
+);
+window[Symbol.for("playmesh.gdevelop.fps-probe.v1")].dispose();
+assert.equal(window.gdjs.RuntimeScene.prototype.render, originalSdkRender);
 appInternal.configureRuntimePerformance({ multiplayer: false });
 assert.deepEqual(clearedLatencyIntervals, latencyIntervals);
 assert.deepEqual(
@@ -355,6 +385,8 @@ for (const methodName of [
   "configure",
   "initializeBrowser",
   "showGameSidebar",
+  "onGameMenuOpen",
+  "onGameMenuClose",
   "restartGame",
   "openSharePanel",
   "openRuntimeLogs",
@@ -418,7 +450,7 @@ const browserApp = browserWindow[appInternalKey].publicApi;
 const browserBootstrap = await browserApp.ready;
 assert.equal(browserWindow.playmesh, undefined);
 assert.equal(browserBootstrap.available, false);
-assert.equal(browserBootstrap.sdkVersion, "3.2.0");
+assert.equal(browserBootstrap.sdkVersion, "3.3.0");
 assert.equal(browserBootstrap.identity, null);
 
 const failedBridgeWindow = createBootstrapContractWindow(

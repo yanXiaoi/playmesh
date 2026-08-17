@@ -53,7 +53,7 @@ Go Developer CLI、统一项目适配器、开发资源代理、正式构建运�
 
 `go-core/` 已提供可启动、可停止的 HTTP 服务。宿主必须使用 `0.0.0.0:0` 请求系统分配空闲端口，并在启动成功后把实际端口上报给 Flutter；Flutter 本机连接时使用回环地址，分享时使用当前设备全部可用的局域网 IPv4 地址。页面不得猜测、缓存固定端口或自行拼接 Core 地址。
 
-网页开发者通道不复用或重绑 Core 端口。Flutter App 另行启动 `DeveloperWebGateway`，按当前产品决策绑定 `0.0.0.0`，默认端口为 `16666`，用户可在设置页修改；设置页只发布当前设备解析到的局域网 IPv4 链接。Developer API status 同时返回当前请求地址、解析到的局域网 IPv4、回环地址和当前 App View 可用性，Agent 提示词只能从这些本机 HTTP Base URL 中选择一个嵌入接口清单，避免把持久开发者 token 指向任意外部地址。端口被占用时返回明确错误，不得通过重启 Core 解决。Android 开启开发者模式后由 Foreground Service 持有同一个 FlutterEngine、CPU WakeLock 和 Wi-Fi Lock，Activity 进入后台或设备锁屏不停止 Gateway；需要可见 Activity/View 的操作由统一元数据声明并在不可用时返回 `409 app_view_unavailable`。关闭开发者模式或 App 进程退出时只关闭开发者 Gateway，不中断现有 Core 会话。
+网页开发者通道不复用或重绑 Core 端口。Flutter App 另行启动 `DeveloperWebGateway`，按当前产品决策绑定 `0.0.0.0`，默认端口为 `16666`；用户从首页进入“制作游戏”后，可在同一个开发者模式开关上配置端口和 token，再按需要展开“源代码开发”或“可视化开发”。“制作游戏”页只发布当前设备解析到的局域网 IPv4 链接。Developer API status 同时返回当前请求地址、解析到的局域网 IPv4、回环地址和当前 App View 可用性，Agent 提示词只能从这些本机 HTTP Base URL 中选择一个嵌入接口清单，避免把持久开发者 token 指向任意外部地址。端口被占用时返回明确错误，不得通过重启 Core 解决。Android 开启开发者模式后由 Foreground Service 持有同一个 FlutterEngine、CPU WakeLock 和 Wi-Fi Lock，Activity 进入后台或设备锁屏不停止 Gateway；需要可见 Activity/View 的操作由统一元数据声明并在不可用时返回 `409 app_view_unavailable`。关闭开发者模式或 App 进程退出时只关闭开发者 Gateway，不中断现有 Core 会话。
 
 Developer CLI 是 Gateway 的客户端，不是第二个游戏运行时。CLI 2.0 只识别根
 `playmesh-cli.json`，并通过唯一 `adapter.Registry` 把 JavaScript、TypeScript、
@@ -181,6 +181,14 @@ flowchart LR
 “主机/加入端”“浏览器/App”“局域网/公共中转”描述的是会话角色、客户端形态和传输
 路径，不会增加资源源类型。Go Server 只转发加密字节，不读取游戏资源、SDK 消息或
 引擎类型；选择共享方式也不会把临时开发资源转换为正式安装包。
+
+加入端只有 `RemoteGamePage` 一条正式运行路径：游戏 HTML、Game SDK 和资源始终
+来自 Authority 的 `GameWebGateway`，加入端不从自己的已安装游戏包启动第二份
+Game SDK。`playmesh-app.js` 无特权客户端同样由 Authority 网关的受保护
+`/playmesh/**` 命名空间提供，游戏包不能覆盖；真正持有 App 身份、权限、平台 UI、
+设备与媒体能力的 `AppWebViewBridge` 和 `PlaymeshAppBridge` channel 只存在于加入端
+本机。局域网与 Relay 的回环网关只转发受控页面和 Core 流量，不提供让远端页面指定
+本地文件、SDK URL 或宿主凭据的入口。
 
 CLI 二进制统一命名为 `playmesh-cli`（Windows 使用 `.exe`）。桌面平台构建将它作为 App 运行包的一部分：Windows/Linux 由 CMake 追踪 Go 源并安装到 bundle 根目录，macOS 由 Xcode Build Phase 放入 `Contents/MacOS/`；位置均与桌面 Go Core 的运行目录同级。Android/iOS 不编译或携带 CLI。
 
@@ -331,7 +339,7 @@ Binary WS（按需）
 
 游戏库只负责展示游戏并提供明确的“查看详情”操作。游戏详情页以紧凑信息区展示名称、发布者、最后上传时间、版本、简介、人数、模式、主画面/控制器方向、SDK 版本和运行入口，并提供唯一的“开始游戏”操作；点击后进入独立的游戏页，不在游戏库或详情页内嵌 WebView。清单中的时间保存为 Unix 毫秒时间戳，展示时转换为当前设备时区。
 
-启动入口必须通过 `GameLaunchArguments.enterFullscreenOnLaunch` 显式声明是否请求启动全屏。游戏库详情与首页快速游戏固定传 `true`；开发者工作区、CLI `run` 与 CLI `dev` 共用开发启动入口，Android/iOS 手持端传 `true` 以继续应用全屏和角色方向，Windows、macOS 与 Linux 桌面端传 `false` 并保持窗口化。控制器/加入端仍固定默认全屏，不受开发主画面策略影响。全屏请求不阻塞游戏运行时和会话初始化；App/WebView 通过原生宿主处理全屏和方向，普通浏览器由 Game SDK 无提示层地尽力调用 Fullscreen API 与 Screen Orientation API，被浏览器拒绝时继续游玩，并保留 SDK 悬浮工具栏的全屏按钮供用户手势重试。离开游戏页时恢复进入前的全屏状态和系统默认方向；窗口化开发页若经 SDK 临时进入全屏，退出时也会清理该状态。
+主机入口必须通过 `GameLaunchArguments.enterFullscreenOnLaunch` 显式声明是否请求启动全屏。游戏库详情与首页快速游戏固定传 `true`；开发者工作区、CLI `run` 与 CLI `dev` 共用开发启动入口，Android/iOS 手持端传 `true`，Windows、macOS 与 Linux 桌面端传 `false` 并保持窗口化。控制器/加入端由独立的 `RemoteGamePage` 按当前终端策略进入全屏，不再通过 `GamePage` 的本地控制器角色分支启动。全屏请求不阻塞游戏运行时和会话初始化；App/WebView 通过原生宿主处理全屏和方向，普通浏览器由 Game SDK 无提示层地尽力调用 Fullscreen API 与 Screen Orientation API，被浏览器拒绝时继续游玩，并保留 SDK 悬浮工具栏的全屏按钮供用户手势重试。离开游戏页时恢复进入前的全屏状态和系统默认方向；窗口化开发页若经 SDK 临时进入全屏，退出时也会清理该状态。
 
 Android 主 Activity 声明接收 `ACTION_VIEW` 和 `ACTION_SEND`。原生层取得系统授予的 `content://` 读取权限后，将文件复制到应用缓存并通过 `playmesh/open_file` MethodChannel 交给 Flutter：压缩包复用 Playmesh 游戏包导入校验；单个 HTML 使用独立 WebView 执行，不注入 SDK、Bridge、存储或联机能力。游戏 WebView、扫码远程 WebView 和独立 HTML WebView 的右上角悬浮工具均提供进入与退出全屏按钮。
 
@@ -629,7 +637,7 @@ SDK 采用 Bucket 分区模型。每个 Bucket 同时可以保存私有 JSON 值
 const profile = playmesh.main.storage.getBucket("profile");
 
 const coins = await profile.getData<number>("coins");
-profile.setData("coins", (coins ?? 0) + 1);
+await profile.setData("coins", (coins ?? 0) + 1);
 
 profile.removeData("temporaryFlag");
 await profile.clearData();
@@ -637,18 +645,40 @@ await profile.clearData();
 const url = await profile.upload(file); // /bucket/profile/{timestamp}.ext
 ```
 
-`getData` 首次访问时加载 `packages/{gameId}/data/json/{bucket}.json`；`setData`、`removeData` 和 `clearData` 默认只修改内存，不立即写磁盘。`upload(file)` 把原始文件流写入 `data/data/{bucket}/`，以精确到毫秒的时间戳重命名、保留 1 至 16 位字母数字后缀，并返回同源 `/bucket/...` 地址。
+普通异步 Bucket 使用安全名称并存放在
+`packages/{gameId}/data/json/{bucket}.json`；GDevelop 同步适配可使用 1 至 4096 UTF-8
+字节的原始逻辑名称，由存储层写入 `data/json/logical/sha256-{digest}.json` envelope 并校验
+精确原名，不能与普通文件路径碰撞。每个完整 Bucket JSON root 上限为 10 MiB。
+`setData`、`removeData` 和 `clearData` 默认只修改共享主机内存，不立即写磁盘。
+`upload(file)` 把原始文件流写入 `data/data/{bucket}/`，以精确到毫秒的时间戳重命名、保留
+1 至 16 位字母数字后缀，并返回同源 `/bucket/...` 地址。
 
-宿主存储服务必须提供延迟批量持久化：数据发生变化后等待几秒或达到脏数据阈值再写入对应 Bucket 文件；同一时间窗口内的多次修改合并为一次写入。游戏只能调用 `getData`、`setData`、`removeData` 和 `clearData`，不能显式 flush。WebView 重启、退出或会话关闭时，App 必须等待最终落盘完成后再释放存储与连接。
+宿主存储服务必须按标准化项目路径共享一个协调器、一个 OS 文件锁、同一 Bucket 内存映射、
+修订号和串行写队列。数据发生变化后等待几秒或达到脏数据阈值再写入；同一时间窗口内的
+多次修改合并为一次写入。中间实例关闭只释放 lease，最后一个实例关闭才 flush 并释放锁。
+游戏不能显式 flush；WebView 重启、退出或会话关闭时，App 必须等待最终落盘完成。
 
-持久化主机固定为开始游戏的 Authority 设备，所有客户端看到同一份主机 Bucket：
+持久化主机固定为开始游戏的 Authority 设备，所有客户端看到同一份主机 Bucket。异步
+`getData/setData/removeData/clearData` 和同步 `getDataSync/setDataSync` 都由 Game SDK 通过
+同一个同源、已鉴权的私有 JSON 网关访问：GET 读取、PUT 写入、DELETE 删除 key 或清空
+Bucket；请求共同使用 SHA-256、requestId 幂等和 revision/CAS，并最多以同一请求重试一次
+响应丢失。同步方法只服务无法改变同步上层语义的锁定运行时 seam，使用主线程同步 XHR，
+失败直接抛错。
 
-- Authority 主屏 WebView 通过 Flutter Bridge 直接访问主机 `GameStorageService`。
-- 普通浏览器和其他 App 玩家都由 Authority Game SDK 通过当前受控 Session WebSocket 发起存储 RPC；分享网关不再增加 `/api/storage` 等业务 HTTP 接口。
-- 加入设备不得在自己的 `packages/{gameId}/data/` 创建分叉副本；所有请求最终调用同一个主机内存缓存与延迟落盘服务。
-- 当前终端的 `playmesh-app.js` 只负责平台环境、身份、能力、权限、输入、本机日志和覆盖层，不拥有游戏全局数据。
+旧 Session WebSocket 存储 RPC、宿主接收器、pending/settle、双读、双写和 fallback 均不
+保留；Session WS 只负责会话、动作与状态同步。加入设备不得创建分叉副本，全部 JSON 请求
+最终进入上述同一主机协调器。`upload(file)` 是独立原始字节 HTTP POST，只写
+`data/data`，不复用 JSON envelope。当前终端的 `playmesh-app.js` 只负责平台环境、身份、
+能力、权限、输入、本机日志和覆盖层，不拥有游戏全局数据。
 
-存储范围只自动绑定当前 `gameId` 和当前游戏库。平台不创建、推断或强制 `{userId}` 子目录；如游戏需要多用户存档，应由开发者在 Bucket 名称、key 或 JSON 内容中自行设计。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，即首字符为字母或数字，其余只能使用字母、数字、下划线和连字符，最长 64 个字符；SDK 与宿主存储层必须分别校验。SDK 还必须限制 key 格式、单值大小、单文件大小、总容量和 JSON 类型；写入采用临时文件加原子替换，异常时不能破坏已有数据。游戏数据与 `main.json`、游戏包文件、其他游戏数据和 App 用户资料隔离。
+存储范围只自动绑定当前 `gameId` 和当前游戏库。平台不创建、推断或强制 `{userId}`
+子目录；如游戏需要多用户存档，应由开发者在 Bucket 名称、key 或 JSON 内容中自行设计。
+异步方法和上传仍要求 Bucket 名称匹配
+`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；同步方法的宽逻辑名只对自身调用生效，且仅私有
+GDevelop 路径可使用 `$playmesh.gdevelop.root.v1`。SDK 与宿主必须分别校验方法对应的
+名称/key 规则、完整 JSON root、单文件大小和 JSON 类型；写入采用临时文件加原子替换，
+异常时不能破坏已有数据。游戏数据与 `main.json`、游戏包文件、其他游戏数据和 App 用户
+资料隔离。
 
 游戏详情页必须提供“清除游戏数据”操作，并明确提示该操作会删除当前游戏的自定义存档。用户确认后只清理 `packages/{gameId}/data/`，不影响游戏本体与开发历史。清除缓存是独立操作，会删除 `cache/` 及其中的开发历史。卸载游戏时直接删除整个 `packages/{gameId}/` 目录，同时删除游戏文件、数据和缓存。
 
@@ -762,7 +792,7 @@ SDK 只返回 locale 字符串，不向游戏暴露
 `app.json`、`platform.game.*` 或其他 messages。游戏开发者自行维护业务翻译并按
 该 locale 渲染；Playmesh 不自动改写游戏 DOM、资源、标签或用户内容。
 
-工作区按浏览器来源持久化最近打开的项目。再次进入时仅在该项目仍存在于统一游戏库时自动恢复；首次进入或项目已删除时必须保持项目下拉菜单展开，选定或新建项目后才能进入编辑。顶部只保留项目、运行、保存和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
+工作区不在浏览器持久化最近打开的项目。项目列表与活动运行项目由 App Gateway 返回；网页只在当前页面会话内保留临时选择，再次进入时使用 App 活动项目或列表首项。顶部只保留项目、运行、保存和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
 
 复制项目是变更稳定 ID 的正式入口：以当前项目为来源创建新的唯一 ID 和名称，`author` 发布者元数据使用当前 App 用户昵称，只复制发布内容，不复制根目录 `data/`、`cache/`、`.playmesh/`。普通项目设置继续禁止修改 `id`、`author` 和 `lastModifiedAt`。删除项目会删除包、运行数据、缓存和本地历史，正在运行的项目不得删除。
 
@@ -804,7 +834,7 @@ SDK 只返回 locale 字符串，不向游戏暴露
 
 所有 AI 执行适配器都必须附加 `X-Playmesh-AI-Channel`。当操作声明 `dangerous=true` 时，统一执行中间件暂停原请求，SSE 发布 `ai.approval.requested`，前端提供允许一次、按游戏/项目允许、始终允许和拒绝。批准后继续原 handler；拒绝返回 403；30 秒超时返回 408。普通开发者 UI 调用不带 AI 通道头，沿用各自已有的人机确认。
 
-当前运行游戏可注册一个项目级 `DeveloperWebViewJavaScriptExecutor`。`GamePage` 将执行器绑定到 `DeveloperRunController`，移动端 `LocalGameWebView` 使用 `runJavaScriptReturningResult`，Windows 宿主使用 WebView2 `executeScript`；页面开始导航、销毁或退出时立即撤销执行器，避免请求落到旧 WebView。执行前必须同时校验活动状态为 `running`、`activeStatus.projectId` 等于接口路径的 `projectId`、执行器也登记在同一项目 ID 下，禁止跨项目或命中已退到后台的 WebView。`POST /dev/api/projects/{projectId}/webview/javascript` 通过统一注册表调用该执行器并返回结果；它是暴露给 Chat/Agent 的高风险危险操作，AI 请求必须经过同一审批中间件。工作区操作台复用 CodeMirror，显示返回或错误，并在浏览器本地维护按项目隔离的最近执行历史。
+当前运行游戏可注册一个项目级 `DeveloperWebViewJavaScriptExecutor`。`GamePage` 将执行器绑定到 `DeveloperRunController`，移动端 `LocalGameWebView` 使用 `runJavaScriptReturningResult`，Windows 宿主使用 WebView2 `executeScript`；页面开始导航、销毁或退出时立即撤销执行器，避免请求落到旧 WebView。执行前必须同时校验活动状态为 `running`、`activeStatus.projectId` 等于接口路径的 `projectId`、执行器也登记在同一项目 ID 下，禁止跨项目或命中已退到后台的 WebView。`POST /dev/api/projects/{projectId}/webview/javascript` 通过统一注册表调用该执行器并返回结果；它是暴露给 Chat/Agent 的高风险危险操作，AI 请求必须经过同一审批中间件。工作区操作台复用 CodeMirror，显示返回或错误，并只在当前页面会话内存中维护按项目隔离的最近执行历史。
 
 ### 开发者本地历史
 
@@ -868,7 +898,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
   "remarks": "局域网多人抢答游戏",
   "version": "0.1.0",
   "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": ["multiplayer"],
@@ -917,7 +947,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 - `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
 - `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。单屏多人还必须声明 `controllerOrientation`，其他显示模式禁止声明。App 必须在创建游戏 WebView 前按当前角色应用方向，并在退出游戏后恢复系统方向。
-- `sdkVersion` 和 `appSdkVersion` 都是必填字段，声明游戏要求的两套平台 SDK；当前且唯一允许的值分别为 `4.0.0` 和 `3.2.0`。版本使用 `MAJOR.MINOR.PATCH`；CLI 发布前从本地生成 SDK 自动覆盖这两个字段。运行时通过注册表做精确匹配，缺失、旧值、未知值或格式错误值都拒绝启动，不解析旧清单版本，也不静默回退。
+- `sdkVersion` 和 `appSdkVersion` 都是必填字段，声明游戏要求的两套平台 SDK；当前 Game SDK 只允许 `4.1.0`，App SDK 允许 `3.2.0` 或 `3.3.0`。版本使用 `MAJOR.MINOR.PATCH`；CLI 新建和更新项目写入当前版本。运行时通过注册表按兼容区间解析，App SDK `3.2.0` 请求使用向后兼容的 `3.3.0` 运行包；缺失、低于兼容下限、未知值或格式错误值拒绝启动。
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。`required` 用于主游戏页面，单屏多人可用 `controllerRequired` 独立声明控制器页面需求；能力 ID 按功能命名，不绑定 App 或浏览器实现，平台按运行角色和环境选择适配器。
 - 平台能力由 `lib/core/capabilities/` 下的插件注册表统一维护。每个能力拥有独立目录，并在同一插件中定义描述符、`apiVersion`、方法、事件、可用性、实例创建、自检与释放；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。Flutter 不支持运行时目录扫描，新增插件后只需在默认注册入口增加该插件，不再维护平行元数据或测试适配器。
 - 当前支持声明 `media.camera`、`media.microphone`、`device.midi`、
@@ -947,7 +977,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 
 ## SDK 与组件版本策略
 
-后续所有更改都必须评估受影响组件并按需升级版本号，完整规则和当前版本矩阵见 `docs/06-engineering-standards.md`。Game SDK 与 App Bridge SDK 以 `lib/core/game_sdk/features/` 下注册的 Dart feature 为唯一手写源；同一 feature 文件同时保存网页端 TypeScript 片段和对应宿主命令执行器，`sdk_feature_registry.dart` 是唯一注册位置。运行时按 `sdkVersion/appSdkVersion` 从注册表精确选择当前发行并直接组装 JS、`.d.ts` 与版本，构建再按注册顺序落盘 `sdk-src/*.ts`、公开 JS、`.d.ts` 和关联契约，并校验网页端发出的命令与当前 bundle 可用的 Dart 执行器集合一致。当前 Game SDK 只接受 `4.0.0`，App Bridge SDK 只接受 `3.2.0`；注册表不得为旧清单声明兼容范围、回退发行或转换逻辑。每个执行器仍自行声明其实际 bundle 的 `supportedVersions`，注册时禁止同一命令和版本出现解析歧义。未来再次发生破坏性升级时，应替换当前发行定义并同步升级全部生成契约，而不是保留旧命名空间 shim 或旧清单解析。默认项目骨架、Schema、Manifest、OpenAPI、AI 提示词和校验器只维护当前契约。
+后续所有更改都必须评估受影响组件并按需升级版本号，完整规则和当前版本矩阵见 `docs/06-engineering-standards.md`。Game SDK 与 App Bridge SDK 以 `lib/core/game_sdk/features/` 下注册的 Dart feature 为唯一手写源；同一 feature 文件同时保存网页端 TypeScript 片段和对应宿主命令执行器，`sdk_feature_registry.dart` 是唯一注册位置。运行时按 `sdkVersion/appSdkVersion` 从注册表选择兼容发行并直接组装 JS、`.d.ts` 与版本，构建再按注册顺序落盘 `sdk-src/*.ts`、公开 JS、`.d.ts` 和关联契约，并校验网页端发出的命令与当前 bundle 可用的 Dart 执行器集合一致。当前 Game SDK 只接受 `4.1.0`；App Bridge SDK `3.3.0` 是当前 bundle，并声明兼容请求范围 `3.2.0`–`3.3.0`。只有经兼容性评估的加法升级才能扩展范围，破坏性升级必须创建独立发行边界。每个执行器仍自行声明其实际 bundle 的 `supportedVersions`，注册时禁止同一命令和版本出现解析歧义。默认项目骨架生成当前版本，Schema、Manifest、OpenAPI、AI 提示词和校验器同时准确表达支持范围。
 
 规则：
 
@@ -1058,7 +1088,7 @@ SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不显示该入�
   "lastModifiedAt": 1784851200000,
   "version": "0.1.0",
   "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": ["multiplayer"],
@@ -1158,7 +1188,7 @@ App 从声明文件读取展示信息和 App 原生能力开关：单机模式�
 只决定客户端路由和加入上下文。
 
 游戏页只压入当前导航栈，返回操作关闭当前游戏路由并恢复来源页面。普通游戏
-从详情页启动时返回详情；开发者工作区发起运行时保留工作区和设置页，返回不得
+从详情页启动时返回详情；开发者工作区发起运行时保留工作区和“制作游戏”页，返回不得
 清空导航栈或强制跳转首页。
 
 ## 房间和输入协议草案

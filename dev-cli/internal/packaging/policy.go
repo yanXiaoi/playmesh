@@ -89,6 +89,7 @@ func loadPackageManifestLayout(
 	if err := requireManifestSDKVersion(
 		manifest,
 		"appSdkVersion",
+		sdk.MinimumSupportedAppVersion,
 		sdk.RequiredAppVersion,
 	); err != nil {
 		return packageManifestLayout{}, nil, err
@@ -238,17 +239,21 @@ func loadPackageManifestLayout(
 func requireManifestSDKVersion(
 	manifest map[string]any,
 	field string,
-	required string,
+	supported ...string,
 ) error {
 	value, ok := manifest[field].(string)
-	if !ok || value != required {
-		return fmt.Errorf(
-			"main.json.%s 必须显式声明为 %s",
-			field,
-			required,
-		)
+	if ok {
+		for _, version := range supported {
+			if value == version {
+				return nil
+			}
+		}
 	}
-	return nil
+	return fmt.Errorf(
+		"main.json.%s 必须显式声明为 %s",
+		field,
+		strings.Join(supported, " 或 "),
+	)
 }
 
 func manifestEntryString(value any, field string) (string, error) {

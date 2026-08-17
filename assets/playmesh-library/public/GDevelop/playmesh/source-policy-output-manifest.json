@@ -1,0 +1,423 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "tag": "v5.6.276",
+    "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
+  },
+  "overlay": {
+    "treeSha256": "59605948ad63b5d1cfe08e1960700d92de0087897f368ce6530450bbe2213b57"
+  },
+  "generatedFiles": [
+    {
+      "relativePath": "newIDE/app/src/PlaymeshShared/GameManifest.js",
+      "postPatchSha256": "c2a6665d3442f9c5379c8aac4c86713285a61d2a24c39b1277f51f965bbb2975"
+    },
+    {
+      "relativePath": "newIDE/app/src/PlaymeshShared/GDevelopAuthorityBootstrapSource.js",
+      "postPatchSha256": "a99d57e6caacbe2d3835a382c1979c4b194d2e91b98e22f7f763f7d84a3eaa7d"
+    },
+    {
+      "relativePath": "newIDE/app/src/PlaymeshShared/GDevelopAppRuntimeDebuggerClientSource.js",
+      "postPatchSha256": "fc69db9a2f9822a67a0ff017e085262854b4ace68d44f3edc878c74bcf70f645"
+    },
+    {
+      "relativePath": "newIDE/app/src/PlaymeshShared/GDevelopFpsProbeSource.js",
+      "postPatchSha256": "6fbd303d844ada86fed29f9e2b1392683e13788ea9dbc60e25ec87a16b69346d"
+    },
+    {
+      "relativePath": "newIDE/app/src/PlaymeshShared/GDevelopMultiplayerBridgeSource.js",
+      "postPatchSha256": "51107298f2e3ad77a63473304ca491bbc40ca35fdbaa6719a05fea24c1e39fc6"
+    },
+    {
+      "relativePath": "newIDE/app/src/ExportAndShare/BrowserExporters/BrowserSWPreviewLauncher/BrowserSWPreviewIndexedDB.js",
+      "postPatchSha256": "0a6adc30bf2596b220e6c1bf2d122536252a1b25d4718ce4307fcefa29a67e57"
+    }
+  ],
+  "patchedOfficialFiles": [
+    {
+      "relativePath": "Extensions/Multiplayer/multiplayercomponents.ts",
+      "upstreamGitBlobSha": "1ba58f95a6f59add9033724c5ef601c5f2b02696",
+      "postPatchSha256": "f25b7af846e96731a859798d63e167050afab0ce81724e547a19ee38902addc5"
+    },
+    {
+      "relativePath": "Extensions/Multiplayer/multiplayertools.ts",
+      "upstreamGitBlobSha": "ffd474906ff9b3c8d01ba46b499347656f31558f",
+      "postPatchSha256": "db86497c7bf2b5132480771760d63dc648315b5905ba28466d4c107fd6aaee18"
+    },
+    {
+      "relativePath": "Extensions/Multiplayer/peerJsHelper.ts",
+      "upstreamGitBlobSha": "dfd4a73aa4b272e6eccea2aa3f288b5778ca76b5",
+      "postPatchSha256": "06c8593384e3fc9dd14d03a140d9ca8ed141d5f390699333a1c405ebd099c15e"
+    },
+    {
+      "relativePath": "Extensions/PlayerAuthentication/playerauthenticationcomponents.ts",
+      "upstreamGitBlobSha": "8352080d4345e9fae45b1940ee1317e2875e8735",
+      "postPatchSha256": "1da8a00568276055ddea4894436ce7612b78ae10ce9712921dbd6d1548c0f188"
+    },
+    {
+      "relativePath": "Extensions/PlayerAuthentication/playerauthenticationtools.ts",
+      "upstreamGitBlobSha": "c3aabe47feb2782d560ff45af8915cc87eebbd6f",
+      "postPatchSha256": "037ccb96e2312b6a9a404be12a58f651ef72444c1e89a700ff48ed4fbfffa607"
+    },
+    {
+      "relativePath": "GDJS/Runtime/events-tools/storagetools.ts",
+      "upstreamGitBlobSha": "d61394d79c78e787f488ae63e4185ffff5c9dee3",
+      "postPatchSha256": "edece060b1984f84421ee420288d6916b602c1e4d2503b30866cf82a63d86e8a"
+    },
+    {
+      "relativePath": "newIDE/app/package.json",
+      "upstreamGitBlobSha": "8b4e42cc4fd22731f71adf6ebb1c4109ff03fb54",
+      "postPatchSha256": "e6cd7683d0f5eca4b358b8e0f298ab5582983b00a0d71bd534e2cc94a8932767"
+    },
+    {
+      "relativePath": "newIDE/app/scripts/make-service-worker.js",
+      "upstreamGitBlobSha": "11021c16d7291e85b2b1a0d4beb44eb24d09dec5",
+      "postPatchSha256": "f7729ee982359dd5b00cf15f40dbcd37358298b281b0f7674472e98052816576"
+    },
+    {
+      "relativePath": "newIDE/app/scripts/make-version-metadata.js",
+      "upstreamGitBlobSha": "73b9cf1f28173f516251b43e0b83a89b8d789ac0",
+      "postPatchSha256": "a80a8c02b8f2e23eb99e118f7fe7340b9cde438309ffa0fbe7d0d6da77eb838e"
+    },
+    {
+      "relativePath": "newIDE/app/scripts/service-worker-template/service-worker-template.js",
+      "upstreamGitBlobSha": "e1fd7eb24720691692e97476c82f3dda8dd3517d",
+      "postPatchSha256": "cdc096327e94a97664136f60ec579092713f81b2de9249a49cb5e27ab96f1ae2"
+    },
+    {
+      "relativePath": "newIDE/app/src/AnnouncementsFeed/AnnouncementsFeedContext.js",
+      "upstreamGitBlobSha": "601262a77057a1aa923c70f4e7215caffa3a4193",
+      "postPatchSha256": "196b842dd5af9231d69d29c05d32ae7e039f69eb00b124e7f6c7fe4635023c52"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/AssetStoreContext.js",
+      "upstreamGitBlobSha": "62c0a37ff7e6a96a9c78da5cbc7417b0ee855db9",
+      "postPatchSha256": "7bac8353d729904b13337396ae6b07989e80936ecccb4ba7cea2da67ec229ff4"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/BehaviorStore/BehaviorStoreContext.js",
+      "upstreamGitBlobSha": "6cb1d8211fecf537d827256d5d7ee6d5982e5c54",
+      "postPatchSha256": "e5d6003d1127687ce4635094ffa6ee86fe1dbb44f7d7297ea1a76fffba562768"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/Bundles/BundleStoreContext.js",
+      "upstreamGitBlobSha": "6cb8704dde01ec8bafc2d0fd6daa558371658f29",
+      "postPatchSha256": "db2a1e50f59a4e54e082b1aeb281619aabac812c206c330a15a910f97f733510"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/ExampleStore/ExampleStoreContext.js",
+      "upstreamGitBlobSha": "e0c3885ab523fe44efe3bf03e1856f20dcf8c6d7",
+      "postPatchSha256": "ee41577bea640e9229bb004855390cc86713499cf53fcc7b1a540da3d5576289"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/ExtensionStore/ExtensionStoreContext.js",
+      "upstreamGitBlobSha": "23a9c696b8b4d53f248e0e178992887f90a635eb",
+      "postPatchSha256": "3e25605fb6837dac0a39f5205dd40f6815f00cfdb5b880e12438a3d37ce492b6"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/ExtensionStore/ExtensionDetailPanel.js",
+      "upstreamGitBlobSha": "38df6616b672c3e6df4e884e195e157e056ead76",
+      "postPatchSha256": "22acda1bce6897d84df723d93ef78f9e84695e7641844b8c9f7e57e7ac7adf0a"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/ExtensionStore/InstallExtension.js",
+      "upstreamGitBlobSha": "f07f4a26ebbad25ac47f7659a48ff0a6f4cf6179",
+      "postPatchSha256": "ddf60cfbb302094fe42fa170088b31b28955ee95961e8adeaa74d56297e3fd98"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/NewObjectDialog.js",
+      "upstreamGitBlobSha": "f0529ff9fa52073cbf79b0e2df84b7e16800b409",
+      "postPatchSha256": "9f3ef5e15bbe10ee57c63b0a17065b6b3264226401d382569107eb7999462bf8"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/NewObjectFromScratch.js",
+      "upstreamGitBlobSha": "f61eb4c91e4532e59c52b99e6d639da4d3af154a",
+      "postPatchSha256": "19162e7c36a287174f06b3347431016e727b4bef76568b491966970d02741743"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/ObjectStoreContext.js",
+      "upstreamGitBlobSha": "6cb8619c0d9de0f98fc360c4250d98d789477c5c",
+      "postPatchSha256": "1dd233bc7cbf5a95452107e42e03d985d682afc9bfbf6f6ed802bcca1dfa8d56"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/PrivateGameTemplates/PrivateGameTemplateStoreContext.js",
+      "upstreamGitBlobSha": "ef86be27d72ba9936ea86200ae5aa6320e170599",
+      "postPatchSha256": "a23134328d560ba07f25ace6c3af899805870c4c199fcc471b7e371bdf27c730"
+    },
+    {
+      "relativePath": "newIDE/app/src/AssetStore/ResourceStore/ResourceStoreContext.js",
+      "upstreamGitBlobSha": "01da231d22a875bcd65c00ff4a9169e97acaa343",
+      "postPatchSha256": "40fc671f7a26ced832e830e7ccf29021ef61c74481dc006eb009cec352b702f8"
+    },
+    {
+      "relativePath": "newIDE/app/src/BehaviorsEditor/NewBehaviorDialog.js",
+      "upstreamGitBlobSha": "213c19392e5e7dcc8bca1b87d1500906c246975f",
+      "postPatchSha256": "e2ba31ab966e99c5fd616f8786a7fecb2ce8abf430e9f027cfd0372c2ca31ea7"
+    },
+    {
+      "relativePath": "newIDE/app/src/BrowserApp.js",
+      "upstreamGitBlobSha": "6619110b08ff0e12e7d3ee74db77fefa626307da",
+      "postPatchSha256": "9855441c3c1c13e2b2e4c0f577e9e5278f0a5947aa41ab63e0507d2e02a376e1"
+    },
+    {
+      "relativePath": "newIDE/app/src/Course/CourseStoreContext.js",
+      "upstreamGitBlobSha": "55c72b8918e7bcec2d6a50f9baa19b86d2e4706b",
+      "postPatchSha256": "37243954649b2a64339f57c7544b3807d23be7008e6735f477c05d8712866089"
+    },
+    {
+      "relativePath": "newIDE/app/src/ExportAndShare/PreviewLauncher.flow.js",
+      "upstreamGitBlobSha": "b30e07ff90261c6abb0a8c293ac521e92b3d70fc",
+      "postPatchSha256": "07f80c3ddc236a8dccffe8c9525d5e8f372711f9d932472d17c745c556a2e824"
+    },
+    {
+      "relativePath": "newIDE/app/src/ExportAndShare/BrowserExporters/BrowserFileSystem.js",
+      "upstreamGitBlobSha": "3fd390fadad65ce2a90f1e611832351fd30790fe",
+      "postPatchSha256": "bb7cca5d6840b3d7efc7f659e736c4aaf963e4ee26a0dbe1057b70fff2ad325b"
+    },
+    {
+      "relativePath": "newIDE/app/src/GameEngineFinder/BrowserS3GDJSFinder.js",
+      "upstreamGitBlobSha": "b1650bc98933e7eb9847164d17d5bb82f07c1366",
+      "postPatchSha256": "b40155c9789d29b0945935c24cdc0f907180696120a906a5c3a2f90498032ed0"
+    },
+    {
+      "relativePath": "newIDE/app/src/InAppTutorial/InAppTutorialProvider.js",
+      "upstreamGitBlobSha": "aa4e0271947113efbd149e764dd8eb2895d754ac",
+      "postPatchSha256": "70e3b2455a13a94a4a146ed810a533b1311407e52a847846ef1e90e68b0e25d4"
+    },
+    {
+      "relativePath": "newIDE/app/src/index.js",
+      "upstreamGitBlobSha": "859f1048ed28256c1a57369308ef8a3f0b27fe64",
+      "postPatchSha256": "ff567ff64b5e4e5ecee6da6cfec409de439ce672136a2d2574df85634ce18e07"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/EditorContainers/BaseEditor.js",
+      "upstreamGitBlobSha": "3bdede2fb3a37676bc901e4e43eb83fecc55fa66",
+      "postPatchSha256": "eb3b4313b8f71a7185c5fb55648710026278831f6a47fee60b4eff9c2c534a01"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/AboutDialog.js",
+      "upstreamGitBlobSha": "c2be533b97aa4b419246692866cd3a2dadada0bd",
+      "postPatchSha256": "493323083f61fb0f32a9a19119b6355b62908ede251df5df2370b9c9bc60a9dd"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/EditorContainers/HomePage/HomePageMenu.js",
+      "upstreamGitBlobSha": "4114ec02800badb323cad8506ed7ea2ce23ccc1b",
+      "postPatchSha256": "08d7e9db8063a12c416af50ac578453866b9236d6630e336d740d6e1e4289a69"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/EditorContainers/HomePage/HomePageMenuBar.js",
+      "upstreamGitBlobSha": "57d14d0f4ffb545b9d46922ac854464c337d9973",
+      "postPatchSha256": "daad427819da2af857740435129f012a66fe4431da32939c54111c322093fa34"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/EditorTabs/EditorTabsHandler.js",
+      "upstreamGitBlobSha": "84cfc529abaa169f6aac765b17234e7491cf603e",
+      "postPatchSha256": "83210bea81b872261fc51631bb7bebfd55b493a080cf761e321d74feed3caaaf"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/index.js",
+      "upstreamGitBlobSha": "0268fc9b7862c026ce99c756d896e28526aa809f",
+      "postPatchSha256": "e9732fb0c1f04a9ae2d5a9154f8984d36857bce252999603422889801c8313db"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/MainMenu.js",
+      "upstreamGitBlobSha": "b0e701e77a9c8b21f4b4331cc3e8fb34f9fcff72",
+      "postPatchSha256": "d03527c6193c934eaf2ae7d263a53cfd97278986ad3712141ba2eabec40c1bc2"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/Preferences/PreferencesProvider.js",
+      "upstreamGitBlobSha": "904133d56900298ec400f5677e05420c9d975577",
+      "postPatchSha256": "0ede69e43a7414e964fe95e8a27ce5611055d348f9f4409f7be17a5a26102677"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/Providers.js",
+      "upstreamGitBlobSha": "0ebee82b3fa66b99de06bf9190c327c58044cc6b",
+      "postPatchSha256": "417f71c1097ff03a9de1003ccff531b64e265afcc40b84f484d25de4e5bc534e"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/ProjectTitlebar.js",
+      "upstreamGitBlobSha": "015035ebd561775e74512baaf6f099813a8814f9",
+      "postPatchSha256": "8eac1f84e2686716939de4cb8a2bdccd1128fd4a039127227360a10f58395616"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/TabsTitlebar.js",
+      "upstreamGitBlobSha": "987b9c2b67c06260aff78ccc5832fda48988431f",
+      "postPatchSha256": "16b5f0ef165545a56d155454ce9a2e4c16fa89cc42bb8c2d2c54b8bee83c5089"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/Toolbar/PreviewAndShareButtons.js",
+      "upstreamGitBlobSha": "6c61b28e5c217895db23efdec125b690c4b1c853",
+      "postPatchSha256": "5a945fb6d210416b92c69eaab2d8b3b7705b38395d00ef1b3120d9cfa4458c44"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/UseCapturesManager.js",
+      "upstreamGitBlobSha": "b69a0c36bb46b8917af48279fc5670a3d03f868b",
+      "postPatchSha256": "1e0460987669ba1b4fb143fbb541c8b5618592186272efb4ca63f4435dbaf7cb"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/UseNewProjectDialog.js",
+      "upstreamGitBlobSha": "8c9273b1fd3b4e41da1f62ef6c162a0df4280553",
+      "postPatchSha256": "d3cbf6e41a79b2b6710ac9c73199123165449b4c92ef30a62addc6fa428fa0f5"
+    },
+    {
+      "relativePath": "newIDE/app/src/ObjectsRendering/PixiResourcesLoader.js",
+      "upstreamGitBlobSha": "6b2a9cbe2e7fd746c287e3f26f05f759638b75bd",
+      "postPatchSha256": "c85cf75cd3626f493292bfdffceeb8f91e50a86c439f9be11eb9b3a35aa817bb"
+    },
+    {
+      "relativePath": "newIDE/app/src/Profile/AuthenticatedUserProvider.js",
+      "upstreamGitBlobSha": "3934e89055a9e402d4010032feebb9fd30f52834",
+      "postPatchSha256": "3e6fd6262123d3119bac5e3a70a559760e5f1815ef99901cd048d347f2182776"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectCreation/CreateProject.js",
+      "upstreamGitBlobSha": "ffe728f7de38e48c25658f3eb6e616d4e7db5b3a",
+      "postPatchSha256": "8d86e8b1da59e993144014acdb1b4ed22460214407a9540b5af0931459224e66"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectCreation/NewProjectSetupDialog.js",
+      "upstreamGitBlobSha": "e2675eed07c8c303864a48e9f7f43568e980e5df",
+      "postPatchSha256": "f6cdf7117d861f79fa3a36587d85a924eca1a2887a2e3e1b438d91e5056f39db"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectManager/index.js",
+      "upstreamGitBlobSha": "356241f0da2143cb06f231f4f31fc9955abe2657",
+      "postPatchSha256": "ab64c3ed68acda95e24bdce8afa748213a33a4cbb3f031bd2fb7773a0c799648"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectManager/ProjectPropertiesDialog.js",
+      "upstreamGitBlobSha": "66d7d54557e3bc1e669cfb6210a292a847bb2a39",
+      "postPatchSha256": "0e4c592d75ce4e91a2ada42a82a3e743667ffb716a88202b27639926a9e4527e"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectsStorage/DownloadFileStorageProvider/DownloadFileSaveAsDialog.js",
+      "upstreamGitBlobSha": "ed12f40520acb711c1243a8ce0663c22f1698a1e",
+      "postPatchSha256": "5398680d5d9976ee4caa32b82e79e5a78316477cb5ff3b41617c868cce1f7697"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectsStorage/OpenFromStorageProviderDialog.js",
+      "upstreamGitBlobSha": "d89794d6e2c8c080a191b508753483c215fa0187",
+      "postPatchSha256": "3d64627c5aaa77e16152f6c25ad797bc80bddeccd77294516c52f9cef3a1895d"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectsStorage/ResourceFetcher/BrowserResourceFetcher.js",
+      "upstreamGitBlobSha": "d58dd58489a06afbe844dc74391219ca8fb9087b",
+      "postPatchSha256": "201005140a45a8d5e2b41bf96b1ef76f36bed7ffeeada457ba3b0dee731e1a2f"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectsStorage/ResourceMover/BrowserResourceMover.js",
+      "upstreamGitBlobSha": "bf96aa19d34bad4861a28b81619b2689a42157d5",
+      "postPatchSha256": "4ee4ed07e2a37d60c6fedba6c590d88278e53427f5c01c126454d89d823cde60"
+    },
+    {
+      "relativePath": "newIDE/app/src/ResourcesEditor/index.js",
+      "upstreamGitBlobSha": "35d37156928745a2f9dfedb2b4732dbe7362da94",
+      "postPatchSha256": "44f1b48013d192a3882fc4e14ac728ca6bb0ab37552905fa3a943ec0d013ba6a"
+    },
+    {
+      "relativePath": "newIDE/app/src/ResourcesList/BrowserResourceSources.js",
+      "upstreamGitBlobSha": "16a9cee0e12e099a7a94d65401ea59dc95f82829",
+      "postPatchSha256": "961b542850440be19e1118d3d6d4705dc38f8881942af69d03e1b45d9832c5ef"
+    },
+    {
+      "relativePath": "newIDE/app/src/ResourcesList/index.js",
+      "upstreamGitBlobSha": "80d2e9f618e25f1759fdc5c0d8af9e98c796d3d8",
+      "postPatchSha256": "787f59b21203ea4b91e93213753ea2d036ffd10de4a399211d895b9fafbfea0f"
+    },
+    {
+      "relativePath": "newIDE/app/src/stories/componentStories/ProjectCreation/NewProjectSetupDialog.stories.js",
+      "upstreamGitBlobSha": "453efe099e042060ed6f9a6c5fe590113a7db1b4",
+      "postPatchSha256": "8b87cae87f8d9fda50fc0671278e0df4870df945fadd60a5b8531c70f7b57b6a"
+    },
+    {
+      "relativePath": "newIDE/app/src/stories/componentStories/ResourcesList/ResourcesList.stories.js",
+      "upstreamGitBlobSha": "19a9e4c43bf95546f17ce6e6bd53ecdde76faaf9",
+      "postPatchSha256": "e6883567acb1d7d71961d72159c7c0df8fb1e45fc9dbac283d18528d661405e8"
+    },
+    {
+      "relativePath": "newIDE/app/src/UI/Search/UseSearchItem.js",
+      "upstreamGitBlobSha": "de32939166ba47679e953a7c67b74bffa2cd6f07",
+      "postPatchSha256": "923ed31dd2b1935c27b361e54710e7fb98a9d0d06a838b1ca30f2069daa6697a"
+    },
+    {
+      "relativePath": "newIDE/app/src/UI/Search/UseSearchStructuredItem.js",
+      "upstreamGitBlobSha": "61575b45dfc5437af35ec09c17cae71184965684",
+      "postPatchSha256": "9e92cca3f01c7c2fd84f9d5c69718e71001f5d352dd00586a24a68609eaf4f30"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/Analytics/EventSender.js",
+      "upstreamGitBlobSha": "40c16b0f480f9f9d1d90d7bea7be28b114784fd2",
+      "postPatchSha256": "b22b6f81f80a4b78a21f8dea5adffc5dd4e225f0e63c9f1fa37d0a2b5d2cbe5c"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/Analytics/LocalStats.js",
+      "upstreamGitBlobSha": "cee36d3f81efef07f8abee7cad1a08520975a7eb",
+      "postPatchSha256": "d928132b0f313f29bb4114c8f7af3077ec44229f40918436c5f2b40983d03e00"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/Analytics/UserUUID.js",
+      "upstreamGitBlobSha": "67d487da17dcc204f6483fcb90b2311862b3259f",
+      "postPatchSha256": "973086795e4d8d327b6625572678ba3842b48c4d497f87e7a25bafa4267bf7c2"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/BlobDownloader.js",
+      "upstreamGitBlobSha": "40779c73fd8a1b6a11bc60f8ada3d2cf325bb3ae",
+      "postPatchSha256": "7ae82e94c0546a86aa3f7370216facbfb86c52d214ad8ba803bf922378f0f453"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/BlobDownloadUrlHolder.js",
+      "upstreamGitBlobSha": "8646b5ed0c2396267c6ac95614fdbc1a8769c770",
+      "postPatchSha256": "ff983b6ce90dee2f2fc678f635242ca9fa4ae5134daec6738d7ec425238a121d"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/BrowserArchiver.js",
+      "upstreamGitBlobSha": "5842055026aa5c1a12ebd54e21713aa03afec218",
+      "postPatchSha256": "9080d7c665c65476b3e8fe2083c983e0e27563f233b21834239d17968162a186"
+    },
+    {
+      "relativePath": "newIDE/app/src/UI/SelectField.js",
+      "upstreamGitBlobSha": "6af569d80edd52f67f84965f2cdb219a35c67c0a",
+      "postPatchSha256": "8e19bd0ee8dd6b04304e4654521f5bf0e6fe3d5fb11c22783bf0360ab535867a"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js",
+      "upstreamGitBlobSha": "cc52e676c4bf4873bb1a0fe6c6568982e1fbd1bb",
+      "postPatchSha256": "1353b0877f59a758b576ac6a7749884c4348e26f13f3b4b044197cf9672a141d"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/GDevelopServices/Authentication.js",
+      "upstreamGitBlobSha": "2e675353ab4aecf1a27308985c2da7d3c6ef7b9d",
+      "postPatchSha256": "893c47218a17c3fcceb3fed4c91f1985f46753654984dddc82ecb67c41d0576b"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/GDevelopServices/Extension.js",
+      "upstreamGitBlobSha": "51598f7e98af9a2466e8cfa24f63b001f985ac74",
+      "postPatchSha256": "6d4833ec7ddfe49d08bccc4988a3a7a16e80b6d66dbd0e82f584076724063079"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/GDevelopServices/Generation.js",
+      "upstreamGitBlobSha": "507201fddd7cccee11a650215385480db6026d48",
+      "postPatchSha256": "7ae74c8d71d4c79800701bc440de6ed5a4ddbca14daf15b373feca1e58374f88"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/GDevelopServices/Game.js",
+      "upstreamGitBlobSha": "199fdf3ae3092562144328fbcda0e7dbe0823602",
+      "postPatchSha256": "c3b62390dd985457b4a30fd54fcbfa452764ba3997f7bad6fc44358fb47ed139"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/i18n/GDI18nProvider.js",
+      "upstreamGitBlobSha": "dc4c2c6386e66804ecb2866a6e93962607ac69ca",
+      "postPatchSha256": "ef864c9c170931d699c5ed66efabb47eecd0108ee646ab03334767f86bfb10ac"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/ProjectCache.js",
+      "upstreamGitBlobSha": "c58926d96b6812e0fda01655b0f7ea0812f85ef7",
+      "postPatchSha256": "e150360ceeca592272032a26002e0e633ea483ab61e75f87224a74cfca8f2a5a"
+    },
+    {
+      "relativePath": "newIDE/app/src/Utils/UseCreateProject.js",
+      "upstreamGitBlobSha": "001e774e471da10a0eb8f285513b8995b1c009c2",
+      "postPatchSha256": "b2db211a854b9da9eee8a8ab7d74561d84e9f846a21cc65717a27ef65cc95ee7"
+    }
+  ]
+}

@@ -1,5 +1,9 @@
 import 'dart:async';
 
+import '../../models/game_capabilities.dart';
+import '../../models/game_manifest.dart';
+import '../../models/game_summary.dart';
+import '../../models/local_game_entry.dart';
 import 'developer_event_hub.dart';
 
 typedef DeveloperProjectLaunch =
@@ -12,32 +16,160 @@ typedef DeveloperRunClock = DateTime Function();
 
 DateTime _developerRunUtcNow() => DateTime.now().toUtc();
 
+class DeveloperPreviewPackageRequired implements Exception {
+  const DeveloperPreviewPackageRequired({
+    this.stage = 'developer_runtime',
+    this.operation = 'runtime.start',
+  });
+
+  static const code = 'developer_preview_package_required';
+
+  final String stage;
+  final String operation;
+}
+
 class DeveloperResourceSession {
   const DeveloperResourceSession({
     required this.projectId,
     required this.resourceBaseUri,
     required this.credential,
     required this.expiresAt,
+    this.runtimeDeclaration,
   });
 
   final String projectId;
   final Uri resourceBaseUri;
   final String credential;
   final DateTime expiresAt;
+  final DeveloperRuntimeDeclaration? runtimeDeclaration;
 
   bool isExpiredAt(DateTime value) => !value.toUtc().isBefore(expiresAt);
+}
+
+/// Engine-neutral metadata for a staged development artifact.
+///
+/// Temporary preview and reverse-proxy sessions must bind this declaration so
+/// their manifest and capabilities never fall back to a saved library project
+/// with the same game id.
+class DeveloperRuntimeDeclaration {
+  const DeveloperRuntimeDeclaration({
+    required this.manifest,
+    this.capabilities = const GameCapabilities(),
+    this.gameEntryOverride,
+  });
+
+  final GameManifest manifest;
+  final GameCapabilities capabilities;
+  final String? gameEntryOverride;
+
+  /// Builds the complete, ephemeral game metadata used by a staged preview.
+  ///
+  /// A GDevelop source project is deliberately independent from the installed
+  /// Playmesh game library. The preview package already carries the canonical
+  /// `main.json`, so launching it must not require (or create) a published
+  /// package with the same [manifest.id].
+  GameSummary toDevelopmentGame() {
+    final displayMode = manifest.displayModes.single;
+    return GameSummary(
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      author: manifest.author,
+      lastModifiedAt: manifest.lastModifiedAt,
+      sdkVersion: manifest.sdkVersion,
+      appSdkVersion: manifest.appSdkVersion,
+      description: manifest.remarks,
+      minPlayers: manifest.players.min,
+      maxPlayers: manifest.players.max,
+      supportsMultiplayer: manifest.supportsMultiplayer,
+      displayModeLabel: displayMode.manifestValue,
+      displayMode: displayMode.manifestValue,
+      orientation: manifest.orientation,
+      controllerOrientation: manifest.controllerOrientation,
+      tags: manifest.tags,
+      capabilities: capabilities,
+      entry: LocalGameEntry(
+        statusLabel: 'Game SDK ${manifest.sdkVersion} · development preview',
+        gameEntryPath: gameEntryOverride ?? manifest.entries.game,
+        controllerEntryPath: manifest.entries.controller,
+      ),
+    );
+  }
+
+  GameSummary applyTo(GameSummary base) {
+    final development = toDevelopmentGame();
+    return GameSummary(
+      id: development.id,
+      name: development.name,
+      version: development.version,
+      author: development.author,
+      lastModifiedAt: development.lastModifiedAt,
+      lastOpenedAt: base.lastOpenedAt,
+      launchCount: base.launchCount,
+      localIconPath: base.localIconPath,
+      sdkVersion: development.sdkVersion,
+      appSdkVersion: development.appSdkVersion,
+      description: development.description,
+      minPlayers: development.minPlayers,
+      maxPlayers: development.maxPlayers,
+      supportsMultiplayer: development.supportsMultiplayer,
+      displayModeLabel: development.displayModeLabel,
+      displayMode: development.displayMode,
+      orientation: development.orientation,
+      controllerOrientation: development.controllerOrientation,
+      tags: development.tags,
+      capabilities: development.capabilities,
+      entry: LocalGameEntry(
+        statusLabel: development.entry.statusLabel,
+        gameEntryPath: development.entry.gameEntryPath,
+        controllerEntryPath: development.entry.controllerEntryPath,
+        packageRootFilePath: base.entry.packageRootFilePath,
+      ),
+    );
+  }
+}
+
+sealed class DeveloperProjectLaunchSource {
+  const DeveloperProjectLaunchSource();
+}
+
+/// A project whose authoritative manifest and web resources are already saved
+/// in the managed Playmesh package directory.
+final class DeveloperSavedProjectLaunchSource
+    extends DeveloperProjectLaunchSource {
+  const DeveloperSavedProjectLaunchSource(this.game);
+
+  final GameSummary game;
+}
+
+/// A temporary package or reverse-proxy resource session.
+final class DeveloperResourceSessionLaunchSource
+    extends DeveloperProjectLaunchSource {
+  const DeveloperResourceSessionLaunchSource(this.session);
+
+  final DeveloperResourceSession session;
 }
 
 class DeveloperProjectLaunchRequest {
   const DeveloperProjectLaunchRequest({
     required this.projectId,
     required this.runId,
-    this.resourceSession,
+    required this.source,
   });
 
   final String projectId;
   final String runId;
-  final DeveloperResourceSession? resourceSession;
+  final DeveloperProjectLaunchSource source;
+
+  GameSummary? get savedProject => switch (source) {
+    DeveloperSavedProjectLaunchSource(:final game) => game,
+    DeveloperResourceSessionLaunchSource() => null,
+  };
+
+  DeveloperResourceSession? get resourceSession => switch (source) {
+    DeveloperSavedProjectLaunchSource() => null,
+    DeveloperResourceSessionLaunchSource(:final session) => session,
+  };
 }
 
 enum DeveloperRunPhase { idle, starting, running, stopped, error }
@@ -127,9 +259,31 @@ class DeveloperRunController {
   }
 
   Future<DeveloperRunStatus> run(String projectId) async {
+    throw const DeveloperPreviewPackageRequired();
+  }
+
+  /// Starts the built-in source workspace from an already saved, validated
+  /// project. The caller must provide the parsed project explicitly; accepting
+  /// only a game id here would reintroduce the unsafe installed-package
+  /// fallback used by temporary third-party sessions in the past.
+  Future<DeveloperRunStatus> runSavedProject({
+    required String projectId,
+    required GameSummary game,
+  }) async {
     return _serialize(() async {
+      if (game.id != projectId) {
+        throw StateError('已保存项目 ID 与运行请求不一致');
+      }
+      final packageRoot = game.entry.packageRootFilePath?.trim();
+      if (packageRoot == null || packageRoot.isEmpty) {
+        throw StateError('已保存项目缺少受管资源目录');
+      }
       await _stopRunsBeforeLaunch();
-      return _launch(projectId: projectId, startingMessage: '正在请求 App 启动游戏');
+      return _launch(
+        projectId: projectId,
+        source: DeveloperSavedProjectLaunchSource(game),
+        startingMessage: '正在请求 App 启动已保存的源码项目',
+      );
     });
   }
 
@@ -146,6 +300,9 @@ class DeveloperRunController {
     DeveloperResourceSession session,
   ) async {
     return _serialize(() async {
+      if (session.runtimeDeclaration == null) {
+        throw const DeveloperPreviewPackageRequired();
+      }
       if (session.isExpiredAt(clock())) {
         throw StateError('开发资源会话已经过期');
       }
@@ -154,7 +311,7 @@ class DeveloperRunController {
       try {
         return await _launch(
           projectId: session.projectId,
-          resourceSession: session,
+          source: DeveloperResourceSessionLaunchSource(session),
           startingMessage: '正在请求 App 启动开发资源会话',
         );
       } on Object {
@@ -180,10 +337,18 @@ class DeveloperRunController {
     await _serialize(() async {
       Object? firstError;
       StackTrace? firstStackTrace;
-      final projectIds = _resourceSessions.keys.toList(growable: false);
+      final projectIds = <String>{
+        ..._resourceSessions.keys,
+        ..._stopHandlers.keys,
+        for (final status in _statuses.values)
+          if (status.runId != null &&
+              (status.phase == DeveloperRunPhase.starting ||
+                  status.phase == DeveloperRunPhase.running))
+            status.projectId,
+      }.toList(growable: false);
       for (final projectId in projectIds) {
         try {
-          await _stopDevelopment(projectId);
+          await _stopRun(projectId);
         } on Object catch (error, stackTrace) {
           firstError ??= error;
           firstStackTrace ??= stackTrace;
@@ -198,8 +363,19 @@ class DeveloperRunController {
   Future<DeveloperRunStatus> _launch({
     required String projectId,
     required String startingMessage,
-    DeveloperResourceSession? resourceSession,
+    required DeveloperProjectLaunchSource source,
   }) async {
+    switch (source) {
+      case DeveloperSavedProjectLaunchSource(:final game):
+        if (game.id != projectId) {
+          throw StateError('已保存项目 ID 与运行请求不一致');
+        }
+      case DeveloperResourceSessionLaunchSource(:final session):
+        if (session.projectId != projectId ||
+            session.runtimeDeclaration == null) {
+          throw const DeveloperPreviewPackageRequired();
+        }
+    }
     final launch = onLaunch;
     if (launch == null) {
       throw StateError('当前 App 未连接开发者运行入口');
@@ -217,7 +393,7 @@ class DeveloperRunController {
         DeveloperProjectLaunchRequest(
           projectId: projectId,
           runId: runId,
-          resourceSession: resourceSession,
+          source: source,
         ),
       );
       return status(projectId);

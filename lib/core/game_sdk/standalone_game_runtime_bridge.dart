@@ -81,15 +81,11 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
             'role': 'authority_player',
             'connected': true,
           },
-          ensureStorage: ensureStorage,
           completeLifecycle: (lifecycleRequestId) {
             final operation = _lifecycleOperations.remove(lifecycleRequestId);
             if (operation == null || operation.isCompleted) return false;
             operation.complete();
             return true;
-          },
-          routeRemoteStorage: (_, _, _) async {
-            throw StateError('单机模式不会路由远程存储');
           },
         ),
         SdkCommandEnvelope(

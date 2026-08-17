@@ -4,6 +4,7 @@ class _DevelopmentSessionOperation implements _DeveloperHttpOperation {
   const _DevelopmentSessionOperation();
 
   static const _path = '/dev/api/projects/{projectId}/development';
+  static const _packagePath = '$_path/package';
 
   @override
   List<DeveloperOperationDefinition> get definitions => const [
@@ -14,6 +15,20 @@ class _DevelopmentSessionOperation implements _DeveloperHttpOperation {
       summary: '读取项目开发资源会话状态',
       permission: 'runtime.run',
       parameters: [developerProjectIdParameter],
+      chatEnabled: false,
+      agentEnabled: false,
+    ),
+    DeveloperOperationDefinition(
+      id: 'runtime.development.package.stage',
+      method: 'POST',
+      path: _packagePath,
+      summary: '校验临时开发 app 包并返回一次性会话凭据',
+      description: '只保存内存运行声明，不安装、不写入游戏库。',
+      permission: 'runtime.run',
+      risk: DeveloperOperationRisk.medium,
+      idempotent: false,
+      parameters: [developerProjectIdParameter],
+      successStatus: 201,
       chatEnabled: false,
       agentEnabled: false,
     ),
@@ -32,17 +47,19 @@ class _DevelopmentSessionOperation implements _DeveloperHttpOperation {
       requestBodySchema: {
         'type': 'object',
         'additionalProperties': false,
-        'required': ['resourceBaseUrl', 'credential', 'expiresAt'],
+        'required': ['resourceBaseUrl', 'credential', 'expiresAt', 'packageId'],
         'properties': {
           'resourceBaseUrl': {'type': 'string', 'format': 'uri'},
           'credential': {'type': 'string', 'minLength': 32, 'maxLength': 128},
           'expiresAt': {'type': 'integer', 'minimum': 1},
+          'packageId': {'type': 'string', 'minLength': 1, 'maxLength': 128},
         },
       },
       requestExample: {
         'resourceBaseUrl': 'http://192.168.1.20:4173/',
         'credential': 'D7P9E0m4o7fXcqs8vYFf4qN1sG-AaB2cK6L3wZxQ',
         'expiresAt': 1785400000000,
+        'packageId': 'package-0123456789abcdef0123456789abcdef',
       },
       chatEnabled: false,
       agentEnabled: false,
@@ -83,14 +100,44 @@ class _DevelopmentSessionOperation implements _DeveloperHttpOperation {
             'run': gateway.runController.status(projectId).toJson(),
           },
         });
+      case 'runtime.development.package.stage':
+        final mime = request.headers.contentType?.mimeType;
+        if (mime != 'application/zip' &&
+            mime != 'application/x-zip-compressed' &&
+            mime != 'application/octet-stream') {
+          throw const FormatException('开发临时包必须是 ZIP');
+        }
+        try {
+          final result = await gateway.previewService.stageRuntimeDeclaration(
+            gameId: projectId,
+            archive: request,
+            declaredLength: request.contentLength < 0
+                ? null
+                : request.contentLength,
+          );
+          await _json(request.response, HttpStatus.created, result.toJson());
+        } on PackageUploadTooLarge catch (error) {
+          throw _DeveloperRequestTooLarge(error.limit);
+        } on PackageUploadEmpty {
+          throw const FormatException('开发临时包不能为空');
+        }
       case 'runtime.development.start':
-        await gateway.catalog.prepareGame(projectId);
         final body = await _jsonBody(request);
-        final session = _parseDevelopmentSession(
+        final packageId = _developmentPackageId(body);
+        final candidate = _parseDevelopmentSession(
           projectId: projectId,
           body: body,
           request: request,
           now: gateway.clock().toUtc(),
+        );
+        final declaration = await gateway.previewService
+            .consumeRuntimeDeclaration(gameId: projectId, packageId: packageId);
+        final session = DeveloperResourceSession(
+          projectId: candidate.projectId,
+          resourceBaseUri: candidate.resourceBaseUri,
+          credential: candidate.credential,
+          expiresAt: candidate.expiresAt,
+          runtimeDeclaration: declaration,
         );
         final status = await gateway.runController.runDevelopment(session);
         await _json(request.response, HttpStatus.accepted, status.toJson());
@@ -107,11 +154,12 @@ DeveloperResourceSession _parseDevelopmentSession({
   required HttpRequest request,
   required DateTime now,
 }) {
-  if (body.length != 3 ||
+  if (body.length != 4 ||
       !body.keys.toSet().containsAll({
         'resourceBaseUrl',
         'credential',
         'expiresAt',
+        'packageId',
       })) {
     throw const FormatException('开发资源会话请求字段无效');
   }
@@ -163,6 +211,17 @@ DeveloperResourceSession _parseDevelopmentSession({
     credential: credential,
     expiresAt: expiresAt,
   );
+}
+
+String _developmentPackageId(Map<String, Object?> body) {
+  final value = body['packageId'];
+  if (value is! String || !RegExp(r'^package-[a-f0-9]{32}$').hasMatch(value)) {
+    throw const DeveloperPreviewPackageRequired(
+      stage: 'development_package_bind',
+      operation: 'runtime.development.start',
+    );
+  }
+  return value;
 }
 
 bool _sameDevelopmentPeer(

@@ -379,7 +379,19 @@ func TestInspectArchiveRejectsReservedAppDirectories(t *testing.T) {
 	}
 }
 
-func TestInspectArchiveRequiresCurrentSDKVersions(t *testing.T) {
+func TestInspectArchiveAcceptsCompatibleAppSDKVersion(t *testing.T) {
+	manifest := testPackageManifest()
+	manifest["appSdkVersion"] = minimumSupportedAppSDKVersion
+
+	_, findings := inspectTestArchive(t, manifest, map[string]string{
+		"app/index.html": "<!doctype html><title>compatible</title>",
+	})
+	if len(findings) != 0 {
+		t.Fatalf("compatible App SDK version should be accepted: %v", findings)
+	}
+}
+
+func TestInspectArchiveRequiresSupportedSDKVersions(t *testing.T) {
 	cases := []struct {
 		name         string
 		field        string
@@ -403,13 +415,13 @@ func TestInspectArchiveRequiresCurrentSDKVersions(t *testing.T) {
 			name:         "缺少 App SDK 版本",
 			field:        "appSdkVersion",
 			remove:       true,
-			findingField: "main.json.appSdkVersion 必须显式声明为 3.2.0",
+			findingField: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
 		},
 		{
 			name:         "旧 App SDK 版本",
 			field:        "appSdkVersion",
 			value:        "3.1.0",
-			findingField: "main.json.appSdkVersion 必须显式声明为 3.2.0",
+			findingField: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
 		},
 	}
 	for _, testCase := range cases {

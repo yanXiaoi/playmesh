@@ -1,1 +1,5 @@
-Future<List<Uri>> resolveLanEndpoints(int port) async => const [];
+import 'lan_endpoint.dart';
+
+Future<List<LanEndpointCandidate>> resolveLanEndpointCandidates(
+  int port,
+) async => const [];

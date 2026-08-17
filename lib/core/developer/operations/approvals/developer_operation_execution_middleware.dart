@@ -58,14 +58,23 @@ class _DeveloperAiApprovalMiddleware
     }
     final result = await gateway.approvalBroker.request(
       requestId: requestId,
-      operation: operation,
-      projectId: pathParameters['projectId'],
-      channel: channel,
+      subject: DeveloperAiApprovalSubject(
+        scopeKind: 'source',
+        scopeId: pathParameters['projectId'],
+        operationId: operation.id,
+        summary: operation.summary,
+        description: operation.description,
+        risk: operation.risk.name,
+        dangerous: operation.dangerous,
+        channel: channel,
+        method: operation.normalizedMethod,
+        path: operation.path,
+      ),
     );
     switch (result) {
-      case _DeveloperAiApprovalResult.approved:
+      case DeveloperAiApprovalResult.approved:
         await next();
-      case _DeveloperAiApprovalResult.rejected:
+      case DeveloperAiApprovalResult.rejected:
         await _error(
           request.response,
           HttpStatus.forbidden,
@@ -73,7 +82,7 @@ class _DeveloperAiApprovalMiddleware
           'ai_operation_rejected',
           '开发者拒绝了 AI 危险操作',
         );
-      case _DeveloperAiApprovalResult.timeout:
+      case DeveloperAiApprovalResult.timeout:
         await _error(
           request.response,
           HttpStatus.requestTimeout,

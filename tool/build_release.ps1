@@ -198,6 +198,7 @@ if ($buildWindows) {
         'playmesh.exe',
         'playmesh-core.exe',
         'playmesh-cli.exe',
+        'LICENSE',
         'flutter_windows.dll',
         'WebView2Loader.dll',
         'data/app.so',

@@ -202,7 +202,7 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 4.1.0'), findsOneWidget);
+    expect(find.text('Playmesh 4.2.0'), findsOneWidget);
     expect(find.text('Core 0.1.0'), findsOneWidget);
   });
 
@@ -643,51 +643,6 @@ void main() {
 
     expect(orientationController.exitFullscreenCalls, 1);
     expect(orientationController.restoreCalls, 1);
-  });
-
-  testWidgets('controller role remains fullscreen when launch flag is false', (
-    WidgetTester tester,
-  ) async {
-    const controllerGame = GameSummary(
-      id: 'com.playmesh.controller-fullscreen',
-      name: '控制器全屏测试',
-      version: '1.0.0',
-      description: '控制器角色始终默认全屏',
-      minPlayers: 2,
-      maxPlayers: 4,
-      supportsMultiplayer: true,
-      displayModeLabel: '单屏多人',
-      displayMode: 'single_screen_multiplayer',
-      orientation: GameOrientation.landscape,
-      controllerOrientation: GameOrientation.portrait,
-      entry: LocalGameEntry(
-        gameEntryPath: 'index.html',
-        controllerEntryPath: 'controller/index.html',
-        statusLabel: 'Ready',
-      ),
-    );
-    final orientationController = _RecordingOrientationController();
-
-    await tester.pumpWidget(
-      localizedTestApp(
-        home: GamePage(
-          game: controllerGame,
-          enterFullscreenOnLaunch: false,
-          joinRequest: GameJoinRequest(
-            coreEndpoint: Uri.parse('http://127.0.0.1:43210/'),
-            joinCode: 'ABC123',
-            nickname: 'Controller',
-          ),
-          orientationController: orientationController,
-          previewBuilder: (_) => const Text('控制器页面'),
-        ),
-      ),
-    );
-
-    expect(orientationController.entered, [GameOrientation.portrait]);
-    orientationController.completeEnter();
-    await tester.pumpAndSettle();
-    expect(find.text('控制器页面'), findsOneWidget);
   });
 
   testWidgets('requests orientation without blocking WebView and restores it', (

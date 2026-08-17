@@ -111,6 +111,12 @@ const appDeviceSdkSource = SdkSourceFragment(
       showGameSidebar() {
         return showAppGameSidebar();
       },
+      onGameMenuOpen(callback) {
+        return onAppGameMenuOpen(callback);
+      },
+      onGameMenuClose(callback) {
+        return onAppGameMenuClose(callback);
+      },
       openRuntimeLogs() {
         return openAppUiRuntimeLogs();
       },

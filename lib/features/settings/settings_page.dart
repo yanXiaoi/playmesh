@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import '../../core/developer/developer_channel.dart';
 import '../../core/catalog/online_game_catalog.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/localization/playmesh_ui_controller.dart';
@@ -13,24 +12,25 @@ import '../../core/protocol/go_core_status.dart';
 import '../../core/release/playmesh_release_notes.dart';
 import '../../core/services/go_core_runtime.dart';
 import '../../core/services/go_core_status_service.dart';
+import '../../core/update/app_update_service.dart';
 import '../../ui/playmesh_ui.dart';
-import '../developer/developer_workspace_page.dart';
+import 'app_update_dialog.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
     this.statusProvider,
-    this.developerProvider,
     this.catalogController,
     this.uiController,
+    this.updateChecker,
   });
 
   static const routeName = '/settings';
 
   final GoCoreStatusProvider? statusProvider;
-  final DeveloperModeProvider? developerProvider;
   final GameCatalogController? catalogController;
   final PlaymeshUiController? uiController;
+  final AppUpdateChecker? updateChecker;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -38,46 +38,32 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late final GoCoreStatusProvider _statusProvider;
-  late final DeveloperModeProvider? _developerProvider;
   late final bool _ownsStatusProvider;
-  late final TextEditingController _developerPortController;
-  late final TextEditingController _developerTokenController;
+  late final AppUpdateChecker _updateChecker;
+  late final bool _ownsUpdateChecker;
   GoCoreStatusResult? _result;
-  DeveloperSession? _developerSession;
-  List<Uri> _developerLinks = const [];
-  Object? _developerError;
   bool _isLoading = true;
-  bool _developerLoading = false;
-  bool? _developerTargetEnabled;
 
   @override
   void initState() {
     super.initState();
     _ownsStatusProvider = widget.statusProvider == null;
     _statusProvider = widget.statusProvider ?? GoCoreRuntime.bundled();
-    _developerProvider =
-        widget.developerProvider ??
-        (_statusProvider is DeveloperModeProvider
-            ? _statusProvider as DeveloperModeProvider
-            : null);
-    _developerLoading = _developerProvider != null;
-    _developerPortController = TextEditingController(
-      text: defaultDeveloperPort.toString(),
-    );
-    _developerTokenController = TextEditingController();
+    _ownsUpdateChecker = widget.updateChecker == null;
+    _updateChecker = widget.updateChecker ?? AppUpdateService.bundled();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_refreshStatus());
     });
-    unawaited(_initializeDeveloperMode());
   }
 
   @override
   void dispose() {
-    _developerPortController.dispose();
-    _developerTokenController.dispose();
     if (_ownsStatusProvider) {
       unawaited(_statusProvider.close());
+    }
+    if (_ownsUpdateChecker) {
+      _updateChecker.close();
     }
     super.dispose();
   }
@@ -93,7 +79,11 @@ class _SettingsPageState extends State<SettingsPage> {
               maxWidth: 880,
               child: Column(
                 children: [
-                  const EntranceAnimation(child: _AboutSection()),
+                  EntranceAnimation(
+                    child: _AboutSection(
+                      onCheckUpdates: () => _showAppUpdateDialog(context),
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   if (widget.uiController case final ui?) ...[
                     EntranceAnimation(
@@ -111,23 +101,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                   EntranceAnimation(
                     delay: const Duration(milliseconds: 80),
-                    child: _DeveloperModeSection(
-                      providerAvailable: _developerProvider != null,
-                      portController: _developerPortController,
-                      tokenController: _developerTokenController,
-                      loading: _developerLoading,
-                      targetEnabled: _developerTargetEnabled,
-                      session: _developerSession,
-                      links: _developerLinks,
-                      error: _developerError,
-                      onEnable: _enableDeveloperMode,
-                      onDisable: _disableDeveloperMode,
-                      onOpenWorkspace: _openDeveloperWorkspace,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  EntranceAnimation(
-                    delay: const Duration(milliseconds: 120),
                     child: _CoreStatusSection(
                       endpoint: _statusProvider.endpoint,
                       isLoading: _isLoading,
@@ -160,147 +133,8 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  Future<void> _enableDeveloperMode() async {
-    final provider = _developerProvider;
-    if (provider == null) {
-      setState(
-        () => _developerError = context.tr('settings.developer_unsupported'),
-      );
-      return;
-    }
-
-    final port = int.tryParse(_developerPortController.text.trim());
-    if (port == null || port < 1 || port > 65535) {
-      setState(() => _developerError = context.tr('settings.port_range_error'));
-      return;
-    }
-
-    setState(() {
-      _developerLoading = true;
-      _developerTargetEnabled = true;
-      _developerError = null;
-      _developerLinks = const [];
-    });
-
-    try {
-      final session = await provider.enableDeveloperMode(
-        port: port,
-        token: _developerTokenController.text.trim(),
-      );
-      final links = await provider.developerWorkspaceLinks(session);
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _developerSession = session;
-        _developerLinks = links;
-        _developerTokenController.text = session.token ?? '';
-        _developerLoading = false;
-        _developerTargetEnabled = null;
-      });
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _developerError = error;
-        _developerLoading = false;
-        _developerTargetEnabled = null;
-      });
-    }
-  }
-
-  Future<void> _initializeDeveloperMode() async {
-    final provider = _developerProvider;
-    if (provider == null) return;
-    try {
-      if (provider
-          case final DeveloperWorkspacePreferenceProvider preferences) {
-        final preference = await preferences.loadDeveloperWorkspacePreference();
-        if (!mounted) return;
-        _developerPortController.text = preference.port.toString();
-        _developerTokenController.text = preference.token;
-      }
-      await _refreshDeveloperMode();
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _developerError = error;
-        _developerLoading = false;
-      });
-    }
-  }
-
-  Future<void> _refreshDeveloperMode() async {
-    final provider = _developerProvider;
-    if (provider == null) return;
-    try {
-      final session = await provider.developerModeStatus();
-      final links = session.enabled
-          ? await provider.developerWorkspaceLinks(session)
-          : const <Uri>[];
-      if (!mounted) return;
-      setState(() {
-        _developerSession = session.enabled ? session : null;
-        _developerLinks = links;
-        _developerLoading = false;
-        if (session.port != null) {
-          _developerPortController.text = session.port.toString();
-        }
-      });
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _developerError = error;
-        _developerLoading = false;
-      });
-    }
-  }
-
-  Future<void> _disableDeveloperMode() async {
-    final provider = _developerProvider;
-    if (provider == null) {
-      return;
-    }
-
-    setState(() {
-      _developerLoading = true;
-      _developerTargetEnabled = false;
-      _developerError = null;
-    });
-    try {
-      await provider.disableDeveloperMode();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _developerSession = null;
-        _developerLinks = const [];
-        _developerLoading = false;
-        _developerTargetEnabled = null;
-      });
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _developerError = error;
-        _developerLoading = false;
-        _developerTargetEnabled = null;
-      });
-    }
-  }
-
-  void _openDeveloperWorkspace(Uri workspaceUri) {
-    final localUri = workspaceUri.replace(host: '127.0.0.1');
-    unawaited(
-      Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => DeveloperWorkspacePage(workspaceUri: localUri),
-        ),
-      ),
-    );
-  }
+  Future<void> _showAppUpdateDialog(BuildContext context) =>
+      showPlaymeshAppUpdateDialog(context, checker: _updateChecker);
 }
 
 class _AppearanceSection extends StatelessWidget {
@@ -676,272 +510,6 @@ class _CatalogShareSectionState extends State<_CatalogShareSection> {
   }
 }
 
-class _DeveloperModeSection extends StatelessWidget {
-  const _DeveloperModeSection({
-    required this.providerAvailable,
-    required this.portController,
-    required this.tokenController,
-    required this.loading,
-    required this.targetEnabled,
-    required this.session,
-    required this.links,
-    required this.error,
-    required this.onEnable,
-    required this.onDisable,
-    required this.onOpenWorkspace,
-  });
-
-  final bool providerAvailable;
-  final TextEditingController portController;
-  final TextEditingController tokenController;
-  final bool loading;
-  final bool? targetEnabled;
-  final DeveloperSession? session;
-  final List<Uri> links;
-  final Object? error;
-  final Future<void> Function() onEnable;
-  final Future<void> Function() onDisable;
-  final ValueChanged<Uri> onOpenWorkspace;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = session?.enabled ?? false;
-    final selectedLink = links.isEmpty ? null : links.first;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    context.tr('settings.developer_mode'),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Switch(
-                  value: targetEnabled ?? enabled,
-                  onChanged: providerAvailable && !loading
-                      ? (value) => unawaited(value ? onEnable() : onDisable())
-                      : null,
-                ),
-              ],
-            ),
-            if (loading) const LinearProgressIndicator(minHeight: 2),
-            const SizedBox(height: 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final port = TextField(
-                  controller: portController,
-                  enabled: providerAvailable && !enabled && !loading,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: context.tr('settings.port'),
-                    hintText: '16666',
-                  ),
-                );
-                final token = TextField(
-                  controller: tokenController,
-                  enabled: providerAvailable && !enabled && !loading,
-                  decoration: InputDecoration(
-                    labelText: 'Token',
-                    hintText: context.tr('settings.developer_token_hint'),
-                  ),
-                );
-                if (constraints.maxWidth < 520) {
-                  return Column(
-                    children: [port, const SizedBox(height: 12), token],
-                  );
-                }
-                return Row(
-                  children: [
-                    SizedBox(width: 140, child: port),
-                    const SizedBox(width: 12),
-                    Expanded(child: token),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            if (!providerAvailable)
-              Text(context.tr('settings.developer_channel_unsupported'))
-            else if (error != null)
-              Text(
-                context.tr(
-                  'settings.developer_unavailable',
-                  arguments: {'error': _developerErrorMessage(error)},
-                ),
-              )
-            else if (loading)
-              Text(
-                targetEnabled == false
-                    ? context.tr('settings.developer_stopping')
-                    : context.tr('settings.developer_starting'),
-              )
-            else if (!enabled)
-              Text(context.tr('settings.developer_description'))
-            else
-              _DeveloperLinks(
-                session: session!,
-                links: links,
-                qrLink: selectedLink,
-                onOpenWorkspace: onOpenWorkspace,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DeveloperLinks extends StatefulWidget {
-  const _DeveloperLinks({
-    required this.session,
-    required this.links,
-    required this.qrLink,
-    required this.onOpenWorkspace,
-  });
-
-  final DeveloperSession session;
-  final List<Uri> links;
-  final Uri? qrLink;
-  final ValueChanged<Uri> onOpenWorkspace;
-
-  @override
-  State<_DeveloperLinks> createState() => _DeveloperLinksState();
-}
-
-class _DeveloperLinksState extends State<_DeveloperLinks> {
-  Uri? _selectedLink;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedLink = widget.qrLink;
-  }
-
-  @override
-  void didUpdateWidget(covariant _DeveloperLinks oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (_selectedLink == null || !widget.links.contains(_selectedLink)) {
-      _selectedLink = widget.qrLink;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final selectedLink = _selectedLink;
-    final colors = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final details = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              context.tr(
-                'settings.developer_enabled',
-                arguments: {'hint': widget.session.tokenHint ?? '------'},
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (selectedLink != null) ...[
-              FilledButton.icon(
-                onPressed: () => widget.onOpenWorkspace(selectedLink),
-                icon: const Icon(Icons.code),
-                label: Text(context.tr('settings.open_workspace')),
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (widget.links.isEmpty)
-              Text(context.tr('settings.no_lan_address'))
-            else
-              for (final link in widget.links)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: ListTile(
-                    dense: true,
-                    selected: link == selectedLink,
-                    selectedTileColor: colors.secondaryContainer,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    textColor: colors.onSurface,
-                    iconColor: colors.onSurfaceVariant,
-                    selectedColor: colors.onSecondaryContainer,
-                    leading: Icon(
-                      link == selectedLink
-                          ? Icons.radio_button_checked
-                          : Icons.radio_button_off,
-                    ),
-                    title: Text(link.host),
-                    subtitle: SelectableText(
-                      link.toString(),
-                      style: TextStyle(
-                        fontFamily: 'Consolas',
-                        color: link == selectedLink
-                            ? colors.onSecondaryContainer
-                            : colors.onSurfaceVariant,
-                      ),
-                    ),
-                    trailing: IconButton(
-                      tooltip: context.tr('settings.copy_developer_link'),
-                      onPressed: () => _copyLink(context, link),
-                      icon: const Icon(Icons.copy),
-                    ),
-                    onTap: () => setState(() => _selectedLink = link),
-                  ),
-                ),
-            Text(context.tr('settings.developer_qr_description')),
-            if (Theme.of(context).platform == TargetPlatform.android) ...[
-              const SizedBox(height: 6),
-              Text(
-                context.tr('settings.developer_android_description'),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ],
-        );
-        final qr = selectedLink == null
-            ? null
-            : ColoredBox(
-                color: Colors.white,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: QrImageView(data: selectedLink.toString(), size: 150),
-                ),
-              );
-        if (constraints.maxWidth < 560 && qr != null) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [qr, const SizedBox(height: 12), details],
-          );
-        }
-        if (qr == null) return details;
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            qr,
-            const SizedBox(width: 16),
-            Expanded(child: details),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _copyLink(BuildContext context, Uri link) async {
-    await Clipboard.setData(ClipboardData(text: link.toString()));
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(context.tr('settings.developer_link_copied'))),
-    );
-  }
-}
-
 class _CoreStatusSection extends StatelessWidget {
   const _CoreStatusSection({
     required this.endpoint,
@@ -1085,43 +653,79 @@ class _StatusPresentation {
 }
 
 class _AboutSection extends StatelessWidget {
-  const _AboutSection();
+  const _AboutSection({required this.onCheckUpdates});
+
+  final VoidCallback onCheckUpdates;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            const GradientIcon(icon: Icons.hub_rounded, size: 54, iconSize: 27),
-            const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Playmesh $playmeshVersion',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final identity = Row(
+              children: [
+                const GradientIcon(
+                  icon: Icons.hub_rounded,
+                  size: 54,
+                  iconSize: 27,
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Playmesh $playmeshVersion',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        context.tr(
+                          'settings.about_description',
+                          arguments: {'build': playmeshBuildNumber},
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    context.tr(
-                      'settings.about_description',
-                      arguments: {'build': playmeshBuildNumber},
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: context.tr('settings.release_notes'),
-              onPressed: () => _showReleaseNotes(context),
-              icon: const Icon(Icons.new_releases_outlined),
-            ),
-          ],
+                ),
+              ],
+            );
+            final actions = Wrap(
+              spacing: 6,
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilledButton.tonalIcon(
+                  key: const Key('check-app-update-button'),
+                  onPressed: onCheckUpdates,
+                  icon: const Icon(Icons.system_update_alt_rounded),
+                  label: Text(context.tr('settings.check_updates')),
+                ),
+                IconButton(
+                  tooltip: context.tr('settings.release_notes'),
+                  onPressed: () => _showReleaseNotes(context),
+                  icon: const Icon(Icons.new_releases_outlined),
+                ),
+              ],
+            );
+            if (constraints.maxWidth < 520) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [identity, const SizedBox(height: 12), actions],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: identity),
+                const SizedBox(width: 12),
+                actions,
+              ],
+            );
+          },
         ),
       ),
     );
@@ -1195,9 +799,3 @@ String _formatTimestamp(BuildContext context, DateTime timestamp) {
   return '${material.formatMediumDate(local)} '
       '${material.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
 }
-
-String _developerErrorMessage(Object? error) => switch (error) {
-  FormatException(:final message) => message,
-  StateError(:final message) => message,
-  _ => error.toString(),
-};

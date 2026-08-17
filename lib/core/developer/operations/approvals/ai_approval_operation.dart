@@ -44,6 +44,32 @@ class _AiApprovalOperation implements _DeveloperHttpOperation {
       chatEnabled: false,
       agentEnabled: false,
     ),
+    DeveloperOperationDefinition(
+      id: 'ai_approval_grants.list',
+      method: 'GET',
+      path: '/dev/api/ai-approval-grants',
+      summary: '读取按项目和工具持久保存的 AI 始终允许授权',
+      permission: 'ai.approval.manage',
+      chatEnabled: false,
+      agentEnabled: false,
+    ),
+    DeveloperOperationDefinition(
+      id: 'ai_approval_grants.revoke',
+      method: 'DELETE',
+      path: '/dev/api/ai-approval-grants/{grantId}',
+      summary: '撤销一个按项目和工具持久保存的 AI 授权',
+      permission: 'ai.approval.manage',
+      parameters: [
+        DeveloperOperationParameter(
+          name: 'grantId',
+          location: DeveloperOperationParameterLocation.path,
+          description: '持久授权 ID',
+          required: true,
+        ),
+      ],
+      chatEnabled: false,
+      agentEnabled: false,
+    ),
   ];
 
   @override
@@ -54,10 +80,37 @@ class _AiApprovalOperation implements _DeveloperHttpOperation {
     DeveloperOperationDefinition definition,
     Map<String, String> pathParameters,
   ) async {
-    if (request.method == 'GET') {
+    if (definition.id == 'ai_approvals.list') {
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
         'approvals': gateway.approvalBroker.pending,
+      });
+      return;
+    }
+    if (definition.id == 'ai_approval_grants.list') {
+      await _json(request.response, HttpStatus.ok, {
+        'requestId': requestId,
+        'grants': await gateway.approvalBroker.listAlwaysGrants(),
+      });
+      return;
+    }
+    if (definition.id == 'ai_approval_grants.revoke') {
+      final grantId = pathParameters['grantId']!;
+      final removed = await gateway.approvalBroker.revokeAlways(grantId);
+      if (!removed) {
+        await _error(
+          request.response,
+          HttpStatus.notFound,
+          requestId,
+          'ai_approval_grant_not_found',
+          '持久 AI 审批授权不存在',
+        );
+        return;
+      }
+      await _json(request.response, HttpStatus.ok, {
+        'requestId': requestId,
+        'grantId': grantId,
+        'revoked': true,
       });
       return;
     }
@@ -67,15 +120,18 @@ class _AiApprovalOperation implements _DeveloperHttpOperation {
       throw const FormatException('decision 必须是字符串');
     }
     final decision = switch (rawDecision) {
-      'once' => _DeveloperAiApprovalDecision.once,
-      'project' => _DeveloperAiApprovalDecision.project,
-      'always' => _DeveloperAiApprovalDecision.always,
-      'reject' => _DeveloperAiApprovalDecision.reject,
+      'once' => DeveloperAiApprovalDecision.once,
+      'project' => DeveloperAiApprovalDecision.project,
+      'always' => DeveloperAiApprovalDecision.always,
+      'reject' => DeveloperAiApprovalDecision.reject,
       _ => throw const FormatException(
         'decision 只支持 once、project、always 或 reject',
       ),
     };
-    gateway.approvalBroker.decide(pathParameters['approvalId']!, decision);
+    await gateway.approvalBroker.decide(
+      pathParameters['approvalId']!,
+      decision,
+    );
     await _json(request.response, HttpStatus.ok, {
       'requestId': requestId,
       'approvalId': pathParameters['approvalId'],

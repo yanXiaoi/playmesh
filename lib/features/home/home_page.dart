@@ -13,6 +13,7 @@ import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
 import '../game/join_game_page.dart';
+import '../developer/game_creation_page.dart';
 import '../games/game_library_page.dart';
 import '../games/online_game_library_page.dart';
 import '../profile/profile_page.dart';
@@ -35,6 +36,7 @@ class HomePage extends StatelessWidget {
   static const profileIdentityKey = Key('home-profile-identity');
   static const scanJoinKey = Key('home-scan-join');
   static const githubKey = Key('home-github');
+  static const createGameKey = Key('home-create-game');
   static const gameLibraryLoadingKey = Key('home-game-library-loading');
   static final githubRepositoryUri = Uri.parse(
     'https://github.com/yanXiaoi/playmesh',
@@ -117,6 +119,8 @@ class HomePage extends StatelessWidget {
 
     void openSettings() =>
         Navigator.of(context).pushNamed(SettingsPage.routeName);
+    void openGameCreation() =>
+        Navigator.of(context).pushNamed(GameCreationPage.routeName);
     void openGitHub() {
       unawaited(() async {
         final launcher = externalUrlLauncher;
@@ -147,7 +151,7 @@ class HomePage extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(7),
               child: Image.asset(
-                'assets/branding/playmesh-logo.png',
+                'assets/branding/playmesh-mark.png',
                 width: 30,
                 height: 30,
                 excludeFromSemantics: true,
@@ -216,6 +220,7 @@ class HomePage extends StatelessWidget {
                           context,
                         ).pushNamed(JoinGamePage.routeName),
                         onOpenOnline: openOnline,
+                        onCreateGame: openGameCreation,
                       ),
                     ),
                   ],
@@ -374,14 +379,19 @@ class _ProfileHero extends StatelessWidget {
 }
 
 class _PrimaryActions extends StatelessWidget {
-  const _PrimaryActions({required this.onJoin, required this.onOpenOnline});
+  const _PrimaryActions({
+    required this.onJoin,
+    required this.onOpenOnline,
+    required this.onCreateGame,
+  });
 
   final VoidCallback onJoin;
   final VoidCallback onOpenOnline;
+  final VoidCallback onCreateGame;
 
   @override
   Widget build(BuildContext context) {
-    final actions = [
+    final primaryActions = [
       _PrimaryAction(
         icon: Icons.qr_code_scanner_rounded,
         title: context.tr('home.join'),
@@ -395,19 +405,35 @@ class _PrimaryActions extends StatelessWidget {
         onPressed: onOpenOnline,
       ),
     ];
+    final createAction = _PrimaryAction(
+      icon: Icons.handyman_outlined,
+      title: context.tr('home.create_game'),
+      subtitle: context.tr('home.create_game_hint'),
+      onPressed: onCreateGame,
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 720 ? 2 : 1;
         final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final action in actions)
-              SizedBox(
-                width: width,
-                child: _PrimaryActionTile(action: action),
-              ),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final action in primaryActions)
+                  SizedBox(
+                    width: width,
+                    child: _PrimaryActionTile(action: action),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _PrimaryActionTile(
+              key: HomePage.createGameKey,
+              action: createAction,
+            ),
           ],
         );
       },
@@ -430,7 +456,7 @@ class _PrimaryAction {
 }
 
 class _PrimaryActionTile extends StatelessWidget {
-  const _PrimaryActionTile({required this.action});
+  const _PrimaryActionTile({super.key, required this.action});
 
   final _PrimaryAction action;
 

@@ -9,11 +9,11 @@
 - 不得调用 playmesh.main.session、playmesh.main.player、playmesh.main.game、playmesh.main.authority 或 playmesh.main.sync。
 - 不得生成房间、玩家列表、准备、联机码、控制器、广播或消息同步代码。
 
-单机数据流：
+单机持久化数据流：
 1. await playmesh.ready。
-2. 从 playmesh.main.storage Bucket 读取状态。
-3. 本地输入更新状态并立即渲染。
-4. 状态变化时调用 setData；退出时只做业务清理，App 会完成最终落盘。
+2. 从 playmesh.main.storage Bucket 读取存档、长期进度或游戏配置。
+3. 本地输入更新当前运行状态并立即渲染。
+4. 在游戏定义的存档点或持久信息变化时调用 setData；退出时执行游戏自身的业务清理，App 完成最终落盘。
 
 最小参考：
 

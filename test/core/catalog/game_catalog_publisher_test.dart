@@ -98,7 +98,7 @@ void main() {
             jsonEncode({
               'code': 'package_rejected',
               'message':
-                  'main.json.sdkVersion 必须显式声明为 4.0.0\n'
+                  'main.json.sdkVersion 必须显式声明为 4.1.0\n'
                   'upload-SECRET read-SECRET',
             }),
             HttpStatus.unprocessableEntity,
@@ -113,7 +113,7 @@ void main() {
 
     final source = result.sources.single;
     expect(source.status, GameCatalogPublishStatus.packageValidationFailed);
-    expect(source.detail, contains('main.json.sdkVersion 必须显式声明为 4.0.0'));
+    expect(source.detail, contains('main.json.sdkVersion 必须显式声明为 4.1.0'));
     expect(source.detail, isNot(contains('SECRET')));
     expect(result.toJson().toString(), isNot(contains('SECRET')));
   });
@@ -326,8 +326,8 @@ class _Fixture {
         'name': 'Publish Game',
         'author': 'Publisher',
         'version': '1.0.0',
-        'sdkVersion': '4.0.0',
-        'appSdkVersion': '3.2.0',
+        'sdkVersion': '4.1.0',
+        'appSdkVersion': '3.3.0',
         'orientation': 'landscape',
         'modes': ['solo'],
         'displayModes': ['multi_screen'],

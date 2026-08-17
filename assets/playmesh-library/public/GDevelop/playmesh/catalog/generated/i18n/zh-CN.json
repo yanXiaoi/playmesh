@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "catalogRevision": "gdevelop-v5.6.276-catalog-1",
+  "locale": "zh-CN",
+  "sourceLanguage": "en",
+  "exactSources": {
+    "extensionsCommit": "de361fba046e0670a8414cbc657dd53788dbfc48",
+    "examplesCommit": "c55c87d88ac48de01653844dc484c253adecd9c7"
+  },
+  "providers": [],
+  "entries": {
+    "extensions": {},
+    "behaviors": {},
+    "examples": {}
+  },
+  "stats": {
+    "totalFields": 1813,
+    "translatedFields": 0,
+    "cachedFields": 0,
+    "fallbackFields": 1813,
+    "complete": false
+  }
+}

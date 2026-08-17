@@ -308,7 +308,7 @@ function createPage({
             result: command.command === "app.bootstrap"
               ? {
                   available: true,
-                  sdkVersion: "3.2.0",
+                  sdkVersion: "3.3.0",
                   identity: null,
                   capabilityRegistry: [],
                   device: {
@@ -360,7 +360,7 @@ const browserPage = createPage();
 assert.equal(browserPage.consoleEntries[0].args.length, 1);
 assert.equal(
   browserPage.consoleEntries[0].args[0],
-  'Playmesh App SDK 注入成功 {"version":"3.2.0"}',
+  'Playmesh App SDK 注入成功 {"version":"3.3.0"}',
 );
 assert.equal(browserPage.window.playmesh, undefined);
 assert.equal(browserPage.window.playmeshApp, undefined);
@@ -384,8 +384,8 @@ browserPage.window[appInternalKey].registerRuntimeUi({
       isAuthority: true,
       playerName: null,
       playerCount: null,
-      gameSdkVersion: "4.0.0",
-      appSdkVersion: "3.2.0",
+      gameSdkVersion: "4.1.0",
+      appSdkVersion: "3.3.0",
       platform: "browser",
     };
   },
@@ -426,7 +426,7 @@ assert.equal(
 await browserPage.appSdk.ui.openRuntimeLogs();
 assert.equal(
   browserUi[".logs-output"].textContent.includes(
-    'Playmesh App SDK 注入成功 {"version":"3.2.0"}',
+    'Playmesh App SDK 注入成功 {"version":"3.3.0"}',
   ),
   true,
 );
@@ -606,6 +606,57 @@ const reloadedPage = createPage({ sessionState: restartSession });
 await reloadedPage.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(reloadedPage.mounted[0].__elements[".layer"].hidden, true);
+
+const menuEventPage = createPage();
+await menuEventPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+const menuEventUi = menuEventPage.mounted[0].__elements;
+const menuEvents = [];
+const stopMenuOpen = menuEventPage.appSdk.ui.onGameMenuOpen(() => {
+  menuEvents.push("open");
+});
+const stopMenuClose = menuEventPage.appSdk.ui.onGameMenuClose(() => {
+  menuEvents.push("close");
+});
+const stopFailingOpen = menuEventPage.appSdk.ui.onGameMenuOpen(() => {
+  throw new Error("menu open listener failed");
+});
+assert.throws(
+  () => menuEventPage.appSdk.ui.onGameMenuOpen(null),
+  /callback 必须是函数/,
+);
+assert.throws(
+  () => menuEventPage.appSdk.ui.onGameMenuClose("invalid"),
+  /callback 必须是函数/,
+);
+menuEventPage.dispatchKey("Escape", 27);
+await Promise.resolve();
+assert.deepEqual(menuEvents, ["open"]);
+assert.equal(
+  menuEventPage.consoleEntries.some((entry) =>
+    entry.level === "warn" &&
+    entry.args[0].startsWith("Playmesh 游戏菜单打开 回调执行失败")
+  ),
+  true,
+);
+assert.equal(await menuEventPage.appSdk.ui.showGameSidebar(), true);
+assert.deepEqual(menuEvents, ["open"]);
+menuEventUi[".scrim"].click();
+assert.deepEqual(menuEvents, ["open", "close"]);
+stopFailingOpen();
+stopFailingOpen();
+assert.equal(await menuEventPage.appSdk.ui.showGameSidebar(), true);
+assert.deepEqual(menuEvents, ["open", "close", "open"]);
+menuEventUi[".continue"].click();
+assert.deepEqual(menuEvents, ["open", "close", "open", "close"]);
+stopMenuOpen();
+stopMenuOpen();
+assert.equal(await menuEventPage.appSdk.ui.showGameSidebar(), true);
+assert.deepEqual(menuEvents, ["open", "close", "open", "close"]);
+menuEventPage.appSdk.ui.configure({ fallbackUi: false });
+assert.deepEqual(menuEvents, ["open", "close", "open", "close", "close"]);
+stopMenuClose();
+stopMenuClose();
 
 const disabledPage = createPage({ fallbackUi: false });
 await disabledPage.appSdk.ready;

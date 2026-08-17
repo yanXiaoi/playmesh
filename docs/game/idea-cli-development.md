@@ -84,6 +84,11 @@ playmesh-cli get com.example.game
 的 JavaScript，无法还原 TypeScript 类型、Cocos 场景或原始源码结构，因此现有工程
 不会被原地更新，TypeScript/Cocos 必须从 Git 或其他源码备份恢复。
 
+如果已经从 Developer API 手工取得并解压了根 `main.json + app/` 项目包，可在包根
+目录执行 `playmesh-cli convert`。命令从已连接 App 获取当前 SDK，在暂存目录完整
+校验和生成 JavaScript CLI 2.0 工程，全部成功后才迁移为 `playmesh/package/` 与
+`src/` 布局；已有脚手架文件不会被覆盖，失败时原项目包保持不变。
+
 ## npm 与 CLI 命令
 
 根 `package.json` 提供：
@@ -138,10 +143,11 @@ Web Mobile/Web Desktop 正式构建完成后，扩展会把整个构建结果原
 
 ## CLI 2.0 破坏性边界
 
-CLI 2.0 不再接受根目录直接包含 `main.json`、`app/`、`playmesh/sdk/` 的 1.x 工程。
-旧 JavaScript 项目可在新的空目录中执行 `playmesh-cli get <project-id>`。旧
-TypeScript/Cocos 项目不能从 App 发布包无损迁移，必须使用原始源码重新初始化或手工
-迁移。CLI 不会就地覆盖旧源码，也不会假装反编译 TypeScript。
+CLI 2.0 运行命令不再直接接受根目录包含 `main.json`、`app/`、`playmesh/sdk/` 的 1.x
+布局。旧 JavaScript 项目可在新的空目录中执行 `playmesh-cli get <project-id>`；标准
+`main.json + app/` 发布包也可显式执行 `playmesh-cli convert` 转换。旧 TypeScript/Cocos
+项目不能从 App 发布包无损迁移，必须使用原始源码重新初始化或手工迁移。CLI 不会隐式
+覆盖旧源码，也不会假装反编译 TypeScript。
 
 项目已经存在 `playmesh-cli.json`、根 `main.json` 或
 `playmesh/package/main.json` 时，`init` 会在写文件和调用远端创建 API 前报错。

@@ -109,28 +109,6 @@ const gameSessionSdkSource = SdkSourceFragment(
     }
   }
 
-  async function dispatchAuthorityAction(transportMessage) {
-    if (await dispatchSyncAuthorityAction(transportMessage)) return;
-    if (!authorityService) {
-      return;
-    }
-    const context = {
-      senderPlayerId: transportMessage.senderPlayerId,
-      session: transportMessage.session,
-      members: transportMessage.session.players,
-    };
-    const output = await authorityService(transportMessage.payload, context);
-    const results = Array.isArray(output) ? output : [output];
-    for (const result of results) {
-      if (!result || !Array.isArray(result.targetPlayerIds) || !result.message) {
-        continue;
-      }
-      await post("authority.result", result.message, {
-        targetPlayerIds: result.targetPlayerIds,
-      });
-    }
-  }
-
 ''',
 );
 

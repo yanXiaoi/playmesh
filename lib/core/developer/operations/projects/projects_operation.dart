@@ -80,8 +80,17 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
   ) async {
     if (request.method == 'GET') {
       final projects = await gateway.catalog.listProjects();
+      final runningProjectId = gateway.runController.activeStatus?.projectId;
+      final activeProjectId =
+          runningProjectId != null &&
+              projects.any((project) => project.id == runningProjectId)
+          ? runningProjectId
+          : projects.isEmpty
+          ? null
+          : projects.first.id;
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
+        'activeProjectId': activeProjectId,
         'projects': projects.map((project) => project.toJson()).toList(),
       });
       return;

@@ -466,6 +466,18 @@
       "pattern": "^/bucket/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[0-9]+(?:\\.[A-Za-z0-9]{1,16})?$",
       "description": "Same-origin URL returned by StorageBucket.upload(file)"
     },
+    "StorageBucketMethodName": {
+      "enum": [
+        "getData",
+        "setData",
+        "getDataSync",
+        "setDataSync",
+        "removeData",
+        "clearData",
+        "upload"
+      ],
+      "description": "Public StorageBucket method names. Sync methods are optional blocking LAN JSON access and do not use binary upload storage."
+    },
     "PlaymeshBootstrap": {
       "type": "object",
       "required": [
@@ -477,7 +489,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "4.0.0"
+          "const": "4.1.0"
         },
         "gameInfo": {
           "$ref": "#/$defs/GameInfo"
@@ -522,7 +534,7 @@
           "type": "boolean"
         },
         "sdkVersion": {
-          "const": "3.2.0"
+          "const": "3.3.0"
         },
         "identity": {
           "oneOf": [

@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	RequiredGameVersion = contract.GameSDKVersion
-	RequiredAppVersion  = contract.AppSDKVersion
+	RequiredGameVersion        = contract.GameSDKVersion
+	RequiredAppVersion         = contract.AppSDKVersion
+	MinimumSupportedAppVersion = contract.MinimumAppSDKVersion
 )
 
 var (
@@ -139,16 +140,21 @@ func VersionsFromBytes(game, app []byte) (Versions, error) {
 
 func RequireCurrentVersions(versions Versions) error {
 	if versions.Game == RequiredGameVersion &&
-		versions.App == RequiredAppVersion {
+		IsSupportedAppVersion(versions.App) {
 		return nil
 	}
 	return fmt.Errorf(
-		"仅接受 Game SDK %s 与 App SDK %s，实际为 %s 与 %s",
+		"仅接受 Game SDK %s 与 App SDK %s 或 %s，实际为 %s 与 %s",
 		RequiredGameVersion,
+		MinimumSupportedAppVersion,
 		RequiredAppVersion,
 		versions.Game,
 		versions.App,
 	)
+}
+
+func IsSupportedAppVersion(version string) bool {
+	return version == MinimumSupportedAppVersion || version == RequiredAppVersion
 }
 
 func UpdateManifestVersions(projectRoot string, versions Versions) (string, error) {

@@ -1,0 +1,7 @@
+/* Entry points for GDevelop commercial services are not part of Playmesh. */
+#home-shop-tab,
+#home-play-tab,
+#team-view-tab {
+  display: none !important;
+}
+

@@ -84,11 +84,11 @@
 
 前置条件：第三阶段 SDK、Go Core、App 中转和游戏包加载链路稳定。详细规格见 [game/web-dev-channel.md](game/web-dev-channel.md)。
 
-目标：用户在 App 设置开启开发者模式后，App 加载持久化的端口、token 和工作区路径；同局域网浏览器使用稳定链接进入网页开发者工作区，直接使用完整 SDK 和开发者 API 进行开发、运行和诊断。
+目标：用户从 App 首页进入“制作游戏”，开启开发者模式并选择“源代码开发”或“可视化开发”后，App 加载持久化的端口、token 和工作区路径；同局域网浏览器使用稳定链接进入对应工作区，直接使用完整 SDK 和开发者 API 进行开发、运行和诊断。
 
 范围：
 
-- 独立开发者 Gateway 使用设置页配置的固定端口，默认 `16666`；Go Core 继续使用系统动态端口。
+- 独立开发者 Gateway 使用“制作游戏”页配置的固定端口，默认 `16666`；Go Core 继续使用系统动态端口。
 - 开发者 token 可由用户自定义；首次留空时生成高强度随机值。端口、token 和工作区路径持久化，后续重新开启或 App 重启时复用同一工作区链接。
 - 游戏项目和文件编辑。
 - 统一开发者工作区能力：App 内置 WebView 与电脑浏览器共用新建游戏、文件/文件夹新建与删除、文件上传、编辑保存、批量替换、行插入、范围替换、Diff、按时间操作查看和恢复项目级本地历史、运行及 SSE 实时同步；不再实现独立 App 文件编辑器。编辑器内尚未保存的撤销/前进由 CodeMirror 管理，不提供服务端单文件撤销接口。
@@ -109,7 +109,7 @@
 - AI 和浏览器只能访问当前 token 绑定的项目、运行状态、开发者事件和文档资源。
 - 不允许任意系统命令、App 账号 token、其他项目或用户私有数据访问；持久开发者 token 只能授权 Developer API。
 - 浏览器和 AI 能读取完整机器可读接口文档并直接完成一次开发、运行和测试闭环。
-- 设置页和游戏分享层展示的所有链接都可长按或拖选复制。
+- “制作游戏”页和游戏分享层展示的所有链接都可长按或拖选复制。
 
 ## 第五阶段：SDK 权威状态同步与联机延迟显示（已完成）
 
@@ -168,8 +168,9 @@ AI 心智负担要求：
 - 至少检查并更新：`docs/00-context.md`、`docs/01-architecture.md`、`docs/02-roadmap.md`、`docs/05-next-steps.md`、`docs/06-engineering-standards.md`、`docs/game/README.md`、`docs/game/development-guide.md`、`docs/game/sdk-v1.md`、`docs/game/web-dev-channel.md`、`assets/playmesh-library/public/developer/contracts/sdk-manifest.json`、`assets/playmesh-library/public/developer/contracts/schemas/sdk-v1.json` 和 `assets/playmesh-library/public/developer/prompts/`。Developer OpenAPI 必须由运行时操作注册表生成，不维护静态副本。
 - 如果新增 `playmesh.main.sync` 或等价能力导致 SDK 版本、模板结构或 AI 可读契约变化，
   必须更新当前契约，并同步更新最小数据流说明和开发者工作区校验规则。默认模板与
-  AI 契约只暴露当前版本；运行时由 Dart 注册表精确接受 Game SDK `4.0.0` 与 App
-  Bridge SDK `3.2.0`，旧清单版本直接拒绝，不通过静态文件、版本回退或旁路适配历史版本。
+  AI 契约只暴露当前版本；运行时由 Dart 注册表接受 Game SDK `4.1.0`，并把 App
+  Bridge SDK `3.2.0`–`3.3.0` 的兼容请求解析到 `3.3.0` bundle。范围外版本直接拒绝，
+  不通过静态文件或网关旁路适配。
 
 验收：
 

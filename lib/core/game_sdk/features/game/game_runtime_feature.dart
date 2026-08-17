@@ -133,14 +133,9 @@ const gameRuntimeSdkSource = SdkSourceFragment(
       emit(sessionListeners, transport.session);
       startLatencyProbes();
     } else if (transport.type === "game.message") {
-      const storageResponse = transport.payload?.__playmeshStorageResponse;
-      if (storageResponse) {
-        settleBrowserStorage(storageResponse);
-      } else {
-        const snapshot = transport.payload?.__playmeshSyncSnapshot;
-        if (snapshot) applySyncSnapshot(snapshot);
-        else emit(messageListeners, transport.payload);
-      }
+      const snapshot = transport.payload?.__playmeshSyncSnapshot;
+      if (snapshot) applySyncSnapshot(snapshot);
+      else emit(messageListeners, transport.payload);
     } else if (transport.type === "session.pong") {
       handleLatencyPong(transport.payload);
     } else if (transport.type === "authority.ping") {

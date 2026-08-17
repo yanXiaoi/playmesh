@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/4ian/GDevelop.git",
+    "tag": "v5.6.276",
+    "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361",
+    "sourceArchive": "https://codeload.github.com/4ian/GDevelop/zip/refs/tags/v5.6.276",
+    "sourceArchiveSha256": "9ec62ca0d8fa898669cca942d0e3c3258803b2ae90be6b9124eac5c75e5c4ed4",
+    "license": "MIT"
+  },
+  "playmeshRevision": 18,
+  "distribution": {
+    "assetName": "GDevelop-webide-v5.6.276.zip"
+  },
+  "compliance": {
+    "monaco": {
+      "declaredVersion": "0.14.3",
+      "loaderReportedVersion": "0.14.6",
+      "loaderSha256": "0c272c30972d036de6dec5e9d51ac358c11be58b4eef0fba4c85151f30e72ba6"
+    },
+    "playmeshBrandAsset": {
+      "sourcePath": "assets/branding/playmesh-mark.png",
+      "sourceSha256": "67ded8c45a9814e0e138ab6f677409be3775d63f7ee33ef5b7570314cc5a4218",
+      "pixelContract": "playmesh-transparent-mark-v1",
+      "rightsEvidence": "not-asserted-by-build-system"
+    },
+    "firebaseWebIde": {
+      "version": "9.0.0-beta.2",
+      "packageIntegrity": "sha512-gbcJ2sg/ECEP72sn2o4CRI2EjoF0r+v9jZ6zOZ1E/keWpTbZacWvMT4troW9LSmY5lxGBE2grl+EoWSD57Jrdg==",
+      "packageJsonSha256": "8774d51797d604c5ab25de8fa16d064febb2e4e67d8a996db1fb7290057f7a94",
+      "dependencyCommit": "d92a36260a856026263b29955551284d9ee29a58",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/firebase/firebase-js-sdk.git"
+    },
+    "bbTextPixiMultistyleText": {
+      "repository": "https://github.com/tleunen/pixi-multistyle-text.git",
+      "licenseCommit": "3a42873661533af916867f49917f47e764a26181",
+      "licenseSourceUrl": "https://raw.githubusercontent.com/tleunen/pixi-multistyle-text/3a42873661533af916867f49917f47e764a26181/LICENSE.md",
+      "licensePath": "third_party/gdevelop/pixi-multistyle-text-LICENSE.md",
+      "upstreamLicenseSha256": "268d10da911a73347c8c3eacc511aea1a99e1ef151ad90d7ddb5508d46b6bc7e",
+      "vendoredLicenseSha256": "c57ae452dc3235880941f51a0cdd80f4f614014292c49e831221a0bf72fffd12",
+      "vendoredFiles": {
+        "Extensions/BBText/pixi-multistyle-text/README.md": "36e1ccc5e973f62062f4aa767c0206fe33c052bbb9279535caa8f8bec626f8bf",
+        "Extensions/BBText/pixi-multistyle-text/dist/pixi-multistyle-text.d.ts": "4d87f9033669b19e01c8626db64c095404932fe18ddef58399571f9c749d704f",
+        "Extensions/BBText/pixi-multistyle-text/dist/pixi-multistyle-text.umd.js": "198df3e1399b06884328b882207df88ebd00fc6f65642f4c44a07bab5694c7ca"
+      },
+      "exactUpstreamCodeRevision": "unknown"
+    }
+  }
+}

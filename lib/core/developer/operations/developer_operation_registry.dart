@@ -15,7 +15,7 @@ class _DeveloperOperationRegistry {
   }) : middleware = List.unmodifiable(middleware),
        executionMiddleware = List.unmodifiable(executionMiddleware);
 
-  static const catalogVersion = '4.1.0';
+  static const catalogVersion = '4.2.0';
 
   final List<_DeveloperHttpOperation> operations;
   final List<DeveloperOperationMiddleware> middleware;
@@ -51,6 +51,20 @@ class _DeveloperOperationRegistry {
   ) async {
     final matched = match(request);
     if (matched == null) return false;
+    if (!gateway.gdevelopAiFeaturePolicy.allowsRequest(
+      operationId: matched.definition.id,
+      pathParameters: matched.pathParameters,
+      queryParameters: request.uri.queryParameters,
+    )) {
+      await _error(
+        request.response,
+        HttpStatus.notFound,
+        requestId,
+        'route_not_found',
+        '开发者接口不存在',
+      );
+      return true;
+    }
     request.response.headers.set(
       'X-Playmesh-Operation-ID',
       matched.definition.id,
@@ -79,9 +93,12 @@ class _DeveloperOperationRegistry {
     return true;
   }
 
-  Map<String, Object?> openApi() {
+  Map<String, Object?> openApi({
+    bool Function(DeveloperOperationDefinition operation)? where,
+  }) {
     final paths = <String, Map<String, Object?>>{};
     for (final definition in definitions) {
+      if (where != null && !where(definition)) continue;
       final path = paths.putIfAbsent(
         definition.path,
         () => <String, Object?>{},

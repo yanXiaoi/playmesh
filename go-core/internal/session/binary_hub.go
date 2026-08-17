@@ -346,12 +346,14 @@ func (b *binaryHub) detach(sessionID string, peer *binaryPeer) {
 		return
 	}
 	delete(session.peers, peer.player.ID)
+	for _, channel := range session.channels {
+		delete(channel.members, peer.player.ID)
+	}
 	if peer.player.ID == session.authorityID {
-		b.closeAllChannelsLocked(session, "Authority 游戏运行时已退出")
+		// Binary 瞬断不代表游戏运行时退出。保留 Channel，让同一主会话下
+		// 的 SDK 重连后通过 JOIN 恢复；未完成审核必须立即失败，不能等超时。
+		b.cancelAllReviewsLocked(session, errBinaryAuthorityOffline)
 	} else {
-		for _, channel := range session.channels {
-			delete(channel.members, peer.player.ID)
-		}
 		b.cancelPlayerReviewsLocked(session, peer.player.ID, errBinaryTargetOffline)
 	}
 	if len(session.peers) == 0 && len(session.channels) == 0 {
@@ -372,6 +374,19 @@ func (b *binaryHub) disconnect(sessionID, playerID string) {
 	b.mutex.Unlock()
 	if peer != nil {
 		peer.close(websocket.StatusNormalClosure, "主会话已关闭")
+	}
+}
+
+func (b *binaryHub) closeSessionChannels(sessionID string, reason string) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	session := b.sessions[sessionID]
+	if session == nil {
+		return
+	}
+	b.closeAllChannelsLocked(session, reason)
+	if len(session.peers) == 0 {
+		delete(b.sessions, sessionID)
 	}
 }
 
@@ -814,6 +829,22 @@ func (b *binaryHub) cancelPlayerReviewsLocked(session *binarySession, playerID s
 		b.removePendingLocked(session, pending)
 		if sender := session.peers[pending.senderID]; sender != nil {
 			b.respond(sender, pending.requestID, binaryStatusError, 0, binaryChannelID{}, cause)
+		}
+	}
+}
+
+func (b *binaryHub) cancelAllReviewsLocked(session *binarySession, cause error) {
+	for _, pending := range session.pending {
+		b.removePendingLocked(session, pending)
+		if sender := session.peers[pending.senderID]; sender != nil {
+			b.respond(
+				sender,
+				pending.requestID,
+				binaryStatusError,
+				0,
+				binaryChannelID{},
+				cause,
+			)
 		}
 	}
 }

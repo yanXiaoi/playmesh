@@ -1,0 +1,57 @@
+{
+  "positive": [
+    {
+      "name": "Flow named declaration import",
+      "importClause": "type { ProjectShape }",
+      "moduleSource": "export type ProjectShape = {| id: string |};\n"
+    },
+    {
+      "name": "Flow typeof default import",
+      "importClause": "typeof RuntimeConstructor",
+      "moduleSource": "export default class RuntimeConstructor {}\n"
+    },
+    {
+      "name": "Flow inline named modifiers",
+      "importClause": "{ type ProjectShape, typeof RuntimeValue, run as execute }",
+      "moduleSource": "export type ProjectShape = string;\nexport const RuntimeValue = {};\nexport function run() {}\n"
+    },
+    {
+      "name": "ordinary default and named imports",
+      "importClause": "DefaultRenderer, { renderFrame as render }",
+      "moduleSource": "export default function DefaultRenderer() {}\nexport const renderFrame = () => {};\n"
+    },
+    {
+      "name": "CommonJS shorthand object export",
+      "importClause": "{ mapVector }",
+      "moduleSource": "const mapVector = vector => vector;\nmodule.exports = { mapVector };\n"
+    },
+    {
+      "name": "CommonJS aliased object export",
+      "importClause": "{ mapVector }",
+      "moduleSource": "const implementation = (left, right) => [left, right];\nmodule.exports = { mapVector: implementation };\n"
+    }
+  ],
+  "negative": [
+    {
+      "name": "real default mismatch",
+      "importClause": "DefaultRenderer",
+      "moduleSource": "export const DefaultRenderer = () => {};\n",
+      "missingDefault": true,
+      "missingNamed": []
+    },
+    {
+      "name": "real named mismatch",
+      "importClause": "{ renderFrame as render }",
+      "moduleSource": "export default function renderFrame() {}\n",
+      "missingDefault": false,
+      "missingNamed": ["renderFrame"]
+    },
+    {
+      "name": "comments and strings are not exports",
+      "importClause": "MissingDefault, { missingNamed }",
+      "moduleSource": "// export default fake\nconst documentation = 'export const missingNamed = true';\n",
+      "missingDefault": true,
+      "missingNamed": ["missingNamed"]
+    }
+  ]
+}

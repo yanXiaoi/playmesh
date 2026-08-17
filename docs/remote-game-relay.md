@@ -26,7 +26,7 @@ Relay `2.0.0` 曾是分享运行时的破坏性架构更新：邀请密钥改放
 当前清单必须显式声明 `entries.game`；单屏多人还必须显式声明
 `entries.controller`，多人必须显式声明 `authority.entry`。Relay 只转交这些实际
 清单入口，不提供模板路径回退。Relay 本身不新增游戏侧 API；当前游戏代码仍只通过
-Game SDK `4.0.0` 的 `playmesh.main.*` 和 App SDK `3.2.0` 的
+Game SDK `4.1.0` 的 `playmesh.main.*` 和 App SDK `3.3.0` 的
 `playmesh.app.*` 访问平台能力。
 
 Relay 2.0 的传输架构对游戏可观察到的变化是：App 加入游戏时页面运行在本地

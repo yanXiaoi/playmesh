@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "profile": "playmesh-local-authoring",
+  "disabledFeatures": [
+    "gdevelop-ai",
+    "gdevelop-asset-store",
+    "gdevelop-cloud-projects",
+    "gdevelop-cloud-builds",
+    "gdevelop-player-authentication",
+    "gdevelop-multiplayer-services",
+    "gdevelop-leaderboards",
+    "gdevelop-games-platform",
+    "gdevelop-analytics-and-telemetry"
+  ],
+  "retainedFeatures": [
+    "local-projects",
+    "scene-editor",
+    "events-editor",
+    "javascript-events",
+    "built-in-open-source-extensions",
+    "local-preview",
+    "html5-export",
+    "playmesh-multiplayer-extension"
+  ],
+  "blockedHostSuffixes": [
+    "gdevelop.io",
+    "gdevelop-app.com",
+    "gd.games",
+    "liluo.io",
+    "gdevelop-services.firebaseapp.com",
+    "gdevelop-services.firebaseio.com",
+    "gdevelop-services.appspot.com"
+  ]
+}
+

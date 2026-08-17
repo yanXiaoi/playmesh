@@ -16,7 +16,7 @@ Playmesh 游戏是由 App 托管的 HTML/CSS/JavaScript 应用。Flutter 负责�
 
 ## IDEA 与 CLI 开发
 
-Playmesh CLI 允许在 IDEA 中编辑本地副本、在目标 Windows 或 Android App 中运行，同一套命令和目录结构跨平台使用。先在 App 设置中开启开发者模式并复制完整工作区链接，然后执行：
+Playmesh CLI 允许在 IDEA 中编辑本地副本、在目标 Windows 或 Android App 中运行，同一套命令和目录结构跨平台使用。先从 App 首页进入“制作游戏”，开启开发者模式，展开“源代码开发”并复制完整工作区链接，然后执行：
 
 ```powershell
 playmesh-cli to "http://<app-ip>:16666/dev/<workspace-id>/workspace?token=<token>"
@@ -63,8 +63,8 @@ CLI 2.0 与本次 App 资源协议构成同步破坏性更新，不兼容根目�
 环境变量或配置项。自动化契约测试已覆盖这三个来源及其优先级，但当前环境尚未在真实
 Cocos Creator Editor 中验收菜单调用和预览生命周期。
 
-已安装游戏不依赖 CLI 工程文件；App 会严格校验清单版本，只接受 Game SDK `4.0.0`
-与 App SDK `3.2.0`，不会把旧版本解析到当前发行版。完整命令、迁移边界与 Cocos
+已安装游戏不依赖 CLI 工程文件；App 会严格校验清单版本，只接受 Game SDK `4.1.0`，
+并接受 App SDK `3.2.0` 或 `3.3.0`。兼容的 `3.2.0` 请求解析到当前 `3.3.0` bundle。完整命令、迁移边界与 Cocos
 集成见
 [`dev-cli/README.md`](../../dev-cli/README.md)。
 
@@ -78,7 +78,7 @@ Playmesh 不提供独立的 App 文件编辑器。电脑浏览器与 App 内置 
 
 对话控制台自动携带 `X-Playmesh-AI-Channel: chat`；Agent 必须携带值为 `agent` 的同一请求头。注册表中 `dangerous=true` 的接口在所有 AI 通道上先暂停，通过 SSE 向工作区展示“允许一次 / 此游戏或项目允许 / 始终允许 / 拒绝”。30 秒未决定时原请求返回 `408 ai_approval_timeout`，拒绝返回 `403 ai_operation_rejected`。
 
-当前项目运行后，“更多 → WebView JS 操作台”可复用 JavaScript CodeMirror 编辑器，在当前游戏的顶层 WebView 文档中执行代码，并在下方展示 `resultType`、返回值、运行实例和请求 ID。成功结果与执行错误按项目保存在浏览器本地历史中，可由“历史记录”重新载入。对应接口为 `POST /dev/api/projects/{projectId}/webview/javascript`，请求体是 `{"source":"document.title"}`；它声明为高风险 `dangerous=true` 并同时暴露给 Chat 和 Agent，因此 AI 调用必须先走上述 SSE 审批，开发者从操作台手动执行则不附加 AI 通道头。
+当前项目运行后，“更多 → WebView JS 操作台”可复用 JavaScript CodeMirror 编辑器，在当前游戏的顶层 WebView 文档中执行代码，并在下方展示 `resultType`、返回值、运行实例和请求 ID。成功结果与执行错误仅按项目保存在当前页面会话内存中，可由“历史记录”在本次会话重新载入；刷新或关闭页面后丢弃。对应接口为 `POST /dev/api/projects/{projectId}/webview/javascript`，请求体是 `{"source":"document.title"}`；它声明为高风险 `dangerous=true` 并同时暴露给 Chat 和 Agent，因此 AI 调用必须先走上述 SSE 审批，开发者从操作台手动执行则不附加 AI 通道头。
 
 工作区还支持在项目树中右键新建或删除文件与文件夹，并将本地文件上传到指定目录。也可以把文件拖到根节点、文件夹或某个文件上；拖到文件时上传到其所在目录。只有 `.zip` 文件提供解压入口，剪切后目标目录才显示“移动到这里”。当前编辑缓冲区尚未保存内容的撤销与重做由 CodeMirror 管理；服务端不提供独立的单文件撤销接口。
 
@@ -171,9 +171,9 @@ console.log(ready.main.sdkVersion, playmesh.app.runtime.getLocale());
 ```
 
 游戏只显式引入 `playmesh-main.js`，平台会在 App WebView 和普通浏览器中先注入
-`playmesh-app.js`。Game SDK `4.0.0` 在 `playmesh.main.*` 提供所有平台一致的游戏
+`playmesh-app.js`。Game SDK `4.1.0` 在 `playmesh.main.*` 提供所有平台一致的游戏
 声明、会话、玩家、角色、联机、生命周期和存储 API，共享结果来自 Authority；App SDK
-`3.2.0` 在 `playmesh.app.*` 只提供当前终端的平台环境、身份、设备能力、权限、
+`3.3.0` 在 `playmesh.app.*` 只提供当前终端的平台环境、身份、设备能力、权限、
 输入、性能、本机 Console 日志、locale 和覆盖层。面向游戏代码的唯一全局对象是
 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在。`playmesh.main.ready` 内部先
@@ -268,12 +268,18 @@ preview.src = imageUrl;
 
 - Bucket 名称匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
 - key 只允许字母、数字、点、下划线和连字符，长度为 1 至 128。
+- 普通游戏继续使用异步 `getData/setData/removeData/clearData`。仅 GDevelop 等必须维持同步
+  上层语义的运行时适配器使用 `getDataSync/setDataSync`；同步调用会阻塞页面，失败时直接
+  抛错，不能作为普通存档 API。
 - 平台只自动绑定当前 `gameId`，不创建 `{userId}` 目录。用户维度由游戏在 key 或 JSON 内容中设计。
 - 所有客户端读写 Authority 主机的同一份 Bucket。浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Bucket。
 - 浏览器昵称采集、修改和普通浏览器居中游戏菜单由 SDK 统一提供。菜单包含继续、刷新、日志、性能、全屏、信息和退出；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具入口或昵称控件。
 - 使用 `session.onPlayerJoin`、`session.onPlayerLeave` 和 `session.onPlayerReconnect` 处理首次连接、掉线和同 ID 重连。不要用昵称推断玩家身份。
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
-- JSON 值存放在私有 `data/json`；`upload(file)` 使用原始文件流写入 `data/data`，返回运行时 `/bucket/...` 地址。游戏不得猜测宿主文件路径、枚举目录或用 `/bucket` 读取 JSON 存档。
+- JSON 值存放在私有 `data/json`，完整 Bucket root 上限为 10 MiB；异步与同步 JSON 操作
+  统一由 SDK 通过同源 HTTP `GET/PUT/DELETE` 访问，不存在 Session WS fallback。
+  `upload(file)` 仍使用独立原始文件流 `POST` 写入 `data/data`，返回运行时
+  `/bucket/...` 地址。游戏不得猜测宿主文件路径、枚举目录或自行调用内部 JSON 路由。
 
 ## FPS 上报
 

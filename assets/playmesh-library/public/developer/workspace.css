@@ -1384,7 +1384,7 @@ summary:focus-visible,
 }
 
 .prompt-preview-dialog {
-  grid-template-rows: 44px auto minmax(0, 1fr);
+  grid-template-rows: 44px auto auto minmax(0, 1fr);
 }
 
 .agent-base-url-panel {

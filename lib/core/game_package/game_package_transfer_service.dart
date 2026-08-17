@@ -220,7 +220,7 @@ class GamePackageTransferService {
     Directory target,
     Directory staging,
   ) async {
-    for (final name in const ['data', 'cache']) {
+    for (final name in const ['data', 'cache', '.playmesh']) {
       final source = Directory('${target.path}${Platform.pathSeparator}$name');
       if (await FileSystemEntity.type(source.path, followLinks: false) !=
           FileSystemEntityType.directory) {

@@ -1,0 +1,321 @@
+.root {
+  min-width: 0;
+  width: 100%;
+}
+
+.headingRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 10px;
+}
+
+.headingActions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.heading {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.resultCount,
+.cardMeta,
+.progressText {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 12px;
+}
+
+.catalogStatus {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 12px 0;
+}
+
+.importFailure {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.diagnostics {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  opacity: 0.76;
+  font-size: 11px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.thumbnail {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumbnailFallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.24), transparent 66%),
+    rgba(255, 255, 255, 0.035);
+}
+
+.thumbnailFallback span {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: clamp(28px, 6vw, 54px);
+  font-weight: 700;
+}
+
+.cardBody {
+  display: flex;
+  min-height: 286px;
+  flex: 1;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.provenance,
+.noticeFacts {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+}
+
+.provenance > div,
+.noticeFacts > div {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.34fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.provenance dt,
+.noticeFacts dt {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.provenance dd,
+.noticeFacts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.licenseStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.licenseStatusOpen {
+  color: #5ed6a0;
+  background: rgba(42, 157, 106, 0.12);
+}
+
+.licenseStatusPending {
+  color: #9ec8ff;
+  background: rgba(70, 126, 214, 0.12);
+}
+
+.licenseStatusWarning {
+  color: #ffc76a;
+  background: rgba(204, 137, 31, 0.12);
+}
+
+.cardTitle {
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardDescription {
+  display: -webkit-box;
+  min-height: 42px;
+  margin: 8px 0;
+  overflow: hidden;
+  opacity: 0.78;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.45;
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.noticeDialog {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.noticeDialog p,
+.noticeDialog h4 {
+  margin: 0;
+}
+
+.licenseDialogHeading,
+.licenseLoading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sourceUrl,
+.secondaryText {
+  color: rgba(255, 255, 255, 0.7);
+  overflow-wrap: anywhere;
+}
+
+.evidenceList {
+  display: grid;
+  gap: 8px;
+}
+
+.evidenceRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.5fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 10px;
+  border-left: 3px solid rgba(158, 200, 255, 0.72);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.evidenceRow code,
+.evidenceRow div,
+.evidenceRow span,
+.evidenceRow small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.copyrightNotice {
+  display: block;
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.acknowledgement {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 199, 106, 0.5);
+  border-radius: 6px;
+  background: rgba(204, 137, 31, 0.08);
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+.acknowledgement input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+}
+
+.acknowledgement input:focus-visible {
+  outline: 2px solid #9ec8ff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .headingRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .headingActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cardBody {
+    min-height: 0;
+  }
+
+  .provenance > div,
+  .noticeFacts > div,
+  .evidenceRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .cardActions > * {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .thumbnail img {
+    scroll-behavior: auto;
+  }
+}

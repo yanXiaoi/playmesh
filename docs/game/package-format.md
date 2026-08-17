@@ -90,7 +90,7 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
   "remarks": "示例游戏",
   "version": "1.0.0",
   "sdkVersion": "4.0.0",
-  "appSdkVersion": "3.2.0",
+  "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": ["multiplayer"],
@@ -116,7 +116,7 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
 | `sdkVersion` | 是 | 必须为 `4.0.0`；旧 Game SDK 版本直接拒绝 |
-| `appSdkVersion` | 是 | 必须为 `3.2.0`；缺失或旧 App SDK 版本直接拒绝；CLI 发布时总会写入当前值 |
+| `appSdkVersion` | 是 | 支持 `3.2.0` 或 `3.3.0`；新建、更新与 CLI 发布写入当前 `3.3.0` |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `controllerOrientation` | 单屏多人必填 | 控制器全屏方向；其他显示模式禁止声明 |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
@@ -147,8 +147,8 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
   URI 语法解析并透传。上传到 go-server 云分发时，服务端会递归解码入口查询参数并
   应用主动内容规则，含外部 HTTP/WS、`file:`、`javascript:` 等内容的包会被拒绝。
 - `modes` 必须且只能声明一个模式；值为 `multiplayer` 时必须声明 `authority.entry`。
-- SDK 版本不做迁移或范围映射；Game SDK 只接受 `4.0.0`，App SDK 只接受
-  `3.2.0`。旧值不会获得旧文件、旧命名空间或自动升级。
+- Game SDK 只接受 `4.1.0`。App SDK 请求 `3.2.0` 或 `3.3.0` 时均由版本注册表解析到
+  兼容的 `3.3.0` bundle；更旧或未知值不会获得旧文件、旧命名空间或旁路适配。
 - `modes` 为 `solo` 时，`players.max` 不能大于 1。
 - `displayModes` 必须且只能声明一个显示模式。
 - 所有游戏必须显式声明 `entries.game`；声明 `single_screen_multiplayer` 时还必须显式

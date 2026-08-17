@@ -53,17 +53,18 @@ func (e *InputError) Error() string {
 }
 
 const (
-	requiredGameSDKVersion       = "4.0.0"
-	requiredAppSDKVersion        = "3.2.0"
-	maxManifestBytes       int64 = 256 << 10
-	maxActiveTextBytes     int64 = 4 << 20
-	maxFindingBytes              = 8 << 10
-	maxArchivePathBytes          = 512
-	maxRootIconBytes             = 2 << 20
-	maxRootIconEdge              = 8192
-	maxRootIconPixels      int64 = 4 * 1024 * 1024
-	maxGameTagCount              = 5
-	maxGameTagRunes              = 64
+	requiredGameSDKVersion              = "4.0.0"
+	requiredAppSDKVersion               = "3.3.0"
+	minimumSupportedAppSDKVersion       = "3.2.0"
+	maxManifestBytes              int64 = 256 << 10
+	maxActiveTextBytes            int64 = 4 << 20
+	maxFindingBytes                     = 8 << 10
+	maxArchivePathBytes                 = 512
+	maxRootIconBytes                    = 2 << 20
+	maxRootIconEdge                     = 8192
+	maxRootIconPixels             int64 = 4 * 1024 * 1024
+	maxGameTagCount                     = 5
+	maxGameTagRunes                     = 64
 )
 
 var (
@@ -1017,17 +1018,18 @@ func (s *Service) validateManifestPackageContract(
 		return nil
 	}
 	findings := make([]string, 0)
-	requireManifestExactVersion(
+	requireManifestSupportedVersion(
 		manifest,
 		"sdkVersion",
-		requiredGameSDKVersion,
 		&findings,
+		requiredGameSDKVersion,
 	)
-	requireManifestExactVersion(
+	requireManifestSupportedVersion(
 		manifest,
 		"appSdkVersion",
-		requiredAppSDKVersion,
 		&findings,
+		minimumSupportedAppSDKVersion,
+		requiredAppSDKVersion,
 	)
 	entries := map[string]any{}
 	entriesValid := true
@@ -1126,19 +1128,24 @@ func (s *Service) validateManifestPackageContract(
 	return findings
 }
 
-func requireManifestExactVersion(
+func requireManifestSupportedVersion(
 	manifest map[string]any,
 	field string,
-	required string,
 	findings *[]string,
+	supported ...string,
 ) {
 	value, ok := manifest[field].(string)
-	if !ok || value != required {
-		*findings = append(
-			*findings,
-			fmt.Sprintf("main.json.%s 必须显式声明为 %s", field, required),
-		)
+	if ok {
+		for _, version := range supported {
+			if value == version {
+				return
+			}
+		}
 	}
+	*findings = append(
+		*findings,
+		fmt.Sprintf("main.json.%s 必须显式声明为 %s", field, strings.Join(supported, " 或 ")),
+	)
 }
 
 type manifestWebEntryKind uint8

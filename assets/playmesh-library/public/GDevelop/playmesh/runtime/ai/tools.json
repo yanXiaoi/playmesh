@@ -1,0 +1,1996 @@
+{
+  "protocolVersion": "1.0.0",
+  "toolsVersion": "2.0.0",
+  "gdevelopVersion": "5.6.276",
+  "upstreamCommit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361",
+  "storeNetworkEnabled": false,
+  "toolCount": 49,
+  "discovery": {
+    "toolDetailsToolName": "get_gdevelop_tool_details",
+    "toolNameArgument": "tool_name"
+  },
+  "tools": [
+    {
+      "name": "list_scenes",
+      "summary": "List every scene name and report the scene currently selected in the editor.",
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "list_scenes",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "list_project_objects",
+      "summary": "List every scene and global object available in one scene context, including objects without instances, their actual behaviors, and scene/global object groups with members.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "list_project_objects",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "list_project_resources",
+      "summary": "List the current project resources by name and kind without exposing files, URLs, or binary contents.",
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "inspect_project_properties_resources",
+      "officialArguments": {
+        "list_all_resources": true
+      },
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "change_project_resources",
+      "summary": "Rename or safely delete existing project resources using the pinned official resource reference updater.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "changed_resources"
+        ],
+        "properties": {
+          "changed_resources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "resource_name": {
+                  "type": "string"
+                },
+                "new_resource_name": {
+                  "type": "string"
+                },
+                "delete_this_resource": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_project_properties_resources",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "import_project_resource",
+      "summary": "Import an Agent-staged resource through the pinned GDevelop ResourceSource creation seam without adding Playmesh format rules.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "resource_name",
+          "resource_kind",
+          "content_hash",
+          "mime",
+          "size"
+        ],
+        "properties": {
+          "resource_name": {
+            "type": "string"
+          },
+          "resource_kind": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "import_project_resource",
+      "officialArguments": {},
+      "chatEnabled": false,
+      "agentEnabled": true,
+      "timeoutMs": 60000,
+      "binaryStaging": {
+        "method": "PUT",
+        "path": "/dev/api/gdevelop/projects/{gameId}/ai/editor-sessions/{editorSessionId}/resource-staging/{contentHash}",
+        "body": "raw-binary",
+        "channel": "agent",
+        "loopbackOnly": true,
+        "requiresForegroundView": true,
+        "requiredHeaders": [
+          "Authorization: Bearer <developer-token>",
+          "X-Playmesh-AI-Channel: agent",
+          "Content-Type: <resource-mime>"
+        ]
+      },
+      "executionKind": "agent_resource_cas"
+    },
+    {
+      "name": "create_object",
+      "summary": "Create an object without using the GDevelop asset store.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "object_type": {
+            "type": "string"
+          },
+          "target_object_scope": {
+            "type": "string",
+            "enum": [
+              "scene",
+              "global"
+            ]
+          },
+          "replace_existing_object": {
+            "type": "boolean",
+            "description": "When true, duplicated_object_name is required and must resolve to an existing same-type project object."
+          },
+          "duplicated_object_name": {
+            "type": "string",
+            "description": "Existing project object used as the local duplicate or replacement source."
+          },
+          "duplicated_object_scene": {
+            "type": "string",
+            "description": "Optional scene containing duplicated_object_name; requires duplicated_object_name."
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "create_or_replace_object",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "create_or_replace_object",
+      "summary": "Create or duplicate an object locally; replacement swaps from an existing same-type project object without asset search.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "object_type": {
+            "type": "string"
+          },
+          "target_object_scope": {
+            "type": "string",
+            "enum": [
+              "scene",
+              "global"
+            ]
+          },
+          "replace_existing_object": {
+            "type": "boolean",
+            "description": "When true, duplicated_object_name is required and must resolve to an existing same-type project object."
+          },
+          "duplicated_object_name": {
+            "type": "string",
+            "description": "Existing project object used as the local duplicate or replacement source."
+          },
+          "duplicated_object_scene": {
+            "type": "string",
+            "description": "Optional scene containing duplicated_object_name; requires duplicated_object_name."
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "create_or_replace_object",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "inspect_object_properties",
+      "summary": "Read object properties and behaviors.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "inspect_object_properties",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "change_object_property",
+      "summary": "Change one or more existing object properties.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "changed_properties"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "changed_properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "property_name",
+                "new_value"
+              ],
+              "properties": {
+                "property_name": {
+                  "type": "string"
+                },
+                "new_value": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_object_property",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "delete_object",
+      "summary": "Delete a scene or global object using the official object editor function.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_object_properties_effects",
+      "officialArguments": {
+        "delete_this_object": true
+      },
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "add_behavior",
+      "summary": "Add an installed behavior to an object.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "behavior_type"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "behavior_type": {
+            "type": "string"
+          },
+          "behavior_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "add_behavior",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "remove_behavior",
+      "summary": "Remove an object behavior.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "behavior_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "behavior_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_behavior_property",
+      "officialArguments": {
+        "delete_this_behavior": true
+      },
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "inspect_behavior_properties",
+      "summary": "Read behavior properties.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "behavior_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "behavior_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "inspect_behavior_properties",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "change_behavior_property",
+      "summary": "Change one or more behavior properties.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "behavior_name",
+          "changed_properties"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "behavior_name": {
+            "type": "string"
+          },
+          "changed_properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "property_name",
+                "new_value"
+              ],
+              "properties": {
+                "property_name": {
+                  "type": "string"
+                },
+                "new_value": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_behavior_property",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "describe_instances",
+      "summary": "Describe scene instances, optionally filtered by object name.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "filter_by_object_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "describe_instances",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "put_2d_instances",
+      "summary": "Place, move, or erase 2D instances.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "layer_name",
+          "brush_kind"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "layer_name": {
+            "type": "string"
+          },
+          "brush_kind": {
+            "type": "string"
+          },
+          "brush_position": {
+            "type": "string"
+          },
+          "brush_size": {
+            "type": "number",
+            "minimum": 0
+          },
+          "brush_end_position": {
+            "type": "string"
+          },
+          "existing_instance_ids": {
+            "type": "string"
+          },
+          "new_instances_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "instances_z_order": {
+            "type": "number"
+          },
+          "instances_size": {
+            "type": "string"
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "column_count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "put_2d_instances",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "put_3d_instances",
+      "summary": "Place, move, or erase 3D instances.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "layer_name",
+          "brush_kind"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "layer_name": {
+            "type": "string"
+          },
+          "brush_kind": {
+            "type": "string"
+          },
+          "brush_position": {
+            "type": "string"
+          },
+          "brush_size": {
+            "type": "number",
+            "minimum": 0
+          },
+          "brush_end_position": {
+            "type": "string"
+          },
+          "existing_instance_ids": {
+            "type": "string"
+          },
+          "new_instances_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "instances_size": {
+            "type": "string"
+          },
+          "instances_rotation": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "put_3d_instances",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "read_scene_events",
+      "summary": "Read a scene event sheet as human-readable text.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "read_scene_events",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "read_scene_events_json",
+      "summary": "Read the complete official gd.EventsList JSON for one scene without truncation.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "read_scene_events_json",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "read_events_source",
+      "summary": "Read the official GDevelop EventScript source view for scene events.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "event_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "search": {
+            "type": "string"
+          },
+          "object_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sub_events_depth": {
+            "type": "number"
+          },
+          "max_chars": {
+            "type": "number"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "read_events_source",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "list_event_types",
+      "summary": "List every official event node type registered by the pinned GDevelop editor build.",
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "list_event_types",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_event_type_details",
+      "summary": "Read one exact official event node type and its canonical empty JSON template generated by the pinned editor factory and serializer.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "event_type"
+        ],
+        "properties": {
+          "event_type": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "get_event_type_details",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "list_event_instructions",
+      "summary": "List official event actions, conditions, and expressions available to the current project for a required text query.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "kind",
+          "query"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "action",
+              "condition",
+              "expression",
+              "all"
+            ]
+          },
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "list_event_instructions",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_event_instruction_details",
+      "summary": "Read official metadata and ordered parameters for one exact event action, condition, or expression type.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "kind",
+          "instruction_type"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "action",
+              "condition",
+              "expression"
+            ]
+          },
+          "instruction_type": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "get_event_instruction_details",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "format_event_expression",
+      "summary": "Format one exact official GDevelop expression call from ordered parameter values.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "instruction_type",
+          "parameter_values"
+        ],
+        "properties": {
+          "instruction_type": {
+            "type": "string"
+          },
+          "parameter_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "should_convert_to_string": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "object",
+            "required": [
+              "extension_name"
+            ],
+            "properties": {
+              "extension_name": {
+                "type": "string"
+              },
+              "object_name": {
+                "type": "string"
+              },
+              "behavior_name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "format_event_expression",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "add_scene_events",
+      "summary": "Apply an official serialized GDevelopEventPayload to add or change scene events.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "events_description",
+          "extension_names_list"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "events_description": {
+            "type": "string"
+          },
+          "extension_names_list": {
+            "type": "string"
+          },
+          "objects_list": {
+            "type": "string"
+          },
+          "estimated_complexity": {
+            "type": "number",
+            "minimum": 0
+          },
+          "placement_hint": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "add_scene_events",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 90000,
+      "eventPayloadSchema": {
+        "$id": "playmesh.gdevelop.event-payload/1.0.0",
+        "title": "GDevelopEventPayload",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "sceneName",
+          "changes"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "sceneName": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "operationName",
+                "operationTargetEvent",
+                "isEventsJsonValid",
+                "generatedEvents",
+                "areEventsValid",
+                "extensionNames",
+                "diagnosticLines",
+                "undeclaredVariables",
+                "undeclaredObjectVariables",
+                "missingObjectBehaviors",
+                "missingResources"
+              ],
+              "properties": {
+                "operationName": {
+                  "type": "string",
+                  "enum": [
+                    "delete_event",
+                    "insert_and_replace_event",
+                    "replace_entire_event_and_sub_events",
+                    "replace_event_but_keep_existing_sub_events",
+                    "insert_before_event",
+                    "insert_after_event",
+                    "insert_as_sub_event",
+                    "insert_actions_conditions_at_end",
+                    "insert_actions_conditions_at_start",
+                    "replace_all_actions",
+                    "replace_all_conditions",
+                    "insert_at_end"
+                  ]
+                },
+                "operationTargetEvent": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "isEventsJsonValid": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "generatedEvents": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Official serialized gd.EventsList JSON consumed by applyEventsChanges."
+                },
+                "areEventsValid": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "extensionNames": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "diagnosticLines": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "undeclaredVariables": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "undeclaredObjectVariables": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "missingObjectBehaviors": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "missingResources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "generatedEventsContract": {
+        "format": "gd.EventsList/5.6.276",
+        "representation": "changes[].generatedEvents is a JSON string whose decoded value is an array serialized by GDevelop gd.EventsList.",
+        "readExistingEvents": {
+          "tool": "read_scene_events_json",
+          "outputField": "eventsJson"
+        },
+        "discoverInstructions": {
+          "listTool": "list_event_instructions",
+          "detailsTool": "get_event_instruction_details",
+          "parameterRule": "Query every needed action, condition, and expression. Use returned parameters in their exact array order, including code-only parameters. Do not infer a type, expression spelling, or parameter order."
+        },
+        "standardEventShape": {
+          "type": "BuiltinCommonInstructions::Standard",
+          "conditions": [
+            {
+              "type": {
+                "value": "<official-condition-type>"
+              },
+              "parameters": [
+                "<ordered-official-parameter-values>"
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "type": {
+                "value": "<official-action-type>"
+              },
+              "parameters": [
+                "<ordered-official-parameter-values>"
+              ]
+            }
+          ]
+        },
+        "officialCreateActionExample": {
+          "source": "GDevelop 5.6.276 EventScriptRenderer.fixtures.json canonical serialized event",
+          "decodedGeneratedEvents": [
+            {
+              "type": "BuiltinCommonInstructions::Standard",
+              "conditions": [],
+              "actions": [
+                {
+                  "type": {
+                    "value": "Create"
+                  },
+                  "parameters": [
+                    "",
+                    "Player",
+                    "100",
+                    "200",
+                    "\"\""
+                  ]
+                }
+              ]
+            }
+          ],
+          "rule": "generatedEvents contains JSON.stringify(decodedGeneratedEvents), not an object wrapper."
+        },
+        "conditionInversion": "Set condition.type.inverted to true only for an inverted condition; otherwise omit it or use false.",
+        "validation": "The pinned official GDevelop unserializer and event applier are authoritative. null generatedEvents does not request generation and cannot insert events.",
+        "locallyConstructedChangeDefaults": {
+          "isEventsJsonValid": null,
+          "areEventsValid": null,
+          "extensionNames": [],
+          "diagnosticLines": [],
+          "undeclaredVariables": [],
+          "undeclaredObjectVariables": {},
+          "missingObjectBehaviors": {},
+          "missingResources": [],
+          "rule": "These fields describe official generator diagnostics. When constructing from verified local metadata instead of an official generation response, use these neutral values; never claim true validation flags."
+        }
+      },
+      "executionKind": "event_payload",
+      "executionConfig": {
+        "sceneArgument": "scene_name"
+      }
+    },
+    {
+      "name": "create_scene",
+      "summary": "Create a scene.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "include_ui_layer": {
+            "type": "boolean"
+          },
+          "background_color": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "create_scene",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "delete_scene",
+      "summary": "Delete a scene.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_scene_properties_layers_effects_groups",
+      "officialArguments": {
+        "delete_this_scene": true
+      },
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "list_prefabs",
+      "summary": "List project EventsBasedObject definitions and their canonical Extension::Object types.",
+      "argumentsSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "list_prefabs",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "inspect_prefab",
+      "summary": "Inspect one project EventsBasedObject definition through official GDevelop getters.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "extension_name",
+          "prefab_name"
+        ],
+        "properties": {
+          "extension_name": {
+            "type": "string"
+          },
+          "prefab_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "inspect_prefab",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "inspect_scene_properties_layers_effects",
+      "summary": "Read scene properties, layers, effects, and groups.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "inspect_scene_properties_layers_effects",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "change_scene_properties_layers_effects_groups",
+      "summary": "Change scene properties, layers, effects, and groups.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "changed_properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "property_name",
+                "new_value"
+              ],
+              "properties": {
+                "property_name": {
+                  "type": "string"
+                },
+                "new_value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "changed_layers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "layer_name"
+              ],
+              "properties": {
+                "layer_name": {
+                  "type": "string"
+                },
+                "new_layer_name": {
+                  "type": "string"
+                },
+                "new_layer_position": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "delete_this_layer": {
+                  "type": "boolean"
+                },
+                "move_instances_to_layer": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "changed_layer_effects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "layer_name",
+                "effect_name"
+              ],
+              "properties": {
+                "layer_name": {
+                  "type": "string"
+                },
+                "effect_name": {
+                  "type": "string"
+                },
+                "effect_type": {
+                  "type": "string"
+                },
+                "new_effect_name": {
+                  "type": "string"
+                },
+                "new_effect_position": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "delete_this_effect": {
+                  "type": "boolean"
+                },
+                "changed_properties": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "property_name",
+                      "new_value"
+                    ],
+                    "properties": {
+                      "property_name": {
+                        "type": "string"
+                      },
+                      "new_value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "changed_groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "group_name"
+              ],
+              "properties": {
+                "group_name": {
+                  "type": "string"
+                },
+                "new_group_name": {
+                  "type": "string"
+                },
+                "delete_this_group": {
+                  "type": "boolean"
+                },
+                "objects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "object_name"
+                    ],
+                    "properties": {
+                      "object_name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_scene_properties_layers_effects_groups",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "add_or_edit_variable",
+      "summary": "Create or edit a scene, object, or global variable.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "variable_name_or_path",
+          "value",
+          "variable_scope"
+        ],
+        "properties": {
+          "variable_name_or_path": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "variable_scope": {
+            "type": "string",
+            "enum": [
+              "scene",
+              "object",
+              "global"
+            ]
+          },
+          "variable_type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "boolean",
+              "structure",
+              "array"
+            ]
+          },
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "add_or_edit_variable",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "inspect_variables",
+      "summary": "Read variables through the pinned official GDevelop function. Object and group scopes use object_name; in GDevelop 5.6.276 a group inspection returns the variables of its first member.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "variable_scope"
+        ],
+        "properties": {
+          "variable_scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "scene",
+              "object",
+              "group"
+            ],
+            "description": "For object and group scopes, object_name selects either an object or an object group using the official resolver."
+          },
+          "scene_name": {
+            "type": "string",
+            "description": "Required for scene scope. For object or group scope, include it to resolve the scene context; omit it to inspect only global objects or groups."
+          },
+          "object_name": {
+            "type": "string",
+            "description": "Required for object or group scope. This is the object name or object-group name."
+          },
+          "variable_names_or_paths": {
+            "type": "array",
+            "description": "Optional variable names or nested paths. When omitted or empty, the official function returns all variables in the resolved container.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "inspect_variables",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "read_full_docs",
+      "summary": "Read locally available documentation for installed extensions.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "extension_names"
+        ],
+        "properties": {
+          "extension_names": {
+            "type": "string"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "read_full_docs",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "create_or_update_plan",
+      "summary": "Create or update the current development plan.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "explanation": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "step",
+                "status"
+              ],
+              "properties": {
+                "step": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "create_or_update_plan",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "search_gdevelop_capabilities",
+      "summary": "Search the pinned local GDevelop behavior and extension catalog before implementing equivalent functionality.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "behavior",
+              "extension",
+              "all"
+            ]
+          },
+          "category": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "search_gdevelop_capabilities",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_gdevelop_capability_details",
+      "summary": "Read metadata for one pinned GDevelop behavior or extension capability.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "stable_id",
+          "type"
+        ],
+        "properties": {
+          "stable_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z][A-Za-z0-9_]*)?$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "behavior",
+              "extension"
+            ]
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "get_gdevelop_capability_details",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "install_gdevelop_extension",
+      "summary": "Install the pinned owner extension for an extension or behavior capability into the current project.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "stable_id",
+          "type"
+        ],
+        "properties": {
+          "stable_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:::[A-Za-z][A-Za-z0-9_]*)?$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "behavior",
+              "extension"
+            ]
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "install_gdevelop_extension",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 90000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_gdevelop_tool_details",
+      "summary": "Read the exact argument schema and execution metadata for one registered GDevelop AI tool by name.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "tool_name"
+        ],
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        }
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "get_gdevelop_tool_details",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 10000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_debugger_connection_status",
+      "summary": "Read whether the current GDevelop preview debugger is connected.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "getStatus",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_runtime_error_logs",
+      "summary": "Read every captured runtime error log and crash message without truncation.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "console.log/game.crashed",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_current_runtime_scene",
+      "summary": "Read the current scene state from the official runtime dump.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "refresh/dump",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_current_runtime_instances",
+      "summary": "Read every current scene instance from the official runtime dump.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "refresh/dump",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "get_current_runtime_variables",
+      "summary": "Read global, current scene, and current instance variables from the official runtime dump.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "low",
+      "modifiesProject": false,
+      "approvalRequired": false,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "refresh/dump",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "pause_runtime",
+      "summary": "Pause the current GDevelop preview through the official debugger.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "medium",
+      "modifiesProject": false,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "pause",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "resume_runtime",
+      "summary": "Resume the current GDevelop preview through the official debugger.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "medium",
+      "modifiesProject": false,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "play",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "set_runtime_value",
+      "summary": "Set one runtime value through the official debugger path command.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "newValue"
+        ],
+        "properties": {
+          "path": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "newValue": {}
+        }
+      },
+      "risk": "high",
+      "modifiesProject": false,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "set",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "call_runtime_method",
+      "summary": "Call one runtime method through the official debugger path command.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "args"
+        ],
+        "properties": {
+          "path": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "args": {
+            "type": "array",
+            "items": {}
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": false,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "call",
+      "officialArguments": {},
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    }
+  ]
+}

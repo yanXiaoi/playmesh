@@ -36,15 +36,17 @@ class _OperationCatalogOperation implements _DeveloperHttpOperation {
     Map<String, String> pathParameters,
   ) async {
     final target = request.uri.queryParameters['target'] ?? 'all';
-    bool include(DeveloperOperationDefinition operation) => switch (target) {
-      'all' => true,
-      'chat' => operation.chatEnabled,
-      'agent' => operation.agentEnabled,
-      'chat-bootstrap' => operation.chatEnabled && operation.chatBootstrap,
-      _ => throw const FormatException(
-        'target 只支持 all、chat、agent 或 chat-bootstrap',
-      ),
-    };
+    bool include(DeveloperOperationDefinition operation) =>
+        gateway.gdevelopAiFeaturePolicy.exposesOperationId(operation.id) &&
+        switch (target) {
+          'all' => true,
+          'chat' => operation.chatEnabled,
+          'agent' => operation.agentEnabled,
+          'chat-bootstrap' => operation.chatEnabled && operation.chatBootstrap,
+          _ => throw const FormatException(
+            'target 只支持 all、chat、agent 或 chat-bootstrap',
+          ),
+        };
     await _json(request.response, HttpStatus.ok, {
       'requestId': requestId,
       'catalogVersion': _DeveloperOperationRegistry.catalogVersion,

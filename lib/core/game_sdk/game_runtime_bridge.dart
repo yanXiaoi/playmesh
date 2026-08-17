@@ -32,9 +32,7 @@ class GameRuntimeBridge implements GameSdkBridge {
   final List<String> requiredCapabilities;
   final StreamController<String> _outbound = StreamController.broadcast();
   final Map<String, Completer<void>> _lifecycleOperations = {};
-  final Map<String, String?> _remoteStorageRequests = {};
   int _lifecycleSequence = 0;
-  int _storageSequence = 0;
   late final StreamSubscription<Map<String, Object?>> _sessionSubscription;
 
   @override
@@ -71,14 +69,12 @@ class GameRuntimeBridge implements GameSdkBridge {
             'displayMode': connection.snapshot.displayMode,
             'requiredCapabilities': requiredCapabilities,
           },
-          ensureStorage: ensureStorage,
           completeLifecycle: (lifecycleRequestId) {
             final operation = _lifecycleOperations.remove(lifecycleRequestId);
             if (operation == null || operation.isCompleted) return false;
             operation.complete();
             return true;
           },
-          routeRemoteStorage: _routeRemoteStorage,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -109,30 +105,6 @@ class GameRuntimeBridge implements GameSdkBridge {
     _send({'type': 'command.result', 'requestId': requestId, 'result': result});
   }
 
-  void _sendError(String? requestId, Object error) {
-    _send({
-      'type': 'command.error',
-      'requestId': requestId,
-      'error': error.toString(),
-    });
-  }
-
-  Future<void> _routeRemoteStorage(
-    String command,
-    String? sdkRequestId,
-    Map<String, Object?> payload,
-  ) async {
-    final transportRequestId = 'storage-${++_storageSequence}';
-    _remoteStorageRequests[transportRequestId] = sdkRequestId;
-    connection.submitAction({
-      '__playmeshStorageRequest': {
-        'requestId': transportRequestId,
-        'command': command,
-        ...payload,
-      },
-    });
-  }
-
   Future<void> _handleTransportMessage(Map<String, Object?> message) async {
     if (message['type'] == 'platform.avatar.write' && connection.isAuthority) {
       await _handleAvatarWrite(message);
@@ -143,25 +115,6 @@ class GameRuntimeBridge implements GameSdkBridge {
         session is Map &&
         session['state'] == 'stopped') {
       await storage.clearSystemAvatars();
-    }
-    final payload = message['payload'];
-    if (payload is Map) {
-      final normalized = Map<String, Object?>.from(payload);
-      final storageRequest = normalized['__playmeshStorageRequest'];
-      if (connection.isAuthority && storageRequest is Map) {
-        await _handleRemoteStorageRequest(
-          message,
-          Map<String, Object?>.from(storageRequest),
-        );
-        return;
-      }
-      final storageResponse = normalized['__playmeshStorageResponse'];
-      if (storageResponse is Map) {
-        _handleRemoteStorageResponse(
-          Map<String, Object?>.from(storageResponse),
-        );
-        return;
-      }
     }
     _send({'type': 'transport.message', 'message': message});
   }
@@ -243,51 +196,6 @@ class GameRuntimeBridge implements GameSdkBridge {
     debugPrint('[$level] $message ${jsonEncode(record)}');
   }
 
-  Future<void> _handleRemoteStorageRequest(
-    Map<String, Object?> message,
-    Map<String, Object?> request,
-  ) async {
-    final senderPlayerId = sdkRequiredString(message, 'senderPlayerId');
-    final requestId = sdkRequiredString(request, 'requestId');
-    try {
-      final result = await executeSdkStorageCommand(
-        storage,
-        sdkRequiredString(request, 'command'),
-        request,
-      );
-      connection.submitAuthorityResult(
-        targetPlayerIds: [senderPlayerId],
-        message: {
-          '__playmeshStorageResponse': {
-            'requestId': requestId,
-            'result': result,
-          },
-        },
-      );
-    } on Object catch (error) {
-      connection.submitAuthorityResult(
-        targetPlayerIds: [senderPlayerId],
-        message: {
-          '__playmeshStorageResponse': {
-            'requestId': requestId,
-            'error': error.toString(),
-          },
-        },
-      );
-    }
-  }
-
-  void _handleRemoteStorageResponse(Map<String, Object?> response) {
-    final requestId = sdkRequiredString(response, 'requestId');
-    if (!_remoteStorageRequests.containsKey(requestId)) return;
-    final sdkRequestId = _remoteStorageRequests.remove(requestId);
-    if (response['error'] case final Object error) {
-      _sendError(sdkRequestId, error);
-    } else {
-      _sendResult(sdkRequestId, response['result']);
-    }
-  }
-
   @override
   Future<void> notifyLifecycle(String event) async {
     final requestId = 'lifecycle-${++_lifecycleSequence}';
@@ -320,10 +228,6 @@ class GameRuntimeBridge implements GameSdkBridge {
       if (!operation.isCompleted) operation.complete();
     }
     _lifecycleOperations.clear();
-    for (final requestId in _remoteStorageRequests.values) {
-      _sendError(requestId, '主机存储连接已关闭');
-    }
-    _remoteStorageRequests.clear();
     if (connection.isAuthority) await storage.clearSystemAvatars();
     await storage.close();
     await _sessionSubscription.cancel();

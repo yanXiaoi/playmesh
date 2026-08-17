@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_fullscreen/flutter_fullscreen.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'core/localization/playmesh_ui_controller.dart';
@@ -7,6 +11,10 @@ import 'core/localization/playmesh_ui_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await FullScreen.ensureInitialized();
+  if (!kIsWeb && Platform.isWindows) {
+    await windowManager.ensureInitialized();
+    await windowManager.setPreventClose(true);
+  }
   try {
     final uiBootstrap = await PlaymeshUiBootstrap.load();
     runApp(PlaymeshApp(uiBootstrap: uiBootstrap));

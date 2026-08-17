@@ -6,7 +6,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "3.2.0";
+  const PLAYMESH_APP_SDK_VERSION = "3.3.0";
   const PLAYMESH_APP_INTERNAL_KEY =
     Symbol.for("playmesh.app.internal.v1");
 
@@ -571,6 +571,9 @@ const PLAYMESH_APP_DECLARATION = String.raw`
   let appUiPerformanceVisible = false;
   let appUiRenderTimer = null;
   const appUiConsoleLogs = [];
+  const appUiGameMenuOpenListeners = new Set();
+  const appUiGameMenuCloseListeners = new Set();
+  let appUiGameMenuOpen = false;
   const APP_UI_LOG_LIMIT = 500;
   const initialAppUiOptions =
     global.__PLAYMESH_APP_OPTIONS__ &&
@@ -586,6 +589,63 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     const error = new Error(message);
     error.code = code;
     return error;
+  }
+
+  function subscribeAppUiEvent(listeners, callback, name) {
+    if (typeof callback !== "function") {
+      throw new TypeError(`${name} callback 必须是函数`);
+    }
+    listeners.add(callback);
+    let subscribed = true;
+    return function unsubscribe() {
+      if (!subscribed) return;
+      subscribed = false;
+      listeners.delete(callback);
+    };
+  }
+
+  function reportAppUiEventError(name, error) {
+    global.console?.warn?.(`Playmesh ${name} 回调执行失败`, error);
+  }
+
+  function notifyAppUiEvent(listeners, name) {
+    for (const callback of [...listeners]) {
+      try {
+        const result = callback();
+        if (result && typeof result.then === "function") {
+          void result.catch((error) => reportAppUiEventError(name, error));
+        }
+      } catch (error) {
+        reportAppUiEventError(name, error);
+      }
+    }
+  }
+
+  function setAppUiGameMenuOpen(open) {
+    const nextOpen = open === true;
+    if (appUiGameMenuOpen === nextOpen) return false;
+    appUiGameMenuOpen = nextOpen;
+    notifyAppUiEvent(
+      nextOpen ? appUiGameMenuOpenListeners : appUiGameMenuCloseListeners,
+      nextOpen ? "游戏菜单打开" : "游戏菜单关闭",
+    );
+    return true;
+  }
+
+  function onAppGameMenuOpen(callback) {
+    return subscribeAppUiEvent(
+      appUiGameMenuOpenListeners,
+      callback,
+      "onGameMenuOpen",
+    );
+  }
+
+  function onAppGameMenuClose(callback) {
+    return subscribeAppUiEvent(
+      appUiGameMenuCloseListeners,
+      callback,
+      "onGameMenuClose",
+    );
   }
 
   function configureAppUi(options = {}) {
@@ -605,6 +665,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       appUiOptions.floatingButton = options.floatingButton;
     }
     if (!appUiOptions.fallbackUi) {
+      void hideAppGameSidebar();
       if (appUiRenderTimer !== null) {
         global.clearTimeout?.(appUiRenderTimer);
         appUiRenderTimer = null;
@@ -614,6 +675,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     } else {
       if (appFallbackUi &&
           previousFloatingButton !== appUiOptions.floatingButton) {
+        void hideAppGameSidebar();
         appFallbackUi.host?.remove?.();
         appFallbackUi = null;
       }
@@ -1417,6 +1479,11 @@ const PLAYMESH_APP_DECLARATION = String.raw`
 
   async function showAppGameSidebar() {
     if (!appUiOptions.fallbackUi) return false;
+    if (appUiGameMenuOpen && appFallbackUi &&
+        !appFallbackUi.layer.hidden) {
+      appFallbackUi.continueButton.focus?.({ preventScroll: true });
+      return true;
+    }
     captureAppUiReturnFocus();
     const ui = await ensureAppFallbackUi();
     if (!ui) {
@@ -1428,15 +1495,20 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     ui.layer.hidden = false;
     if (ui.menuButton) ui.menuButton.hidden = true;
     ui.continueButton.focus?.({ preventScroll: true });
+    setAppUiGameMenuOpen(true);
     return true;
   }
 
   function hideAppGameSidebar(restoreFocus = true) {
     const ui = appFallbackUi;
-    if (!ui) return Promise.resolve(false);
+    if (!ui) {
+      setAppUiGameMenuOpen(false);
+      return Promise.resolve(false);
+    }
     ui.layer.hidden = true;
     refreshAppFallbackUi();
     if (restoreFocus) restoreAppUiReturnFocus();
+    setAppUiGameMenuOpen(false);
     return Promise.resolve(true);
   }
 
@@ -1698,6 +1770,12 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       },
       showGameSidebar() {
         return showAppGameSidebar();
+      },
+      onGameMenuOpen(callback) {
+        return onAppGameMenuOpen(callback);
+      },
+      onGameMenuClose(callback) {
+        return onAppGameMenuClose(callback);
       },
       openRuntimeLogs() {
         return openAppUiRuntimeLogs();

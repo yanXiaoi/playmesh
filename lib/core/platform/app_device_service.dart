@@ -11,6 +11,16 @@ class AppDeviceService {
 
   String get platform => kIsWeb ? 'web' : defaultTargetPlatform.name;
 
+  Future<bool> isFullscreen() async {
+    final desktop =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux);
+    if (desktop) return windowManager.isFullScreen();
+    return FullScreen.isFullScreen || FullScreen.isFullScreenForced;
+  }
+
   Future<void> setFullscreen(
     bool enabled, {
     GameOrientation? orientation,

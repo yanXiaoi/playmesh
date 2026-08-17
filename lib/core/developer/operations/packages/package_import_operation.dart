@@ -9,8 +9,8 @@ class _PackageImportOperation implements _DeveloperHttpOperation {
       id: 'packages.import',
       method: 'POST',
       path: '/dev/api/packages/import',
-      summary: '导入或更新标准 Playmesh 游戏包并保留 data/cache',
-      description: '请求体是 application/zip 原始字节，不是 JSON；主要供 Developer CLI 使用。',
+      summary: '导入或更新标准 Playmesh 游戏包并保留平台目录',
+      description: '请求体是 application/zip 原始字节，不是 JSON；支持定长或 HTTP chunked 流式上传。',
       permission: 'project.write',
       risk: DeveloperOperationRisk.medium,
       idempotent: false,
@@ -26,27 +26,37 @@ class _PackageImportOperation implements _DeveloperHttpOperation {
     DeveloperOperationDefinition definition,
     Map<String, String> pathParameters,
   ) => gateway._serializePackageFile(() async {
-    final builder = BytesBuilder(copy: false);
-    var length = 0;
-    await for (final chunk in request) {
-      length += chunk.length;
-      if (length > GamePackageTransferService.maxCompressedBytes) {
-        throw const FormatException('游戏包压缩文件不能超过 100 MiB');
-      }
-      builder.add(chunk);
-    }
-    if (length == 0) throw const FormatException('上传的游戏包不能为空');
-    final file = File(
-      '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      'playmesh-developer-import.playmesh.zip',
-    );
+    TemporaryPackageUpload? upload;
     try {
-      if (await file.exists()) await file.delete();
-      await file.writeAsBytes(builder.takeBytes(), flush: true);
-      final game = await gateway.catalog.publishPackage(
-        file,
-        author: gateway._requireCurrentAuthor(),
-        lastModifiedAt: gateway.clock().toUtc(),
+      try {
+        upload =
+            await PackageUploadSpooler(
+              maxBytes: GamePackageTransferService.maxCompressedBytes,
+            ).spool(
+              request,
+              declaredLength: request.contentLength < 0
+                  ? null
+                  : request.contentLength,
+            );
+      } on PackageUploadTooLarge catch (error) {
+        throw _DeveloperRequestTooLarge(error.limit);
+      } on PackageUploadEmpty {
+        throw const FormatException('上传的游戏包不能为空');
+      }
+      final author = gateway._requireCurrentAuthor();
+      final lastModifiedAt = gateway.clock().toUtc();
+      final validated = await gateway.packageTransfer.readPackage(
+        upload.file,
+        author: author,
+        lastModifiedAt: lastModifiedAt,
+      );
+      final game = await gateway.gdevelopProjectRekey.runIdentityMutation(
+        validated.manifest.id,
+        () => gateway.catalog.publishPackage(
+          upload!.file,
+          author: author,
+          lastModifiedAt: lastModifiedAt,
+        ),
       );
       developerEventHub.emit({
         'type': 'project.imported',
@@ -59,10 +69,10 @@ class _PackageImportOperation implements _DeveloperHttpOperation {
         'requestId': requestId,
         'project': {'id': game.id, 'name': game.name, 'version': game.version},
         'committed': true,
-        'preservedDirectories': ['data', 'cache'],
+        'preservedDirectories': ['data', 'cache', '.playmesh'],
       });
     } finally {
-      if (await file.exists()) await file.delete();
+      await upload?.dispose();
     }
   });
 }

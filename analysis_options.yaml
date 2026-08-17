@@ -16,6 +16,9 @@ analyzer:
     # Release staging mirrors are generated from source and may target another
     # Flutter/Dart toolchain. Analyze the real source tree, not prior artifacts.
     - build/**
+    # GDevelop checkouts, node_modules and release candidates are disposable
+    # upgrade/build inputs. Their third-party Dart examples are not App source.
+    - work/**
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

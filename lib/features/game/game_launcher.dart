@@ -15,7 +15,6 @@ class GameLauncher extends StatelessWidget {
     required this.localNickname,
     this.bridge,
     this.developerResourceSession,
-    this.controllerRole = false,
     this.onOpenSharePanel,
     this.onExitRequested,
     this.onSystemBackHandlerChanged,
@@ -27,7 +26,6 @@ class GameLauncher extends StatelessWidget {
   final String localNickname;
   final GameSdkBridge? bridge;
   final DeveloperResourceSession? developerResourceSession;
-  final bool controllerRole;
   final Future<void> Function()? onOpenSharePanel;
   final Future<void> Function()? onExitRequested;
   final ValueChanged<VoidCallback?>? onSystemBackHandlerChanged;
@@ -50,12 +48,9 @@ class GameLauncher extends StatelessWidget {
     if (source == null) {
       return const _PackageFailure(error: FormatException('游戏缺少已安装包目录'));
     }
-    final entryPath = controllerRole
-        ? game.entry.controllerEntryPath!
-        : game.entry.gameEntryPath;
     return LocalGameWebView(
       resourceSource: source,
-      entryPath: entryPath,
+      entryPath: game.entry.gameEntryPath,
       title: game.name,
       gameSdkVersion: game.sdkVersion.isEmpty ? null : game.sdkVersion,
       appSdkVersion: game.appSdkVersion.isEmpty ? null : game.appSdkVersion,
@@ -63,7 +58,7 @@ class GameLauncher extends StatelessWidget {
       localUserId: localUserId,
       localNickname: localNickname,
       declaredCapabilities: game.capabilities
-          .requiredForRole(controller: controllerRole)
+          .requiredForRole(controller: false)
           .toList(),
       onOpenSharePanel: onOpenSharePanel,
       onExitRequested: onExitRequested,

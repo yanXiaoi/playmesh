@@ -14,8 +14,8 @@
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
 归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.0.0+26`、Go Core
 `0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`、Game SDK `4.0.0`、
-App Bridge SDK `3.2.0`。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
+Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`、Game SDK `4.1.0`、
+App Bridge SDK `3.3.0`。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在，内部协作使用不可枚举的私有
@@ -70,13 +70,13 @@ Go Core 监听 0.0.0.0:0
 
 已归档的纵向链路：
 
-1. 设置页可在独立固定端口开启开发者模式，默认 `16666`，并持久化端口、自定义或随机 token 和工作区路径。
+1. 首页“制作游戏”页可在独立固定端口开启开发者模式，默认 `16666`，并持久化端口、自定义或随机 token 和工作区路径；用户再按需要展开“源代码开发”或“可视化开发”。
 2. 关闭开发者模式或 App 退出时停止监听；重新开启或 App 重启后恢复同一工作区链接，局域网设备可直接重连。
 3. 工作区可新建、复制、设置和删除项目，以 IDEA 风格项目树浏览并编辑文本文件；支持新建、删除、上传、Git 风格双栏 Diff、差异块应用、快速批量操作和项目级本地历史，不提供嵌入式主页面预览。
 4. 工作区提供运行按钮；多人项目运行后显示与游戏分享面板一致的地址切换、链接复制和二维码入口。
 5. 已提供 `/dev/docs`、OpenAPI、Developer Session Schema、SDK Manifest、请求示例和当前接口鉴权/AI 可用性面板。
 6. 文件变更、运行状态和客户端日志通过统一 SSE 通道同步；浏览器原生 `console` 输出保留，同时在存在开发者监听时复制到后台日志面板。
-7. 设置页、Core 地址、开发者模式地址和游戏分享链接均支持长按或拖选复制。
+7. “制作游戏”页、Core 地址、开发者模式地址和游戏分享链接均支持长按或拖选复制。
 8. App 内置 WebView 与外部浏览器使用同一套响应式工作区。
 
 项目校验、文件行列诊断、5 分钟窗口项目级本地历史、机器契约、运行状态、SSE 和 Console 日志诊断闭环均已纳入交付。第四阶段不包含测试会话、虚拟玩家、设备模拟、热重载或游戏包导入/导出。
@@ -143,16 +143,22 @@ Go Core 监听 0.0.0.0:0
 
 - 游戏包直接位于 `playmesh-library/packages/{gameId}/`，不增加版本或 `files` 中间目录。
 - `packages/{gameId}/app/` 直接映射为运行时 `/`；平台公共 SDK、头像等资源位于 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。运行时只额外映射 `data/data` 中由 SDK 上传的文件到 `/bucket/{bucket}/{file}`；`data/json` 与 `cache/` 永不映射。
-- JSON 持久化文件位于 `packages/{gameId}/data/json/{bucket}.json`，二进制上传位于 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，不增加 `{userId}` 目录。Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
+- 普通 JSON 持久化文件位于 `packages/{gameId}/data/json/{bucket}.json`；同步 GDevelop
+  逻辑名使用 `data/json/logical/sha256-{digest}.json` 原名 envelope。二进制上传位于
+  `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，不增加 `{userId}` 目录。
+  异步与上传 Bucket 名称仍必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。
 - Core 每次启动都使用系统分配端口，实际端口由宿主上报。
-- 开发者 Gateway 与 Core 分离，默认固定端口 `16666`，可在设置页修改；不得为了修改开发者端口重启 Core。
+- 开发者 Gateway 与 Core 分离，默认固定端口 `16666`，可在首页“制作游戏”页修改；不得为了修改开发者端口重启 Core。
 - Android 发布物包含 `playmesh_core.aar`，Windows 发布物包含 Runner 同目录的 `playmesh-core.exe`。
 - `orientation`、`displayModes` 和 `modes` 是独立维度；当前 `displayModes` 与 `modes` 都只能声明一个值。
 - 浏览器分享 token 在当前游戏会话期间有效，关闭附加层和刷新游戏不撤销；退出游戏、会话结束或 Core 重启后失效。
 - 分享地址列表可点选，二维码始终对应当前选中的地址。
 - 主机与 App 扫码加入页使用同一套悬浮工具语义；主机分享入口为一级按钮，所有 App 游戏工具只保留返回而不重复提供退出。普通浏览器由 SDK 提供不含 App 导航和分享能力的对应功能区。
 - 分享链接/二维码面板在视口内居中并动态适配，内容超出屏幕时允许整体滚动；悬浮工具二级界面固定使用高对比度配色，不继承游戏显示颜色。
-- 所有 Bucket 数据只保存在开始游戏的 Authority 主机；普通浏览器和其他 App 玩家统一由权威 Game SDK 通过当前受控 Session WebSocket 的存储 RPC 路由到 Authority，不增加分享 HTTP 存储端点。
+- 所有 Bucket 数据只保存在开始游戏的 Authority 主机；普通浏览器和其他 App 玩家由 Game
+  SDK 通过绑定当前游戏/会话的同源 JSON Bucket HTTP GET/PUT/DELETE 路由访问，旧 Session
+  WebSocket 存储 RPC 与 fallback 不保留。该路由是 SDK 内部传输，不恢复可任意调用的
+  `/api/storage`。Binary upload 继续独立使用原始字节 POST。
 - FPS 由游戏在真实渲染点调用当前客户端的 `playmesh.app.performance.reportFrame()` 上报，默认显示在左上角并可从悬浮工具坞关闭。
 - 平台构建仅在用户明确要求时执行；产物结构验证必须记录到 `docs/verification/`，安装、真机运行和生产签名仍由用户或 CI 验证。
 - 公共显示端不得进入 `players` 或提交玩家动作。

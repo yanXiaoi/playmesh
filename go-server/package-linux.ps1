@@ -156,6 +156,7 @@ try {
     foreach ($fileName in @(
         "server.json",
         ".env.example",
+        "LICENSE",
         "README.md",
         "THIRD_PARTY_NOTICES.md"
     )) {

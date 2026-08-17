@@ -1,5 +1,10 @@
 import '../../models/game_summary.dart';
+import '../network/lan_endpoint.dart';
 import 'developer_channel.dart';
+import 'gdevelop_ai_tool_registry.dart';
+
+typedef GDevelopAiToolRegistryProvider =
+    Future<GDevelopAiToolRegistry> Function();
 
 class DeveloperWorkspaceLocale {
   const DeveloperWorkspaceLocale({required this.id, required this.label});
@@ -51,6 +56,8 @@ class DeveloperWorkspaceLocalization {
 
 typedef DeveloperWorkspaceLocalizationProvider =
     DeveloperWorkspaceLocalization Function();
+typedef DeveloperWorkspaceLocalizationResolver =
+    DeveloperWorkspaceLocalization Function(String localeId);
 typedef DeveloperWorkspaceLocaleUpdater =
     Future<void> Function(String? localeId);
 typedef DeveloperWorkspaceThemeUpdater =
@@ -59,11 +66,13 @@ typedef DeveloperWorkspaceThemeUpdater =
 class DeveloperWorkspaceLocalizationBridge {
   const DeveloperWorkspaceLocalizationBridge({
     required this.current,
+    required this.resolve,
     required this.useLocale,
     required this.useTheme,
   });
 
   final DeveloperWorkspaceLocalizationProvider current;
+  final DeveloperWorkspaceLocalizationResolver resolve;
   final DeveloperWorkspaceLocaleUpdater useLocale;
   final DeveloperWorkspaceThemeUpdater useTheme;
 }
@@ -163,7 +172,17 @@ abstract interface class DeveloperProjectPublisher {
 abstract interface class DeveloperWebGateway {
   DeveloperSession get session;
 
-  Future<List<Uri>> workspaceLinks();
+  Future<List<Uri>> sourceWorkspaceLinks();
+
+  Future<List<LanEndpointCandidate>> sourceWorkspaceEndpoints();
+
+  Future<List<Uri>> gdevelopWorkspaceLinks();
+
+  Future<List<LanEndpointCandidate>> gdevelopWorkspaceEndpoints();
+
+  bool beginGDevelopWebIdeInstall();
+
+  void endGDevelopWebIdeInstall();
 
   Future<void> close();
 }

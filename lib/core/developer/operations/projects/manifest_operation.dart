@@ -26,7 +26,7 @@ class _ManifestOperation implements _DeveloperHttpOperation {
       id: 'manifest.update',
       method: 'PUT',
       path: '/dev/api/projects/{projectId}/manifest',
-      summary: '校验并保存 main.json；id、author 和 lastModifiedAt 不可修改',
+      summary: '校验并保存 main.json；id、author、lastModifiedAt 和 SDK 版本由 App 管理',
       permission: 'project.write',
       risk: DeveloperOperationRisk.medium,
       idempotent: false,

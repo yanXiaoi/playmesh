@@ -222,6 +222,7 @@ func (h *Handler) finish(writer http.ResponseWriter, request *http.Request, sess
 	}
 	writeJSON(writer, http.StatusOK, snapshot)
 	h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &snapshot})
+	h.binary.closeSessionChannels(snapshot.ID, "会话已结束")
 	h.mutex.Lock()
 	delete(h.avatarPending, snapshot.ID)
 	waiters := h.avatarWaiters[snapshot.ID]

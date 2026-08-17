@@ -139,6 +139,7 @@ type SessionRequest struct {
 	ResourceBaseURL string `json:"resourceBaseUrl"`
 	Credential      string `json:"credential"`
 	ExpiresAt       int64  `json:"expiresAt"`
+	PackageID       string `json:"packageId"`
 }
 
 const RestartControlPath = "/.playmesh-development/restart"

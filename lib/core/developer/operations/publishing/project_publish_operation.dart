@@ -75,84 +75,86 @@ class _ProjectPublishOperation implements _DeveloperHttpOperation {
       return;
     }
 
-    final body = await _jsonBody(request);
-    final sourceIds = _sourceIds(body);
-    final publisher = gateway.projectPublisher;
-    if (publisher == null) {
-      await _error(
-        request.response,
-        HttpStatus.serviceUnavailable,
-        requestId,
-        'publishing_unavailable',
-        '当前 App 尚未接入游戏源发布服务',
-      );
-      return;
-    }
+    await gateway.gdevelopProjectRekey.runIdentityMutation(projectId, () async {
+      final body = await _jsonBody(request);
+      final sourceIds = _sourceIds(body);
+      final publisher = gateway.projectPublisher;
+      if (publisher == null) {
+        await _error(
+          request.response,
+          HttpStatus.serviceUnavailable,
+          requestId,
+          'publishing_unavailable',
+          '当前 App 尚未接入游戏源发布服务',
+        );
+        return;
+      }
 
-    final candidates = await publisher.listCandidates();
-    final candidateIds = candidates.map((source) => source.id).toSet();
-    final unavailable = sourceIds
-        .where((sourceId) => !candidateIds.contains(sourceId))
-        .toList(growable: false);
-    if (unavailable.isNotEmpty) {
-      await _json(request.response, HttpStatus.conflict, {
-        'requestId': requestId,
-        'error': {
-          'code': 'publish_source_not_eligible',
-          'message': '所选游戏源已不可用，请刷新候选列表后重试',
-        },
-        'unavailableSourceIds': unavailable,
-      });
-      return;
-    }
+      final candidates = await publisher.listCandidates();
+      final candidateIds = candidates.map((source) => source.id).toSet();
+      final unavailable = sourceIds
+          .where((sourceId) => !candidateIds.contains(sourceId))
+          .toList(growable: false);
+      if (unavailable.isNotEmpty) {
+        await _json(request.response, HttpStatus.conflict, {
+          'requestId': requestId,
+          'error': {
+            'code': 'publish_source_not_eligible',
+            'message': '所选游戏源已不可用，请刷新候选列表后重试',
+          },
+          'unavailableSourceIds': unavailable,
+        });
+        return;
+      }
 
-    final validation = await gateway.catalog.validateProject(projectId);
-    if (!validation.valid) {
-      developerEventHub.emit({
-        'type': 'project.publish.rejected',
-        'projectId': projectId,
-        'reason': 'package_validation_failed',
-        'timestamp': gateway.clock().toUtc().millisecondsSinceEpoch,
-      });
-      await _json(request.response, HttpStatus.unprocessableEntity, {
-        'requestId': requestId,
-        'error': {
-          'code': 'package_validation_failed',
-          'message': '项目完整校验未通过，未导出或上传游戏包',
-        },
-        'validation': validation.toJson(),
-      });
-      return;
-    }
-
-    final game = await gateway.catalog.prepareGame(projectId);
-    final result = await publisher.publish(
-      game: game,
-      sourceIds: sourceIds,
-      onEvent: (event) {
+      final validation = await gateway.catalog.validateProject(projectId);
+      if (!validation.valid) {
         developerEventHub.emit({
-          'type': 'project.publish.status',
+          'type': 'project.publish.rejected',
           'projectId': projectId,
-          ...event.toJson(),
+          'reason': 'package_validation_failed',
           'timestamp': gateway.clock().toUtc().millisecondsSinceEpoch,
         });
-      },
-    );
-    developerEventHub.emit({
-      'type': 'project.published',
-      'projectId': projectId,
-      'gameId': result.gameId,
-      'version': result.version,
-      'succeeded': result.succeeded,
-      'partiallySucceeded': result.partiallySucceeded,
-      'failedSourceIds': result.failedSourceIds,
-      'timestamp': gateway.clock().toUtc().millisecondsSinceEpoch,
-    });
-    await _json(request.response, HttpStatus.ok, {
-      'requestId': requestId,
-      'projectId': projectId,
-      'validation': validation.toJson(),
-      'result': result.toJson(),
+        await _json(request.response, HttpStatus.unprocessableEntity, {
+          'requestId': requestId,
+          'error': {
+            'code': 'package_validation_failed',
+            'message': '项目完整校验未通过，未导出或上传游戏包',
+          },
+          'validation': validation.toJson(),
+        });
+        return;
+      }
+
+      final game = await gateway.catalog.prepareGame(projectId);
+      final result = await publisher.publish(
+        game: game,
+        sourceIds: sourceIds,
+        onEvent: (event) {
+          developerEventHub.emit({
+            'type': 'project.publish.status',
+            'projectId': projectId,
+            ...event.toJson(),
+            'timestamp': gateway.clock().toUtc().millisecondsSinceEpoch,
+          });
+        },
+      );
+      developerEventHub.emit({
+        'type': 'project.published',
+        'projectId': projectId,
+        'gameId': result.gameId,
+        'version': result.version,
+        'succeeded': result.succeeded,
+        'partiallySucceeded': result.partiallySucceeded,
+        'failedSourceIds': result.failedSourceIds,
+        'timestamp': gateway.clock().toUtc().millisecondsSinceEpoch,
+      });
+      await _json(request.response, HttpStatus.ok, {
+        'requestId': requestId,
+        'projectId': projectId,
+        'validation': validation.toJson(),
+        'result': result.toJson(),
+      });
     });
   }
 

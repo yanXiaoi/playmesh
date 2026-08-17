@@ -102,7 +102,7 @@ void main() {
     );
   });
 
-  test('同 ID 更新只替换发布文件并保留 data 和 cache', () async {
+  test('同 ID 更新只替换发布文件并保留 data、cache 和平台 sidecar', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-update-');
     addTearDown(() => root.delete(recursive: true));
     final source = File('${root.path}${Platform.pathSeparator}source.zip');
@@ -129,14 +129,23 @@ void main() {
     await cache.parent.create(recursive: true);
     await data.writeAsString('{"score":7}');
     await cache.writeAsString('cached');
+    final projectMetadata = File(
+      '${installed.path}${Platform.pathSeparator}.playmesh'
+      '${Platform.pathSeparator}project.json',
+    );
+    final historyState = File(
+      '${installed.path}${Platform.pathSeparator}.playmesh'
+      '${Platform.pathSeparator}gdevelop'
+      '${Platform.pathSeparator}history${Platform.pathSeparator}state.json',
+    );
+    await projectMetadata.parent.create(recursive: true);
+    await historyState.parent.create(recursive: true);
+    await projectMetadata.writeAsString('{"kind":"gdevelop"}');
+    await historyState.writeAsString('{"revision":7}');
     final removedEntries = <FileSystemEntity>[
       File(
         '${installed.path}${Platform.pathSeparator}sdk'
         '${Platform.pathSeparator}legacy.js',
-      ),
-      File(
-        '${installed.path}${Platform.pathSeparator}.playmesh'
-        '${Platform.pathSeparator}state.json',
       ),
       File('${installed.path}${Platform.pathSeparator}arbitrary.txt'),
       Directory('${installed.path}${Platform.pathSeparator}other-root'),
@@ -182,6 +191,8 @@ void main() {
 
     expect(await data.readAsString(), '{"score":7}');
     expect(await cache.readAsString(), 'cached');
+    expect(await projectMetadata.readAsString(), '{"kind":"gdevelop"}');
+    expect(await historyState.readAsString(), '{"revision":7}');
     for (final entry in removedEntries) {
       expect(
         await FileSystemEntity.type(entry.path, followLinks: false),
@@ -267,6 +278,51 @@ void main() {
     );
   });
 
+  test('更新包验证失败时原游戏与平台历史保持完整', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-update-validation-failure-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    final service = GamePackageTransferService(libraryRoot: root);
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.safe-update'),
+      'app/index.html': '<!doctype html><title>Stable</title>',
+    });
+    final game = await service.importPackage(source);
+    final installed = Directory(game.entry.packageRootFilePath!);
+    final history = File(
+      '${installed.path}${Platform.pathSeparator}.playmesh'
+      '${Platform.pathSeparator}gdevelop${Platform.pathSeparator}history'
+      '${Platform.pathSeparator}state.json',
+    );
+    await history.parent.create(recursive: true);
+    await history.writeAsString('{"revision":3}');
+
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.safe-update', version: '2.0.0'),
+      'app/not-the-entry.html': '<!doctype html><title>Broken</title>',
+    });
+    await expectLater(service.importPackage(source), throwsFormatException);
+
+    expect(
+      await File(
+        '${installed.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Stable'),
+    );
+    expect(await history.readAsString(), '{"revision":3}');
+    expect(
+      jsonDecode(
+        await File(
+          '${installed.path}${Platform.pathSeparator}main.json',
+        ).readAsString(),
+      )['version'],
+      '1.0.0',
+    );
+  });
+
   test('非单屏多人游戏拒绝声明控制器能力', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-transfer-');
     addTearDown(() => root.delete(recursive: true));
@@ -315,6 +371,26 @@ void main() {
           'main.json': utf8.encode(_manifest('com.example.reserved')),
           'app/index.html': utf8.encode('<!doctype html>'),
           path: [0],
+        }),
+        throwsFormatException,
+        reason: path,
+      );
+    }
+  });
+
+  test('上传包不能写入平台拥有的 .playmesh sidecar', () {
+    final service = GamePackageTransferService();
+    for (final path in [
+      '.playmesh/project.json',
+      '.PLAYMESH/project.json',
+      r'.playmesh\project.json',
+      '.playmesh/../main.json',
+    ]) {
+      expect(
+        () => service.validatePackageFiles({
+          'main.json': utf8.encode(_manifest('com.example.sidecar-attack')),
+          'app/index.html': utf8.encode('<!doctype html>'),
+          path: utf8.encode('{"kind":"source"}'),
         }),
         throwsFormatException,
         reason: path,
@@ -548,8 +624,8 @@ String _manifest(
   'author': author,
   'lastModifiedAt': 1784851200000,
   'version': version,
-  'sdkVersion': '4.0.0',
-  'appSdkVersion': '3.2.0',
+  'sdkVersion': '4.1.0',
+  'appSdkVersion': '3.3.0',
   'orientation': 'portrait',
   'modes': ['solo'],
   'displayModes': ['multi_screen'],

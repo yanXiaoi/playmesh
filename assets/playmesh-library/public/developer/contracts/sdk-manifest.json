@@ -1,6 +1,6 @@
 {
-  "version": "4.0.0",
-  "channelVersion": "3.2.0",
+  "version": "4.1.0",
+  "channelVersion": "3.3.0",
   "script": "/playmesh/sdk/v1/playmesh-main.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -163,7 +163,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "4.0.0"
+          "value": "4.1.0"
         },
         {
           "name": "ready",
@@ -179,7 +179,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "3.2.0"
+          "value": "3.3.0"
         },
         {
           "name": "ready",
@@ -219,6 +219,16 @@
           "name": "ui.showGameSidebar",
           "signature": "ui.showGameSidebar(): Promise<boolean>",
           "behavior": "Manually opens the SDK game menu and returns false when fallbackUi is disabled"
+        },
+        {
+          "name": "ui.onGameMenuOpen",
+          "signature": "ui.onGameMenuOpen(callback: () => void): PlaymeshUnsubscribe",
+          "behavior": "Subscribes to successful closed-to-open SDK game menu transitions and returns an idempotent unsubscribe function"
+        },
+        {
+          "name": "ui.onGameMenuClose",
+          "signature": "ui.onGameMenuClose(callback: () => void): PlaymeshUnsubscribe",
+          "behavior": "Subscribes to successful open-to-closed SDK game menu transitions and returns an idempotent unsubscribe function"
         },
         {
           "name": "ui.restartGame",
@@ -398,8 +408,8 @@
       "members": [
         {
           "name": "submitAction",
-          "signature": "submitAction(action: JsonObject): Promise<null>",
-          "rule": "Submit business intent only. Never trust a player id, score, answer or result supplied by the action payload"
+          "signature": "submitAction(action: JsonValue, options?: {namespace?: string}): Promise<unknown>",
+          "rule": "Omitting options preserves the legacy wire payload and routes to playmesh.main.authority.defaultNamespace. A named namespace is an internal routing label only. Never trust a player id, score, answer or result supplied by the action payload"
         },
         {
           "name": "onMessage",
@@ -417,11 +427,16 @@
       "name": "playmesh.main.authority",
       "members": [
         {
+          "name": "defaultNamespace",
+          "value": "playmesh.authority.default.v1",
+          "status": "Stable default route used by submitAction(action) and onService(handler)"
+        },
+        {
           "name": "onService",
-          "signature": "onService(handler: (action: JsonObject, context: AuthorityContext) => AuthorityResult | AuthorityResult[] | null | Promise<AuthorityResult | AuthorityResult[] | null>): Unsubscribe",
+          "signature": "onService(handler: (action: JsonValue, context: AuthorityContext) => AuthorityResult | AuthorityResult[] | null | Promise<AuthorityResult | AuthorityResult[] | null>, options?: {namespace?: string}): Unsubscribe",
           "availability": "The App session host only; browser players and App joiners can never register Authority",
-          "rule": "Use context.senderPlayerId and context.members[].id as trusted identities. targetPlayerIds normally contains Player.id values; include context.session.authorityClientId when the single-screen public display must also receive the message. Remove duplicate ids",
-          "invalidResult": "Results without targetPlayerIds array or message object are ignored"
+          "rule": "Namespace is a routing label, not a security boundary. Use context.senderPlayerId and context.members[].id as trusted identities. Unknown named namespaces do not fall back to the default handler. The default route is last-registration-wins for compatibility; duplicate named routes are rejected",
+          "invalidResult": "Results without targetPlayerIds array or a message/payload value are ignored"
         }
       ]
     },
@@ -511,18 +526,21 @@
         {
           "name": "getBucket",
           "signature": "getBucket(bucket: string): StorageBucket",
-          "constraints": "bucket matches ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$; key matches ^[A-Za-z0-9._-]+$ and is 1 to 128 characters",
+          "constraints": "async methods keep bucket ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$; sync methods accept logical bucket names of 1 to 4096 UTF-8 bytes; ordinary keys keep ^[A-Za-z0-9._-]+$ and 1 to 128 characters; $playmesh.gdevelop.root.v1 is reserved for the GDevelop adapter",
           "storageAuthority": "All clients read and write the Authority host copy",
           "bucketMembers": [
             "getData(key): Promise<JsonValue | null>",
             "setData(key, value): Promise<null>",
+            "getDataSync(key): JsonValue | null",
+            "setDataSync(key, value): void",
             "removeData(key): Promise<null>",
             "clearData(): Promise<null>",
             "upload(file): Promise<string>"
           ],
           "uploadStorage": "packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{safe-extension}",
           "uploadUrl": "/bucket/{bucket}/{timestamp-ms}.{safe-extension}",
-          "jsonStorage": "packages/{gameId}/data/json/{bucket}.json; never mapped to the web"
+          "jsonStorage": "packages/{gameId}/data/json/{bucket}.json or data/json/logical/sha256-{digest}.json envelope; never mapped to the web",
+          "syncTransport": "Optional blocking same-origin GET/PUT over the authenticated Bucket gateway; it reuses transport/auth only and never writes data/data or returns a file URL"
         }
       ]
     },
@@ -566,7 +584,7 @@
   "authoritativeDataFlow": [
     "Preferred: game starts playmesh.main.sync on Authority, players submit semantic input, and SDK publishes versioned full snapshots",
     "The App runtime that creates and runs the session is assigned authorityClientId before any player-order logic",
-    "Player calls playmesh.main.game.submitAction(action)",
+    "Player calls playmesh.main.game.submitAction(action, optionalNamespaceOptions)",
     "The platform attaches senderPlayerId and the current SessionSnapshot",
     "Authority handler validates the action and updates authoritative state",
     "Authority returns targetPlayerIds using Player.id values and optionally SessionSnapshot.authorityClientId for the single-screen public display",
@@ -577,6 +595,7 @@
     "Determine Authority only with playmesh.main.session.isAuthority() or SessionSnapshot.authorityClientId; never use players[0], join order or a first-player convention",
     "Do not access PlaymeshBridge, chrome.webview, Core HTTP, WebSocket, share tokens or player credentials directly",
     "Do not trust identity or final results supplied by action payloads",
+    "Treat Authority namespaces only as routing labels; every handler must validate the trusted context",
     "Do not store credentials, player ids or game buckets in localStorage",
     "Do not read data/json, cache/, .playmesh/ or another game package; use only URLs returned by Bucket upload for runtime files",
     "Do not register authority service from a controller page"
@@ -588,8 +607,8 @@
     "publicRoot": "app/",
     "sdkImport": "/playmesh/sdk/v1/playmesh-main.js",
     "appUrlRoot": "/",
-    "gameSdkVersion": "main.json sdkVersion is required and must equal 4.0.0",
-    "appSdkVersion": "main.json appSdkVersion is required and must equal 3.2.0",
+    "gameSdkVersion": "main.json sdkVersion is required and must equal 4.1.0",
+    "appSdkVersion": "main.json appSdkVersion is required and must equal 3.2.0 or 3.3.0; new projects use 3.3.0",
     "gameEntry": "main.json entries.game is required; it is relative to physical app/ and must explicitly identify an HTML file",
     "controllerEntry": "main.json entries.controller is required for single_screen_multiplayer; it is relative to physical app/ and must explicitly identify an HTML file",
     "authorityEntry": "main.json authority.entry is required for multiplayer games; it is relative to physical app/ and must explicitly identify a JavaScript file",

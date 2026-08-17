@@ -1,0 +1,20 @@
+{
+  "version": "5.6.276",
+  "releaseNotes": "修复了一些问题",
+  "windows": {
+    "downloads": [
+      {
+        "name": "GitHub",
+        "url": ""
+      }
+    ]
+  },
+  "android": {
+    "downloads": [
+      {
+        "name": "GitHub",
+        "url": ""
+      }
+    ]
+  }
+}

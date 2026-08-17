@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -271,7 +272,7 @@ func TestOnlyAuthorityCanCreateOrCloseBinaryChannel(t *testing.T) {
 	}
 }
 
-func TestAuthorityBinaryDisconnectClosesAllChannels(t *testing.T) {
+func TestAuthorityBinaryDisconnectKeepsChannelForRejoin(t *testing.T) {
 	server, host, guest, hostSession, guestSession := binaryTestSession(t)
 	defer server.Close()
 	defer hostSession.CloseNow()
@@ -289,9 +290,220 @@ func TestAuthorityBinaryDisconnectClosesAllChannels(t *testing.T) {
 	if err := hostBinary.Close(websocket.StatusNormalClosure, "游戏退出"); err != nil {
 		t.Fatal(err)
 	}
+
+	reconnected := dialBinary(t, server.URL, host)
+	defer reconnected.CloseNow()
+	writeBinary(t, reconnected, binaryChannelFrame(binaryOpJoin, 3, created.channelID))
+	if joined := readBinaryResponse(t, reconnected); joined.status != binaryStatusOK {
+		t.Fatalf("authority rejoin response = %#v", joined)
+	}
+
+	writeBinary(t, reconnected, binarySendFrame(
+		4,
+		created.channelID,
+		0,
+		guest.Credential.Player.ID,
+		[]byte("after-authority-rejoin"),
+	))
+	delivery := readBinaryDelivery(t, guestBinary)
+	if delivery.senderID != binaryAuthorityID ||
+		!bytes.Equal(delivery.payload, []byte("after-authority-rejoin")) {
+		t.Fatalf("delivery after authority rejoin = %#v", delivery)
+	}
+	if response := readBinaryResponse(t, reconnected); response.status != binaryStatusOK {
+		t.Fatalf("send after authority rejoin = %#v", response)
+	}
+}
+
+func TestGuestBinaryAbnormalDisconnectKeepsChannelForRejoin(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+
+	writeBinary(t, hostBinary, binaryCreateFrame(1, binaryModeRelay))
+	created := readBinaryResponse(t, hostBinary)
+	writeBinary(t, guestBinary, binaryChannelFrame(binaryOpJoin, 2, created.channelID))
+	_ = readBinaryResponse(t, guestBinary)
+
+	guestBinary.CloseNow()
+	reconnected := dialBinary(t, server.URL, guest)
+	defer reconnected.CloseNow()
+	writeBinary(t, reconnected, binaryChannelFrame(binaryOpJoin, 3, created.channelID))
+	if joined := readBinaryResponse(t, reconnected); joined.status != binaryStatusOK {
+		t.Fatalf("guest rejoin response = %#v", joined)
+	}
+
+	writeBinary(t, reconnected, binarySendFrame(
+		4,
+		created.channelID,
+		0,
+		binaryAuthorityID,
+		[]byte("after-guest-rejoin"),
+	))
+	delivery := readBinaryDelivery(t, hostBinary)
+	if delivery.senderID != guest.Credential.Player.ID ||
+		!bytes.Equal(delivery.payload, []byte("after-guest-rejoin")) {
+		t.Fatalf("delivery after guest rejoin = %#v", delivery)
+	}
+	if response := readBinaryResponse(t, reconnected); response.status != binaryStatusOK {
+		t.Fatalf("send after guest rejoin = %#v", response)
+	}
+}
+
+func TestAuthorityBinaryDisconnectFailsPendingReviewsAndAllowsRejoin(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	writeBinary(t, hostBinary, binaryCreateFrame(1, binaryModeAuthority))
+	created := readBinaryResponse(t, hostBinary)
+	writeBinary(t, guestBinary, binaryChannelFrame(binaryOpJoin, 2, created.channelID))
+	_ = readBinaryResponse(t, guestBinary)
+
+	writeBinary(t, guestBinary, binarySendFrame(
+		3,
+		created.channelID,
+		0,
+		binaryAuthorityID,
+		[]byte("waiting-for-review"),
+	))
+	_ = readBinaryReview(t, hostBinary)
+	if err := hostBinary.Close(websocket.StatusNormalClosure, "审核端瞬断"); err != nil {
+		t.Fatal(err)
+	}
+	response := readBinaryResponse(t, guestBinary)
+	if response.status != binaryStatusError || response.message != errBinaryAuthorityOffline.Error() {
+		t.Fatalf("pending review response = %#v", response)
+	}
+
+	reconnected := dialBinary(t, server.URL, host)
+	defer reconnected.CloseNow()
+	writeBinary(t, reconnected, binaryChannelFrame(binaryOpJoin, 4, created.channelID))
+	if joined := readBinaryResponse(t, reconnected); joined.status != binaryStatusOK {
+		t.Fatalf("authority rejoin response = %#v", joined)
+	}
+}
+
+func TestAuthorityPrimaryDisconnectClosesAllChannels(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	writeBinary(t, hostBinary, binaryCreateFrame(1, binaryModeRelay))
+	created := readBinaryResponse(t, hostBinary)
+	writeBinary(t, guestBinary, binaryChannelFrame(binaryOpJoin, 2, created.channelID))
+	_ = readBinaryResponse(t, guestBinary)
+
+	hostSession.CloseNow()
 	closed := readBinaryServerFrame(t, guestBinary)
 	if closed[1] != binaryOpClosed || !bytes.Equal(closed[2:18], created.channelID[:]) {
-		t.Fatalf("closed frame = %x", closed)
+		t.Fatalf("closed frame after primary disconnect = %x", closed)
+	}
+}
+
+func TestSessionResetKeepsBinaryChannels(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	writeBinary(t, hostBinary, binaryCreateFrame(1, binaryModeRelay))
+	created := readBinaryResponse(t, hostBinary)
+	writeBinary(t, guestBinary, binaryChannelFrame(binaryOpJoin, 2, created.channelID))
+	_ = readBinaryResponse(t, guestBinary)
+
+	request, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/sessions/"+host.Session.ID+"/reset",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+host.Credential.Token)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("reset status = %d", response.StatusCode)
+	}
+
+	writeBinary(t, guestBinary, binarySendFrame(
+		3,
+		created.channelID,
+		0,
+		binaryAuthorityID,
+		[]byte("after-reset"),
+	))
+	delivery := readBinaryDelivery(t, hostBinary)
+	if delivery.senderID != guest.Credential.Player.ID ||
+		!bytes.Equal(delivery.payload, []byte("after-reset")) {
+		t.Fatalf("delivery after reset = %#v", delivery)
+	}
+	if response := readBinaryResponse(t, guestBinary); response.status != binaryStatusOK {
+		t.Fatalf("send after reset = %#v", response)
+	}
+}
+
+func TestSessionFinishClosesAllBinaryChannels(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	writeBinary(t, hostBinary, binaryCreateFrame(1, binaryModeRelay))
+	created := readBinaryResponse(t, hostBinary)
+	writeBinary(t, guestBinary, binaryChannelFrame(binaryOpJoin, 2, created.channelID))
+	_ = readBinaryResponse(t, guestBinary)
+
+	request, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/sessions/"+host.Session.ID+"/finish",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+host.Credential.Token)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("finish status = %d", response.StatusCode)
+	}
+
+	closed := readBinaryServerFrame(t, guestBinary)
+	if closed[1] != binaryOpClosed || !bytes.Equal(closed[2:18], created.channelID[:]) {
+		t.Fatalf("closed frame after finish = %x", closed)
 	}
 }
 

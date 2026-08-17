@@ -3,9 +3,10 @@ package packaging
 import "github.com/yanXiaoi/playmesh/dev-cli/internal/sdk"
 
 const (
-	rootIconName           = RootIconName
-	requiredGameSDKVersion = sdk.RequiredGameVersion
-	requiredAppSDKVersion  = sdk.RequiredAppVersion
+	rootIconName                  = RootIconName
+	requiredGameSDKVersion        = sdk.RequiredGameVersion
+	requiredAppSDKVersion         = sdk.RequiredAppVersion
+	minimumSupportedAppSDKVersion = sdk.MinimumSupportedAppVersion
 )
 
 type sdkBundle = sdk.Bundle

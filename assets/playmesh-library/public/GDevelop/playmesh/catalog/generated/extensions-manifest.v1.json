@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "kind": "extensions",
+  "catalogRevision": "gdevelop-v5.6.276-catalog-1",
+  "engine": {
+    "version": "5.6.276",
+    "tag": "v5.6.276",
+    "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
+  },
+  "source": {
+    "repository": "GDevelopApp/GDevelop-extensions",
+    "remote": "https://github.com/GDevelopApp/GDevelop-extensions.git",
+    "transport": "exact-commit-json-with-sha256-manifest",
+    "branch": "main",
+    "commit": "de361fba046e0670a8414cbc657dd53788dbfc48",
+    "rootTreeSha": "a153f751e377ea04c05aedafc47eadbf092f3291",
+    "license": "MIT",
+    "licenseUrl": "https://github.com/GDevelopApp/GDevelop-extensions/blob/de361fba046e0670a8414cbc657dd53788dbfc48/LICENSE"
+  },
+  "index": {
+    "path": "extensions-index.json",
+    "bytes": 1831335,
+    "sha256": "36c7f24d3c21b6c80297d12c02212891be64ec94f6ba43c9626d920fb96da417",
+    "mediaType": "application/json"
+  },
+  "counts": {
+    "extensions": 219,
+    "behaviors": 152
+  }
+}

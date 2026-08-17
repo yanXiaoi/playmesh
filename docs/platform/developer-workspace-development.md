@@ -1,11 +1,15 @@
 # 开发者工作区开发约定
 
+开发者入口的共享/独立分层见
+`docs/platform/developer-foundation-architecture.md`；GDevelop 完整工程与资源历史合同见
+`docs/gdevelop/history-development.md`。
+
 本约定适用于 Developer Gateway、Developer Operation、网页工作区、AI 对话控制台、
 Agent API、项目文件与本地历史。游戏作者使用说明见
 [网页开发者通道](../game/web-dev-channel.md)。
 
-当前 Developer API / OpenAPI 版本为 `4.0.0`。本轮破坏性开发资源会话与外部工程
-接入变更见 [Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
+当前未发布 Developer API / OpenAPI 版本为 `4.2.0`。开发资源会话与外部工程接入变更见
+[Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
 ## 架构
@@ -56,7 +60,7 @@ lib/core/developer/operations/{domain}/
 
 ## 当前完整 Operation 注册表
 
-下表记录 Developer API `4.0.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
+下表记录 Developer API `4.2.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
 真正用于路由的是“HTTP method + path 模板”，operation ID 用于响应头、OpenAPI、
 操作目录、审批和诊断，不参与路径命中。
 
@@ -82,8 +86,11 @@ BCP 47 locale。模板列表、读取、保存、恢复和项目导出使用同�
 语言的用户覆盖按 locale 隔离。不得在提示词目录增加第二份 App 文案、语言清单或 fallback，
 也不得在 Dart/JavaScript 中按语言分支。完整撰写要求见[工程开发规范](../06-engineering-standards.md#文档撰写规则)。
 
-`GET /dev/{workspacePath}/workspace` 和 `/playmesh/**` 静态资源由 Gateway 外壳处理，
+`GET /dev/{workspacePath}/workspace`、同会话下的
+`GET /dev/{workspacePath}/gdevelop/**` 和 `/playmesh/**` 静态资源由 Gateway 外壳处理，
 不是 Operation。它们不能被复制进上表或 `/dev/api/operations` 冒充业务 API。
+GDevelop 路由只读取本机 `playmesh-library/GDevelop/official/` 中已经安装且准备完成的
+Web IDE；缺少 `index.html` 时不生成可视化工作区链接，也不回退到 GDevelop 在线服务。
 
 ### 开发资源会话
 
@@ -188,6 +195,9 @@ GET 且 path.startsWith("/playmesh/developer/")
 
 GET 且 path == session.workspacePath
   => 设置 HttpOnly/Strict token cookie，返回工作区 HTML
+
+GET 且 path.startsWith(session.gdevelopWorkspacePath)
+  => 从本机已安装目录安全返回 GDevelop Web IDE 文件
 
 GET 且 path.startsWith("/playmesh/")
   => 其他 Playmesh 公共资源

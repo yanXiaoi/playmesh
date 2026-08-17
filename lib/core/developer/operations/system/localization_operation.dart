@@ -38,6 +38,16 @@ class _LocalizationOperation implements _DeveloperHttpOperation {
       );
       return;
     }
+    final requestedLocale = request.uri.queryParameters['locale']?.trim() ?? '';
+    final resolvesLocale =
+        definition.id == 'workspace.localization' && requestedLocale.isNotEmpty;
+    if (resolvesLocale &&
+        (requestedLocale.length > 64 ||
+            !RegExp(
+              r'^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$',
+            ).hasMatch(requestedLocale))) {
+      throw const FormatException('locale query 格式无效');
+    }
     if (definition.id == 'workspace.localization_update') {
       final body = await _jsonBody(request);
       final updatesLocale = body.containsKey('localeId');
@@ -73,9 +83,19 @@ class _LocalizationOperation implements _DeveloperHttpOperation {
         await bridge.useTheme(themeMode!);
       }
     }
+    final localization = resolvesLocale
+        ? bridge.resolve(requestedLocale)
+        : bridge.current();
     await _json(request.response, HttpStatus.ok, {
       'requestId': requestId,
-      ...bridge.current().toJson(),
+      ...localization.toJson(),
+      if (resolvesLocale)
+        'messages': {
+          for (final entry in localization.messages.entries)
+            if (entry.key.startsWith('workspace.gdevelop_'))
+              entry.key: entry.value,
+        },
+      if (resolvesLocale) 'resolvedLocale': localization.localeId,
     });
   }
 }

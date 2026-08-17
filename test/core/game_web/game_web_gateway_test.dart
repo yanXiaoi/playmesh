@@ -9,6 +9,8 @@ import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
 import 'package:playmesh/models/game_summary.dart';
 
+import '../storage/standard_json_bucket_test_support.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = null;
@@ -34,7 +36,7 @@ void main() {
       shareToken: 'share-token',
       gameName: '测试游戏',
       tags: const ['派对', '本地多人'],
-      gameSdkVersion: '4.0.0',
+      gameSdkVersion: '4.1.0',
       appSdkVersion: '3.2.0',
       requiredCapabilities: const ['media.camera'],
       controllerRequiredCapabilities: const ['media.microphone'],
@@ -63,6 +65,16 @@ void main() {
       ),
       isTrue,
     );
+
+    final unauthorizedStorage = await sendStandardJsonBucketRequest(
+      baseUri: base,
+      requestId: 'remote-browser-rejected-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+    );
+    expect(unauthorizedStorage.statusCode, HttpStatus.forbidden);
 
     final opened = await _openInvitation(shareLinks.first);
     final controller = opened.entry;
@@ -106,6 +118,40 @@ void main() {
     expect(controller.body, isNot(contains('nicknameEndpoint')));
     expect(controller.body, isNot(contains('"nickname":')));
 
+    final remoteInitial = await sendStandardJsonBucketRequest(
+      baseUri: base,
+      requestId: 'remote-browser-get-initial-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(remoteInitial.statusCode, HttpStatus.ok);
+    final remoteSet = await sendStandardJsonBucketRequest(
+      baseUri: base,
+      requestId: 'remote-browser-set-0001',
+      gameId: storage.gameId,
+      operation: 'set',
+      bucket: 'save',
+      key: 'checkpoint',
+      value: 11,
+      expectedRevision: standardJsonBucketRevision(remoteInitial),
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(remoteSet.statusCode, HttpStatus.ok);
+    final remoteGet = await sendStandardJsonBucketRequest(
+      baseUri: base,
+      requestId: 'remote-browser-get-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(remoteGet.statusCode, HttpStatus.ok);
+    expect(standardJsonBucketValue(remoteGet), 11);
+
     final spoofedAppController = await http.get(
       opened.entryUri.replace(
         query:
@@ -142,10 +188,23 @@ void main() {
     expect(sdk.statusCode, HttpStatus.ok);
     expect(
       sdk.body,
-      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
     );
     expect(sdk.body, contains('global.playmesh = Object.freeze'));
     expect(sdk.body, isNot(contains('/playmesh/developer/log')));
+
+    final compatibleAppSdk = await http.get(
+      base.resolve('/playmesh/sdk/v1/playmesh-app.js'),
+    );
+    expect(compatibleAppSdk.statusCode, HttpStatus.ok);
+    expect(
+      compatibleAppSdk.body,
+      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.2.0'),
+    );
+    expect(
+      compatibleAppSdk.body,
+      contains('PLAYMESH_APP_SDK_VERSION = "3.3.0"'),
+    );
 
     final rejectedRemoteLog = await http.post(
       base.resolve('/playmesh/developer/log'),
@@ -190,6 +249,89 @@ void main() {
 
     final missing = await http.get(base.resolve('/not-found'));
     expect(missing.statusCode, HttpStatus.notFound);
+  });
+
+  test('RemoteGamePage 回环 tunnel 透明保留邀请 Cookie 与标准存储路由', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-web-storage-tunnel-',
+    );
+    final storage = await GameStorageService.create(
+      gameId: 'com.playmesh.tunnel-storage',
+      libraryRoot: root,
+    );
+    final packageRoot = await _createInstalledPackageRoot();
+    final gateway = await startGameWebGateway(
+      source: InstalledGameWebResourceSource(packageRootPath: packageRoot.path),
+      gameId: storage.gameId,
+      multiplayer: true,
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      controllerOrientation: GameOrientation.portrait,
+      gameEntryPath: 'index.html',
+      controllerEntryPath: 'controller/index.html',
+      coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
+      joinCode: 'ABC123',
+      shareToken: 'share-token',
+      gameName: 'Tunnel 存储测试',
+      tags: const ['测试'],
+      gameSdkVersion: '4.1.0',
+      appSdkVersion: '3.3.0',
+      requiredCapabilities: const [],
+      controllerRequiredCapabilities: const [],
+      storage: storage,
+    );
+    final authorityBase = Uri.parse('http://127.0.0.1:${gateway.port}/');
+    final tunnel = await startLocalTunnelGateway(targetBaseUri: authorityBase);
+    addTearDown(() async {
+      await tunnel.close();
+      await gateway.close();
+      await storage.close();
+      await root.delete(recursive: true);
+      await packageRoot.delete(recursive: true);
+    });
+
+    final authorityInvitation = (await gateway.shareLinks()).first;
+    final tunnelInvitation = authorityInvitation.replace(
+      scheme: tunnel.localBaseUri.scheme,
+      host: tunnel.localBaseUri.host,
+      port: tunnel.localBaseUri.port,
+    );
+    final opened = await _openInvitation(tunnelInvitation);
+    expect(opened.entry.statusCode, HttpStatus.ok);
+
+    final tunnelInitial = await sendStandardJsonBucketRequest(
+      baseUri: tunnel.localBaseUri,
+      requestId: 'remote-tunnel-get-initial-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(tunnelInitial.statusCode, HttpStatus.ok);
+    final tunnelSet = await sendStandardJsonBucketRequest(
+      baseUri: tunnel.localBaseUri,
+      requestId: 'remote-tunnel-set-0001',
+      gameId: storage.gameId,
+      operation: 'set',
+      bucket: 'save',
+      key: 'checkpoint',
+      value: 19,
+      expectedRevision: standardJsonBucketRevision(tunnelInitial),
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(tunnelSet.statusCode, HttpStatus.ok);
+    final tunnelGet = await sendStandardJsonBucketRequest(
+      baseUri: tunnel.localBaseUri,
+      requestId: 'remote-tunnel-get-0001',
+      gameId: storage.gameId,
+      operation: 'get',
+      bucket: 'save',
+      key: 'checkpoint',
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(tunnelGet.statusCode, HttpStatus.ok);
+    expect(standardJsonBucketValue(tunnelGet), 19);
   });
 
   test('局域网 App 通过受控 Upgrade 透明访问当前 Core', () async {

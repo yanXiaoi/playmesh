@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/developer/developer_run_controller.dart';
+import 'package:playmesh/models/game_manifest.dart';
+import 'package:playmesh/models/game_summary.dart';
+import 'package:playmesh/models/local_game_entry.dart';
 
 void main() {
   test('重启已注册的开发游戏并保留分享信息', () async {
@@ -121,6 +124,96 @@ void main() {
     );
   });
 
+  test('已保存源码项目使用本地资源启动并保留开发调试绑定', () async {
+    late DeveloperRunController controller;
+    DeveloperProjectLaunchRequest? launched;
+    var stopped = 0;
+    controller = DeveloperRunController(
+      onLaunch: (request) async {
+        launched = request;
+        controller.registerStopHandler(
+          request.projectId,
+          () async => stopped += 1,
+          expectedRunId: request.runId,
+        );
+        controller.registerJavaScriptExecutor(
+          request.projectId,
+          (source) async => 'saved:$source',
+          expectedRunId: request.runId,
+        );
+      },
+    );
+    const game = GameSummary(
+      id: 'com.example.saved-source',
+      name: 'Saved source',
+      version: '1.0.0',
+      description: '',
+      minPlayers: 1,
+      maxPlayers: 1,
+      supportsMultiplayer: false,
+      displayModeLabel: 'multi_screen',
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      entry: LocalGameEntry(
+        gameEntryPath: 'index.html',
+        statusLabel: '开发项目',
+        packageRootFilePath: '/managed/packages/com.example.saved-source',
+      ),
+    );
+
+    final started = await controller.runSavedProject(
+      projectId: game.id,
+      game: game,
+    );
+
+    expect(started.phase, DeveloperRunPhase.starting);
+    expect(launched?.source, isA<DeveloperSavedProjectLaunchSource>());
+    expect(launched?.savedProject, same(game));
+    expect(launched?.resourceSession, isNull);
+
+    controller.reportRunning(projectId: game.id, expectedRunId: started.runId);
+    expect(
+      await controller.executeJavaScript(game.id, 'document.title'),
+      'saved:document.title',
+    );
+
+    await controller.stopAllDevelopment();
+    expect(stopped, 1);
+    expect(controller.status(game.id).phase, DeveloperRunPhase.stopped);
+  });
+
+  test('已保存源码项目 ID 与请求不一致时拒绝启动', () async {
+    var launches = 0;
+    final controller = DeveloperRunController(
+      onLaunch: (_) async => launches += 1,
+    );
+    const game = GameSummary(
+      id: 'com.example.saved-source',
+      name: 'Saved source',
+      version: '1.0.0',
+      description: '',
+      minPlayers: 1,
+      maxPlayers: 1,
+      supportsMultiplayer: false,
+      displayModeLabel: 'multi_screen',
+      displayMode: 'multi_screen',
+      orientation: GameOrientation.landscape,
+      entry: LocalGameEntry(
+        gameEntryPath: 'index.html',
+        statusLabel: '开发项目',
+        packageRootFilePath: '/managed/packages/com.example.saved-source',
+      ),
+    );
+
+    await expectLater(
+      controller.runSavedProject(projectId: 'com.example.other', game: game),
+      throwsStateError,
+    );
+
+    expect(launches, 0);
+    expect(controller.activeStatus, isNull);
+  });
+
   test('开发资源会话只在内存绑定并随停止运行撤销', () async {
     DeveloperProjectLaunchRequest? launched;
     var stopped = 0;
@@ -136,6 +229,7 @@ void main() {
       resourceBaseUri: Uri.parse('http://192.168.1.8:4173/'),
       credential: List<String>.filled(40, 'a').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration('com.example.development'),
     );
 
     final started = await controller.runDevelopment(session);
@@ -160,6 +254,7 @@ void main() {
       resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
       credential: List<String>.filled(40, 'b').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration('com.example.failed-development'),
     );
 
     await expectLater(controller.runDevelopment(session), throwsStateError);
@@ -187,12 +282,14 @@ void main() {
       resourceBaseUri: Uri.parse('http://192.168.1.8:4173/'),
       credential: List<String>.filled(40, 'c').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration('com.example.repeated-development'),
     );
     final second = DeveloperResourceSession(
       projectId: first.projectId,
       resourceBaseUri: Uri.parse('http://192.168.1.8:5173/'),
       credential: List<String>.filled(40, 'd').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration(first.projectId),
     );
 
     final firstStatus = await controller.runDevelopment(first);
@@ -219,6 +316,7 @@ void main() {
       resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
       credential: List<String>.filled(40, 'e').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration('com.example.immediate-stop'),
     );
     await controller.runDevelopment(session);
 
@@ -253,6 +351,7 @@ void main() {
       resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
       credential: List<String>.filled(40, 'f').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration('com.example.retry-stop'),
     );
     await controller.runDevelopment(session);
 
@@ -292,6 +391,7 @@ void main() {
       resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
       credential: List<String>.filled(40, 'g').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+      runtimeDeclaration: _declaration('com.example.formal-after-development'),
     );
     final development = await controller.runDevelopment(session);
     controller.reportRunning(
@@ -325,6 +425,7 @@ void main() {
       resourceBaseUri: Uri.parse('http://127.0.0.1:4173/'),
       credential: List<String>.filled(40, 'h').join(),
       expiresAt: DateTime.now().toUtc().add(const Duration(milliseconds: 30)),
+      runtimeDeclaration: _declaration('com.example.expiring-development'),
     );
 
     await controller.runDevelopment(session);
@@ -337,3 +438,23 @@ void main() {
     );
   });
 }
+
+DeveloperRuntimeDeclaration _declaration(String gameId) =>
+    DeveloperRuntimeDeclaration(
+      manifest: GameManifest.fromJson({
+        'id': gameId,
+        'name': 'Temporary development',
+        'author': 'Tester',
+        'lastModifiedAt': 0,
+        'remarks': '',
+        'version': '1.0.0',
+        'sdkVersion': '4.1.0',
+        'appSdkVersion': '3.3.0',
+        'orientation': 'landscape',
+        'modes': ['solo'],
+        'displayModes': ['multi_screen'],
+        'players': {'min': 1, 'max': 1},
+        'entries': {'game': 'index.html'},
+        'tags': <String>[],
+      }),
+    );

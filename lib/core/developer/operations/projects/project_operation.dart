@@ -39,6 +39,13 @@ class _ProjectOperation implements _DeveloperHttpOperation {
       );
       return;
     }
+    // Revocation is deliberately performed by this source-workspace
+    // controller before deletion. The persistence mechanism is shared, while
+    // GDevelop keeps its own lifecycle controller and scopeKind.
+    await gateway.approvalBroker.clearScopeApprovals(
+      scopeKind: 'source',
+      scopeId: projectId,
+    );
     await gateway.catalog.deleteProject(projectId);
     developerEventHub.emit({
       'type': 'project.deleted',

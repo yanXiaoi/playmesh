@@ -6,6 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const developerRoot = 'assets/playmesh-library/public/developer';
   const localizationRoot = 'assets/playmesh-localization';
+  const gdevelopOverlayRoot =
+      'assets/playmesh-library/public/GDevelop/playmesh/overlays/'
+      'newIDE/app/src';
 
   test('能力选择器只渲染 supportedPlatforms 中的平台', () {
     final script = File('$developerRoot/workspace.js').readAsStringSync();
@@ -30,6 +33,50 @@ void main() {
     ).readAsStringSync();
     final zh = _readMessages('$localizationRoot/locales/zh-CN/app.json');
     final en = _readMessages('$localizationRoot/locales/en-US/app.json');
+    final gdevelopMessageRegistryFile = File(
+      '$gdevelopOverlayRoot/PlaymeshLocalization/PlaymeshMessageKeys.js',
+    );
+    final gdevelopMessageRegistrySource = gdevelopMessageRegistryFile
+        .readAsStringSync();
+    final gdevelopMessageRegistry = <String, String>{};
+    for (final match in RegExp(
+      r'''\b([A-Za-z][A-Za-z0-9]*):\s*(["'])(workspace\.gdevelop_[^"']+)\2''',
+    ).allMatches(gdevelopMessageRegistrySource)) {
+      gdevelopMessageRegistry[match.group(1)!] = match.group(3)!;
+    }
+    final gdevelopMessageConsumers = <String>{};
+    for (final entity in Directory(
+      gdevelopOverlayRoot,
+    ).listSync(recursive: true)) {
+      if (entity is! File ||
+          !entity.path.endsWith('.js') ||
+          entity.absolute.path == gdevelopMessageRegistryFile.absolute.path) {
+        continue;
+      }
+      final source = entity.readAsStringSync();
+      for (final match in RegExp(
+        r'\bplaymeshMessages\.([A-Za-z][A-Za-z0-9]*)',
+      ).allMatches(source)) {
+        gdevelopMessageConsumers.add(match.group(1)!);
+      }
+    }
+
+    expect(gdevelopMessageRegistry, isNotEmpty);
+    expect(
+      gdevelopMessageConsumers.difference(gdevelopMessageRegistry.keys.toSet()),
+      isEmpty,
+      reason: 'GDevelop UI references an unknown Playmesh message key.',
+    );
+    expect(
+      gdevelopMessageRegistry.keys.toSet().difference(gdevelopMessageConsumers),
+      isEmpty,
+      reason: 'Every registered GDevelop message needs a real UI consumer.',
+    );
+    expect(
+      gdevelopMessageRegistry.values.toSet(),
+      hasLength(gdevelopMessageRegistry.length),
+      reason: 'GDevelop message registry values must be unique.',
+    );
 
     final requiredKeys = <String>{};
     for (final match in RegExp(
@@ -44,6 +91,7 @@ void main() {
     }
     requiredKeys.removeWhere((key) => key.endsWith('.'));
     requiredKeys.addAll(_dynamicWorkspaceKeys);
+    requiredKeys.addAll(gdevelopMessageRegistry.values);
 
     final zhWorkspaceKeys = zh.keys
         .where((key) => key.startsWith('workspace.'))
@@ -414,27 +462,42 @@ void main() {
     expect(script, isNot(contains('tr(event.source')));
     expect(script, isNot(contains('tr(event.level')));
     final manifestBuilder = RegExp(
-      r'function manifestFromForm\(\)\{(.+?)return manifest\}',
+      r'function manifestFromForm\(gameSdkVersion,appSdkVersion\)\{(.+?)\}'
+      r'\nasync function saveManifestSettings',
     ).firstMatch(script)!.group(1)!;
+    expect(html, contains('/playmesh/developer/playmesh-game-manifest.js'));
+    expect(
+      manifestBuilder,
+      contains('return PlaymeshGameManifest.buildGameManifest({'),
+    );
     expect(manifestBuilder, isNot(contains('...manifestSource')));
     expect(manifestBuilder, isNot(contains('delete manifest.')));
     expect(
       manifestBuilder,
-      contains('appSdkVersion:manifestSource.appSdkVersion'),
+      contains('sdkVersion:gameSdkVersion,appSdkVersion'),
     );
+    expect(manifestBuilder, isNot(contains('manifestSdkVersion')));
     expect(
-      manifestBuilder,
-      contains("entries:{game:q('manifestGameEntry').value.trim()}"),
-      reason:
-          'The form must write a fresh object containing only current fields; '
-          'unknown main.json fields are silently omitted.',
-    );
-    expect(
-      manifestBuilder,
+      script,
       contains(
-        "if(mode==='multiplayer'&&displayMode==='single_screen_multiplayer')"
-        "{manifest.entries.controller=q('manifestControllerEntry').value.trim();",
+        "sdk=await api('/dev/api/status').then(r=>r.json()),"
+        'manifest=manifestFromForm(sdk.gameSdkVersion,sdk.appSdkVersion)',
       ),
+    );
+    expect(
+      manifestBuilder,
+      contains("gameEntry:q('manifestGameEntry').value"),
+      reason:
+          'The shared builder must receive only current form fields; unknown '
+          'main.json fields are not copied into the new manifest.',
+    );
+    expect(
+      manifestBuilder,
+      contains("controllerEntry:q('manifestControllerEntry').value"),
+    );
+    expect(
+      manifestBuilder,
+      contains("authorityEntry:q('manifestAuthorityEntry').value"),
     );
     expect(
       '$html\n$script',
@@ -933,6 +996,7 @@ const _dynamicWorkspaceKeys = <String>{
   'workspace.prompt.category.common',
   'workspace.prompt.category.mode',
   'workspace.prompt.category.display',
+  'workspace.prompt.category.gdevelop',
   'workspace.prompt.template.common',
   'workspace.prompt.template.agent_common',
   'workspace.prompt.template.custom_ideas',
@@ -940,6 +1004,8 @@ const _dynamicWorkspaceKeys = <String>{
   'workspace.prompt.template.multiplayer',
   'workspace.prompt.template.multi_screen',
   'workspace.prompt.template.single_screen_multiplayer',
+  'workspace.prompt.template.gdevelop_chat',
+  'workspace.prompt.template.gdevelop_agent',
   'workspace.history.summary.publish_project',
   'workspace.history.summary.create_directory',
   'workspace.history.summary.delete_directory',

@@ -17,6 +17,10 @@ const gameCoreSource = fs.readFileSync(
   "lib/core/game_sdk/features/game/game_core_feature.dart",
   "utf8",
 );
+const gameAuthoritySource = fs.readFileSync(
+  "lib/core/game_sdk/features/game/game_authority_feature.dart",
+  "utf8",
+);
 const gameStorageLifecycleSource = fs.readFileSync(
   "lib/core/game_sdk/features/game/game_storage_lifecycle_feature.dart",
   "utf8",
@@ -114,11 +118,27 @@ assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
 assert.match(
   game,
-  /interface PlaymeshMainApi \{[\s\S]*?readonly version: "4\.0\.0";/,
+  /interface PlaymeshMainApi \{[\s\S]*?readonly version: "4\.1\.0";/,
 );
 assert.match(
   game,
-  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.2\.0";/,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.3\.0";/,
+);
+assert.match(
+  game,
+  /submitAction\(action: PlaymeshJson, options\?: PlaymeshAuthorityServiceOptions\): Promise<unknown>;/,
+);
+assert.match(
+  game,
+  /readonly defaultNamespace: "playmesh\.authority\.default\.v1";/,
+);
+assert.match(
+  game,
+  /onService\([\s\S]*?options\?: PlaymeshAuthorityServiceOptions\): PlaymeshUnsubscribe;/,
+);
+assert.match(
+  gameAuthoritySource,
+  /const authorityServices = new Map\(\);[\s\S]*?function encodeAuthorityAction[\s\S]*?function decodeAuthorityAction[\s\S]*?function registerAuthorityService[\s\S]*?function normalizeAuthorityResults[\s\S]*?async function dispatchAuthorityAction/,
 );
 assert.match(
   gameRuntimeSource,
@@ -253,6 +273,14 @@ assert.match(game, /openSharePanel\(\): Promise<void>/);
 assert.match(game, /configure\(options: PlaymeshAppUiOptions\): PlaymeshAppUiOptions/);
 assert.match(game, /initializeBrowser\(\): boolean/);
 assert.match(game, /showGameSidebar\(\): Promise<boolean>/);
+assert.match(
+  game,
+  /onGameMenuOpen\(callback: \(\) => void\): PlaymeshUnsubscribe/,
+);
+assert.match(
+  game,
+  /onGameMenuClose\(callback: \(\) => void\): PlaymeshUnsubscribe/,
+);
 assert.match(game, /restartGame\(\): void/);
 assert.match(game, /openRuntimeLogs\(\): Promise<boolean>/);
 assert.match(game, /openGameInfo\(\): Promise<boolean>/);
@@ -268,6 +296,8 @@ for (const topLevelUiMethod of [
   "configure",
   "initializeBrowser",
   "showGameSidebar",
+  "onGameMenuOpen",
+  "onGameMenuClose",
   "restartGame",
   "openSharePanel",
   "openRuntimeLogs",
@@ -339,6 +369,8 @@ for (const memberName of [
   "ui.configure",
   "ui.initializeBrowser",
   "ui.showGameSidebar",
+  "ui.onGameMenuOpen",
+  "ui.onGameMenuClose",
   "ui.restartGame",
   "ui.openRuntimeLogs",
   "ui.openGameInfo",
@@ -361,6 +393,53 @@ const authorityNamespace = sdkManifest.namespaces.find(
   (namespace) => namespace.name === "playmesh.main.authority",
 );
 assert.equal(
+  authorityNamespace.members.find((member) => member.name === "defaultNamespace")
+    .value,
+  "playmesh.authority.default.v1",
+);
+assert.match(
+  authorityNamespace.members.find((member) => member.name === "onService")
+    .signature,
+  /options\?: \{namespace\?: string\}/,
+);
+const gameNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.main.game",
+);
+assert.match(
+  gameNamespace.members.find((member) => member.name === "submitAction")
+    .signature,
+  /options\?: \{namespace\?: string\}/,
+);
+const storageNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.main.storage",
+);
+const storageBucketMembers = storageNamespace.members.find(
+  (member) => member.name === "getBucket",
+).bucketMembers;
+assert.deepEqual(storageBucketMembers, [
+  "getData(key): Promise<JsonValue | null>",
+  "setData(key, value): Promise<null>",
+  "getDataSync(key): JsonValue | null",
+  "setDataSync(key, value): void",
+  "removeData(key): Promise<null>",
+  "clearData(): Promise<null>",
+  "upload(file): Promise<string>",
+]);
+assert.deepEqual(sdkSchema.$defs.StorageBucketMethodName.enum, [
+  "getData",
+  "setData",
+  "getDataSync",
+  "setDataSync",
+  "removeData",
+  "clearData",
+  "upload",
+]);
+assert.match(game, /getDataSync<T = PlaymeshJson>\(key: string\): T \| null;/);
+assert.match(game, /setDataSync\(key: string, value: PlaymeshJson\): void;/);
+for (const forbiddenSyncStorageName of ["getSync", "setSync", "getBucketSync"]) {
+  assert.doesNotMatch(game, new RegExp(`\\b${forbiddenSyncStorageName}\\s*\\(`));
+}
+assert.equal(
   authorityNamespace.members.some((member) => member.name === "openSharePanel"),
   false,
 );
@@ -376,7 +455,7 @@ assert.equal(
 assert(sdkSchema.$defs.PlaymeshBootstrap.required.includes("gameInfo"));
 assert.equal(
   sdkSchema.$defs.PlaymeshAppBootstrap.properties.sdkVersion.const,
-  "3.2.0",
+  "3.3.0",
 );
 assert.equal(
   sdkSchema.$defs.PlaymeshReadyResult.properties.app.$ref,
@@ -394,7 +473,17 @@ assert.deepEqual(sdkSchema.$defs.Player.properties.avatar.type, [
 ]);
 assert.equal("source" in sdkSchema.$defs.Player.properties, false);
 assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
-assert.equal(defaultGameManifest.sdkVersion, "4.0.0");
+assert.equal(defaultGameManifest.sdkVersion, "4.1.0");
+assert.equal(defaultGameManifest.appSdkVersion, "3.3.0");
+assert.equal(gameManifestSchema.properties.sdkVersion.const, "4.1.0");
+assert.equal(
+  sdkManifest.projectRules.gameSdkVersion,
+  "main.json sdkVersion is required and must equal 4.1.0",
+);
+assert.deepEqual(gameManifestSchema.properties.appSdkVersion.enum, [
+  "3.2.0",
+  "3.3.0",
+]);
 assert.equal("permissions" in defaultGameManifest, false);
 assert.equal("icon" in defaultGameManifest, false);
 assert.equal("permissions" in gameManifestSchema.properties, false);

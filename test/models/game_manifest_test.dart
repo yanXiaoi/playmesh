@@ -11,8 +11,8 @@ void main() {
     'name': '测试游戏',
     'remarks': '清单解析测试',
     'version': '1.0.0',
-    'sdkVersion': '4.0.0',
-    'appSdkVersion': '3.2.0',
+    'sdkVersion': '4.1.0',
+    'appSdkVersion': '3.3.0',
     'orientation': 'landscape',
     'controllerOrientation': 'portrait',
     'modes': ['multiplayer'],
@@ -211,6 +211,14 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('兼容旧 App SDK 声明并保留游戏请求版本', () {
+    final json = validManifest()..['appSdkVersion'] = '3.2.0';
+
+    final manifest = GameManifest.fromJson(json);
+
+    expect(manifest.appSdkVersion, '3.2.0');
   });
 
   test('拒绝不兼容的 App SDK 主版本', () {

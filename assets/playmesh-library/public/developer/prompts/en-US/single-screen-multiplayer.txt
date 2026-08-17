@@ -5,7 +5,7 @@ The host loads the explicitly declared and existing `main.json.entries.game` as 
 
 Required deliverables:
 - `entries.game`: public display, session presentation, Authority registration, and authoritative state presentation only; it provides no player input.
-- `entries.controller`: player input, `submitAction`, and synchronized snapshot consumption.
+- `entries.controller`: player input, business-intent submission through `submitAction` or `submitState`, and public synchronized snapshot consumption.
 - Authority service: processes controller input through `playmesh.main.sync` and updates authoritative state; the SDK automatically distributes snapshots to the public display and players.
 
 Strictly prohibited:
@@ -54,4 +54,4 @@ document.querySelector("#action").addEventListener("click", async () => {
 });
 playmesh.main.sync.observe((snapshot) => render(snapshot.state));
 
-Single-screen multiplayer has no public-display "Start game" button for players to click. Players submit ready state from controllers. The Authority determines player count, ready state, and countdown inside authoritative `onInput`/`onTick`, then calls `playmesh.main.session.start()` and handles errors. That method only asks Core to change the base session state; it does not decide game-specific conditions. Do not assume undeclared methods such as `readyPlayer` or `setReady` exist.
+Single-screen multiplayer places player interaction in `entries.controller`, while the public display presents the session and public state. Controllers submit one-shot intents such as readiness through `submitAction`, and Authority handles them with `onInput`. Games that advance a countdown or real-time rules by time also provide `onTick`. After the current game's start conditions are satisfied, Authority calls `playmesh.main.session.start()` and handles the result or error.

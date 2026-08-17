@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, webcrypto } from "node:crypto";
 import fs from "node:fs";
 import vm from "node:vm";
 
@@ -64,12 +65,102 @@ function platformCatalog() {
 }
 const hostData = new Map();
 const browserLocalStorage = new Map();
-const storageCommands = [];
+const standardStorageRequests = [];
+const synchronousStorageRequests = [];
+const synchronousStorageLedger = new Map();
 const uploadCommands = [];
 const nicknameCommands = [];
 const joinCommands = [];
 const joinUrls = [];
 let joins = 0;
+
+function browserBucketRevision(bucket) {
+  const values = Object.fromEntries(
+    [...hostData.entries()]
+      .filter(([key]) => key.startsWith(`${bucket}:`))
+      .map(([key, value]) => [key.slice(bucket.length + 1), value]),
+  );
+  return createHash("sha256").update(JSON.stringify(values)).digest("hex");
+}
+
+class BrowserStorageXMLHttpRequest {
+  constructor() {
+    this.headers = {};
+    this.status = 0;
+    this.responseText = "";
+  }
+
+  open(method, url, asynchronous = true) {
+    assert.equal(asynchronous, false);
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name, value) {
+    this.headers[name] = value;
+  }
+
+  send(body) {
+    assert.equal(this.headers["X-Playmesh-Storage-Sync"], "1");
+    const encodedBody = this.method === "GET"
+      ? Buffer.from(
+          new URL(this.url, "http://playmesh.local").searchParams.get("payload"),
+          "base64url",
+        ).toString("utf8")
+      : body;
+    assert.equal(this.method === "GET" ? body : null, null);
+    assert.equal(
+      this.headers["X-Playmesh-Content-Sha256"],
+      createHash("sha256").update(encodedBody).digest("hex"),
+    );
+    const envelope = JSON.parse(encodedBody);
+    synchronousStorageRequests.push({
+      method: this.method,
+      url: this.url,
+      envelope,
+      body: encodedBody,
+    });
+    const replay = synchronousStorageLedger.get(envelope.requestId);
+    if (replay) {
+      this.status = replay.status;
+      this.responseText = replay.responseText;
+      return;
+    }
+    const key = `${envelope.bucket}:${envelope.key}`;
+    let status = 200;
+    let result;
+    let error;
+    if (this.method === "GET") {
+      result = {
+        value: hostData.has(key) ? hostData.get(key) : null,
+        revision: browserBucketRevision(envelope.bucket),
+      };
+    } else {
+      assert.equal(this.method, "PUT");
+      const currentRevision = browserBucketRevision(envelope.bucket);
+      if (envelope.expectedRevision !== currentRevision) {
+        status = 409;
+        error = {
+          code: "storage_revision_conflict",
+          message: "storage revision conflict",
+        };
+      } else {
+        hostData.set(key, envelope.value);
+        result = { revision: browserBucketRevision(envelope.bucket) };
+      }
+    }
+    this.status = status;
+    this.responseText = JSON.stringify({
+      protocolVersion: "1.0.0",
+      requestId: envelope.requestId,
+      ...(error ? { error } : { result }),
+    });
+    synchronousStorageLedger.set(envelope.requestId, {
+      status: this.status,
+      responseText: this.responseText,
+    });
+  }
+}
 
 function createPage(
   appIdentity = null,
@@ -328,29 +419,6 @@ function createPage(
             },
           }),
         }));
-      } else if (message.type === "game.action" &&
-          message.payload?.__playmeshStorageRequest) {
-        const command = message.payload.__playmeshStorageRequest;
-        storageCommands.push(command);
-        const key = `${command.bucket}:${command.key}`;
-        if (command.command === "storage.set") hostData.set(key, command.value);
-        if (command.command === "storage.remove") hostData.delete(key);
-        if (command.command === "storage.clear") {
-          for (const existing of hostData.keys()) {
-            if (existing.startsWith(`${command.bucket}:`)) hostData.delete(existing);
-          }
-        }
-        queueMicrotask(() => this.emit("message", {
-          data: JSON.stringify({
-            type: "game.message",
-            payload: {
-              __playmeshStorageResponse: {
-                requestId: command.requestId,
-                result: command.command === "storage.get" ? hostData.get(key) : null,
-              },
-            },
-          }),
-        }));
       }
     }
 
@@ -395,8 +463,69 @@ function createPage(
     },
     document,
     location: { reload() {} },
+    XMLHttpRequest: BrowserStorageXMLHttpRequest,
     fetch: async (url, options) => {
       const requestUrl = String(url);
+      if (requestUrl.startsWith("/bucket/_playmesh-json/v1")) {
+        const encodedBody = options.body || Buffer.from(
+          new URL(requestUrl, "http://playmesh.local").searchParams.get("payload"),
+          "base64url",
+        ).toString("utf8");
+        const envelope = JSON.parse(encodedBody);
+        const calculatedDigest = Buffer.from(
+          await webcrypto.subtle.digest("SHA-256", new TextEncoder().encode(encodedBody)),
+        ).toString("hex");
+        assert.equal(options.headers["X-Playmesh-Content-Sha256"], calculatedDigest);
+        standardStorageRequests.push({ url: requestUrl, options, envelope });
+        const key = `${envelope.bucket}:${envelope.key}`;
+        let status = 200;
+        let result;
+        let error;
+        if (envelope.operation === "get") {
+          result = {
+            value: hostData.has(key) ? hostData.get(key) : null,
+            revision: browserBucketRevision(envelope.bucket),
+          };
+        } else if (envelope.operation === "set") {
+          const currentRevision = browserBucketRevision(envelope.bucket);
+          if (envelope.expectedRevision !== currentRevision) {
+            status = 409;
+            error = { code: "storage_revision_conflict", message: "revision conflict" };
+          } else {
+            hostData.set(key, envelope.value);
+            result = { revision: browserBucketRevision(envelope.bucket) };
+          }
+        } else if (envelope.operation === "remove") {
+          const currentRevision = browserBucketRevision(envelope.bucket);
+          if (envelope.expectedRevision !== currentRevision) {
+            status = 409;
+            error = { code: "storage_revision_conflict", message: "revision conflict" };
+          } else {
+            hostData.delete(key);
+            result = { revision: browserBucketRevision(envelope.bucket) };
+          }
+        } else if (envelope.operation === "clear") {
+          const currentRevision = browserBucketRevision(envelope.bucket);
+          if (envelope.expectedRevision !== currentRevision) {
+            status = 409;
+            error = { code: "storage_revision_conflict", message: "revision conflict" };
+          } else {
+            for (const existing of hostData.keys()) {
+              if (existing.startsWith(`${envelope.bucket}:`)) hostData.delete(existing);
+            }
+            result = { revision: browserBucketRevision(envelope.bucket) };
+          }
+        }
+        return {
+          ok: status >= 200 && status < 300,
+          status,
+          json: async () => ({
+            protocolVersion: "1.0.0",
+            requestId: envelope.requestId,
+            ...(error ? { error } : { result }),
+          }),
+        };
+      }
       if (requestUrl.startsWith("/bucket/")) {
         uploadCommands.push({ url, options });
         return {
@@ -474,6 +603,9 @@ function createPage(
       };
     },
     WebSocket: FakeWebSocket,
+    crypto: webcrypto,
+    TextEncoder,
+    TextDecoder,
     history: {
       get length() { return historyLength; },
       get state() { return historyState; },
@@ -542,10 +674,10 @@ function createPage(
   window.window = window;
   if (appIdentity) {
     const publicAppApi = {
-      version: "3.2.0",
+      version: "3.3.0",
       ready: Promise.resolve({
         available: true,
-        sdkVersion: "3.2.0",
+        sdkVersion: "3.3.0",
         runtime: {
           coreBase: "http://127.0.0.1:43000/",
           playerSource: "lan_app",
@@ -727,8 +859,8 @@ assert.strictEqual(
   "根 ready 的 app 结果必须与 playmesh.app.ready 保持同一引用",
 );
 assert.deepEqual(Object.keys(firstPage.playmesh).sort(), ["app", "main", "ready"]);
-assert.equal(firstBootstrap.main.sdkVersion, "4.0.0");
-assert.equal(firstPage.playmesh.app.version, "3.2.0");
+assert.equal(firstBootstrap.main.sdkVersion, "4.1.0");
+assert.equal(firstPage.playmesh.app.version, "3.3.0");
 assert.equal(firstBootstrap.app.available, false);
 assert.equal(JSON.stringify(firstBootstrap).includes("sidebar.title"), false);
 assert.equal(Object.isFrozen(firstPage.playmesh.main.gameInfo), true);
@@ -876,9 +1008,36 @@ const hostBucket = firstPage.playmesh.main.storage.getBucket("browser_save");
 assert.equal(hostBucket.flush, undefined);
 await hostBucket.setData("score", 18);
 assert.equal(await hostBucket.getData("score"), 18);
-assert.equal(storageCommands.every((command) => command.shareToken === undefined), true);
-assert.equal(storageCommands.every((command) => command.requestId.startsWith("browser-storage-")), true);
-assert.equal(storageCommands.some((command) => command.command === "storage.set"), true);
+assert.equal(
+  standardStorageRequests.every(
+    (request) => request.url.startsWith("/bucket/_playmesh-json/v1") &&
+      request.options.method === ({ get: "GET", set: "PUT", remove: "DELETE", clear: "DELETE" })[request.envelope.operation] &&
+      request.options.credentials === "same-origin" &&
+      request.envelope.gameId === "com.playmesh.browser-test" &&
+      request.envelope.requestId.startsWith("storage-") &&
+      request.envelope.shareToken === undefined,
+  ),
+  true,
+);
+assert.deepEqual(
+  standardStorageRequests.map((request) => request.envelope.operation),
+  ["get", "set", "get"],
+);
+assert.equal(
+  standardStorageRequests.some((request) => request.envelope.operation === "set"),
+  true,
+);
+const browserSyncBucket = firstPage.playmesh.main.storage.getBucket("目录/浏览器存档");
+assert.equal(browserSyncBucket.getDataSync("$playmesh.gdevelop.root.v1"), null);
+browserSyncBucket.setDataSync("$playmesh.gdevelop.root.v1", { round: 2 });
+assert.equal(
+  JSON.stringify(browserSyncBucket.getDataSync("$playmesh.gdevelop.root.v1")),
+  JSON.stringify({ round: 2 }),
+);
+assert.deepEqual(
+  synchronousStorageRequests.slice(-3).map((request) => request.method),
+  ["GET", "PUT", "GET"],
+);
 const uploadedFile = { name: "avatar.png", size: 4 };
 assert.equal(
   await hostBucket.upload(uploadedFile),

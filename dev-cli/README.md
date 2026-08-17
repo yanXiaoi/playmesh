@@ -1,5 +1,7 @@
 # Playmesh Developer CLI
 
+The Playmesh Developer CLI is licensed under the [MIT License](LICENSE). Pull requests are welcome; see the repository [contribution guide](../CONTRIBUTING.md).
+
 `playmesh-cli` 是使用 Go 标准库实现的全局开发工具。它把 IDEA、WebStorm、VS Code
 等外部 IDE 中的工程连接到已开启开发者模式的 Playmesh App；校验、安装和实际运行
 仍由目标 App 完成。
@@ -29,7 +31,7 @@ go build -o playmesh-cli.exe .
 
 ```text
 internal/
-  cli/                 # 命令路由与 to/get/init/configure/update/dev/run/logs 编排
+  cli/                 # 命令路由与 to/get/convert/init/configure/update/dev/run/logs 编排
   adapter/
     adapter.go         # Adapter 接口与 Registry
     registry/          # JavaScript、TypeScript、Cocos 的唯一组合根
@@ -76,9 +78,11 @@ playmesh/
     playmesh-app.d.ts
 ```
 
-旧工程可在空目录使用 `playmesh-cli get <project-id>` 恢复为 JavaScript 2.0 工程。
-App 只保存编译后的 JavaScript 发布包，不能还原 TypeScript 或 Cocos 源码；这些工程
-必须从 Git 或其他源码备份恢复。CLI 不在旧目录上执行隐式迁移。
+旧工程可在空目录使用 `playmesh-cli get <project-id>` 从 App 恢复，或把 Developer API
+取得的标准 `main.json + app/` 项目包放在当前目录后执行 `playmesh-cli convert`，两种
+方式都会生成 JavaScript 2.0 工程。App 只保存编译后的 JavaScript 发布包，不能还原
+TypeScript 或 Cocos 源码；这些工程必须从 Git 或其他源码备份恢复。CLI 不执行隐式
+迁移，必须显式调用上述命令。
 
 ## 连接目标 App
 
@@ -162,6 +166,23 @@ playmesh-cli get com.example.game
 TypeScript 类型与源码组织，Cocos 发布包也不包含场景和资源工程，因此这两类源码
 必须从 Git 或其他备份恢复。
 
+## 转换本地项目包
+
+从 App 的 Developer API 手工取得并解压标准项目包后，在包根目录执行：
+
+```powershell
+playmesh-cli to "http://<app-ip>:16666/dev/<workspace-id>/workspace?token=<token>"
+playmesh-cli convert
+```
+
+当前目录必须包含根 `main.json` 和 `app/`，也可包含 `capabilities.json` 与 `icon.png`。
+`convert` 先按正式上传规则完整校验本地包，从已连接 App 获取当前 SDK，在临时目录生成
+完整 JavaScript CLI 工程，全部成功后才替换布局。成功后原根 `main.json`、`app/` 和
+可选包文件会迁入 `playmesh/package/`，发布包的 `app/` 同时复制为可编辑的 `src/`；
+其他文件保持不变。若 `playmesh-cli.json`、`playmesh/`、`src/`、`package.json`、
+`jsconfig.json` 或 `.gitignore` 已存在，命令会拒绝覆盖。任何校验、SDK 下载或生成失败
+都不会改动原项目包。
+
 ## 命令语义
 
 - `playmesh-cli init`：创建原生项目并选择 JavaScript/TypeScript。
@@ -169,6 +190,8 @@ TypeScript 类型与源码组织，Cocos 发布包也不包含场景和资源工
   安装项目级扩展。
 - `playmesh-cli get <project-id>`：把 App 发布包恢复为 JavaScript 2.0 工程；不用于
   恢复 TypeScript 或 Cocos 源码。
+- `playmesh-cli convert`：把当前目录手工复制出的标准 `main.json + app/` 项目包显式
+  转换为 JavaScript 2.0 工程，并从已连接 App 安装当前 SDK。
 - `playmesh-cli configure`：交互设置当前项目，复用 `init` 的配置定义与收集流程。
 - `playmesh-cli configure --out`：只以 JSON 输出当前可配置状态。
 - `playmesh-cli configure --json`：从标准输入读取 JSON，由公共层校验并全量覆盖当前
@@ -387,7 +410,8 @@ Playmesh 扩展。Creator 3.8 的公开扩展 API 没有稳定且有文档支持
 CLI 在上传前要求 `main.json.entries.game` 显式存在；单屏多人还要求显式
 `entries.controller`，多人要求显式 `authority.entry`。三者必须指向
 `playmesh/package/app/` 中实际文件，不能依赖模板路径回退。`sdkVersion` 与
-`appSdkVersion` 同样必须显式写入当前本地 SDK 的 `4.0.0` 与 `3.2.0`。
+`appSdkVersion` 同样必须显式写入；Game SDK 只支持 `4.0.0`，App SDK 支持
+`3.2.0` 与 `3.3.0`，新建、更新和发布默认写入当前 `3.3.0`。
 
 包根 `playmesh/package/icon.png` 是可选项；文件存在且通过 PNG、大小和尺寸校验时
 才随完整包或每次开发基础包上传，缺少图标不会阻止发布。

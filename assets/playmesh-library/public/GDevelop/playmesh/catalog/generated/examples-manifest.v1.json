@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "kind": "examples",
+  "catalogRevision": "gdevelop-v5.6.276-catalog-1",
+  "engine": {
+    "version": "5.6.276",
+    "tag": "v5.6.276",
+    "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
+  },
+  "source": {
+    "repository": "GDevelopApp/GDevelop-examples",
+    "remote": "https://github.com/GDevelopApp/GDevelop-examples.git",
+    "transport": "exact-commit-sparse-checkout-with-sha256-manifest",
+    "branch": "main",
+    "commit": "c55c87d88ac48de01653844dc484c253adecd9c7",
+    "rootTreeSha": "cee1e71d82ca53c49fc8efa7a8392a832cc4bfed",
+    "license": "MIT unless an example directory states otherwise",
+    "licenseUrl": "https://github.com/GDevelopApp/GDevelop-examples/blob/c55c87d88ac48de01653844dc484c253adecd9c7/LICENSE"
+  },
+  "treeMetadata": {
+    "repository": "GDevelopApp/GDevelop-examples",
+    "commit": "c55c87d88ac48de01653844dc484c253adecd9c7",
+    "rootTreeSha": "cee1e71d82ca53c49fc8efa7a8392a832cc4bfed",
+    "entryCount": 8062
+  },
+  "index": {
+    "path": "examples-index.json",
+    "bytes": 3086780,
+    "sha256": "fe55a522ec45aeaa77d76b079b2aaf9da5416c38aae4eca8fd8f9b9c7db3d06e",
+    "mediaType": "application/json"
+  },
+  "counts": {
+    "examples": 284,
+    "unavailableExamples": 3
+  }
+}

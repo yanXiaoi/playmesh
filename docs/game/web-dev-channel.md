@@ -4,7 +4,7 @@
 
 第四阶段提供一个运行在局域网浏览器中的游戏开发者工作区。它不是普通玩家入口，而是开发和验证 Playmesh 游戏 SDK 的工具。
 
-App 端不维护独立文件编辑器。开启开发者模式后，设置页可使用内置 WebView 打开同一个响应式工作区；电脑端和 App 端共享文件修订、Diff、历史、运行状态、SSE 事件及 Console 日志。
+App 端不维护独立文件编辑器。从首页进入“制作游戏”、开启开发者模式并展开“源代码开发”后，可使用内置 WebView 打开同一个响应式工作区；电脑端和 App 端共享文件修订、Diff、历史、运行状态、SSE 事件及 Console 日志。
 
 工作区页面、样式、脚本、CodeMirror 和默认项目骨架统一位于 `playmesh-library/public/developer/`。Dart 网关只负责鉴权、静态资源装载和 API/SSE，不内嵌页面模板或项目骨架。
 
@@ -14,15 +14,16 @@ locale 的 `app.json` 提供，Developer Gateway/内置 WebView 只传递已经�
 语言偏好，也不维护独立的中英文词典。API 路径、机器错误 code、游戏源码和日志原文
 保持不翻译。
 
-用户必须先在 App 设置中主动开启开发者模式。开发者网页通道只在开发者模式有效，关闭后立即失效。
+用户必须先从 App 首页进入“制作游戏”并主动开启开发者模式，再选择“源代码开发”或“可视化开发”。开发者网页通道只在开发者模式有效，关闭后立即失效。
 
-开发者 Gateway 使用独立监听端口，不修改 Go Core 的动态端口。按当前产品决策，Gateway 绑定 `0.0.0.0`；设置页默认端口为 `16666`，用户可以修改，并只展示当前设备解析到的局域网 IPv4 链接。端口被占用或无权限时必须显示明确错误，不得重启 Core 或中断当前游戏会话。设置页展示的开发者地址、文档地址和游戏分享地址都必须支持长按或拖选复制。
+开发者 Gateway 使用独立监听端口，不修改 Go Core 的动态端口。按当前产品决策，Gateway 绑定 `0.0.0.0`；“制作游戏”页默认端口为 `16666`，用户可以修改，并只展示当前设备解析到的局域网 IPv4 链接。端口被占用或无权限时必须显示明确错误，不得重启 Core 或中断当前游戏会话。“制作游戏”页展示的开发者地址、文档地址和游戏分享地址都必须支持长按或拖选复制。
 
 ## 开启流程
 
 ```text
-App 设置
+App 首页 -> 制作游戏
   -> 开发者模式开关
+  -> 源代码开发 / 可视化开发
   -> Go Core/本地服务启动开发者通道
   -> 首次生成或加载持久 token
   -> 首次生成或加载持久工作区路径
@@ -73,7 +74,7 @@ Android 开启开发者模式时必须启动 `specialUse` Foreground Service，�
 工作区至少包含：
 
 - 顶部只保留项目、运行、保存、AI 开发和“更多”五个入口。移动端项目选择具有 `120px` 最小宽度，四个操作按钮保留固定可点击宽度；一行不足时允许响应式换行，由项目选择独占第一行，四个操作按钮均分第二行，禁止继续压缩任一入口。空间足够时仍保持单行，尽量把纵向视口留给项目树和代码。对话控制台、WebView JS 操作台、新建文件、重启、停止、校验、文件 Diff、删除文件和数据清理统一收纳到“更多”下拉菜单。
-- 项目入口与“更多”都使用 IDEA 风格的锚点下拉菜单，按触发按钮的实时视口位置展开，不使用整页选择弹窗或固定坐标。项目菜单聚合新建项目、复制当前项目、项目设置和删除项目，列表可按项目名、ID 或版本搜索，并按浏览器来源持久化最近打开项；首次进入或历史项目已不存在时，项目菜单保持展开，选定或新建项目后才能编辑。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
+- 项目入口与“更多”都使用 IDEA 风格的锚点下拉菜单，按触发按钮的实时视口位置展开，不使用整页选择弹窗或固定坐标。项目菜单聚合新建项目、复制当前项目、项目设置和删除项目，列表可按项目名、ID 或版本搜索；项目列表和活动运行项目均由 App Gateway 返回，网页只在当前页面会话内保留用户的临时选择，重新打开时使用 App 返回的活动项目或列表首项。新建联机项目默认显示模式为 `multi_screen`（多人多屏）。
 - 复制项目以当前项目为来源，新项目名称和 ID 均可修改；源码、清单和公开资源进入副本，项目根目录的 `data/`、`cache/`、`.playmesh/` 不复制。`author` 发布者元数据使用当前 App 用户昵称；普通项目设置不允许修改稳定 `id`、`author` 和 `lastModifiedAt`。复制操作通过创建新项目提供变更 ID 的正式入口。删除项目会删除源码、运行数据、缓存和本地历史，必须在项目未运行时二次确认。
 - IDEA 风格项目文件树和 `main.json` 原文只读查看区；项目设置提供可视化清单编辑和可增删的标签输入。设置页同时可视化编辑同级 `capabilities.json`，全部取消时删除该可选文件。
 - 能力选项必须由 `GET /dev/api/capabilities` 返回的统一插件注册表动态生成，展示中文名、用途、`apiVersion`、方法、事件以及 App/HTML 是否已适配，不在网页中硬编码传感器列表。
@@ -87,7 +88,7 @@ Android 开启开发者模式时必须启动 `specialUse` Foreground Service，�
 - 本地历史按时间操作展示资源新增、修改、删除、文本前后内容、增删行数与二进制大小变化。文本文件使用左右双栏 Diff，左栏可切换该操作的变更前或变更后版本，右栏始终是当前工作区；用户既可以只把某一个差异块应用并保存到当前文件，也可以用整次恢复全量替换选中文件、文件夹或整个工作区。恢复前必须自动生成独立且不参与后续合并的历史操作；恢复整个工作区时继续保留平台管理的当前 `main.json`。
 - HTML/CSS/JavaScript 编辑区。编辑器提供 HTML 标签/属性、CSS 属性/值、JavaScript 和 `playmesh` SDK 方法补全；可用 `Ctrl+Space` 或 `Alt+/` 主动触发。
 - 开始、重启与停止操作；由 App 启动当前游戏，不在工作区嵌入主页面预览。重启只作用于当前 App 中运行的该项目实例，并保留已有联机码和分享链接；停止会关闭会话并返回游戏库。
-- WebView JS 操作台复用 JavaScript CodeMirror 编辑器，执行按钮调用 `POST /dev/api/projects/{projectId}/webview/javascript`，下方原样显示结构化求值结果或错误。历史记录按项目保存在工作区浏览器的 `localStorage`，最多保留最近 30 次代码、返回和时间，可重新载入；它不是游戏 Bucket 或服务端项目历史。
+- WebView JS 操作台复用 JavaScript CodeMirror 编辑器，执行按钮调用 `POST /dev/api/projects/{projectId}/webview/javascript`，下方原样显示结构化求值结果或错误。最近 30 次代码、返回和时间仅按项目保存在当前页面内存，可在本次会话重新载入；刷新或关闭页面后丢弃，既不写浏览器持久存储，也不是游戏 Bucket 或项目历史。
 - 游戏运行状态、分享二维码和可复制链接。普通多人多屏与单机分享加载显式声明的
   `entries.game`，单屏多人分享加载同样显式声明的 `entries.controller`；清单入口
   始终相对于物理 `app/`，缺失不回退，单机分享不加入 Session、不创建玩家且不建立
@@ -145,11 +146,13 @@ AI 应优先使用高层开发者 API，例如“创建项目”“修改文件�
 
 项目运行生命周期使用四个正式接口：`GET /dev/api/projects/{projectId}/run` 读取当前状态，`POST /run` 开始，`POST /run/restart` 刷新当前运行内容，`POST /run/stop` 停止并关闭当前游戏会话。首次启动会先移除旧游戏路由再创建新的游戏 WebView；刷新只重建当前 WebView 内容并保留现有会话。没有对应运行实例时，刷新和停止返回结构化错误。AI 在非流式调用中应优先轮询 `GET /dev/api/projects/{projectId}/run` 获取状态，并使用 `GET /dev/api/logs?limit=50` 读取诊断日志；SSE 仍用于浏览器工作区的实时体验。
 
+运行控制面统一使用 `projectId + runId`，但资源来源必须保持三种互斥语义，不能按同一 game ID 相互回退：内置源码工作区的 `POST /run` 在服务端重新校验已经原子保存到受管 `packages/{projectId}/` 的项目，并直接以其中的 `app/` 作为实时资源；GDevelop 的 `/preview` 接收完整临时 ZIP，校验后从隔离临时目录运行；外部 CLI/Cocos 先通过 `/development/package` 上传只用于固定清单与能力声明的临时基础包，再由 `/development` 绑定带凭据和有效期的反向代理资源。三者共用状态、停止、重启和 WebView JavaScript 调试链路，但临时资源永不读取或覆盖同 ID 的正式项目。
+
 ### 外部 CLI 开发资源会话
 
 外部工程仍由 App 创建和持有正式游戏运行实例，但游戏资源可以临时改由 CLI 代理提供。会话接口为 `GET`、`POST`、`DELETE /dev/api/projects/{projectId}/development`：
 
-- `POST` 启动或替换当前项目的开发资源会话，请求体只允许 `resourceBaseUrl`、`credential` 和 `expiresAt`。该操作需要 `runtime.run` 权限、前台工作区视图，风险等级为中且非幂等，成功返回 `202`。
+- `POST /development/package` 接收并校验临时基础 ZIP，返回一次性 `packageId`；`POST /development` 启动或替换当前项目的开发资源会话，请求体只允许 `resourceBaseUrl`、`credential`、`expiresAt` 和 `packageId`。该操作需要 `runtime.run` 权限、前台工作区视图，风险等级为中且非幂等，成功返回 `202`。
 - `GET` 返回会话状态；活动时包含 `active`、`projectId`、`resourceBaseUrl`、`expiresAt` 和 `run`，永不回传 `credential`。
 - `DELETE` 停止开发资源会话并结束其临时运行实例；该操作风险等级为中且非幂等。开始普通正式运行、删除项目、关闭开发者模式或退出 App 时同样清除内存会话。
 
@@ -252,7 +255,7 @@ main.json 内容
 
 - 开发者模式默认关闭。
 - token 使用高强度随机值，不使用连续 ID、昵称、游戏 ID 或简单时间戳。
-- 设置页允许输入 8 至 128 个字符的自定义 token；首次留空时生成 32 字节高强度随机值，后续留空复用已保存 token。
+- “制作游戏”页允许输入 8 至 128 个字符的自定义 token；首次留空时生成 32 字节高强度随机值，后续留空复用已保存 token。
 - 开发者端口、token 和工作区路径持久化到 `playmesh-library/developer/settings.json`，默认端口为 `16666`。该文件属于敏感开发配置，不得加入游戏包、日志或 AI 项目源码。
 - App 关闭、重启或用户关闭开发者模式时只停止 Gateway 监听，不删除持久 token 和工作区路径。
 - 重新开启开发者模式时恢复同一端口、token 和路径；在设备局域网 IP 未变化时，完整工作区链接保持不变，其他设备可立即重连。
@@ -285,15 +288,15 @@ main.json 内容
 
 游戏项目自己的浏览器依赖仍属于游戏源码：开发者可上传普通 JS/CSS/字体/图片或 ZIP，在 `app/` 内解压、移动和复制后使用根 URL（例如 `/static/vendor/example.js`）或相对路径引用。平台不会执行项目级 npm 安装，也不会允许依赖越过项目沙箱。
 
-编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh-main.d.ts` 和 `playmesh-app.d.ts` 读取标记。旧 Game 类型文件不兼容、不保留。Game SDK `4.0.0` 与 App SDK `3.2.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时以 `/playmesh/sdk/v1/playmesh-main.js` 和平台预先注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL；旧 `/playmesh/sdk/v1/playmesh.js` 不兼容、不保留。运行前严格要求清单声明 Game SDK `4.0.0` 与 App SDK `3.2.0`，旧版本直接拒绝，不解析到当前发行版。响应内容由 Dart 注册表即时组装；Game SDK 只公开 `playmesh.main.*` 游戏域，App SDK 只公开 `playmesh.app.*` 终端域，唯一根例外 `playmesh.ready` 复用 `main.ready` 初始化链并返回 `{ main, app }`，而 `main.ready` 内部先等待 `app.ready`。普通浏览器中的 App SDK 负责网页覆盖层，原生终端能力 `isAvailable()` 为 `false`。
+编辑器补全由 CodeMirror hint 插件提供。HTML 注入标签与属性提示，CSS 注入属性和值提示；JavaScript 补全不再维护第二份硬编码 API，而是从当前 Dart 注册表组装的 `playmesh-main.d.ts` 和 `playmesh-app.d.ts` 读取标记。旧 Game 类型文件不兼容、不保留。Game SDK `4.1.0` 与 App SDK `3.3.0` 的运行文件、内置工作区补全、AI 项目提示词和 CLI/IDEA 类型提示均来自 `lib/core/game_sdk/features/` 的同一注册表；`sdk-src/*.ts` 只是正式构建生成的可审阅中间产物。AI 项目提示词嵌入两份完整 `.d.ts`，并明确以其方法、参数、返回值、类型、版本与中文 JSDoc 为唯一接口事实源。运行时以 `/playmesh/sdk/v1/playmesh-main.js` 和平台预先注入的 `/playmesh/sdk/v1/playmesh-app.js` 为权威 URL；旧 `/playmesh/sdk/v1/playmesh.js` 不兼容、不保留。运行前严格要求清单声明 Game SDK `4.1.0`；App SDK `3.2.0` 或 `3.3.0` 均解析到当前 `3.3.0` bundle。响应内容由 Dart 注册表即时组装；Game SDK 只公开 `playmesh.main.*` 游戏域，App SDK 只公开 `playmesh.app.*` 终端域，唯一根例外 `playmesh.ready` 复用 `main.ready` 初始化链并返回 `{ main, app }`，而 `main.ready` 内部先等待 `app.ready`。普通浏览器中的 App SDK 负责网页覆盖层，原生终端能力 `isAvailable()` 为 `false`。
 
 > **AI 上下文最小披露原则：提示词只暴露游戏代码可调用的公开 SDK、当前项目声明与完成任务所必需的约束。回环代理、内部路由、中转鉴权、密钥协商和加密通道等平台实现不得进入游戏 AI 上下文。**
 
 ## 第四阶段完成标准
 
-- App 设置可以开启和关闭开发者模式。
-- 开发者 Gateway 默认固定端口为 `16666`，可在设置页修改，且不会重启动态端口的 Go Core。
-- 设置页会恢复上次保存的合法端口、token 和工作区路径。
+- App 首页“制作游戏”页可以开启和关闭开发者模式，并选择“源代码开发”或“可视化开发”。
+- 开发者 Gateway 默认固定端口为 `16666`，可在“制作游戏”页修改，且不会重启动态端口的 Go Core。
+- “制作游戏”页会恢复上次保存的合法端口、token 和工作区路径。
 - token 可以自定义；首次留空时安全随机生成，后续留空时复用。
 - App 能展示持久工作区的局域网地址、token 和二维码。
 - 浏览器能进入工作区并加载项目文件。
@@ -303,4 +306,4 @@ main.json 内容
 - AI 能依据文档完成项目创建、文件修改、校验、运行和日志诊断闭环，不需要理解内部 Bridge 或 WebSocket 帧。
 - App 关闭或开发者模式关闭期间地址不可访问；App 重启或重新开启后同一地址恢复服务。
 - AI 接入点、项目沙箱和权限边界有文档和测试。
-- 设置页和游戏分享层中的所有链接均可长按或拖选复制。
+- “制作游戏”页和游戏分享层中的所有链接均可长按或拖选复制。

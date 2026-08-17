@@ -62,7 +62,7 @@ func Resolve(root string) (Context, error) {
 	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return Context{}, errors.New(
-			"当前目录缺少 playmesh-cli.json；新项目请执行 playmesh-cli init，旧 JavaScript 项目请在空目录执行 playmesh-cli get",
+			"当前目录缺少 playmesh-cli.json；新项目请执行 playmesh-cli init，App 中的项目请在空目录执行 playmesh-cli get，手工复制的 main.json + app/ 项目请执行 playmesh-cli convert",
 		)
 	}
 	if err != nil {

@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/playmesh/developer/editor/node_modules/codemirror/addon/merge/merge.css">
 <link rel="stylesheet" href="/playmesh/developer/workspace.css">
 <script src="/playmesh/developer/workspace-localization.js"></script>
+<script src="/playmesh/developer/playmesh-game-manifest.js"></script>
 </head>
 <body>
 <a class="skip-link" href="#workspaceMain" data-i18n="workspace.skip_to_editor"></a>
@@ -118,7 +119,8 @@
       <label><span data-i18n="workspace.name"></span><input id="manifestName" name="manifestName" data-initial-focus required maxlength="80" autocomplete="off"></label>
       <label class="wide"><span data-i18n="workspace.description"></span><textarea id="manifestRemarks" name="manifestRemarks" maxlength="500" rows="3" autocomplete="off"></textarea></label>
       <label><span data-i18n="workspace.game_version"></span><input id="manifestVersion" name="manifestVersion" required pattern="\d+\.\d+\.\d+" autocomplete="off"></label>
-      <label><span data-i18n="workspace.sdk_version"></span><input id="manifestSdkVersion" name="manifestSdkVersion" required pattern="\d+\.\d+\.\d+" autocomplete="off"></label>
+      <label><span data-i18n="workspace.sdk_version"></span><input id="manifestSdkVersion" name="manifestSdkVersion" required pattern="\d+\.\d+\.\d+" autocomplete="off" readonly></label>
+      <p class="manifest-help wide" data-i18n="workspace.sdk_version_managed_help"></p>
       <label><span data-i18n="workspace.main_orientation"></span><select id="manifestOrientation" name="manifestOrientation"><option value="landscape" data-i18n="workspace.landscape"></option><option value="portrait" data-i18n="workspace.portrait"></option></select></label>
       <label id="manifestControllerOrientationField" hidden><span data-i18n="workspace.controller_orientation"></span><select id="manifestControllerOrientation" name="manifestControllerOrientation"><option value="portrait" data-i18n="workspace.portrait"></option><option value="landscape" data-i18n="workspace.landscape"></option></select></label>
       <label><span data-i18n="workspace.game_mode"></span><select id="manifestMode" name="manifestMode"><option value="multiplayer" data-i18n="workspace.multiplayer_game"></option><option value="solo" data-i18n="workspace.solo_game"></option></select></label>
@@ -223,8 +225,8 @@
 </div></div>
 
 <div id="promptPreviewModal" class="modal" role="dialog" aria-modal="true" data-i18n-aria-label="workspace.get_current_project_prompt"><div class="dialog prompt-preview-dialog">
-  <div class="dialog-head"><strong data-i18n="workspace.get_current_project_prompt"></strong><div class="prompt-kind-tabs"><button id="previewChatPrompt" class="active" data-initial-focus data-i18n="workspace.chat_prompt"></button><button id="previewAgentPrompt" data-i18n="workspace.agent_prompt"></button></div><button id="copyPromptPreview" data-i18n-title="workspace.copy_prompt_title" data-i18n="workspace.copy"></button><button id="downloadPromptPreview" data-i18n-title="workspace.download_prompt_title" data-i18n="workspace.download"></button><button data-close="promptPreviewModal" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
-  <div id="agentBaseUrlPanel" class="agent-base-url-panel" hidden><label for="agentBaseUrl"><strong data-i18n="workspace.agent_connection_address"></strong><select id="agentBaseUrl" name="agentBaseUrl" data-i18n-aria-label="workspace.agent_base_url"></select></label><span data-i18n="workspace.agent_base_url_help"></span></div>
+<div class="dialog-head"><strong data-i18n="workspace.get_current_project_prompt"></strong><div class="prompt-kind-tabs"><button id="previewChatPrompt" class="active" data-initial-focus data-i18n="workspace.chat_prompt"></button><button id="previewAgentPrompt" data-i18n="workspace.agent_prompt"></button></div><button id="copyPromptPreview" data-i18n-title="workspace.copy_prompt_title" data-i18n="workspace.copy"></button><button id="downloadPromptPreview" data-i18n-title="workspace.download_prompt_title" data-i18n="workspace.download"></button><button data-close="promptPreviewModal" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
+<div id="agentBaseUrlPanel" class="agent-base-url-panel" hidden><label for="agentBaseUrl"><strong data-i18n="workspace.agent_connection_address"></strong><select id="agentBaseUrl" name="agentBaseUrl" data-i18n-aria-label="workspace.agent_base_url"></select></label><span data-i18n="workspace.agent_base_url_help"></span></div>
   <pre id="promptPreviewContent"></pre>
 </div></div>
 

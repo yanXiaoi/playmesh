@@ -22,6 +22,10 @@ $localizationRoot = Join-Path $repoRoot (
   $localizationRelativeRoot -replace '/', '\'
 )
 $localizationManifestPath = Join-Path $localizationRoot 'manifest.json'
+$gdevelopWebIdeSourcesRelativePath = 'assets/app/GdevelopWebIDE.json'
+$gdevelopWebIdeSourcesPath = Join-Path $repoRoot (
+  $gdevelopWebIdeSourcesRelativePath -replace '/', '\'
+)
 $utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
 
 function Get-StrictUtf8Text {
@@ -187,6 +191,67 @@ function Get-LocalizationFiles {
   return @($relativeFiles)
 }
 
+function Get-GDevelopWebIdeSourceFile {
+  if (-not (Test-Path -LiteralPath $gdevelopWebIdeSourcesPath -PathType Leaf)) {
+    throw "GDevelop Web IDE source list is missing: $gdevelopWebIdeSourcesRelativePath"
+  }
+  $bytes = [IO.File]::ReadAllBytes($gdevelopWebIdeSourcesPath)
+  if ($bytes.Length -eq 0 -or $bytes.Length -gt 512KB) {
+    throw 'GDevelop Web IDE source list must be between 1 B and 512 KiB.'
+  }
+  $text = $utf8Strict.GetString($bytes)
+  $trimmed = $text.Trim()
+  if (-not $trimmed.StartsWith('[') -or -not $trimmed.EndsWith(']')) {
+    throw 'GDevelop Web IDE source list root must be a JSON array.'
+  }
+  try {
+    $sources = @($text | ConvertFrom-Json)
+  } catch {
+    throw "GDevelop Web IDE source list is invalid JSON: $($_.Exception.Message)"
+  }
+  if ($sources.Count -eq 0) {
+    throw 'Production release requires at least one GDevelop Web IDE config source.'
+  }
+  if ($sources.Count -gt 16) {
+    throw 'GDevelop Web IDE source list exceeds 16 entries.'
+  }
+
+  $names = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::OrdinalIgnoreCase
+  )
+  $urls = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal
+  )
+  foreach ($source in $sources) {
+    $properties = @($source.PSObject.Properties.Name | Sort-Object)
+    if ($properties.Count -ne 2 -or
+        $properties[0] -cne 'name' -or
+        $properties[1] -cne 'url') {
+      throw 'Each GDevelop Web IDE source must contain only name and url.'
+    }
+    $name = [string]$source.name
+    $url = [string]$source.url
+    if ([string]::IsNullOrWhiteSpace($name) -or
+        $name -cne $name.Trim() -or
+        $name.Length -gt 80 -or
+        $name -match '[\x00-\x1f\x7f]' -or
+        -not $names.Add($name)) {
+      throw "GDevelop Web IDE source name is invalid or duplicated: $name"
+    }
+    [Uri]$uri = $null
+    if (-not [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -cne 'https' -or
+        [string]::IsNullOrWhiteSpace($uri.Host) -or
+        -not [string]::IsNullOrEmpty($uri.UserInfo) -or
+        -not [string]::IsNullOrEmpty($uri.Fragment) -or
+        $uri.AbsoluteUri -cne $url -or
+        -not $urls.Add($url)) {
+      throw "GDevelop Web IDE source URL is invalid or duplicated: $url"
+    }
+  }
+  return $gdevelopWebIdeSourcesRelativePath
+}
+
 function Get-SourceSnapshot {
   if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "AI prompt manifest is missing: $manifestPath"
@@ -201,6 +266,7 @@ function Get-SourceSnapshot {
   }
 
   $localizationFiles = @(Get-LocalizationFiles)
+  $gdevelopWebIdeSourceFile = Get-GDevelopWebIdeSourceFile
   $localizationManifest = (
     Get-StrictUtf8Text -Path $localizationManifestPath
   ) | ConvertFrom-Json
@@ -286,6 +352,7 @@ function Get-SourceSnapshot {
   foreach ($relative in $localizationFiles) {
     $relativeFiles.Add($relative)
   }
+  $relativeFiles.Add($gdevelopWebIdeSourceFile)
   $relativeFiles = @($relativeFiles | Sort-Object -Unique)
   $entries = [Collections.Generic.List[object]]::new()
   foreach ($relative in $relativeFiles) {

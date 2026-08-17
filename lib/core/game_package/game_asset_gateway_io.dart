@@ -73,6 +73,8 @@ class _IoGameAssetGateway implements GameAssetGateway {
   final String gameSdkVersion;
   final String appSdkVersion;
   final GameStorageService? storage;
+  final StandardJsonBucketRequestLedger _standardJsonLedger =
+      StandardJsonBucketRequestLedger();
   bool _closed = false;
 
   @override
@@ -115,7 +117,17 @@ class _IoGameAssetGateway implements GameAssetGateway {
   Future<void> _handle(HttpRequest request) async {
     final bucketStorage = storage;
     if (bucketStorage != null &&
-        await handleGameBucketRequest(request, storage: bucketStorage)) {
+        await handleGameBucketRequest(
+          request,
+          storage: bucketStorage,
+          authorizeStandardJson: (request) =>
+              request.connectionInfo?.remoteAddress.isLoopback == true
+              ? StandardJsonBucketAuthorization(
+                  'local:${server.port}:${bucketStorage.gameId}',
+                )
+              : null,
+          standardJsonLedger: _standardJsonLedger,
+        )) {
       return;
     }
     final relativePath = gameWebResourceRequestPath(

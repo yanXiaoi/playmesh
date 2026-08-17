@@ -4,7 +4,9 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   id: 'game.storage-lifecycle',
   target: SdkSourceTarget.game,
   order: 70,
-  typeScript: r'''  const main = {
+  typeScript: r'''  const standardStorageRevisions = new Map();
+  const standardStorageBucketOperations = new Map();
+  const main = {
     version: PLAYMESH_SDK_VERSION,
     ready: null,
     gameInfo: Object.freeze({
@@ -60,8 +62,8 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       },
     },
     game: {
-      submitAction(action) {
-        return post("game.submitAction", action);
+      submitAction(action, options) {
+        return post("game.submitAction", encodeAuthorityAction(action, options));
       },
       onMessage(callback) {
         return subscribe(messageListeners, callback);
@@ -71,15 +73,8 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       },
     },
     authority: {
-      onService(handler) {
-        if (!main.session.isAuthority()) {
-          throw new Error("只有 Authority Client 可以注册权威服务");
-        }
-        authorityService = handler;
-        return function unregister() {
-          if (authorityService === handler) authorityService = null;
-        };
-      },
+      defaultNamespace: DEFAULT_AUTHORITY_SERVICE_NAMESPACE,
+      onService: registerAuthorityService,
     },
     binary: {
       authorityPlayerId: "authority",
@@ -141,25 +136,39 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     },
     storage: {
       getBucket(bucket) {
-        validateStorageName(bucket, "bucket");
+        validateSynchronousStorageBucketName(bucket);
         return {
           getData(key) {
+            validateStorageName(bucket, "bucket");
             validateStorageName(key, "key");
             return storageCall("storage.get", bucket, key);
           },
           setData(key, value) {
+            validateStorageName(bucket, "bucket");
             validateStorageName(key, "key");
             JSON.stringify(value);
             return storageCall("storage.set", bucket, key, value);
           },
+          getDataSync(key) {
+            validateSynchronousStorageKey(key);
+            return storageCallSync("sync.get", bucket, key);
+          },
+          setDataSync(key, value) {
+            validateSynchronousStorageKey(key);
+            JSON.stringify(value);
+            storageCallSync("sync.set", bucket, key, value);
+          },
           removeData(key) {
+            validateStorageName(bucket, "bucket");
             validateStorageName(key, "key");
             return storageCall("storage.remove", bucket, key);
           },
           clearData() {
+            validateStorageName(bucket, "bucket");
             return storageCall("storage.clear", bucket);
           },
           upload(file) {
+            validateStorageName(bucket, "bucket");
             return storageUpload(bucket, file);
           },
         };
@@ -291,41 +300,466 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     await lockBrowserOrientation(orientation);
   }
 
-  async function storageCall(command, bucket, key, value) {
-    if (!global.__PLAYMESH_BROWSER__) {
-      return post(command, { bucket, key, value });
+  function storageCall(command, bucket, key, value) {
+    const operation = command.slice("storage.".length);
+    if (!["get", "set", "remove", "clear"].includes(operation)) {
+      throw new Error(`未知存储操作: ${command}`);
     }
-    await main.ready;
-    const requestId = `browser-storage-${Date.now()}-${++browserStorageSequence}`;
-    return new Promise((resolve, reject) => {
-      const timer = global.setTimeout(() => {
-        browserStoragePending.delete(requestId);
-        reject(new Error(`Authority 存储请求超时: ${command}`));
-      }, 15000);
-      browserStoragePending.set(requestId, { resolve, reject, timer });
-      sendBrowserTransport("game.submitAction", {
-        __playmeshStorageRequest: {
-          requestId,
-          command,
-          bucket,
-          ...(key === undefined ? {} : { key }),
-          ...(value === undefined ? {} : { value }),
-        },
-      }).catch((error) => {
-        global.clearTimeout(timer);
-        browserStoragePending.delete(requestId);
-        reject(error);
-      });
-    });
+    const previous = standardStorageBucketOperations.get(bucket) || Promise.resolve();
+    const current = previous
+      .catch(() => {})
+      .then(() => performStandardStorageCall(operation, bucket, key, value));
+    standardStorageBucketOperations.set(bucket, current);
+    current.then(
+      () => {
+        if (standardStorageBucketOperations.get(bucket) === current) {
+          standardStorageBucketOperations.delete(bucket);
+        }
+      },
+      () => {
+        if (standardStorageBucketOperations.get(bucket) === current) {
+          standardStorageBucketOperations.delete(bucket);
+        }
+      },
+    );
+    return current;
   }
 
-  function settleBrowserStorage(response) {
-    const operation = browserStoragePending.get(response?.requestId);
-    if (!operation) return;
-    browserStoragePending.delete(response.requestId);
-    global.clearTimeout(operation.timer);
-    if (response.error != null) operation.reject(new Error(String(response.error)));
-    else operation.resolve(response.result);
+  async function performStandardStorageCall(operation, bucket, key, value) {
+    await main.ready;
+    const gameId = bootstrap?.gameInfo?.id;
+    if (typeof gameId !== "string" || !gameId) {
+      throw new Error("当前游戏存储上下文不可用");
+    }
+    if (operation !== "get" && !standardStorageRevisions.has(bucket)) {
+      await standardStorageRestRequest(
+        "get",
+        bucket,
+        key === undefined ? "_playmesh_revision_probe" : key,
+        undefined,
+        gameId,
+      );
+    }
+    return standardStorageRestRequest(operation, bucket, key, value, gameId);
+  }
+
+  async function standardStorageRestRequest(operation, bucket, key, value, gameId) {
+    const requestId = standardStorageRequestId();
+    const revision = standardStorageRevisions.get(bucket) || null;
+    const envelope = operation === "get"
+      ? {
+          protocolVersion: "1.0.0",
+          requestId,
+          gameId,
+          operation,
+          bucket,
+          key,
+          revision,
+        }
+      : operation === "set"
+        ? {
+            protocolVersion: "1.0.0",
+            requestId,
+            gameId,
+            operation,
+            bucket,
+            key,
+            value,
+            expectedRevision: revision,
+          }
+        : operation === "remove"
+          ? {
+              protocolVersion: "1.0.0",
+              requestId,
+              gameId,
+              operation,
+              bucket,
+              key,
+              expectedRevision: revision,
+            }
+          : {
+              protocolVersion: "1.0.0",
+              requestId,
+              gameId,
+              operation,
+              bucket,
+              expectedRevision: revision,
+            };
+    const body = JSON.stringify(envelope);
+    const digest = await standardStorageSha256(body);
+    const method = operation === "get"
+      ? "GET"
+      : operation === "set"
+        ? "PUT"
+        : "DELETE";
+    const url = method === "PUT"
+      ? "/bucket/_playmesh-json/v1"
+      : `/bucket/_playmesh-json/v1?payload=${standardStorageBase64Url(
+          standardStorageUtf8Bytes(body),
+        )}`;
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await global.fetch(url, {
+          method,
+          credentials: "same-origin",
+          headers: {
+            ...(method === "PUT" ? { "Content-Type": "application/json" } : {}),
+            "X-Playmesh-Content-Sha256": digest,
+          },
+          ...(method === "PUT" ? { body } : {}),
+        });
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (error) {
+          if (attempt === 0) {
+            lastError = error;
+            continue;
+          }
+          throw new Error("存储 HTTP 响应不是有效 JSON");
+        }
+        if (response.status >= 500 && attempt === 0) {
+          lastError = new Error(
+            payload?.error?.message || "存储网关暂时不可用",
+          );
+          continue;
+        }
+        if (!response.ok) {
+          const error = new Error(
+            payload?.error?.message || `存储 HTTP 请求失败: ${response.status}`,
+          );
+          error.code = payload?.error?.code || "storage_http_failed";
+          throw error;
+        }
+        if (
+          payload?.protocolVersion !== "1.0.0" ||
+          payload?.requestId !== requestId
+        ) {
+          throw new Error("存储 HTTP 响应与请求不匹配");
+        }
+        const result = payload.result;
+        if (!result ||
+            typeof result !== "object" ||
+            !/^[a-f0-9]{64}$/.test(result.revision || "")) {
+          throw new Error("存储 HTTP 响应缺少有效修订号");
+        }
+        standardStorageRevisions.set(bucket, result.revision);
+        if (operation === "get") {
+          if (!Object.prototype.hasOwnProperty.call(result, "value")) {
+            throw new Error("存储 HTTP 读取响应缺少 value");
+          }
+          return result.value;
+        }
+        return null;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0 && error?.code == null) continue;
+        throw error;
+      }
+    }
+    throw new Error(
+      `存储 HTTP 路由不可用: ${lastError?.message || lastError || "unknown"}`,
+    );
+  }
+
+  function standardStorageRequestId() {
+    const bytes = new Uint8Array(12);
+    if (global.crypto?.getRandomValues) {
+      global.crypto.getRandomValues(bytes);
+    } else {
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Math.floor(Math.random() * 256);
+      }
+    }
+    const nonce = [...bytes]
+      .map((item) => item.toString(16).padStart(2, "0"))
+      .join("");
+    return `storage-${Date.now().toString(36)}-${nonce}`;
+  }
+
+  async function standardStorageSha256(value) {
+    if (!global.crypto?.subtle || typeof global.TextEncoder !== "function") {
+      throw new Error("当前 WebView 不支持标准存储 SHA-256 校验");
+    }
+    const data = new global.TextEncoder().encode(value);
+    const digest = await global.crypto.subtle.digest("SHA-256", data);
+    return [...new Uint8Array(digest)]
+      .map((item) => item.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function storageCallSync(operation, bucket, key, value) {
+    if (operation !== "sync.get" && operation !== "sync.set") {
+      throw new Error(`未知同步存储操作: ${operation}`);
+    }
+    if (operation === "sync.set" && !standardStorageRevisions.has(bucket)) {
+      storageCallSync("sync.get", bucket, key);
+    }
+    const requestId = standardStorageRequestId();
+    const gameId = bootstrap?.gameInfo?.id ||
+      global.__PLAYMESH_BROWSER__?.gameId ||
+      "@playmesh-current-game";
+    const revision = standardStorageRevisions.get(bucket) || null;
+    const envelope = operation === "sync.get"
+      ? {
+          protocolVersion: "1.0.0",
+          requestId,
+          gameId,
+          operation,
+          bucket,
+          key,
+          revision,
+        }
+      : {
+          protocolVersion: "1.0.0",
+          requestId,
+          gameId,
+          operation,
+          bucket,
+          key,
+          value,
+          expectedRevision: revision,
+        };
+    const body = JSON.stringify(envelope);
+    if (typeof body !== "string") {
+      throw new Error("同步存储值必须可序列化为 JSON");
+    }
+    const digest = standardStorageSha256Sync(body);
+    const result = synchronousStorageHttpRequest(
+      operation === "sync.get" ? "GET" : "PUT",
+      body,
+      digest,
+      requestId,
+    );
+    if (!result ||
+        typeof result !== "object" ||
+        !/^[a-f0-9]{64}$/.test(result.revision || "")) {
+      throw new Error("同步存储响应缺少有效修订号");
+    }
+    standardStorageRevisions.set(bucket, result.revision);
+    if (operation === "sync.get") {
+      if (!Object.prototype.hasOwnProperty.call(result, "value")) {
+        throw new Error("同步存储读取响应缺少 value");
+      }
+      return result.value;
+    }
+  }
+
+  function synchronousStorageHttpRequest(method, body, digest, requestId) {
+    if (typeof global.XMLHttpRequest !== "function") {
+      throw new Error("当前 WebView 不支持同步 XMLHttpRequest 存储");
+    }
+    const url = method === "GET"
+      ? `/bucket/_playmesh-json/v1?payload=${standardStorageBase64Url(
+          standardStorageUtf8Bytes(body),
+        )}`
+      : "/bucket/_playmesh-json/v1";
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const xhr = new global.XMLHttpRequest();
+        xhr.open(method, url, false);
+        xhr.setRequestHeader("X-Playmesh-Storage-Sync", "1");
+        xhr.setRequestHeader("X-Playmesh-Content-Sha256", digest);
+        if (method === "PUT") {
+          xhr.setRequestHeader("Content-Type", "application/json");
+        }
+        xhr.send(method === "PUT" ? body : null);
+        const status = xhr.status === 1223 ? 204 : xhr.status;
+        let payload;
+        try {
+          payload = JSON.parse(xhr.responseText || "");
+        } catch (error) {
+          if (attempt === 0) {
+            lastError = error;
+            continue;
+          }
+          throw new Error("同步存储 HTTP 响应不是有效 JSON");
+        }
+        if (status >= 500 && attempt === 0) {
+          lastError = new Error(payload?.error?.message || "存储网关暂时不可用");
+          continue;
+        }
+        if (status < 200 || status >= 300) {
+          const error = new Error(
+            payload?.error?.message || `同步存储 HTTP 请求失败: ${status}`,
+          );
+          error.code = payload?.error?.code || "storage_sync_http_failed";
+          throw error;
+        }
+        if (payload?.protocolVersion !== "1.0.0" ||
+            payload?.requestId !== requestId) {
+          if (attempt === 0) {
+            lastError = new Error("同步存储 HTTP 响应与请求不匹配");
+            continue;
+          }
+          throw new Error("同步存储 HTTP 响应与请求不匹配");
+        }
+        return payload.result;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0 && error?.code == null) continue;
+        throw error;
+      }
+    }
+    throw new Error(
+      `同步存储 HTTP 路由不可用: ${lastError?.message || lastError || "unknown"}`,
+    );
+  }
+
+  function standardStorageUtf8Bytes(value) {
+    if (typeof global.TextEncoder === "function") {
+      return new global.TextEncoder().encode(value);
+    }
+    const bytes = [];
+    for (let index = 0; index < value.length; index += 1) {
+      let codePoint = value.charCodeAt(index);
+      if (codePoint >= 0xd800 && codePoint <= 0xdbff) {
+        const low = value.charCodeAt(index + 1);
+        if (low >= 0xdc00 && low <= 0xdfff) {
+          codePoint = 0x10000 + ((codePoint - 0xd800) << 10) + (low - 0xdc00);
+          index += 1;
+        } else {
+          codePoint = 0xfffd;
+        }
+      } else if (codePoint >= 0xdc00 && codePoint <= 0xdfff) {
+        codePoint = 0xfffd;
+      }
+      if (codePoint <= 0x7f) {
+        bytes.push(codePoint);
+      } else if (codePoint <= 0x7ff) {
+        bytes.push(0xc0 | (codePoint >>> 6), 0x80 | (codePoint & 0x3f));
+      } else if (codePoint <= 0xffff) {
+        bytes.push(
+          0xe0 | (codePoint >>> 12),
+          0x80 | ((codePoint >>> 6) & 0x3f),
+          0x80 | (codePoint & 0x3f),
+        );
+      } else {
+        bytes.push(
+          0xf0 | (codePoint >>> 18),
+          0x80 | ((codePoint >>> 12) & 0x3f),
+          0x80 | ((codePoint >>> 6) & 0x3f),
+          0x80 | (codePoint & 0x3f),
+        );
+      }
+    }
+    return new Uint8Array(bytes);
+  }
+
+  function standardStorageSha256Sync(value) {
+    const bytes = standardStorageUtf8Bytes(value);
+    const constants = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+      0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+      0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+      0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+      0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+      0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+      0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+      0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    const state = new Uint32Array([
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ]);
+    const words = new Uint32Array(64);
+    const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+    const bitLength = bytes.length * 8;
+    const bitLengthHigh = Math.floor(bitLength / 0x100000000);
+    const bitLengthLow = bitLength >>> 0;
+    const byteAt = (position) => {
+      if (position < bytes.length) return bytes[position];
+      if (position === bytes.length) return 0x80;
+      if (position < paddedLength - 8) return 0;
+      const shift = (paddedLength - 1 - position) * 8;
+      return shift >= 32
+        ? (bitLengthHigh >>> (shift - 32)) & 0xff
+        : (bitLengthLow >>> shift) & 0xff;
+    };
+    const rotateRight = (value, bits) =>
+      (value >>> bits) | (value << (32 - bits));
+    for (let offset = 0; offset < paddedLength; offset += 64) {
+      for (let index = 0; index < 16; index += 1) {
+        const position = offset + index * 4;
+        words[index] = (
+          (byteAt(position) << 24) |
+          (byteAt(position + 1) << 16) |
+          (byteAt(position + 2) << 8) |
+          byteAt(position + 3)
+        ) >>> 0;
+      }
+      for (let index = 16; index < 64; index += 1) {
+        const x = words[index - 15];
+        const y = words[index - 2];
+        const sigma0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3);
+        const sigma1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
+        words[index] = (
+          words[index - 16] + sigma0 + words[index - 7] + sigma1
+        ) >>> 0;
+      }
+      let a = state[0];
+      let b = state[1];
+      let c = state[2];
+      let d = state[3];
+      let e = state[4];
+      let f = state[5];
+      let g = state[6];
+      let h = state[7];
+      for (let index = 0; index < 64; index += 1) {
+        const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+        const choice = (e & f) ^ (~e & g);
+        const temporary1 = (h + sum1 + choice + constants[index] + words[index]) >>> 0;
+        const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+        const majority = (a & b) ^ (a & c) ^ (b & c);
+        const temporary2 = (sum0 + majority) >>> 0;
+        h = g;
+        g = f;
+        f = e;
+        e = (d + temporary1) >>> 0;
+        d = c;
+        c = b;
+        b = a;
+        a = (temporary1 + temporary2) >>> 0;
+      }
+      state[0] = (state[0] + a) >>> 0;
+      state[1] = (state[1] + b) >>> 0;
+      state[2] = (state[2] + c) >>> 0;
+      state[3] = (state[3] + d) >>> 0;
+      state[4] = (state[4] + e) >>> 0;
+      state[5] = (state[5] + f) >>> 0;
+      state[6] = (state[6] + g) >>> 0;
+      state[7] = (state[7] + h) >>> 0;
+    }
+    return [...state]
+      .map((item) => item.toString(16).padStart(8, "0"))
+      .join("");
+  }
+
+  function standardStorageBase64Url(bytes) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let encoded = "";
+    for (let index = 0; index < bytes.length; index += 3) {
+      const first = bytes[index];
+      const second = index + 1 < bytes.length ? bytes[index + 1] : 0;
+      const third = index + 2 < bytes.length ? bytes[index + 2] : 0;
+      encoded += alphabet[first >>> 2];
+      encoded += alphabet[((first & 3) << 4) | (second >>> 4)];
+      if (index + 1 < bytes.length) {
+        encoded += alphabet[((second & 15) << 2) | (third >>> 6)];
+      }
+      if (index + 2 < bytes.length) encoded += alphabet[third & 63];
+    }
+    return encoded;
   }
 
   async function storageUpload(bucket, file) {
@@ -659,18 +1093,24 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       throw new Error(`无效的 ${field}`);
     }
   }
+
+  function validateSynchronousStorageBucketName(value) {
+    if (typeof value !== "string") throw new Error("无效的 bucket");
+    const length = standardStorageUtf8Bytes(value).length;
+    if (length < 1 || length > 4096) {
+      throw new Error("同步 Bucket 逻辑名必须为 1 至 4096 个 UTF-8 字节");
+    }
+  }
+
+  function validateSynchronousStorageKey(value) {
+    if (value === "$playmesh.gdevelop.root.v1") return;
+    validateStorageName(value, "key");
+  }
 })(window);
 ''',
 );
 
 class _GameStorageLifecycleFeature implements _GameSdkCommandFeature {
-  static const _storageCommands = {
-    'storage.get',
-    'storage.set',
-    'storage.remove',
-    'storage.clear',
-  };
-
   @override
   SdkSourceFragment get source => gameStorageLifecycleSdkSource;
 
@@ -680,71 +1120,18 @@ class _GameStorageLifecycleFeature implements _GameSdkCommandFeature {
   ];
 
   @override
-  Set<String> get commands => const {
-    'storage.get',
-    'storage.set',
-    'storage.remove',
-    'storage.clear',
-    'lifecycle.complete',
-  };
+  Set<String> get commands => const {'lifecycle.complete'};
 
   @override
   Future<SdkCommandExecution> execute(
     GameSdkCommandContext context,
     SdkCommandEnvelope command,
   ) async {
-    if (command.name == 'lifecycle.complete') {
-      final lifecycleRequestId = sdkRequiredString(
-        command.payload,
-        'lifecycleRequestId',
-      );
-      context.completeLifecycle(lifecycleRequestId);
-      return const SdkCommandResult();
-    }
-    if (!_storageCommands.contains(command.name)) {
-      throw StateError('未注册的存储命令: ${command.name}');
-    }
-    final connection = context.connection;
-    if (connection != null && !connection.isAuthority) {
-      await context.routeRemoteStorage(
-        command.name,
-        command.requestId,
-        command.payload,
-      );
-      return const SdkCommandDeferred();
-    }
-    return SdkCommandResult(
-      await executeSdkStorageCommand(
-        await context.ensureStorage(),
-        command.name,
-        command.payload,
-      ),
+    final lifecycleRequestId = sdkRequiredString(
+      command.payload,
+      'lifecycleRequestId',
     );
+    context.completeLifecycle(lifecycleRequestId);
+    return const SdkCommandResult();
   }
-}
-
-Future<Object?> executeSdkStorageCommand(
-  GameStorageService storage,
-  String command,
-  Map<String, Object?> payload,
-) async {
-  final bucket = sdkRequiredString(payload, 'bucket');
-  switch (command) {
-    case 'storage.get':
-      return storage.getData(bucket, sdkRequiredString(payload, 'key'));
-    case 'storage.set':
-      await storage.setData(
-        bucket,
-        sdkRequiredString(payload, 'key'),
-        payload['value'],
-      );
-      return null;
-    case 'storage.remove':
-      await storage.removeData(bucket, sdkRequiredString(payload, 'key'));
-      return null;
-    case 'storage.clear':
-      await storage.clearData(bucket);
-      return null;
-  }
-  throw FormatException('未知存储命令: $command');
 }

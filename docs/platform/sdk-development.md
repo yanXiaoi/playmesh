@@ -74,7 +74,7 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 
 ## 当前公开 SDK 方法
 
-当前 Game SDK 为 `4.0.0`，App Bridge SDK 为 `3.2.0`。下表是当前公开面；
+当前 Game SDK 为 `4.1.0`，App Bridge SDK 为 `3.3.0`。下表是当前公开面；
 精确参数、泛型、返回类型和中文 JSDoc 仍以注册表生成的 `playmesh-main.d.ts` 与
 `playmesh-app.d.ts` 为准。旧 Game 类型文件不兼容、不保留。
 
@@ -200,12 +200,11 @@ fragment.typeScript.trim().isEmpty
 同一 command 的任意两个 supportedVersions 区间相交
   => 失败：同版本存在多个执行器
 
-release.minimumRequestedVersion != release.bundleVersion
-或 release.maximumRequestedVersion != release.bundleVersion
-  => 失败：当前发行不是精确版本
+release.minimumRequestedVersion > release.maximumRequestedVersion
+  => 失败：兼容版本范围无效
 
-同一 target 注册多个当前 release
-  => 失败：当前版本解析不唯一
+同一 target 的两个 release 兼容范围相交
+  => 失败：请求版本可能命中多个发行
 ```
 
 ## 完整调用链与精确分发条件
@@ -227,6 +226,23 @@ Game SDK 等待宿主回包的默认超时为 15 秒；App SDK 为 30 秒。传�
 拒绝。App WebView 选择 `PlaymeshAppBridge.postMessage` 或
 `chrome.webview.postMessage`；Game WebView 选择 `PlaymeshBridge.postMessage`
 或 `chrome.webview.postMessage`。
+
+#### Windows 宿主的导航回包队列
+
+Windows WebView2 允许页面在 `<head>` 解析阶段就通过 App/Game Bridge 发送 bootstrap，但在
+`LoadingState.navigationCompleted` 前执行宿主回包脚本并不可靠。这个问题属于共享 Windows
+宿主的 document 生命周期，不属于 App/Game SDK 业务。
+
+`WindowsLocalGameWebView` 必须把 App Bridge 与 Game Bridge 的宿主到网页回包统一交给同一个
+`WebViewMessageQueue`：导航开始时暂停并清除上一 document 的待发消息；当前导航完成后才按
+FIFO 恢复。
+因此早发 `app.bootstrap` 可以立即由宿主处理，但其回包只在当前 document 可执行时送达一次，
+随后 `main.ready` 也只完成一次。队列不得重写 `requestId`、改变 result/error、延长 SDK 超时、
+自动重试请求或把上一 document 的消息送进新页面。
+
+该宿主修复同时保护 GDevelop 与非 GDevelop 的 head 早加载页面，不修改 SDK 源、公开 API、
+Bundle 版本或命令执行器。Android/普通浏览器继续使用各自既有的 document-ready/transport
+边界，不能为了 Windows 时序再增加 SDK 内部 bootstrap 分支。
 
 ### 2. Bridge 解析
 
@@ -253,7 +269,7 @@ Bridge 只构造 `GameSdkCommandContext` 或 `AppSdkCommandContext`，随后调�
 
 ### 3. 版本选择与命令命中
 
-版本选择不是“找最接近版本”，而是严格当前版本判断：
+版本选择不是“找最接近版本”，而是按已注册且互不重叠的兼容范围精确命中：
 
 ```text
 requestedVersion == null
@@ -263,8 +279,9 @@ requestedVersion == null
 requestedVersion 不匹配 MAJOR.MINOR.PATCH
   => 失败
 
-requestedVersion == 当前 target 的 release.bundleVersion
-  => 命中当前 release
+requestedVersion 落入某个 release 的
+[minimumRequestedVersion, maximumRequestedVersion]
+  => 命中该 release，并返回其 bundleVersion 对应文件
 
 其他值
   => UnsupportedError，不解析旧版本，不回退
@@ -351,10 +368,10 @@ requestedVersion
 
 规则：
 
-- 当前 Game SDK 只接受 `4.0.0`，App Bridge SDK 只接受 `3.2.0`。
-- 旧版本、未知版本或格式错误版本直接失败，不静默回退，也不转换旧清单。
-- 每个 target 只能注册一个当前精确发行；其
-  `minimumRequestedVersion == maximumRequestedVersion == bundleVersion`。
+- 当前 Game SDK 只接受 `4.1.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0`，后者统一解析到 `3.3.0` bundle。
+- 低于兼容下限、未知版本或格式错误版本直接失败。
+- 每个 target 可注册明确且互不重叠的请求版本区间；`bundleVersion` 是实际返回和随消息发送的
+  SDK 版本，不要求等于区间下界。当前 App `3.2.0` 请求因此使用 `3.3.0` bundle。
 - 执行器的 `supportedVersions` 只约束当前实际 Bundle 的命令分发，不能扩大 Manifest
   可接受版本。
 - 参数、消息、返回值、事件或错误语义不兼容时升级版本并整体替换当前发行定义；
@@ -465,7 +482,9 @@ Game SDK 的 `.ts`、`.js`、`.d.ts`；不得写死当前版本或构造 `*-empt
 - 网页发送命令与执行器集合一致。
 - 同版本同命令只能命中一个执行器。
 - 未注册版本和非法版本被拒绝。
-- Game `4.0.0` 与 App `3.2.0` 能选择当前执行器，旧清单版本被拒绝。
+- Game `4.1.0` 与 App `3.2.0`/`3.3.0` 能选择当前执行器，App `3.1.0` 被拒绝。
+- Windows head 早加载时，App/Game bootstrap 回包在 navigation completed 后按序且恰好一次
+  送达；传统 body 末尾加载行为不变，新导航和 dispose 不泄漏旧 document 消息。
 - `.js` 不包含声明模板，`.d.ts` 不包含版本占位符。
 - Game SDK `.ts/.js/.d.ts` 中的 App SDK 版本一致且不残留跨目标占位符。
 - 所有运行时和开发者入口返回注册表即时组装内容。

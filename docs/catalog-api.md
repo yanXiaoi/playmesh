@@ -127,7 +127,7 @@ Authorization: Bearer optional-read-token
       "author": "发布者名称",
       "version": "2.0.0",
       "sdkVersion": "4.0.0",
-      "appSdkVersion": "3.2.0",
+      "appSdkVersion": "3.3.0",
       "orientation": "landscape",
       "modes": ["multiplayer"],
       "displayModes": ["multi_screen"],

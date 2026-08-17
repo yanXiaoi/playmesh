@@ -77,9 +77,10 @@ Game Package
 - 游戏库采用“目录扫描优先”原则：游戏包导入后由 App 自动扫描、校验和建立索引，不增加开发者注册步骤；索引失效时可以从目录重新构建。
 - 游戏自定义数据必须通过 `playmesh.main.storage.getBucket(bucket)` 持久化。JSON 值存放在 `packages/{gameId}/data/json/{bucket}.json`；`upload(file)` 写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`。不能写入游戏包目录或直接操作文件系统。
 - 平台只按 `gameId + bucket` 选择上述目录，不得自动增加 `{userId}` 层。游戏需要区分用户时，由开发者在 Bucket、key 或 JSON 内容中自行设计。
-- Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；SDK 在调用前校验，Flutter 存储层在落盘前再次校验。点号、空白、斜杠、反斜杠、非 ASCII 字符和前导下划线/连字符都不允许。
-- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 256 MiB。
-- 持久化数据的唯一落盘端是开始游戏的 Authority 主机。Authority WebView 直接访问主机存储服务；普通浏览器和其他 App 玩家统一通过权威 Game SDK 及当前受控 Session WebSocket 的存储 RPC 路由到 Authority，不得为存储恢复 `/api/storage` 等分享 HTTP 业务接口。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。
+- 异步方法和 `upload(file)` 的 Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；SDK 在调用前校验，Flutter 存储层在落盘前再次校验。同步方法仅为锁定运行时适配器额外接受 1 至 4096 UTF-8 字节的原始逻辑名，并映射到带原名校验的安全物理 envelope；不能借此放宽同一 Bucket 的异步方法。私有 key `$playmesh.gdevelop.root.v1` 只允许同步 GDevelop 适配路径。
+- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。完整 Bucket JSON root 上限为 10 MiB。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 256 MiB。
+- 异步 JSON API 与 `getDataSync/setDataSync` 必须统一走同一个绑定当前游戏/会话的同源 HTTP Bucket 网关：GET 读取、PUT 写入、DELETE 删除或清空，并共同使用 SHA-256、requestId 幂等和 revision/CAS。同步方法只允许锁定运行时 seam 使用主线程同步 XHR；不预热、不设 timer、不提供手动 flush，失败立即抛错。旧 Session WebSocket 存储请求/响应、pending/settle 接收器、双读、双写和 fallback 必须从 SDK、App host、GameRuntimeBridge 与 Go Core 主链彻底删除，并以全仓来源门禁防止回归。
+- 持久化数据的唯一落盘端是开始游戏的 Authority 主机；所有 JSON HTTP 请求最终调用该项目共享的主机内存协调器和延迟落盘服务。该网关是 SDK 内部传输而非游戏可构造的公开业务 API，不能恢复 `/api/storage` 或允许任意 gameId。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。`upload(file)` 继续独立使用 HTTP POST 与 `data/data`，不能进入 JSON envelope 或 `data/json`。
 - `packages/{gameId}/app/` 是 WebView 静态映射根。运行时只把 `data/data` 中的文件映射为不可枚举的 `/bucket/{bucket}/{timestamp-file}`；`data/json` 始终私有，任何资源服务、路径拼接和预览接口都必须拒绝访问或穿越到该目录。
 - 当前游戏的物理 `app/` 直接映射为 `/`；SDK、平台头像等公共资源统一放在 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。物理 `app/` 不得包含大小写变体的一级 `playmesh/` 或 `bucket/`；游戏不得以编码、反斜杠、空段、`.`、`..` 或符号链接越出 `app/`，也不得读取其他游戏包。
 - 游戏详情页清除缓存/数据和删除游戏必须调用统一的数据清理流程；数据清理必须有用户确认、日志和明确的不可恢复提示。
@@ -211,9 +212,9 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - HTTP 接口使用 OpenAPI，数据、事件和错误使用 JSON Schema；每个接口记录权限、风险等级、幂等性、重试规则和示例。
 - `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。WebView 必须按当前页面角色在方向应用完成后创建，进入全屏时把对应方向传到原生宿主，退出游戏后恢复系统方向。
 - `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描。缺失 `author` 在模型中保持空动态值，App 固定外壳用统一 `app.json` 显示本地化“未知发布者”；非空发布者始终逐字显示。缺失时间由 App 外壳显示本地化“无”，有值时按设备本地时区换算。
-- `sdkVersion/appSdkVersion` 均为必填字段，用于声明游戏包要求的 SDK 版本；当前发行必须通过统一 Dart
-  注册表精确接受 Game SDK `4.0.0` 与 App Bridge SDK `3.2.0`。旧值、未知值和格式
-  错误值直接拒绝，不能静默改用其他版本，也不能解析为历史发行。
+- `sdkVersion/appSdkVersion` 均为必填字段，用于声明游戏包要求的 SDK 版本；统一 Dart
+  注册表当前精确接受 Game SDK `4.1.0`，并接受 App Bridge SDK `3.2.0`–`3.3.0`，
+  两者均使用兼容的 `3.3.0` bundle。低于下限、未知值和格式错误值直接拒绝。
 - SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本。版本升级必须同步更新发行定义、Manifest、
   Schema、模板、生成产物、测试和文档；当前破坏性版本不承诺对 3.x 清单或命名空间
   向后兼容。
@@ -263,8 +264,8 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 | Playmesh App | `4.0.0+26` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
-| Game SDK | `4.0.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
-| App Bridge SDK | `3.2.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
+| Game SDK | `4.1.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
+| App Bridge SDK | `3.3.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
 | Developer API / OpenAPI | `4.0.0` | Developer Gateway 与临时开发资源会话契约 |
 | Developer CLI | `2.0.0` | `dev-cli/`、adapter.Adapter、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `3.0.0` | `/apps/info`、根相对入口、包校验、版本化下载、图标与上传声明 |
@@ -298,9 +299,9 @@ WebSocket 子协议；不得使用环境代理或转发 `/playmesh/**`、`/bucke
 
 所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖必需 `main.json`、可选 `capabilities.json`、可选 `icon.png` 与必需 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 
-Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`；命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时先对 `main.json` 做严格版本校验，只允许 Game SDK `4.0.0` 与 App Bridge SDK `3.2.0`，再解析当前 Game/App bundle；SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。执行器内部的版本范围只用于当前 bundle 的一致性约束，不能形成旧清单兼容入口。
+Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`；命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时先对 `main.json` 做严格版本校验：Game SDK 只允许 `4.1.0`，App Bridge SDK 允许 `3.2.0`–`3.3.0`，再由注册表解析到对应 bundle；SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。兼容范围只能用于经过评估的非破坏性升级，不能跨越破坏性版本边界。
 
-开发运行时、游戏资源网关、分享网关、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `node tool/generate_sdk.mjs`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、精确发行版本、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架、Schema、AI 提示词和开发下载只暴露当前版本；旧游戏清单必须明确拒绝，不依赖历史静态文件、字段双写、命名空间 shim 或网关旁路。
+开发运行时、游戏资源网关、分享网关、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `node tool/generate_sdk.mjs`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、发行兼容范围、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架和开发下载暴露当前版本；机器契约与校验器必须同时保留仍受支持的清单请求版本，不依赖历史静态文件、字段双写、命名空间 shim 或网关旁路。
 
 ## 错误和日志
 

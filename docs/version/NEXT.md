@@ -2,11 +2,112 @@
 
 ## 状态
 
-- 状态：`4.1.0+27` 已于 2026-08-03 正式发布；当前没有未发布变更。
+- 状态：`4.1.0+27` 已于 2026-08-03 正式发布；当前开发目标为 App
+  `4.2.0+28`、Developer API / OpenAPI `4.2.0`，以下变更尚未发布。
 - 当前发行基线：App `4.1.0+27`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.0.0`、App Bridge SDK `3.2.0`、Catalog API `3.0.0`、
   Relay 协议 `3.0.0`、Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`。
+- 当前未发布组件目标：Game SDK `4.1.0`、App Bridge SDK `3.3.0`。已发布的 App
+  `4.1.0+27` 从未搭载 Game SDK `4.1.0`；该 SDK 版本只属于本工作树的下一发行。
 - 最新正式发布日志：`docs/version/4.1.0.md`；本文件保留 4.1.0 与 4.0.0 发布归档。
+- Game SDK 的未发布 `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
+  隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
+  行为在 Playmesh 内改用命名空间 Authority 服务与 Binary relay，不存在 Playmesh SDK 时
+  保留官方运行层。Go Core 与 Core 协议版本不变。
+- JSON Bucket 存储传输执行破坏性替换：保留既有异步
+  `getData/setData/removeData/clearData/upload` 的签名与 Promise 语义，只新增精确的
+  `getDataSync/setDataSync`；异步与同步 JSON 统一改走同源 HTTP GET/PUT/DELETE、
+  SHA-256、requestId 幂等和 revision/CAS，binary upload 继续独立使用 POST 与
+  `data/data`。SDK、App host、GameRuntimeBridge 与 Go Core 主 Session 链中的旧 WS 存储
+  请求/响应、pending/settle、双读、双写和 fallback 全部删除，旧嵌入 SDK 明确不兼容。
+  因 Game SDK `4.1.0` 尚未发布，本轮继续归入该未发布版本，不再次升号。
+
+## 未发布变更
+
+- 设置页“关于 Playmesh”新增手动检查更新。App 只打包 `assets/app/App.json` 更新源列表，
+  并发请求全部远端 JSON 后按严格语义版本选择最高有效清单，再按当前平台展示下载线路
+  名称与复用的端点延迟检测结果；界面始终显示当前/远端版本和新版本说明。下载地址只
+  交给系统默认浏览器，App 不下载、不校验安装包且不安装；动态 `app_update.json` 不打包。
+- 设置页不再承载开发者模式。首页“加入对局/在线游戏库”下方新增“制作游戏”入口，统一
+  控制同一个 Developer Gateway 会话；源代码开发与基于开源 GDevelop 的可视化开发使用
+  两个独立折叠入口，各自维护链接、可用性和打开语义，公共层不再使用
+  `workspaceKind` 条件分支。GDevelop 官方 WebIDE 仍为运行时可替换资源，不内置下载器或
+  新服务器。
+- Developer API / OpenAPI 兼容升级到 `4.2.0`，新增独立 capability
+  `gdevelop.history.v1`。GDevelop 当前工程与历史 revision 同时保存标准 project JSON、
+  图片、音频、视频、字体、3D 等完整 PlaymeshLocal 资源 manifest；每项目独立 CAS 以 SHA-256
+  去重并由 current/history 分别 pin，只有零引用 blob 才可 GC。
+- GDevelop 资源通过现有同源 Developer Gateway 流式暂存；Content-Length 存在时只用于提前
+  拒绝明显超限，最终始终严格校验实际字节数、SHA-256、MIME、大小、gameId 和 logicalId，
+  不把完整资源驻留内存。snapshot staging 验证全部资源后原子提交；restore 在同一事务中
+  先快照当前工程和资源，再切换目标版本；
+  修订冲突、资源缺失、配额超限、上传超时和请求超限具有稳定错误码。
+- WebIDE 在保存前使用批量 presence 接口检查最多 2048 个 `{contentHash,size}`，只上传
+  CAS 中缺失的新增或更新资源。连续相同快照、删除资源和改回仍由历史 pin 的旧 hash 都
+  不产生重复 Blob 上传；客户端不能用受项目 pin 授权的逐个资源 GET 代替存在性预检。
+- GDevelop 历史移动默认保留每项目 50 revision、每项目 unique CAS 256 MiB、
+  project JSON 32 MiB、单资源 64 MiB、未 pin staging 24 小时；桌面配置对象可提高到
+  每项目 100 revision / 1 GiB / 单资源 128 MiB。不存在全局历史配额或跨项目淘汰；
+  项目内淘汰永不删除 current，配额失败保持其他项目原状态。
+- GDevelop managed project 的身份、项目列表、canonical current 与历史证据改由 App Gateway
+  持有，浏览器 IndexedDB 仅作为可丢弃编辑缓存。新增 project-allocation 事务：冻结 immutable
+  workspace target，声明完整资源计划，上传缺失 raw blob 与 exact project JSON，finalize 时按
+  官方资源顺序建立首个 history current，durable decision 后原子发布项目根，并支持幂等查询、
+  只向前 recover 和决议前 abort。生命周期和历史 wire 直接使用与
+  `properties.packageName`、`main.json.id` 相同的
+  `gameId`，不签发额外 opaque handle。managed root 固定为 `packages/{gameId}`，历史位于
+  平台 sidecar `.playmesh/gdevelop/history`；另存为共享历史，复制为新工程分配新 ID 和
+  独立历史。
+- GDevelop 本地 AI 开发流升级为 v2：Chat/Agent 共用固定 5.6.276 的唯一 49-tool 合约、
+  两套可覆盖提示词、短期内存 editor session、turn/call 幂等状态机、统一危险操作审批、
+  单 writer lease 以及明确的超时/取消边界。Gateway 只协调调用；当前 WebIDE 直接把同一个
+  活动 `gdProject` 传给官方 EditorFunctions，并在函数返回后触发官方回调和 dirty 状态。
+  AI 不保存工程、不写 GDevelop current/历史、不创建 revision 或提交证据，也不执行快照、
+  回滚、浏览器 pending journal、启动恢复或事件纠错。用户继续按 GDevelop 正常流程自行
+  保存。Chat 提示词不包含 Token；Agent 继续使用现有 Developer Gateway Token，不签发
+  第二种凭据。SSE 断开时可按 sequence 轮询调用状态，AI、prompt 或 locale 加载失败不影响
+  普通编辑、保存和预览。
+- GDevelop 内核升级至 5.6.276（Playmesh revision 18）；移除上游已经正式修复的本地
+  SceneEditor/Mosaic 补丁，重新冻结源码策略、官方 libGD 配对与完整测试包证明链。
+- GDevelop AI editor-session wire 升级为不兼容旧宿主的 `2.0.0`，保留独立 `GDevelopAiProjectContext
+  1.0.0`：上下文直接使用官方完整 SimplifiedProject、ExtensionSummary、选中场景事件和
+  当前工具能力引用，并做 canonical SHA-256、体积/深度限制及 Token/URL/Bridge 拒绝。
+  session 创建或 PATCH 均可提交 context。execution 只接受 `success`、`output` 以及失败时
+  可选的字符串错误字段；WebIDE 在回传前以 `gameId + sessionId + callId` 缓存固定结果，
+  响应丢失只重发同一结果，不重新执行内部函数。
+- `add_scene_events` 新增固定 `GDevelopEventPayload 1.0.0` 信封，只接受官方
+  `AiGeneratedEventChange` DTO，不接受裸 EventsList 或自造 placement。Chat 粘贴 envelope 在
+  `name`、`arguments` 同级携带完整 `eventPayload`；浏览器校验后把它作为
+  `input.eventPayload` 与 call 一次入队，并纳入幂等指纹。输入在审批前锁定，审批后不能补交
+  或替换；不存在 `awaiting_event_payload`、correction API、自动纠错或旧 CAS 引用兼容。
+- AI “始终允许”授权改为按 `scopeKind + scopeId + operationId` 持久化，新增授权列表与撤销
+  API；source/GDevelop 项目删除分别清理自身授权，损坏授权文件按 fail-closed 处理。
+- GDevelop 临时预览只接受标准 Playmesh ZIP，并通过 DeveloperRun -> GamePage ->
+  GameWebGateway/Core 的现有运行链启动；不安装、不写 Catalog、不暴露临时资源凭据。
+  GDevelop `index.html` 的 locale bootstrap 只含 `workspace.gdevelop_*` UI 文案，桥接失败
+  原样返回 IDE，且动态 index 强制不缓存。canonical Multiplayer Bootstrap 仅在预览/
+  发布且明确启用多人或无法可靠判断时注入，明确禁用时跳过，原始官方导出保持零注入；
+  `unknown` 仅保守携带兼容脚本，不能据此把 `main.json` 提升为多人，未显式启用时仍按
+  `solo` 运行并由 Bootstrap 的多人会话守卫保持休眠。
+- 标准 `POST /dev/api/packages/import` 改为请求流直接落临时 ZIP，声明长度或实际字节超限、
+  连续 30 秒无数据、空流和中途异常都有稳定错误并清理部分文件，不再在 Gateway 内聚合
+  整包字节。同 ID 更新安装继续原子替换用户包内容，同时保留平台拥有的 `data/`、`cache/`
+  和 `.playmesh/`；上传包仍禁止伪造 `.playmesh`。
+- GDevelop 多人发布保持既有 Manifest 协议：生成包显式声明
+  `authority.entry: static/js/service/index.js`，并由主 HTML 唯一加载同一入口。入口内容从
+  平台唯一 canonical Bootstrap 源生成，不在每个项目维护分叉；Bootstrap 等待迟到的
+  Playmesh SDK，按固定 `session.isAuthority()` 角色只处理低频 channel 发现、加入与清理，
+  高频 GDevelop 状态帧仍走 Binary Channel bridge。guest 不注册 Authority 服务，也不能在
+  dispose 时关闭共享 channel；Authority 注册幂等且只关闭自己创建的 channel。
+
+- App Bridge SDK 升级到 `3.3.0`，新增
+  `playmesh.app.ui.onGameMenuOpen()` 与 `onGameMenuClose()`。游戏可注册并注销菜单开关
+  回调，用于暂停/恢复自身逻辑；事件覆盖公开方法、悬浮按钮、菜单键、返回键、继续、
+  遮罩、重启、退出和禁用兜底 UI 等入口，只在真实状态切换时触发，单个回调异常不会
+  阻止菜单或其他监听器。
+- Developer CLI 新增 `playmesh-cli convert`，可把从 App Developer API 手工复制出的
+  标准 `main.json + app/` 项目包原子转换为 JavaScript CLI 2.0 工程；转换会安装当前
+  SDK、升级清单版本、迁移可选能力与图标、保留无关文件，并拒绝覆盖已有脚手架。
 
 ## 4.1.0 发布归档
 
@@ -46,7 +147,7 @@
 - 局域网邀请改为 `/playmesh/join#inviteToken=...` 两段式握手：落地页以 POST
   交换短期 HttpOnly Cookie 后重定向到 manifest 完整入口。最终游戏 URL 不再追加
   或覆盖 `channelId/token`，普通浏览器和 App WebView 使用同一协议。
-- Game SDK 升级到 `4.0.0`，App Bridge SDK 升级到 `3.2.0`。公共游戏域只位于
+- Game SDK 升级到 `4.0.0`，App Bridge SDK 升级到 `3.3.0`。公共游戏域只位于
   `playmesh.main.*`，当前客户端域只位于 `playmesh.app.*`；locale 固定为
   `playmesh.app.runtime.getLocale()`，性能固定为 `playmesh.app.performance.*`，
   不存在 `playmesh.main.performance`。面向游戏开发者的唯一全局对象是
@@ -58,9 +159,9 @@
   `/playmesh/sdk/v1/playmesh-app.js`，类型文件成对改为 `playmesh-main.d.ts` 与
   `playmesh-app.d.ts`；旧 `playmesh.js` 和旧 Game 类型文件均不兼容、不回退。
 - 性能浮层唯一由 App SDK 创建和维护；Game SDK 的旧浏览器性能 panel 已删除。
-- `main.json.sdkVersion` 只接受 `4.0.0`，`appSdkVersion` 只接受 `3.2.0`；
-  旧值、未知值或格式错误值直接拒绝，不解析旧清单版本，也不提供版本回退或旧命名空间
-  shim。
+- `main.json.sdkVersion` 只接受 `4.0.0`；`appSdkVersion` 接受 `3.2.0` 或 `3.3.0`，
+  并通过版本通道解析到兼容的 `3.3.0` bundle。更旧、未知或格式错误值直接拒绝，
+  不提供历史静态文件或旧命名空间 shim。
 - `/playmesh/**` 与 `/bucket/**` 成为唯一平台保留命名空间。App、CLI 与 Go Server
   统一拒绝物理 `app/playmesh/`、`app/bucket/` 的大小写变体，以及百分号编码、
   反斜杠、空段、`.`、`..` 和符号链接绕过；游戏/控制器入口只允许 `.html`，

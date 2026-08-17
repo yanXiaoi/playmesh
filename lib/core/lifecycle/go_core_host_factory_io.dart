@@ -87,12 +87,20 @@ class _WindowsGoCoreHost implements GoCoreHost {
 
   String _address;
   Process? _process;
+  bool _closed = false;
 
   @override
   Uri get endpoint => _localEndpoint(_address);
 
   @override
   Future<void> start() async {
+    if (_closed) {
+      throw const GoCoreHostException(
+        code: 'core_host_closed',
+        userMessage: '内置 Go Core 已关闭。',
+        diagnostic: 'start called after stop',
+      );
+    }
     if (_process != null) {
       return;
     }
@@ -116,6 +124,14 @@ class _WindowsGoCoreHost implements GoCoreHost {
         '-parent-pid',
         '$pid',
       ], mode: ProcessStartMode.normal);
+      if (_closed) {
+        process.kill();
+        throw const GoCoreHostException(
+          code: 'core_start_cancelled',
+          userMessage: '内置 Go Core 启动已取消。',
+          diagnostic: 'host stopped while process was starting',
+        );
+      }
       _process = process;
       final addressCompleter = Completer<String>();
       process.stdout
@@ -184,19 +200,15 @@ class _WindowsGoCoreHost implements GoCoreHost {
   }
 
   @override
-  Future<void> stop() async {
+  Future<void> stop() {
+    _closed = true;
     final process = _process;
     _process = null;
-    if (process == null) {
-      return;
+    if (process != null) {
+      // Windows 会直接终止进程；退出码仅用于异步日志，不能阻塞应用退出。
+      process.kill();
     }
-
-    process.kill();
-    try {
-      await process.exitCode.timeout(const Duration(seconds: 3));
-    } on TimeoutException {
-      process.kill(ProcessSignal.sigkill);
-    }
+    return Future<void>.value();
   }
 }
 

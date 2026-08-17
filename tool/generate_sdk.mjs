@@ -215,13 +215,167 @@ function registeredCommands(fragments, target, bundleVersion) {
 }
 
 function invokedCommands(source, target) {
+  const invocationNames = target === "game"
+    ? new Set(["post", "sendBrowserTransport"])
+    : new Set(["request"]);
+  const commandPattern = target === "game"
+    ? /^[a-z][A-Za-z0-9.]+$/
+    : /^app\.[A-Za-z0-9.]+$/;
   const commands = new Set();
-  const pattern =
-    target === "game"
-      ? /\b(?:post|storageCall)\((["'])([a-z][A-Za-z0-9.]+)\1/g
-      : /\brequest\((["'])(app\.[A-Za-z0-9.]+)\1/g;
-  for (const match of source.matchAll(pattern)) commands.add(match[2]);
+  let index = 0;
+  while (index < source.length) {
+    const current = source[index];
+    if (current === "'" || current === '"' || current === "`") {
+      index = skipJavaScriptQuoted(source, index, current);
+      continue;
+    }
+    if (current === "/" && source[index + 1] === "/") {
+      index = skipJavaScriptLineComment(source, index + 2);
+      continue;
+    }
+    if (current === "/" && source[index + 1] === "*") {
+      index = skipJavaScriptBlockComment(source, index + 2);
+      continue;
+    }
+    if (current === "/" && isJavaScriptRegexStart(source, index)) {
+      index = skipJavaScriptRegex(source, index);
+      continue;
+    }
+    if (!/[A-Za-z_$]/.test(current)) {
+      index += 1;
+      continue;
+    }
+    const identifierStart = index;
+    index += 1;
+    while (index < source.length && /[A-Za-z0-9_$]/.test(source[index])) {
+      index += 1;
+    }
+    const identifier = source.slice(identifierStart, index);
+    if (!invocationNames.has(identifier)) continue;
+    const previous = previousSignificantCharacter(source, identifierStart);
+    if (previous === ".") continue;
+    let cursor = skipJavaScriptTrivia(source, index);
+    if (source[cursor] !== "(") continue;
+    cursor = skipJavaScriptTrivia(source, cursor + 1);
+    if (source[cursor] !== "'" && source[cursor] !== '"') continue;
+    const literal = readJavaScriptCommandLiteral(source, cursor);
+    if (literal && commandPattern.test(literal.value)) {
+      commands.add(literal.value);
+    }
+  }
   return commands;
+}
+
+function previousSignificantCharacter(source, index) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (!/\s/.test(source[cursor])) return source[cursor];
+  }
+  return null;
+}
+
+function skipJavaScriptTrivia(source, start) {
+  let index = start;
+  while (index < source.length) {
+    if (/\s/.test(source[index])) {
+      index += 1;
+      continue;
+    }
+    if (source[index] === "/" && source[index + 1] === "/") {
+      index = skipJavaScriptLineComment(source, index + 2);
+      continue;
+    }
+    if (source[index] === "/" && source[index + 1] === "*") {
+      index = skipJavaScriptBlockComment(source, index + 2);
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+function skipJavaScriptLineComment(source, start) {
+  const end = source.indexOf("\n", start);
+  return end < 0 ? source.length : end + 1;
+}
+
+function skipJavaScriptBlockComment(source, start) {
+  const end = source.indexOf("*/", start);
+  return end < 0 ? source.length : end + 2;
+}
+
+function isJavaScriptRegexStart(source, index) {
+  const previous = previousSignificantCharacter(source, index);
+  return previous === null || "(=:[{!,?;|&+-*%^~<>".includes(previous);
+}
+
+function skipJavaScriptRegex(source, start) {
+  let inCharacterClass = false;
+  let index = start + 1;
+  while (index < source.length) {
+    const current = source[index];
+    if (current === "\\") {
+      index += 2;
+      continue;
+    }
+    if (current === "\n" || current === "\r") return start + 1;
+    if (current === "[") inCharacterClass = true;
+    if (current === "]") inCharacterClass = false;
+    if (current === "/" && !inCharacterClass) {
+      index += 1;
+      while (index < source.length && /[A-Za-z]/.test(source[index])) {
+        index += 1;
+      }
+      return index;
+    }
+    index += 1;
+  }
+  return source.length;
+}
+
+function skipJavaScriptQuoted(source, start, quote) {
+  let index = start + 1;
+  while (index < source.length) {
+    if (source[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (source[index] === quote) return index + 1;
+    index += 1;
+  }
+  return source.length;
+}
+
+function readJavaScriptCommandLiteral(source, start) {
+  const quote = source[start];
+  let value = "";
+  for (let index = start + 1; index < source.length; index += 1) {
+    const current = source[index];
+    if (current === quote) return { value, end: index + 1 };
+    if (current === "\\" || current === "\n" || current === "\r") {
+      return null;
+    }
+    value += current;
+  }
+  return null;
+}
+
+function assertInvokedCommandSyntax() {
+  const gameFixture = String.raw`
+    // post("ignored.comment", {});
+    const ignored = "sendBrowserTransport('ignored.string', {})";
+    function post(command, payload) { return sendBrowserTransport(command, payload); }
+    const ignoredPattern = /post\("ignored.regex", \{\}\)/g;
+    post("sdk.ready", {});
+    sendBrowserTransport('future.host.command', {});
+    storageCall("storage.set", "save", "score", 1);
+  `;
+  const actual = [...invokedCommands(gameFixture, "game")].sort();
+  const expected = ["future.host.command", "sdk.ready"];
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `Game SDK 宿主命令语法扫描器自检失败: ${JSON.stringify(actual)}`,
+    );
+  }
 }
 
 function assertCommandParity(sources) {
@@ -308,6 +462,7 @@ function generate({
 }
 
 const dartSdkSources = loadDartSdkSources();
+assertInvokedCommandSyntax();
 assertCommandParity(dartSdkSources);
 const appSdkVersion = generate({
   source: dartSdkSources.app,
@@ -370,11 +525,21 @@ updateJson(path.join(developerContracts, "sdk-manifest.json"), (manifest) => {
     ?.find((namespace) => namespace.name === "playmesh.app")
     ?.members?.find((member) => member.name === "version");
   if (appVersionMember) appVersionMember.value = appSdkVersion;
+  if (manifest.projectRules) {
+    manifest.projectRules.gameSdkVersion =
+      `main.json sdkVersion is required and must equal ${gameSdkVersion}`;
+  }
 });
 updateJson(path.join(developerContracts, "schemas", "sdk-v1.json"), (schema) => {
   schema.$defs.PlaymeshBootstrap.properties.sdkVersion.const = gameSdkVersion;
   schema.$defs.PlaymeshAppBootstrap.properties.sdkVersion.const = appSdkVersion;
 });
+updateJson(
+  path.join(developerContracts, "schemas", "game-manifest.json"),
+  (schema) => {
+    schema.properties.sdkVersion.const = gameSdkVersion;
+  },
+);
 updateJson(
   path.join(
     repositoryRoot,

@@ -9,11 +9,11 @@ Strictly prohibited:
 - Do not call `playmesh.main.session`, `playmesh.main.player`, `playmesh.main.game`, `playmesh.main.authority`, or `playmesh.main.sync`.
 - Do not generate room, player-list, ready-state, join-code, controller, broadcast, or message-synchronization code.
 
-Solo data flow:
+Solo persistence data flow:
 1. `await playmesh.ready`.
-2. Read state from a `playmesh.main.storage` Bucket.
-3. Update state from local input and render immediately.
-4. Call `setData` when state changes. Perform only game-specific cleanup on exit; the App performs the final persistence flush.
+2. Read saves, long-term progress, or game settings from a `playmesh.main.storage` Bucket.
+3. Update the current runtime state from local input and render immediately.
+4. Call `setData` at game-defined save points or when persistent information changes. Perform game-specific cleanup on exit; the App performs the final persistence flush.
 
 Minimal reference:
 

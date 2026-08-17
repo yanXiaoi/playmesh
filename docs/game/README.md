@@ -66,12 +66,12 @@ AI 提示词和操作审批。
 - 多人 Authority 入口：`authority.entry` 显式必填；默认模板写入
   `static/js/service/index.js`
 - SDK 清单版本：`sdkVersion` 与 `appSdkVersion` 均必填，且必须分别为 `4.0.0`
-  与 `3.2.0`
+  与 `3.3.0`
 - 游戏业务 locale：`playmesh.app.runtime.getLocale()`（只返回当前显示端 locale；
   游戏自行提供翻译，不读取 App messages）
 
-URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。本次破坏性更新不解析
-旧 SDK 版本：目标 App 只接受 Game SDK `4.0.0` 与 App SDK `3.2.0`，旧值直接拒绝。
+URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。目标 App 只接受 Game
+SDK `4.0.0`；App SDK `3.2.0` 与 `3.3.0` 均受支持，并解析到当前兼容 bundle。
 
 ## 最小游戏
 
@@ -112,8 +112,8 @@ packages/com.example.hello/
 - 只通过 `playmesh.main.*` 使用会话、玩家、联机、生命周期和存储；通过
   `playmesh.app.*` 使用当前终端的 locale、性能和平台能力。
 - 面向游戏代码的唯一全局对象是 `window.playmesh`，其根级公开成员严格只有
-  `ready`、`main` 与 `app`。Game SDK `4.0.0` 的游戏域只位于
-  `playmesh.main.*`，App SDK `3.2.0` 的终端域只位于 `playmesh.app.*`；
+  `ready`、`main` 与 `app`。Game SDK `4.1.0` 的游戏域只位于
+  `playmesh.main.*`，App SDK `3.3.0` 的终端域只位于 `playmesh.app.*`；
   `window.playmeshApp` 与公开 `__*` 内部桥接均不存在。`main.ready` 内部先等待
   `app.ready`；根 `playmesh.ready` 只复用这条初始化链并返回 `{ main, app }`，
   不保留其他旧根路径。

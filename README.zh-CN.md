@@ -27,8 +27,10 @@ Playmesh 还把 AI 接入游戏开发全流程：平台会根据当前项目、�
 开发；具备本地工具调用能力的 Agent 则可直接完成文件读取、修改、校验、运行和日志
 诊断。
 
-项目说明：本项目目前采用 AI 驱动的集中式开发模式。为保持架构和代码生成流程的一致性，
-暂不接受 Pull Request，欢迎通过 Issue 报告 Bug 或提出功能建议。
+Playmesh 采用 MIT 许可证开放开发，欢迎提交 Pull Request。涉及公开 SDK、生成产物、
+多人 Authority、打包或发布流程的较大改动，请先阅读[贡献指南](CONTRIBUTING.md)，
+并在提交前通过 Issue 说明设计和兼容性影响。
+
 ## 本项目能做什么？
 年会小游戏、所有类型的网页单机/联机游戏、各种小工具等所有网页相关的都能运行
 
@@ -169,7 +171,8 @@ npm run dev
 `init` 会用数字选择 JavaScript 或 TypeScript，并生成 IDEA 可直接运行的 npm
 `build/dev/run/logs/update` 脚本；`dev` 通过本地资源代理在真实 App 中调试，
 `run` 执行正式构建与完整上传。`playmesh-cli get <project-id>` 可把 App 中的编译发布
-包恢复为 JavaScript 2.0 工程；TypeScript 与 Cocos 源码仍须由源码版本库保存。完整
+包恢复为 JavaScript 2.0 工程；`playmesh-cli convert` 可把手工复制出的 Developer API
+`main.json + app/` 包转换为相同工程布局。TypeScript 与 Cocos 源码仍须由源码版本库保存。完整
 命令、Cocos Creator 3.x 集成、破坏性目录变更和发布边界见
 [Developer CLI](dev-cli/README.md)。
 
@@ -286,3 +289,18 @@ Debug 签名时还必须同时使用 `-Draft` 或 `-Prerelease`，避免误发�
 
 构建成功不替代 Android 真机、多设备联机、Windows WebView2 或生产签名验收。
 发布结论必须同时记录自动验证、产物检查和仍需人工完成的项目。
+
+## 参与贡献
+
+欢迎通过 Issue 和 Pull Request 提交文档改进、Bug 修复、测试及范围明确的功能。
+开发约束和验证要求见[贡献指南](CONTRIBUTING.md)。
+
+## 许可证
+
+Playmesh 主体、Developer CLI 与 Go Server 使用 [MIT 许可证](LICENSE)。游戏不会仅因
+使用 Playmesh 创建或调用 Playmesh 公开 API 而自动采用 MIT；游戏制作者可自行决定其
+原创代码与素材的许可证，包括闭源和商业发行。
+
+第三方组件及素材继续适用各自的许可证与声明。发行包中的 GDevelop 衍生内容及其他
+第三方材料必须保留随组件提供的许可信息。MIT 许可证不授予 Playmesh 名称、Logo 或
+其他商标的使用权。

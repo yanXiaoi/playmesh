@@ -9,8 +9,8 @@ AgentAI 操作的仍是 Playmesh 游戏库中的真实项目，并与网页工�
 
 ## 开始前准备
 
-1. 在 Playmesh App 设置中开启开发者模式，并保持 App 和 Developer Gateway 运行。
-2. 在 App 内或电脑浏览器中打开开发者工作区。
+1. 从 Playmesh App 首页进入“制作游戏”，开启开发者模式并展开“源代码开发”，同时保持 App 和 Developer Gateway 运行。
+2. 在 App 内或电脑浏览器中打开“源代码开发”工作区。
 3. 创建游戏项目，或选择需要修改的已有项目。
 4. 点击工作区顶部的“AI”，填写公共“自定义想法”。
 5. 点击“获取项目提示词”，切换到“Agent 提示词”。
@@ -76,7 +76,7 @@ Agent 提示词包含持久 Developer Gateway token，应按敏感凭证管理�
 - 只发送给可信 Agent，不要发布到聊天截图、日志、Issue 或代码仓库。
 - 不要把工作区完整链接或 Agent 提示词转发给无关人员。
 - 使用结束后关闭开发者模式，可立即停止 Gateway 对外提供服务。
-- 怀疑 token 泄露时，在 App 设置中更换 token，并重新生成提示词。
+- 怀疑 token 泄露时，在 App 首页“制作游戏”页关闭开发者模式、更换 token，再重新开启并生成提示词。
 
 Agent 不能通过 Gateway 读取 App 账号 token、用户私有资料、其他项目或任意系统文件。
 不要授权它使用其他本地工具绕过 Playmesh 项目沙箱。

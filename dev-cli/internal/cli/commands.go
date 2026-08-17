@@ -310,6 +310,78 @@ func importProjectPackage(
 	return nil
 }
 
+type stagedDevelopmentPackage struct {
+	PackageID string `json:"packageId"`
+	GameID    string `json:"gameId"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+func stageDevelopmentPackage(
+	ctx context.Context,
+	client *target.Client,
+	projectID string,
+	packageBytes []byte,
+) (stagedDevelopmentPackage, error) {
+	response, err := client.Request(
+		ctx,
+		http.MethodPost,
+		target.ProjectPath(projectID, "/development/package"),
+		bytes.NewReader(packageBytes),
+		"application/zip",
+	)
+	if err != nil {
+		return stagedDevelopmentPackage{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return stagedDevelopmentPackage{}, target.DecodeAPIError(response)
+	}
+	var staged stagedDevelopmentPackage
+	if err := json.NewDecoder(response.Body).Decode(&staged); err != nil {
+		return stagedDevelopmentPackage{}, err
+	}
+	if staged.PackageID == "" || staged.GameID != projectID || staged.ExpiresAt <= time.Now().UnixMilli() {
+		return stagedDevelopmentPackage{}, errors.New("目标 App 未返回有效的临时开发包凭据")
+	}
+	return staged, nil
+}
+
+func startTemporaryPackagePreview(
+	ctx context.Context,
+	client *target.Client,
+	projectID string,
+	packageBytes []byte,
+) (runStatus, error) {
+	response, err := client.Request(
+		ctx,
+		http.MethodPost,
+		target.ProjectPath(projectID, "/preview"),
+		bytes.NewReader(packageBytes),
+		"application/zip",
+	)
+	if err != nil {
+		return runStatus{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return runStatus{}, target.DecodeAPIError(response)
+	}
+	var result struct {
+		GameID string    `json:"gameId"`
+		Run    runStatus `json:"run"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return runStatus{}, err
+	}
+	if result.GameID != projectID || result.Run.RunID == "" {
+		return runStatus{}, errors.New("目标 App 未确认临时包开发运行")
+	}
+	if result.Run.ProjectID == "" {
+		result.Run.ProjectID = projectID
+	}
+	return result.Run, nil
+}
+
 func commandDev(ctx context.Context, args []string) error {
 	fmt.Printf("playmesh-cli %s\n", buildinfo.Version)
 	projectContext, err := project.Current()
@@ -373,13 +445,13 @@ func commandDev(ctx context.Context, args []string) error {
 	if baseProjectID != projectID {
 		return errors.New("开发基础包项目 ID 与当前项目不一致")
 	}
-	if err := importProjectPackage(
+	stagedPackage, err := stageDevelopmentPackage(
 		ctx,
 		client,
 		projectID,
 		basePackage,
-		false,
-	); err != nil {
+	)
+	if err != nil {
 		return err
 	}
 	proxy, err := development.StartProxy(
@@ -411,6 +483,7 @@ func commandDev(ctx context.Context, args []string) error {
 		}
 	}()
 	request := proxy.Request()
+	request.PackageID = stagedPackage.PackageID
 	fmt.Printf(
 		"[dev] 资源代理：%s\n",
 		request.ResourceBaseURL,
@@ -662,16 +735,12 @@ func commandRun(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := importProjectPackage(
+	run, err := startTemporaryPackagePreview(
 		ctx,
 		client,
 		projectID,
 		packageBytes,
-		true,
-	); err != nil {
-		return err
-	}
-	run, err := runProject(ctx, projectID)
+	)
 	if err != nil {
 		return err
 	}
@@ -746,43 +815,6 @@ func commandLogs(ctx context.Context) error {
 		current.Run.RunID,
 		logAttachmentKeepsRun,
 	)
-}
-
-func runProject(ctx context.Context, projectID string) (runStatus, error) {
-	targetConfig, err := targetStore.Load()
-	if err != nil {
-		return runStatus{}, err
-	}
-	client := newTargetClient(targetConfig)
-	var current struct {
-		Run *runStatus `json:"run"`
-	}
-	if err := client.JSON(ctx, "GET", "/dev/api/run", nil, &current); err != nil {
-		return runStatus{}, err
-	}
-	var started runStatus
-	if current.Run == nil {
-		err = client.JSON(ctx, "POST", target.ProjectPath(projectID, "/run"), nil, &started)
-	} else if current.Run.ProjectID == projectID {
-		err = client.JSON(ctx, "POST", target.ProjectPath(projectID, "/run/restart"), nil, &started)
-	} else {
-		fmt.Printf("正在关闭当前项目 %s...\n", current.Run.ProjectID)
-		var stopped runStatus
-		if stopErr := client.JSON(ctx, "POST", target.ProjectPath(current.Run.ProjectID, "/run/stop"), nil, &stopped); stopErr != nil {
-			return runStatus{}, fmt.Errorf("关闭当前项目失败: %w", stopErr)
-		}
-		err = client.JSON(ctx, "POST", target.ProjectPath(projectID, "/run"), nil, &started)
-	}
-	if err != nil {
-		return runStatus{}, err
-	}
-	if started.ProjectID == "" {
-		started.ProjectID = projectID
-	}
-	if started.RunID == "" {
-		return runStatus{}, errors.New("目标 App 启动项目后未返回 runId")
-	}
-	return started, nil
 }
 
 type runStatus struct {

@@ -100,6 +100,12 @@ interface PlaymeshAuthorityResult {
   payload?: PlaymeshJson;
 }
 
+/** 为 Authority 动作或服务选择隔离路由。namespace 只是路由标签，不是权限边界。 */
+interface PlaymeshAuthorityServiceOptions {
+  /** 非空命名空间；建议使用反向域名或产品前缀并带版本。 */
+  namespace?: string;
+}
+
 /** Binary Channel 的转发方式。`authority` 先由 Authority 审核，`relay` 直接转发。 */
 type PlaymeshBinaryChannelMode = "authority" | "relay";
 
@@ -203,15 +209,30 @@ interface PlaymeshSyncAuthorityOptions<T> {
   onTick?: (context: PlaymeshSyncTickContext<T>) => T | void | Promise<T | void>;
 }
 
-/** Authority 状态同步控制器。 */
+/** Authority 公共状态同步控制器。 */
 interface PlaymeshSyncAuthorityController<T = PlaymeshJson> {
-  /** 返回当前权威状态的 JSON 副本。 */
+  /** 返回当前 Authority runtime 公共状态的 JSON 副本。 */
   getState(): T;
-  /** 替换权威状态；`publish` 缺省为 true。 */
+  /**
+   * 整体替换当前公共状态。真实变化按 `tickRate` 窗口合并、去重并串行自动发布。
+   * `publish` 默认为 true，使 Promise 等待对应自动发布流程结算为快照或 null；发送失败时拒绝。
+   * 传 false 时立即返回 null，状态变化仍可由后续自动发布窗口同步。
+   */
   setState(state: T, publish?: boolean): Promise<PlaymeshSyncSnapshot<T> | null>;
-  /** 立即发布完整快照；省略目标时发送给全部非 Authority 玩家。 */
+  /**
+   * 每次调用都在调用时独立构造当前完整公共状态快照并立即发起发送；多次调用可并发执行。
+   * `targetPlayerIds` 选择接收者；省略时选择 Authority Client 和 Session players。
+   */
   publish(targetPlayerIds?: string[]): Promise<PlaymeshSyncSnapshot<T> | null>;
-  /** 停止 tick 和同步；停止后需要重新调用 `startAuthority`。 */
+  /**
+   * 在同一调用中整体替换公共状态、使 `getState()` 立即可读，再为同一状态构造快照并发起发送。
+   * `targetPlayerIds` 选择接收者；state 为字符串数组时显式传入第二参数（可为 undefined）以选择此重载。
+   */
+  publish(state: T, targetPlayerIds?: string[]): Promise<PlaymeshSyncSnapshot<T> | null>;
+  /**
+   * 停止当前页面的 tick 与同步 runtime，并取消尚未执行的自动发布任务；已发起的发送继续结算。
+   * 后续同步通过重新调用 `startAuthority` 启动；Session 生命周期保持独立。
+   */
   stop(): void;
 }
 
@@ -263,7 +284,7 @@ interface PlaymeshAppBootstrap {
   /** 当前页面是否连接到 Playmesh App 原生 Bridge。 */
   readonly available: boolean;
   /** 当前 App Bridge SDK 版本。 */
-  readonly sdkVersion: "3.2.0";
+  readonly sdkVersion: "3.3.0";
   /** App 自动注入的本机身份；普通浏览器为 `null`。 */
   readonly identity: PlaymeshAppIdentity | null;
   /** App 提供的受控运行环境；普通浏览器为 `null`。 */
@@ -334,6 +355,10 @@ interface PlaymeshStorageBucket {
   getData<T = PlaymeshJson>(key: string): Promise<T | null>;
   /** 写入 JSON 值；单值序列化后不能超过宿主限制。 */
   setData(key: string, value: PlaymeshJson): Promise<void>;
+  /** 通过局域网同源 Bucket 网关阻塞读取 JSON；不存在时返回 `null`。 */
+  getDataSync<T = PlaymeshJson>(key: string): T | null;
+  /** 通过局域网同源 Bucket 网关阻塞写入 JSON；返回时 App 内存状态已提交。 */
+  setDataSync(key: string, value: PlaymeshJson): void;
   /** 删除一个 key。 */
   removeData(key: string): Promise<void>;
   /** 清空当前 Bucket，不影响其他 Bucket。 */
@@ -356,6 +381,10 @@ interface PlaymeshAppUiApi {
   configure(options: PlaymeshAppUiOptions): PlaymeshAppUiOptions;
   /** 手动打开 SDK 居中游戏菜单；方法名为兼容公开契约保留，禁用兜底 UI 时返回 `false`。 @playmesh-completion playmesh.app.ui.showGameSidebar */
   showGameSidebar(): Promise<boolean>;
+  /** 订阅 SDK 游戏菜单成功打开事件；只在关闭到打开的真实状态变化后触发。 @playmesh-completion playmesh.app.ui.onGameMenuOpen */
+  onGameMenuOpen(callback: () => void): PlaymeshUnsubscribe;
+  /** 订阅 SDK 游戏菜单成功关闭事件；只在打开到关闭的真实状态变化后触发。 @playmesh-completion playmesh.app.ui.onGameMenuClose */
+  onGameMenuClose(callback: () => void): PlaymeshUnsubscribe;
   /** 重新加载当前游戏文档。 @playmesh-completion playmesh.app.ui.restartGame */
   restartGame(): void;
   /** 打开“分享/邀请”；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.ui.openSharePanel */
@@ -379,7 +408,7 @@ interface PlaymeshAppUiApi {
 /** App Bridge 与统一平台 UI 能力。App WebView 和普通浏览器都会注入。 */
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
-  readonly version: "3.2.0";
+  readonly version: "3.3.0";
   /** App Bridge 完成身份和能力插件注册表注入后 resolve；原生 Bridge 失败时 reject。 */
   readonly ready: Promise<PlaymeshAppBootstrap>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
@@ -437,7 +466,7 @@ interface PlaymeshAppApi {
 /** 游戏本体与对局公开 API。所有页面先等待 `playmesh.main.ready`。 */
 interface PlaymeshMainApi {
   /** 当前 Game SDK 版本。 */
-  readonly version: "4.0.0";
+  readonly version: "4.1.0";
   /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
   readonly ready: Promise<PlaymeshBootstrap>;
   /** 当前页面对应的游戏声明。 */
@@ -474,7 +503,7 @@ interface PlaymeshMainApi {
   /** 自定义低层游戏消息。普通多人游戏优先使用 `playmesh.main.sync`。 */
   readonly game: {
     /** 向 Authority 提交 JSON 业务动作；发送者身份由平台附加。 @playmesh-completion playmesh.main.game.submitAction */
-    submitAction(action: PlaymeshJson): Promise<unknown>;
+    submitAction(action: PlaymeshJson, options?: PlaymeshAuthorityServiceOptions): Promise<unknown>;
     /** 订阅 Authority 发给当前客户端的 JSON 消息。 @playmesh-completion playmesh.main.game.onMessage */
     onMessage(callback: (message: PlaymeshJson) => void): PlaymeshUnsubscribe;
     /** `onMessage` 的兼容别名；新代码优先使用 `onMessage`。 @playmesh-completion playmesh.main.game.onEvent */
@@ -482,12 +511,14 @@ interface PlaymeshMainApi {
   };
   /** 自定义 Authority 动作处理。只有 Authority Client 可以注册。 */
   readonly authority: {
+    /** 未传 options 时使用的稳定默认 namespace。 */
+    readonly defaultNamespace: "playmesh.authority.default.v1";
     /**
      * 注册权威动作处理器。规则、分数和胜负应在这里决定，不能信任动作中自报的身份。
      * @returns 取消注册函数。
      * @playmesh-completion playmesh.main.authority.onService
      */
-    onService(handler: (action: PlaymeshJson, context: PlaymeshAuthorityContext) => PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined | Promise<PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined>): PlaymeshUnsubscribe;
+    onService(handler: (action: PlaymeshJson, context: PlaymeshAuthorityContext) => PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined | Promise<PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined>, options?: PlaymeshAuthorityServiceOptions): PlaymeshUnsubscribe;
   };
   /** 多人会话内的透明二进制分发。SDK 按需维护一条受平台管控的 Binary WebSocket。 */
   readonly binary: {
@@ -526,7 +557,7 @@ interface PlaymeshMainApi {
   };
   /** Authority 主机上的持久 JSON Bucket。浏览器和加入设备不建立独立副本。 */
   readonly storage: {
-    /** 获取 Bucket；名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。 @playmesh-completion playmesh.main.storage.getBucket */
+    /** 获取 Bucket；异步方法保持原 64 字符名称规则，同步方法另支持 1～4096 UTF-8 字节的逻辑名。 @playmesh-completion playmesh.main.storage.getBucket */
     getBucket(bucket: string): PlaymeshStorageBucket;
   };
 }

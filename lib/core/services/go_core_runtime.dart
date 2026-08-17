@@ -6,8 +6,17 @@ import '../developer/developer_project_catalog.dart';
 import '../developer/developer_preferences.dart';
 import '../developer/developer_run_controller.dart';
 import '../developer/developer_web_gateway.dart';
+import '../developer/gdevelop_project_history.dart';
+import '../developer/gdevelop_web_ide_distribution.dart';
+import '../developer/gdevelop_web_ide_installer_contract.dart';
+import '../developer/gdevelop_web_ide_manager.dart';
+import '../developer/gdevelop_local_package_source.dart';
+import '../developer/gdevelop_web_ide_source.dart';
+import '../download/named_download_endpoint.dart';
+import '../download/verified_resumable_download_contract.dart';
 import '../lifecycle/go_core_host.dart';
 import '../network/go_core_client.dart';
+import '../network/lan_endpoint.dart';
 import '../protocol/go_core_status.dart';
 import 'go_core_status_service.dart';
 
@@ -32,12 +41,17 @@ class GoCoreRuntime
     this.developerWorkspaceLocalizationBridge,
     this._developerBackgroundNotificationLocalizationProvider,
     DeveloperBackgroundHost? developerBackgroundHost,
+    this.developerGDevelopWebIdeSource,
+    this.developerGDevelopHistory,
+    GDevelopWebIdeManager? developerGDevelopWebIdeManager,
   }) : assert(client != null || clientFactory != null),
        _client = client,
        _clientFactory = clientFactory,
        _developerPreferences = developerPreferences ?? DeveloperPreferences(),
        _developerBackgroundHost =
            developerBackgroundHost ?? const PlatformDeveloperBackgroundHost(),
+       _gdevelopWebIdeManager =
+           developerGDevelopWebIdeManager ?? createGDevelopWebIdeManager(),
        developerRunController =
            developerRunController ?? DeveloperRunController();
 
@@ -54,6 +68,8 @@ class GoCoreRuntime
     DeveloperBackgroundNotificationLocalizationProvider?
     developerBackgroundNotificationLocalizationProvider,
     DeveloperBackgroundHost? developerBackgroundHost,
+    GDevelopWebIdeSource? developerGDevelopWebIdeSource,
+    GDevelopWebIdeManager? developerGDevelopWebIdeManager,
   }) {
     final host = createBundledGoCoreHost(address: address);
     return GoCoreRuntime(
@@ -73,6 +89,8 @@ class GoCoreRuntime
       developerBackgroundNotificationLocalizationProvider:
           developerBackgroundNotificationLocalizationProvider,
       developerBackgroundHost: developerBackgroundHost,
+      developerGDevelopWebIdeSource: developerGDevelopWebIdeSource,
+      developerGDevelopWebIdeManager: developerGDevelopWebIdeManager,
     );
   }
 
@@ -90,16 +108,33 @@ class GoCoreRuntime
   DeveloperBackgroundNotificationLocalizationProvider?
   _developerBackgroundNotificationLocalizationProvider;
   final DeveloperBackgroundHost _developerBackgroundHost;
+  final GDevelopWebIdeSource? developerGDevelopWebIdeSource;
+  final GDevelopProjectHistoryAdapter? developerGDevelopHistory;
+  final GDevelopWebIdeManager _gdevelopWebIdeManager;
   GoCoreStatusService? _statusService;
   DeveloperWebGateway? _developerGateway;
   DeveloperSession? _developerSession;
-  List<Uri> _developerLinks = const [];
+  List<LanEndpointCandidate> _developerLinks = const [];
+  List<LanEndpointCandidate> _gdevelopLinks = const [];
   Future<void>? _startOperation;
+  Future<void>? _closeOperation;
+  bool _gdevelopWebIdeInstallInProgress = false;
+  int _developerModeLifecycleOperations = 0;
+  bool _closed = false;
 
   @override
   Uri get endpoint => _statusService?.endpoint ?? host.endpoint;
 
   Future<void> start() {
+    if (_closed) {
+      return Future<void>.error(
+        const GoCoreHostException(
+          code: 'core_runtime_closed',
+          userMessage: '内置 Go Core 已关闭。',
+          diagnostic: 'start called after runtime close',
+        ),
+      );
+    }
     return _startOperation ??= _startHost();
   }
 
@@ -120,52 +155,75 @@ class GoCoreRuntime
     required int port,
     String? token,
   }) async {
-    await _developerGateway?.close();
-    await _developerBackgroundHost.stop();
-    _developerGateway = null;
-    _developerSession = null;
-    _developerLinks = const [];
-
-    final preference = await _developerPreferences.load();
-    final requestedToken = token?.trim() ?? '';
-    final gateway = await startDeveloperWebGateway(
-      port: port,
-      token: requestedToken.isEmpty ? preference.token : requestedToken,
-      path: preference.path,
-      catalog: developerProjectCatalog,
-      promptTemplates: developerAiPromptTemplates,
-      runController: developerRunController,
-      capabilityTests: developerCapabilityTests,
-      currentAuthor: developerAuthorProvider,
-      projectPublisher: developerProjectPublisher,
-      localizationBridge: developerWorkspaceLocalizationBridge,
-      viewAvailability: _developerBackgroundHost.viewAvailability,
-    );
+    if (_gdevelopWebIdeInstallInProgress) {
+      throw const GDevelopWebIdeInstallBusyException();
+    }
+    _developerModeLifecycleOperations += 1;
     try {
-      await _developerBackgroundHost.start(
-        port: gateway.session.port!,
-        localization: _developerBackgroundNotificationLocalizationProvider
-            ?.call(),
-      );
-      _developerGateway = gateway;
-      _developerSession = gateway.session;
-      _developerLinks = await gateway.workspaceLinks();
-      await _developerPreferences.save(
-        DeveloperWorkspacePreference(
-          port: gateway.session.port!,
-          token: gateway.session.token!,
-          path: gateway.session.path!,
-        ),
-      );
-    } on Object {
-      await gateway.close();
+      await _developerGateway?.close();
       await _developerBackgroundHost.stop();
       _developerGateway = null;
       _developerSession = null;
       _developerLinks = const [];
-      rethrow;
+      _gdevelopLinks = const [];
+
+      final preference = await _developerPreferences.load();
+      final requestedToken = token?.trim() ?? '';
+      final gdevelopWebIdeSource =
+          developerGDevelopWebIdeSource ?? createGDevelopWebIdeSource();
+      final gdevelopWorkspaceAvailable = await gdevelopWebIdeSource
+          .isAvailable();
+      final gateway = await startDeveloperWebGateway(
+        port: port,
+        token: requestedToken.isEmpty ? preference.token : requestedToken,
+        path: preference.path,
+        catalog: developerProjectCatalog,
+        promptTemplates: developerAiPromptTemplates,
+        runController: developerRunController,
+        capabilityTests: developerCapabilityTests,
+        currentAuthor: developerAuthorProvider,
+        projectPublisher: developerProjectPublisher,
+        localizationBridge: developerWorkspaceLocalizationBridge,
+        viewAvailability: _developerBackgroundHost.viewAvailability,
+        gdevelopWebIdeSource: gdevelopWebIdeSource,
+        gdevelopAiToolsProvider:
+            _gdevelopWebIdeManager.loadInstalledAiToolRegistry,
+        gdevelopHistory: developerGDevelopHistory,
+        gdevelopAiFeaturePolicy: GDevelopAiFeaturePolicy.forDeveloperSession(
+          developerModeEnabled: true,
+          gdevelopWorkspaceAvailable: gdevelopWorkspaceAvailable,
+        ),
+      );
+      try {
+        await _developerBackgroundHost.start(
+          port: gateway.session.port!,
+          localization: _developerBackgroundNotificationLocalizationProvider
+              ?.call(),
+        );
+        _developerGateway = gateway;
+        _developerSession = gateway.session;
+        _developerLinks = await gateway.sourceWorkspaceEndpoints();
+        _gdevelopLinks = await gateway.gdevelopWorkspaceEndpoints();
+        await _developerPreferences.save(
+          DeveloperWorkspacePreference(
+            port: gateway.session.port!,
+            token: gateway.session.token!,
+            path: gateway.session.path!,
+          ),
+        );
+      } on Object {
+        await gateway.close();
+        await _developerBackgroundHost.stop();
+        _developerGateway = null;
+        _developerSession = null;
+        _developerLinks = const [];
+        _gdevelopLinks = const [];
+        rethrow;
+      }
+      return gateway.session;
+    } finally {
+      _developerModeLifecycleOperations -= 1;
     }
-    return gateway.session;
   }
 
   @override
@@ -179,14 +237,20 @@ class GoCoreRuntime
 
   @override
   Future<void> disableDeveloperMode() async {
+    _developerModeLifecycleOperations += 1;
     final gateway = _developerGateway;
     _developerGateway = null;
     _developerSession = null;
     _developerLinks = const [];
+    _gdevelopLinks = const [];
     try {
-      await gateway?.close();
+      try {
+        await gateway?.close();
+      } finally {
+        await _developerBackgroundHost.stop();
+      }
     } finally {
-      await _developerBackgroundHost.stop();
+      _developerModeLifecycleOperations -= 1;
     }
   }
 
@@ -267,21 +331,119 @@ class GoCoreRuntime
   );
 
   @override
-  Future<List<Uri>> developerWorkspaceLinks(DeveloperSession session) async {
+  Future<List<LanEndpointCandidate>> sourceWorkspaceLinks(
+    DeveloperSession session,
+  ) async {
     if (!session.enabled || !identical(session, _developerSession)) {
       return const [];
     }
     return List.unmodifiable(_developerLinks);
   }
 
+  @override
+  Future<List<LanEndpointCandidate>> gdevelopWorkspaceLinks(
+    DeveloperSession session,
+  ) async {
+    if (!session.enabled || !identical(session, _developerSession)) {
+      return const [];
+    }
+    final gateway = _developerGateway;
+    if (gateway == null) return const [];
+    _gdevelopLinks = await gateway.gdevelopWorkspaceEndpoints();
+    return List.unmodifiable(_gdevelopLinks);
+  }
+
+  @override
+  Future<GDevelopWebIdeInstallationInspection>
+  inspectGDevelopWebIdeInstallation() =>
+      _gdevelopWebIdeManager.inspectInstallation();
+
+  @override
+  Future<GDevelopWebIdeInstalledNotices> loadInstalledGDevelopWebIdeNotices() =>
+      _gdevelopWebIdeManager.loadInstalledNotices();
+
+  @override
+  Future<GDevelopWebIdeConfigSources> loadGDevelopWebIdeConfigSources() =>
+      _gdevelopWebIdeManager.loadConfigSources();
+
+  @override
+  Future<GDevelopWebIdeReleaseManifest> loadGDevelopWebIdeReleaseManifest(
+    NamedDownloadEndpoint selectedSource,
+  ) => _gdevelopWebIdeManager.loadReleaseManifest(selectedSource);
+
+  @override
+  Future<GDevelopWebIdeInstallResult> applyGDevelopWebIdeRelease({
+    required GDevelopWebIdeReleaseManifest release,
+    required NamedDownloadEndpoint selectedDownload,
+    required bool forceRedownload,
+    VerifiedDownloadProgressCallback? onProgress,
+    DownloadCancellationToken? cancellationToken,
+  }) async {
+    if (_gdevelopWebIdeInstallInProgress) {
+      throw const GDevelopWebIdeInstallBusyException();
+    }
+    _ensureGDevelopWebIdeInstallationAllowed();
+    _gdevelopWebIdeInstallInProgress = true;
+    try {
+      final result = await _gdevelopWebIdeManager.applyRelease(
+        release: release,
+        selectedDownload: selectedDownload,
+        forceRedownload: forceRedownload,
+        onProgress: onProgress,
+        cancellationToken: cancellationToken,
+      );
+      return result;
+    } finally {
+      _gdevelopWebIdeInstallInProgress = false;
+    }
+  }
+
+  @override
+  Future<GDevelopWebIdeInstallResult> applyLocalGDevelopWebIdePackage({
+    required GDevelopLocalPackageSource source,
+    required bool allowMemoryFallback,
+    DownloadCancellationToken? cancellationToken,
+  }) async {
+    if (_gdevelopWebIdeInstallInProgress) {
+      throw const GDevelopWebIdeInstallBusyException();
+    }
+    _ensureGDevelopWebIdeInstallationAllowed();
+    _gdevelopWebIdeInstallInProgress = true;
+    try {
+      final result = await _gdevelopWebIdeManager.applyLocalPackage(
+        source: source,
+        allowMemoryFallback: allowMemoryFallback,
+        cancellationToken: cancellationToken,
+      );
+      return result;
+    } finally {
+      _gdevelopWebIdeInstallInProgress = false;
+    }
+  }
+
+  void _ensureGDevelopWebIdeInstallationAllowed() {
+    if (_developerModeLifecycleOperations > 0 ||
+        _developerGateway != null ||
+        _developerSession?.enabled == true) {
+      throw const GDevelopWebIdeInstallException(
+        'gdevelop_developer_mode_must_be_disabled_before_install',
+      );
+    }
+  }
+
   Future<void> _startHost() async {
     try {
       await host.start();
+      if (_closed) {
+        await host.stop();
+        return;
+      }
       _statusService ??= GoCoreStatusService(
         _client ?? _clientFactory!(host.endpoint),
       );
     } on Object {
       _startOperation = null;
+      if (_closed) return;
       rethrow;
     }
   }
@@ -311,10 +473,16 @@ class GoCoreRuntime
   }
 
   @override
-  Future<void> close() async {
-    await disableDeveloperMode();
-    await _statusService?.close();
+  Future<void> close() {
+    _closed = true;
+    return _closeOperation ??= _close();
+  }
+
+  Future<void> _close() async {
     await host.stop();
+    await disableDeveloperMode();
+    _gdevelopWebIdeManager.close();
+    await _statusService?.close();
     _statusService = null;
     _startOperation = null;
   }

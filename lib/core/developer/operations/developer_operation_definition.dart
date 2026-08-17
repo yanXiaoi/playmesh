@@ -123,6 +123,13 @@ const developerProjectIdParameter = DeveloperOperationParameter(
   required: true,
 );
 
+const developerGameIdParameter = DeveloperOperationParameter(
+  name: 'gameId',
+  location: DeveloperOperationParameterLocation.path,
+  description: 'GDevelop packageName 与 Playmesh main.json.id 共用的稳定游戏 ID',
+  required: true,
+);
+
 const developerPathQueryParameter = DeveloperOperationParameter(
   name: 'path',
   location: DeveloperOperationParameterLocation.query,

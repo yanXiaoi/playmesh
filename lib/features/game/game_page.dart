@@ -38,23 +38,10 @@ class _LocalAvatar {
   final String sha256;
 }
 
-class GameJoinRequest {
-  const GameJoinRequest({
-    required this.coreEndpoint,
-    required this.joinCode,
-    required this.nickname,
-  });
-
-  final Uri coreEndpoint;
-  final String joinCode;
-  final String nickname;
-}
-
 class GameLaunchArguments {
   const GameLaunchArguments({
     required this.game,
     required this.enterFullscreenOnLaunch,
-    this.joinRequest,
     this.developerProjectId,
     this.developerRunId,
     this.developerResourceSession,
@@ -62,7 +49,6 @@ class GameLaunchArguments {
 
   final GameSummary game;
   final bool enterFullscreenOnLaunch;
-  final GameJoinRequest? joinRequest;
   final String? developerProjectId;
   final String? developerRunId;
   final DeveloperResourceSession? developerResourceSession;
@@ -79,7 +65,6 @@ class GamePage extends StatefulWidget {
     this.previewBuilder,
     this.orientationController,
     this.goCoreRuntime,
-    this.joinRequest,
     this.developerProjectId,
     this.developerRunId,
     this.developerResourceSession,
@@ -101,7 +86,6 @@ class GamePage extends StatefulWidget {
   final GamePreviewBuilder? previewBuilder;
   final GameOrientationController? orientationController;
   final GoCoreRuntime? goCoreRuntime;
-  final GameJoinRequest? joinRequest;
   final String? developerProjectId;
   final String? developerRunId;
   final DeveloperResourceSession? developerResourceSession;
@@ -161,13 +145,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   GameSdkBridge? get _webViewBridge => _bridge ?? _soloBridge;
   bool get _canShareFromAppSdk =>
       _soloBridge != null || _bridge?.connection.isAuthority == true;
-  bool get _controllerRole =>
-      widget.game.displayMode == 'single_screen_multiplayer' &&
-      widget.joinRequest != null;
-  bool get _shouldEnterFullscreenOnLaunch =>
-      widget.enterFullscreenOnLaunch || _controllerRole;
-  GameOrientation get _runtimeOrientation =>
-      widget.game.orientationForRole(controller: _controllerRole);
+  bool get _shouldEnterFullscreenOnLaunch => widget.enterFullscreenOnLaunch;
+  GameOrientation get _runtimeOrientation => widget.game.orientation;
 
   @override
   void initState() {
@@ -186,14 +165,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(GamePage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final oldControllerRole =
-        oldWidget.game.displayMode == 'single_screen_multiplayer' &&
-        oldWidget.joinRequest != null;
-    final oldOrientation = oldWidget.game.orientationForRole(
-      controller: oldControllerRole,
-    );
-    final oldShouldEnterFullscreen =
-        oldWidget.enterFullscreenOnLaunch || oldControllerRole;
+    final oldOrientation = oldWidget.game.orientation;
+    final oldShouldEnterFullscreen = oldWidget.enterFullscreenOnLaunch;
     if (_shouldEnterFullscreenOnLaunch &&
         (!oldShouldEnterFullscreen || oldOrientation != _runtimeOrientation)) {
       _applyOrientation(_runtimeOrientation);
@@ -227,8 +200,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final game = widget.game;
     final oldEntry = oldGame.entry;
     final entry = game.entry;
-    final oldJoin = oldWidget.joinRequest;
-    final join = widget.joinRequest;
     return oldGame.id != game.id ||
         oldGame.name != game.name ||
         oldGame.version != game.version ||
@@ -255,10 +226,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         ) ||
         oldWidget.localUserId != widget.localUserId ||
         oldWidget.localNickname != widget.localNickname ||
-        (oldWidget.previewBuilder == null) != (widget.previewBuilder == null) ||
-        oldJoin?.coreEndpoint != join?.coreEndpoint ||
-        oldJoin?.joinCode != join?.joinCode ||
-        oldJoin?.nickname != join?.nickname;
+        (oldWidget.previewBuilder == null) != (widget.previewBuilder == null);
   }
 
   bool _sameDeveloperResourceSession(
@@ -478,7 +446,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             localUserId: widget.localUserId,
             localNickname: widget.localNickname,
             developerResourceSession: widget.developerResourceSession,
-            controllerRole: _controllerRole,
             onOpenSharePanel: _canShareFromAppSdk ? _openShareFromAppSdk : null,
             onExitRequested: _returnToPrevious,
             onSystemBackHandlerChanged: _setGameSystemBackHandler,
@@ -527,7 +494,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     final configurationGeneration = _configurationGeneration;
     final game = widget.game;
     final runtime = widget.goCoreRuntime;
-    final joinRequest = widget.joinRequest;
     final localUserId = widget.localUserId;
     final localNickname = widget.localNickname;
     final developerProjectId = widget.developerProjectId;
@@ -552,7 +518,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       }
       return;
     }
-    if (!game.supportsMultiplayer || (runtime == null && joinRequest == null)) {
+    if (!game.supportsMultiplayer || runtime == null) {
       await _initializeStandaloneSession(
         configurationGeneration: configurationGeneration,
         game: game,
@@ -577,29 +543,16 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         nickname: localNickname,
       );
       if (!_isCurrentConfiguration(configurationGeneration)) return;
-      late final GoCoreSessionClient client;
-      late final GameSessionConnection connection;
-      if (joinRequest == null) {
-        await runtime!.start();
-        if (!_isCurrentConfiguration(configurationGeneration)) return;
-        client = GoCoreSessionClient(baseUri: runtime.endpoint);
-        connection = await client.create(
-          gameId: game.id,
-          displayMode: game.displayMode,
-          minPlayers: game.minPlayers,
-          maxPlayers: game.maxPlayers,
-          nickname: localNickname,
-        );
-      } else {
-        client = GoCoreSessionClient(baseUri: joinRequest.coreEndpoint);
-        connection = await client.join(
-          joinCode: joinRequest.joinCode,
-          nickname: joinRequest.nickname,
-          playerId: localUserId,
-          avatarBytes: localAvatar?.pngBytes,
-          avatarSha256: localAvatar?.sha256,
-        );
-      }
+      await runtime.start();
+      if (!_isCurrentConfiguration(configurationGeneration)) return;
+      final client = GoCoreSessionClient(baseUri: runtime.endpoint);
+      final connection = await client.create(
+        gameId: game.id,
+        displayMode: game.displayMode,
+        minPlayers: game.minPlayers,
+        maxPlayers: game.maxPlayers,
+        nickname: localNickname,
+      );
       final storage = await GameStorageService.create(gameId: game.id);
       if (!_isCurrentConfiguration(configurationGeneration)) {
         await connection.close();
@@ -626,16 +579,14 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         gameName: game.name,
         tags: game.tags,
         requiredCapabilities: game.capabilities
-            .requiredForRole(controller: _controllerRole)
+            .requiredForRole(controller: false)
             .toList(),
       );
-      if (joinRequest == null) {
-        await _syncLocalAvatar(connection, localAvatar);
-        if (!_isCurrentConfiguration(configurationGeneration)) {
-          await bridge.close();
-          client.close();
-          return;
-        }
+      await _syncLocalAvatar(connection, localAvatar);
+      if (!_isCurrentConfiguration(configurationGeneration)) {
+        await bridge.close();
+        client.close();
+        return;
       }
       setState(() {
         _sessionClient = client;
@@ -658,20 +609,12 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       });
       if (developerProjectId != null &&
           _isCurrentConfiguration(configurationGeneration)) {
-        if (connection.isAuthority) {
-          await _ensureShare(showOverlay: false);
-        } else {
-          runtime?.reportDeveloperGameRunning(
-            projectId: developerProjectId,
-            expectedRunId: _developerRunId,
-            joinCode: connection.snapshot.joinCode,
-          );
-        }
+        await _ensureShare(showOverlay: false);
       }
     } on Object catch (error) {
       if (!_isCurrentConfiguration(configurationGeneration)) return;
       if (developerProjectId != null) {
-        runtime?.reportDeveloperGameError(
+        runtime.reportDeveloperGameError(
           developerProjectId,
           error,
           expectedRunId: _developerRunId,
@@ -713,7 +656,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         gameName: game.name,
         tags: game.tags,
         requiredCapabilities: game.capabilities
-            .requiredForRole(controller: _controllerRole)
+            .requiredForRole(controller: false)
             .toList(),
       );
       setState(() {

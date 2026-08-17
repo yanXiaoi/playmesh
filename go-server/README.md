@@ -1,5 +1,7 @@
 # Playmesh Go Server
 
+Playmesh Go Server is licensed under the [MIT License](LICENSE). Pull requests are welcome; see the repository [contribution guide](../CONTRIBUTING.md).
+
 Go Server 是 Playmesh 可独立部署的轻量游戏包平台与公共联机中转。它使用 Gin
 提供两个相互隔离的 HTTP 入口：
 

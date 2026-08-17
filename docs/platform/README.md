@@ -12,10 +12,16 @@ Gateway 的平台开发者。游戏作者只需要阅读 [`docs/game/`](../game/
 2. [SDK 开发约定](sdk-development.md)
    - 修改 Game SDK、App Bridge SDK、TypeScript/声明片段、宿主执行器和精确版本发行定义。
    - 保证运行逻辑、类型、版本、网关响应和生成产物来自同一注册表。
-3. [开发者工作区开发约定](developer-workspace-development.md)
+3. [开发者入口分层与复用边界](developer-foundation-architecture.md)
+   - 维护源码开发与可视化开发共用的会话、Token、地址、Gateway 和存储事务底层。
+   - 保证两个编辑器各自拥有 controller、DTO、路由和项目语义，禁止反向依赖。
+4. [开发者工作区开发约定](developer-workspace-development.md)
    - 新增 Developer Operation、网页工作区功能、AI 审批、项目文件能力和后台行为。
    - 保证路由、OpenAPI、操作目录、权限和运行处理逻辑同源。
-4. [Go Server 开发约定](go-server-development.md)
+5. [GDevelop 集成文档](../gdevelop/README.md)
+   - 维护官方 WebIDE 裁剪、可视化工程、历史、AI、预览、发布和多人兼容层。
+   - 升级官方内核时从唯一索引进入，并执行完整 clean replay 与回滚门禁。
+6. [Go Server 开发约定](go-server-development.md)
    - 维护轻量游戏包分享、上传与分发服务，以及跨网络联机中转。
    - 保持 Catalog、包管理和 Relay 的边界、鉴权、资源限制与版本独立。
 

@@ -23,8 +23,8 @@ func TestInitJavaScriptUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *te
 		  "id":"com.example.created",
 		  "name":"Created",
 		  "version":"1.0.0",
-		  "sdkVersion":"4.0.0",
-		  "appSdkVersion":"3.2.0",
+		  "sdkVersion":"4.1.0",
+		  "appSdkVersion":"3.3.0",
 		  "orientation":"portrait",
 		  "controllerOrientation":"portrait",
 		  "modes":["multiplayer"],
@@ -77,8 +77,8 @@ func TestInitJavaScriptUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *te
 			_ = json.NewEncoder(response).Encode(sdkBundle{
 				GameSDKVersion: requiredGameSDKVersion, AppSDKVersion: requiredAppSDKVersion, Encoding: "base64",
 				Files: map[string]string{
-					"playmesh-main.js":   encoded(`const PLAYMESH_SDK_VERSION = "4.0.0";`),
-					"playmesh-app.js":    encoded(`const PLAYMESH_APP_SDK_VERSION = "3.2.0";`),
+					"playmesh-main.js":   encoded(`const PLAYMESH_SDK_VERSION = "4.1.0";`),
+					"playmesh-app.js":    encoded(`const PLAYMESH_APP_SDK_VERSION = "3.3.0";`),
 					"playmesh-main.d.ts": encoded("declare const playmesh: unknown;"),
 					"playmesh-app.d.ts":  encoded("declare const playmeshApp: unknown;"),
 				},

@@ -2,6 +2,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+const assertFlatJsonCatalogHasUniqueKeys = (source, label) => {
+  const parsed = JSON.parse(source);
+  assert.equal(
+    Object.values(parsed).every((value) => typeof value === "string"),
+    true,
+    `${label} must remain a flat string catalog`,
+  );
+
+  const seenKeys = new Set();
+  for (const match of source.matchAll(/^\s*"((?:\\.|[^"\\])+)"\s*:/gm)) {
+    const key = JSON.parse(`"${match[1]}"`);
+    assert.equal(seenKeys.has(key), false, `${label} has duplicate key: ${key}`);
+    seenKeys.add(key);
+  }
+  assert.equal(
+    seenKeys.size,
+    Object.keys(parsed).length,
+    `${label} key scanner did not cover the complete catalog`,
+  );
+};
+
 const manifest = JSON.parse(read("assets/playmesh-localization/manifest.json"));
 const platformAssetsSource = read("lib/core/localization/platform_game_ui_assets.dart");
 const gameCoreSource = read("lib/core/game_sdk/features/game/game_core_feature.dart");
@@ -35,7 +57,9 @@ const platformKeysByLocale = new Map();
 for (const locale of manifest.locales) {
   const appPath = locale.bundles?.app;
   assert.equal(typeof appPath, "string", `${locale.id} app bundle is missing`);
-  const messages = JSON.parse(read(`assets/playmesh-localization/${appPath}`));
+  const catalogSource = read(`assets/playmesh-localization/${appPath}`);
+  assertFlatJsonCatalogHasUniqueKeys(catalogSource, `${locale.id} app catalog`);
+  const messages = JSON.parse(catalogSource);
   const platformMessages = Object.fromEntries(
     Object.entries(messages)
       .filter(([key]) => key.startsWith("platform.game."))

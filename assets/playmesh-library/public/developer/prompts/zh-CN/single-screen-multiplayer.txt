@@ -5,7 +5,7 @@ capabilities.json 的 `required` 仅供 entries.game 主画面使用，`controll
 
 强制交付：
 - entries.game：只负责公共显示、会话展示、Authority 注册和权威消息展示，不提供玩家输入。
-- entries.controller：负责玩家输入、submitAction 和接收同步快照。
+- entries.controller：负责玩家输入，通过 submitAction 或 submitState 提交业务意图，并接收公共同步快照。
 - Authority service：通过 playmesh.main.sync 处理控制器输入并更新权威状态；SDK 自动把快照发给公共显示端和玩家。
 
 强制禁止：
@@ -54,4 +54,4 @@ document.querySelector("#action").addEventListener("click", async () => {
 });
 playmesh.main.sync.observe((snapshot) => render(snapshot.state));
 
-单屏多人没有公共显示端供玩家手动点击的“开始游戏”按钮。玩家从控制器提交准备状态；Authority 在权威 onInput/onTick 中自行判断人数、准备状态和倒计时，再调用并捕获 playmesh.main.session.start() 的错误。该方法只请求 Core 切换基础会话状态，不替游戏判断业务条件；不得假设 SDK 存在 readyPlayer、setReady 等未声明方法。
+单屏多人将玩家交互放在 entries.controller，公共显示端展示会话与公共状态。控制器通过 submitAction 提交准备等一次性意图，Authority 使用 onInput 处理；需要按时间推进倒计时或实时规则时配置 onTick。Authority 在满足当前游戏定义的开局条件后调用 playmesh.main.session.start()，并处理该请求的成功或错误结果。

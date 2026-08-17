@@ -10,10 +10,6 @@ void main() {
       'session.start',
       'session.reset',
       'session.finish',
-      'storage.get',
-      'storage.set',
-      'storage.remove',
-      'storage.clear',
       'performance.ping',
       'performance.pong',
       'lifecycle.complete',
@@ -35,11 +31,11 @@ void main() {
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;
-    expect(fragments, hasLength(14));
-    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(14));
+    expect(fragments, hasLength(15));
+    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(15));
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.game),
-      hasLength(7),
+      hasLength(8),
     );
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.app),
@@ -65,8 +61,8 @@ void main() {
             SdkFeatureRegistry.appSdkVersion,
           ),
     );
-    expect(SdkFeatureRegistry.gameSdkVersion, '4.0.0');
-    expect(SdkFeatureRegistry.appSdkVersion, '3.2.0');
+    expect(SdkFeatureRegistry.gameSdkVersion, '4.1.0');
+    expect(SdkFeatureRegistry.appSdkVersion, '3.3.0');
     expect(
       SdkFeatureRegistry.gameSdkReleases
           .map(
@@ -77,7 +73,7 @@ void main() {
             ),
           )
           .toList(),
-      [('4.0.0', '4.0.0', '4.0.0')],
+      [('4.1.0', '4.1.0', '4.1.0')],
     );
     expect(
       SdkFeatureRegistry.appSdkReleases
@@ -89,7 +85,13 @@ void main() {
             ),
           )
           .toList(),
-      [('3.2.0', '3.2.0', '3.2.0')],
+      [('3.2.0', '3.3.0', '3.3.0')],
+    );
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.2.0'), '3.3.0');
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.3.0'), '3.3.0');
+    expect(
+      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.2.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.3.0'),
     );
     expect(
       SdkFeatureRegistry.gameSdkReleases.single.commandNames,
@@ -154,8 +156,8 @@ void main() {
 
   test('版本选择拒绝未注册范围且当前版仍从统一 Dart 源组装', () {
     expect(
-      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
-      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.0.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
     );
     expect(
       () => SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '1.0.0'),
@@ -202,9 +204,7 @@ void main() {
         'nickname': '测试玩家',
         'connected': true,
       },
-      ensureStorage: () => throw UnimplementedError(),
       completeLifecycle: (_) => false,
-      routeRemoteStorage: (_, _, _) async {},
     );
 
     expect(

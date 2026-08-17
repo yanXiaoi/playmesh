@@ -1,11 +1,11 @@
 # Game SDK / App SDK API
 
-本文记录 Game SDK `4.0.0` 与 App SDK `3.2.0` 的最新公开 API。静态资源 URL 中的
+本文记录 Game SDK `4.1.0` 与 App SDK `3.3.0` 的最新公开 API。静态资源 URL 中的
 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的
 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。
 App 运行时和各网关从统一注册表组装 JS、`.d.ts` 与宿主执行器。当前清单只接受
-Game SDK `4.0.0` 与 App SDK `3.2.0`；旧 `sdkVersion/appSdkVersion` 直接拒绝，
-不会解析到当前发行版，也不提供旧根命名空间 shim。Game SDK 4 的游戏域全部位于
+Game SDK `4.1.0`；App SDK 接受 `3.2.0` 或 `3.3.0`，并统一解析到向后兼容的
+`3.3.0` bundle。范围外版本直接拒绝，也不提供旧根命名空间 shim。Game SDK 4 的游戏域全部位于
 `playmesh.main.*`，App SDK 3.2 的终端域全部位于 `playmesh.app.*`；根
 `playmesh.ready` 是唯一例外。旧 `playmesh.<游戏域>` 访问和旧 `playmesh.js` 文件
 均不兼容、不保留。其他版本拒绝运行，不会静默切换。执行器内部的
@@ -88,8 +88,8 @@ SDK 完成，游戏不得构造内部 HTTP API、WebSocket、token 或连接参�
 
 ```js
 await playmesh.ready;
-console.log(playmesh.main.version); // "4.0.0"
-console.log(playmesh.app.version); // "3.2.0"
+console.log(playmesh.main.version); // "4.1.0"
+console.log(playmesh.app.version); // "3.3.0"
 ```
 
 `playmesh.app.ready` 等待当前终端 App SDK 初始化；`playmesh.main.ready` 内部先
@@ -355,12 +355,16 @@ await playmesh.main.player.setNickname("新昵称");
 
 ## 游戏消息
 
-### `playmesh.main.game.submitAction(action)`
+### `playmesh.main.game.submitAction(action, options?)`
 
-提交一个 JSON 业务动作，返回 Promise。SDK/宿主负责附加可信发送者和会话上下文；游戏不要在动作里信任自报玩家身份。
+提交一个 JSON 业务动作，返回 Promise。SDK/宿主负责附加可信发送者和会话上下文；游戏不要在动作里信任自报玩家身份。省略 `options` 时继续使用既有线格式并路由到 `playmesh.main.authority.defaultNamespace`；指定 `{ namespace }` 时由 SDK 使用内部信封携带路由标签，处理器收到的仍是原始 `action`。
 
 ```js
 await playmesh.main.game.submitAction({ type: "player.ready", ready: true });
+await playmesh.main.game.submitAction(
+  { type: "gdevelop.channel.request" },
+  { namespace: "playmesh.gdevelop.multiplayer.v1" },
+);
 ```
 
 浏览器和 App 玩家都通过同一语义提交动作。游戏不得直接创建 WebSocket。
@@ -453,6 +457,25 @@ await playmesh.app.ui.showGameSidebar();
 await playmesh.app.ui.exitGame();
 ```
 
+游戏可分别订阅菜单成功打开和关闭事件，用于暂停或恢复游戏自身逻辑：
+
+```js
+const offOpen = playmesh.app.ui.onGameMenuOpen(() => {
+  pauseGameAudio();
+});
+const offClose = playmesh.app.ui.onGameMenuClose(() => {
+  resumeGameAudio();
+});
+
+// 不再需要时注销；重复调用注销函数是安全的。
+offOpen();
+offClose();
+```
+
+监听器只在菜单从关闭变为打开、或从打开变为关闭后触发；重复打开、重复关闭、
+`fallbackUi: false` 导致的打开失败都不会产生事件。单个监听器抛错不会阻止菜单切换或
+其他监听器执行。信息层和日志层仍属于菜单内部覆盖层，不单独产生游戏菜单开关事件。
+
 `showGameSidebar()` 手动打开 SDK 在当前 WebView/HTML 中创建的居中游戏菜单，并把焦点移到
 “继续游戏”。菜单自身负责关闭和恢复游戏 DOM 焦点，因此不公开
 `hideGameSidebar()`；也不提供 `onMenuRequest` 或原生按键转发。游戏菜单打开或关闭
@@ -483,9 +506,9 @@ App SDK 在 console 日志写入点先把每个参数安全转换为字符串，
 
 ## Authority
 
-### `playmesh.main.authority.onService(handler)`
+### `playmesh.main.authority.onService(handler, options?)`
 
-只允许 Authority Client 注册。非 Authority 调用会抛出错误。返回注销函数。
+只允许 Authority Client 注册。非 Authority 调用会抛出错误。返回注销函数。公开的稳定默认路由为 `playmesh.main.authority.defaultNamespace`，当前值是 `"playmesh.authority.default.v1"`；`onService(handler)` 与显式传入该 namespace 完全等价。
 
 ```ts
 type AuthorityContext = {
@@ -508,10 +531,12 @@ type AuthorityResult = {
 playmesh.main.authority.onService(async (action, context) => ({
   targetPlayerIds: context.members.map((member) => member.id),
   message: { type: "action.accepted", action },
-}));
+}), { namespace: "example.game.rules.v1" });
 ```
 
-规则、分数、答案和胜负应由处理器维护。Go Core 不解析游戏业务。
+默认 namespace 允许重复注册并由最后一次注册生效，用于兼容旧代码；非默认 namespace 重复注册会抛错。注销函数只删除它自己的注册，且可以重复调用。未知的命名空间不会回退到默认处理器。旧动作对象即使自行包含 `namespace` 字段，也仍按默认路由处理；业务代码不能依赖或伪造 SDK 的内部信封字段。
+
+namespace 只是同一 Authority 页面内的路由标签，不是安全边界。每个处理器仍须使用平台提供的 `context.senderPlayerId`、`context.session` 和 `context.members` 验证权限，不得信任 action 自报身份。规则、分数、答案和胜负应由处理器维护；Go Core 不解析游戏业务。
 
 ## Binary Channel
 
@@ -582,9 +607,11 @@ playmesh.main.lifecycle.onExit((event) => {});
 
 ### `playmesh.main.storage.getBucket(bucket)`
 
-Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。所有 `_sys-`
-前缀均由平台保留，游戏的数据、上传和清空 API 会统一拒绝，不能占用头像等系统
-Bucket。
+普通异步方法与 `upload(file)` 的 Bucket 名称必须匹配
+`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。同步方法为 GDevelop 等必须保持同步事件语义的
+运行时适配器额外接受 1 至 4096 UTF-8 字节的原始逻辑名称；这不会放宽同一对象上的异步
+方法。所有 `_sys-` 前缀均由平台保留，游戏的数据、上传和清空 API 会统一拒绝，不能占用
+头像等系统 Bucket。
 
 ```js
 const profile = playmesh.main.storage.getBucket("profile_v1");
@@ -599,17 +626,40 @@ await profile.clearData();
 |---|---|---|
 | `getData(key)` | `Promise<any>` | 读取 key；不存在时由宿主返回空值 |
 | `setData(key, value)` | `Promise` | 写入可 JSON 序列化值 |
+| `getDataSync(key)` | `any \| null` | 阻塞读取；仅用于必须维持同步上层语义的 LAN 运行时适配 |
+| `setDataSync(key, value)` | `void` | 阻塞写入主机内存状态；失败时同步抛错 |
 | `removeData(key)` | `Promise` | 删除单个 key |
 | `clearData()` | `Promise` | 清空当前 Bucket |
 | `upload(file)` | `Promise<string>` | 上传原始文件并返回 `/bucket/...` 地址 |
 
-key 必须匹配 `^[A-Za-z0-9._-]+$`，长度为 1 至 128。当前 SDK 会用 `JSON.stringify` 检查写入值；不要写入函数、循环引用或依赖对象原型的实例。
+普通 key 必须匹配 `^[A-Za-z0-9._-]+$`，长度为 1 至 128。私有保留 key
+`$playmesh.gdevelop.root.v1` 只允许同步 GDevelop 适配路径使用，普通游戏和全部异步方法不能
+借此访问平台私有数据。当前 SDK 会用 `JSON.stringify` 检查写入值；不要写入函数、循环引用
+或依赖对象原型的实例。
 
-当前宿主限制单个值序列化后不超过 256 KiB。修改先进入主机内存缓存，默认在 2 秒后批量写盘；同一 Bucket 累积 20 次脏写时会提前落盘。`setData()` 完成表示宿主已经接收修改，不表示每次调用都单独写盘。游戏没有显式 flush 能力；App 在 WebView 重启、退出或会话关闭前等待最终写入完成。
+每个 Bucket 的完整 JSON root 序列化后不能超过 10 MiB。修改先进入主机内存缓存，默认在
+2 秒后批量写盘；同一 Bucket 累积 20 次脏写时会提前落盘。`setData()` 完成表示宿主已经
+接收修改，不表示每次调用都单独写盘。游戏没有显式 flush 能力；App 在 WebView 重启、
+退出或会话关闭前等待最终写入完成。
+
+异步 `getData/setData/removeData/clearData` 与同步 `getDataSync/setDataSync` 共用同一个
+同源、已鉴权的 JSON Bucket HTTP 网关、修订号/CAS、SHA-256 和 requestId 幂等语义：读取
+使用 `GET`，写入使用 `PUT`，删除 key 或清空 Bucket 使用 `DELETE`。SDK 在响应丢失时只以
+相同 requestId 和摘要重试一次；冲突或确定性错误不会改走其他通道。旧 Session WebSocket
+存储 RPC、双读、双写和 fallback 均不存在，旧嵌入 SDK 因而不兼容。
+
+同步方法使用主线程同步 `XMLHttpRequest`，没有异步超时或启动预热；网络不可达、SDK 能力
+不完整、摘要/CAS 冲突都会立即抛错，绝不退回 `localStorage`。它会阻塞当前页面，普通游戏
+代码应继续使用异步方法，只允许 GDevelop 这类无法改变同步调用语义的锁定运行时 seam 使用。
 
 JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/json/{bucket}.json`，始终保持私有。`upload(file)` 不经过 JSON/Base64，文件以流写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，单文件上限 256 MiB；平台保留安全的字母数字后缀并用毫秒时间戳替换原文件名。
 
-上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch` 的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。除 `upload(file)` 使用受控 `/bucket/**` 上传外，JSON 读写只经 Game SDK 的受控连接交给 Authority，不存在公开的存储 HTTP 业务接口。浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他 App 玩家通过 Authority 主机的同一存储服务访问。
+上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch`
+的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。JSON 网关是
+固定绑定当前游戏和会话的 SDK 内部传输，不是游戏可自行构造的公开业务接口；
+`upload(file)` 仍独立使用原始字节 `POST` 和 `data/data` 目录，绝不与 JSON root 混存。
+浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他
+App 玩家访问同一 Authority 主机存储服务。
 
 平台不定义 `{userId}` 存储层。需要按用户区分时，由游戏设计 key 或 JSON 结构。
 

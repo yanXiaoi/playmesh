@@ -14,6 +14,7 @@ for (const [name, content] of [["Windows", windows], ["Linux", linux]]) {
   assert.match(content, /playmesh_dev_cli ALL/);
   assert.match(content, /add_dependencies\(\$\{BINARY_NAME\} playmesh_dev_cli\)/);
   assert.match(content, /install\(PROGRAMS "\$\{PLAYMESH_CLI_BINARY\}"/);
+  assert.match(content, /install\(FILES "\$\{CMAKE_SOURCE_DIR\}\/\.\.\/LICENSE"/);
   assert.match(content, /playmesh-cli(?:\.exe)?/);
   assert.match(
     content,
@@ -32,6 +33,7 @@ assert.match(macProject, /build_dev_cli_macos\.sh/);
 assert.match(macScript, /GOOS=darwin/);
 assert.match(macScript, /xcrun lipo -create/);
 assert.match(release, /'playmesh-cli\.exe'/);
+assert.match(release, /'LICENSE'/);
 assert.match(release, /\[ValidateSet\('all', 'android', 'windows'\)\]/);
 assert.match(coreRelease, /\[ValidateSet\("android", "windows", "all"\)\]/);
 assert.match(release, /-SkipSdkGeneration/);

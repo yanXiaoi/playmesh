@@ -39,11 +39,15 @@ class DeveloperAiPromptTemplateDescriptor {
   const DeveloperAiPromptTemplateDescriptor({
     required this.id,
     required this.category,
+    required this.surface,
+    required this.mode,
     required this.assetPaths,
   });
 
   final String id;
   final String category;
+  final String surface;
+  final String mode;
   final Map<String, String> assetPaths;
 }
 
@@ -65,6 +69,8 @@ class DeveloperAiPromptTemplate {
   Map<String, Object?> toJson() => {
     'id': descriptor.id,
     'category': descriptor.category,
+    'surface': descriptor.surface,
+    'mode': descriptor.mode,
     'content': content,
     'defaultContent': defaultContent,
     'customized': customized,
@@ -94,7 +100,12 @@ class DeveloperAiPromptTemplateStore {
   static const promptsRoot = 'assets/playmesh-library/public/developer/prompts';
   static const manifestAssetPath = '$promptsRoot/manifest.json';
   static const _maxTemplateBytes = 512 * 1024;
-  static const _reservedTemplateIds = {'common', 'agent-common'};
+  static const _reservedTemplateIds = {
+    'common',
+    'agent-common',
+    'gdevelop-chat',
+    'gdevelop-agent',
+  };
 
   final AssetBundle _bundle;
   final Directory? _injectedRoot;
@@ -114,6 +125,20 @@ class DeveloperAiPromptTemplateStore {
       if (locale.toLowerCase().split('-').first == language) return locale;
     }
     return manifest.defaultLocale;
+  }
+
+  /// GDevelop 会话使用的严格 locale 入口。
+  ///
+  /// 输入必须是合法 BCP 47 形状，再按 exact -> base language -> App default
+  /// 解析；不会把任意路径或未校验字符串作为资源目录。
+  Future<String> resolveSessionLocale(String requested) async {
+    final normalized = requested.trim().replaceAll('_', '-');
+    if (!RegExp(
+      r'^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$',
+    ).hasMatch(normalized)) {
+      throw const FormatException('GDevelop AI locale 必须是合法 BCP 47 标识');
+    }
+    return resolveLocale(normalized);
   }
 
   Future<DeveloperAiPromptResources> resources({String? locale}) async {
@@ -142,16 +167,41 @@ class DeveloperAiPromptTemplateStore {
     );
   }
 
-  Future<List<DeveloperAiPromptTemplate>> list({String? locale}) async {
+  Future<List<DeveloperAiPromptTemplate>> list({
+    String? locale,
+    String surface = 'source',
+  }) async {
     final templates = <DeveloperAiPromptTemplate>[];
-    for (final descriptor in await descriptors()) {
+    for (final descriptor in await descriptors(surface: surface)) {
       templates.add(await read(descriptor.id, locale: locale));
     }
     return List.unmodifiable(templates);
   }
 
-  Future<List<DeveloperAiPromptTemplateDescriptor>> descriptors() async {
-    return (await _manifest()).templates;
+  Future<List<DeveloperAiPromptTemplateDescriptor>> descriptors({
+    String surface = 'source',
+  }) async {
+    _validateSurface(surface);
+    return List.unmodifiable(
+      (await _manifest()).templates.where(
+        (descriptor) => descriptor.surface == surface,
+      ),
+    );
+  }
+
+  Future<List<DeveloperAiPromptTemplateDescriptor>> allDescriptors() async =>
+      (await _manifest()).templates;
+
+  Future<Map<String, String>> appMessagesWithPrefix({
+    required String locale,
+    required String prefix,
+  }) async {
+    if (prefix.isEmpty) throw const FormatException('本地化 key 前缀不能为空');
+    final resources = await this.resources(locale: locale);
+    return Map.unmodifiable({
+      for (final entry in resources.appMessages.entries)
+        if (entry.key.startsWith(prefix)) entry.key: entry.value,
+    });
   }
 
   Future<DeveloperAiPromptTemplate> read(String id, {String? locale}) async {
@@ -200,7 +250,7 @@ class DeveloperAiPromptTemplateStore {
   }
 
   Future<DeveloperAiPromptTemplateDescriptor> _descriptor(String id) async {
-    for (final descriptor in await descriptors()) {
+    for (final descriptor in await allDescriptors()) {
       if (descriptor.id == id) return descriptor;
     }
     throw FormatException('未知 AI 提示模板: $id');
@@ -272,6 +322,18 @@ class DeveloperAiPromptTemplateStore {
         DeveloperAiPromptTemplateDescriptor(
           id: id,
           category: _requiredManifestString(item, 'category'),
+          surface: _optionalManifestEnum(
+            item,
+            'surface',
+            fallback: 'source',
+            allowed: const {'source', 'gdevelop'},
+          ),
+          mode: _optionalManifestEnum(
+            item,
+            'mode',
+            fallback: 'shared',
+            allowed: const {'shared', 'chat', 'agent'},
+          ),
           assetPaths: Map.unmodifiable(assetPaths),
         ),
       );
@@ -311,6 +373,12 @@ class DeveloperAiPromptTemplateStore {
       }
     }
     return result;
+  }
+
+  void _validateSurface(String surface) {
+    if (!const {'source', 'gdevelop'}.contains(surface)) {
+      throw FormatException('未知 AI 提示词 surface: $surface');
+    }
   }
 
   Future<String> _readDefault(
@@ -359,6 +427,20 @@ class DeveloperAiPromptTemplateStore {
       '${Platform.pathSeparator}ai-prompts',
     );
   }
+}
+
+String _optionalManifestEnum(
+  Map<String, Object?> json,
+  String field, {
+  required String fallback,
+  required Set<String> allowed,
+}) {
+  final raw = json[field];
+  if (raw == null) return fallback;
+  if (raw is! String || !allowed.contains(raw)) {
+    throw FormatException('AI 提示词清单 $field 无效');
+  }
+  return raw;
 }
 
 String _requiredManifestString(Map<String, Object?> json, String field) {
