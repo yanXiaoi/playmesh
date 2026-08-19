@@ -143,29 +143,35 @@ source policy 另锁定官方 TS 的 Git Blob SHA-1
 
 1. `window.playmesh` 不存在：逐字保留官方 `localStorage` 分支与 `GDJS_` 前缀，通用官方
    Browser HTML5 导出行为不变。
-2. `window.playmesh` 存在且同步能力完整：每次以未经归一化的原始 `name` 调用
-   `playmesh.main.storage.getBucket(name)`，并同时验证 `getDataSync`、`setDataSync` 都是
-   function。读取固定私有 key `$playmesh.gdevelop.root.v1`，不存在时得到 `null`；写入直接
-   提交官方内存中的完整 `jsObject` root，而不是序列化字符串。
+2. `window.playmesh` 存在且同步能力完整：先等待可同步读取的 Game SDK 身份快照。普通玩家
+   使用 `GDJS/users/<encodeURIComponent(username)>/<name>`；公共 Authority 屏固定使用
+   `GDJS/auth/<name>`；无会话玩家的 App 单机页使用 App identity 的 nickname。首次成功解析
+   后在本页面冻结该目录，避免运行中改名把已加载的 root 写进另一个用户目录。读取固定私有
+   key `$playmesh.gdevelop.root.v1`，不存在时得到 `null`；写入直接提交官方内存中的完整
+   `jsObject` root，而不是序列化字符串。
 3. `window.playmesh` 存在但 `main/storage/getBucket` 或任一同步方法缺失：抛出明确的
    Game SDK 4.1.0 不兼容错误，绝不 fallback 到 `localStorage`、空 root 或旧 WS 存储。
+4. 已就绪的纯浏览器 solo 没有玩家或 App identity，明确保留官方浏览器 `localStorage`；多人
+   身份尚未就绪，或已就绪的多人参与页仍无玩家身份时明确失败，不得误写 `auth` 或切回本地。
 
-能力不能在模块加载时缓存。SDK 脚本同步建立公开 surface 后即可使用，不等待
-`playmesh.main.ready`，也不扫描或 hydrate 全部 Bucket。官方 `loadedObjects`、Load/Unload、
-路径、类型、exists/delete/clear 与临时 load 后自动 unload 的语义保持原样；只有实际走到
-Unload 才调用同步写入。同步错误在 Playmesh 分支中失败关闭，不被官方 localStorage 的
-catch 吞掉。
+能力不能在模块加载时缓存；第一次实际存储 I/O 通过 `gameInfo.getCurrent()` 确认 SDK 已就绪，
+但不异步等待 `playmesh.main.ready`，也不扫描或 hydrate 全部 Bucket。官方 `loadedObjects`、
+Load/Unload、路径、类型、exists/delete/clear 与临时 load 后自动 unload 的语义保持原样；
+只有实际走到 Unload 才调用同步写入。同步错误在 Playmesh 分支中失败关闭，不被官方
+localStorage 的 catch 吞掉。
 
-每个原始 GDevelop storage file 名就是一个逻辑 Bucket 名，不增加前缀、别名、Unicode 或
-大小写归一化。SDK 同步路径允许 1 至 4096 UTF-8 字节名称，存储层用
+用户名是玩家存档唯一逻辑键：同名用户共享、改名在下次页面加载后进入新目录。`users` 与
+`auth` 分域，避免昵称 `auth` 与公共屏碰撞；只对用户名做可逆 URL 编码，原始 GDevelop
+storage file 名不归一化。这里的“目录”是逻辑 Bucket 名；存储层仍用
 `data/json/logical/sha256-{digest}.json` envelope 保存并校验原名；完整 JSON root 上限为
 10 MiB。异步和同步 JSON 统一走同源 HTTP GET/PUT/DELETE、SHA-256、requestId 与
 revision/CAS；同步 XHR 响应丢失只以完全相同请求立即重试一次。Binary upload 仍是独立 POST
 与 `data/data`，不进入上述 envelope。
 
 `apply-source-policy.mjs` 是该 TS seam 的唯一修改入口，输出清单记录 preimage Git Blob 和
-post-patch SHA-256。三态测试必须覆盖无 Playmesh、完整 SDK、伪造/残缺 SDK，并断言不存在
-`Symbol.for`、新 Bootstrap 注入或 localStorage fallback。
+post-patch SHA-256。测试必须覆盖无 Playmesh、玩家用户名、公共 `auth`、App 单机身份、身份
+未就绪、页面内改名冻结、纯浏览器 solo 官方本地存储和伪造/残缺 SDK，并断言不存在
+`Symbol.for` 或新 Bootstrap 注入，且多人 Playmesh 分支不 fallback 到 localStorage。
 
 ## Multiplayer：保留官方项目 API 与对象同步，适配 Playmesh lobby/backend
 

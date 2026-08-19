@@ -167,6 +167,7 @@ class _IoGameWebGateway implements GameWebGateway {
   final GameStorageService storage;
   final StandardJsonBucketRequestLedger _standardJsonLedger =
       StandardJsonBucketRequestLedger();
+  @override
   final String invitationToken = _randomSessionToken();
   final String browserSessionToken = _randomSessionToken();
   bool _closed = false;
@@ -176,6 +177,10 @@ class _IoGameWebGateway implements GameWebGateway {
 
   String get _browserSessionCookieName =>
       'playmesh-game-session-${server.port}';
+
+  @override
+  Uri get loopbackInvitationUri =>
+      _invitationUri(Uri(scheme: 'http', host: '127.0.0.1', port: port));
 
   void listen() {
     server.listen((request) async {
@@ -320,7 +325,13 @@ class _IoGameWebGateway implements GameWebGateway {
     request.response.headers
       ..contentType = ContentType.json
       ..set(HttpHeaders.cacheControlHeader, 'no-store');
-    request.response.write(jsonEncode({'entry': _pageEntryTarget}));
+    request.response.write(
+      jsonEncode({
+        'entry': _pageEntryTarget,
+        'gameId': gameId,
+        'gameName': gameName,
+      }),
+    );
     await request.response.close();
   }
 
@@ -546,24 +557,17 @@ class _IoGameWebGateway implements GameWebGateway {
 
   @override
   Future<List<Uri>> shareLinks() async {
-    final endpoints = await resolveLanEndpoints(port);
-    final bases = endpoints.isEmpty
-        ? [Uri(scheme: 'http', host: '127.0.0.1', port: port)]
-        : endpoints;
-    return bases
-        .map(
-          (base) => base.replace(
-            path: playmeshGameInvitationPath,
-            query: null,
-            fragment: Uri(
-              queryParameters: {
-                playmeshGameInvitationTokenParameter: invitationToken,
-              },
-            ).query,
-          ),
-        )
-        .toList(growable: false);
+    final endpoints = await resolveLanEndpoints(port, includeLinkLocal: true);
+    return endpoints.map(_invitationUri).toList(growable: false);
   }
+
+  Uri _invitationUri(Uri base) => base.replace(
+    path: playmeshGameInvitationPath,
+    query: null,
+    fragment: Uri(
+      queryParameters: {playmeshGameInvitationTokenParameter: invitationToken},
+    ).query,
+  );
 
   @override
   Future<void> close() async {

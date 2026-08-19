@@ -62,6 +62,7 @@ const baseCall = {
   idempotencyKey: 'idempotency-secret',
   sequence: 8,
 };
+const chatOperation = { echo: 37, turnId: baseCall.turnId };
 
 assert.match(
   panelSource,
@@ -189,21 +190,21 @@ const addSceneEventsToolDetails = {
   approvalRequired: true,
   implementation: 'playmesh_wrapper',
   officialImplementationName: 'add_scene_events',
-  officialArguments: {},
   chatEnabled: true,
   agentEnabled: true,
   timeoutMs: 90000,
 };
 
-const deleteSceneToolDetails = {
-  name: 'delete_scene',
-  summary: 'Delete a scene.',
+const changeSceneToolDetails = {
+  name: 'change_scene_properties_layers_effects_groups',
+  summary: 'Change or delete a scene.',
   argumentsSchema: {
     type: 'object',
     additionalProperties: false,
     required: ['scene_name'],
     properties: {
       scene_name: { type: 'string', minLength: 1, maxLength: 255 },
+      delete_this_scene: { type: 'boolean' },
     },
   },
   risk: 'high',
@@ -211,7 +212,6 @@ const deleteSceneToolDetails = {
   approvalRequired: true,
   implementation: 'official_editor_function',
   officialImplementationName: 'change_scene_properties_layers_effects_groups',
-  officialArguments: { delete_this_scene: true },
   chatEnabled: true,
   agentEnabled: true,
   timeoutMs: 30000,
@@ -238,7 +238,6 @@ const importProjectResourceToolDetails = {
   approvalRequired: true,
   implementation: 'playmesh_wrapper',
   officialImplementationName: 'import_project_resource',
-  officialArguments: {},
   chatEnabled: false,
   agentEnabled: true,
   timeoutMs: 60000,
@@ -248,7 +247,7 @@ const importProjectResourceToolDetails = {
       '/dev/api/gdevelop/projects/{gameId}/ai/editor-sessions/{editorSessionId}/resource-staging/{contentHash}',
     body: 'raw-binary',
     channel: 'agent',
-    loopbackOnly: true,
+    loopbackOnly: false,
     requiresForegroundView: true,
     requiredHeaders: [
       'Authorization: Bearer <developer-token>',
@@ -262,6 +261,7 @@ const importProjectResourceToolDetails = {
   const statusText = statusModule.serializePlaymeshAiReturnStatus({
     mode: 'chat',
     session,
+    chatOperation,
     calls: [
       {
         ...baseCall,
@@ -283,7 +283,8 @@ const importProjectResourceToolDetails = {
     connectionStatus: 'online',
   });
   const status = JSON.parse(statusText);
-  assert.equal(status.schemaVersion, 'playmesh.gdevelop.ai.return-status.v1');
+  assert.equal(status.schemaVersion, 'playmesh.gdevelop.ai.return-status.v3');
+  assert.equal(status.echo, chatOperation.echo);
   assert.equal(status.recoveryStatus, undefined);
   assert.equal(status.editorSession, undefined);
   assert.equal(status.latestTurn.turnId, undefined);
@@ -291,6 +292,7 @@ const importProjectResourceToolDetails = {
   assert.equal(status.latestTurn.calls[0].sequence, undefined);
   assert.equal(status.latestTurn.calls[0].baseRevision, undefined);
   assert.equal(status.latestTurn.calls[0].correctionCount, undefined);
+  assert.equal(status.latestTurn.calls[0].echo, undefined);
   assert.equal(status.latestTurn.calls[0].result.createdScene, 'Level 1');
   assert.deepEqual(status.latestTurn.calls[0].result.commit, {
     state: 'business_commit',
@@ -338,11 +340,74 @@ const importProjectResourceToolDetails = {
     connectionStatus: 'online',
   });
   assert.equal(agentStatus.editorSession.sequence, session.sequence);
+  assert.equal(agentStatus.schemaVersion, 'playmesh.gdevelop.ai.return-status.v1');
+  assert.equal(agentStatus.echo, undefined);
+  assert.equal(agentStatus.latestTurn.calls[0].echo, undefined);
   assert.deepEqual(
     agentStatus.latestTurn.calls[0].result,
     { commit: { state: 'business_commit' } }
   );
   assert.equal(agentStatus.latestTurn.calls[0].commitEvidence, undefined);
+}
+
+{
+  const requestFailure = statusModule.buildPlaymeshAiReturnStatus({
+    mode: 'chat',
+    session,
+    chatOperation: { echo: 41, turnId: null },
+    calls: [],
+    approvals: [],
+    failure: {
+      stage: 'response',
+      operation: 'gdevelop.ai.call.enqueue',
+      status: 409,
+      code: 'ai_conflict',
+      reason: 'The call was rejected.',
+      requestId: 'request-echo-41',
+      errorType: 'PlaymeshAiRequestError',
+    },
+    connectionStatus: 'online',
+  });
+  assert.equal(requestFailure.echo, 41);
+  assert.equal(requestFailure.failure.echo, undefined);
+
+  const turnRequestFailure = statusModule.buildPlaymeshAiReturnStatus({
+    mode: 'chat',
+    session,
+    chatOperation: { echo: 42, turnId: null },
+    calls: [],
+    approvals: [],
+    failure: {
+      stage: 'request',
+      operation: 'gdevelop.ai.turn.create',
+      status: 0,
+      code: 'ai_unavailable',
+      reason: 'The turn request failed.',
+      requestId: 'request-echoes-42-43',
+      errorType: 'PlaymeshAiRequestError',
+    },
+    connectionStatus: 'offline',
+  });
+  assert.equal(turnRequestFailure.echo, 42);
+  assert.equal(turnRequestFailure.failure.echo, undefined);
+
+  const agentFailure = statusModule.buildPlaymeshAiReturnStatus({
+    mode: 'agent',
+    session,
+    calls: [],
+    approvals: [],
+    failure: {
+      stage: 'response',
+      operation: 'gdevelop.ai.call.enqueue',
+      status: 409,
+      code: 'ai_conflict',
+      reason: 'The call was rejected.',
+      requestId: 'request-echo-44',
+      errorType: 'PlaymeshAiRequestError',
+    },
+    connectionStatus: 'online',
+  });
+  assert.equal(agentFailure.failure.echo, undefined);
 }
 
 {
@@ -373,6 +438,7 @@ const importProjectResourceToolDetails = {
   const status = statusModule.buildPlaymeshAiReturnStatus({
     mode: 'chat',
     session,
+    chatOperation,
     calls: [
       {
         ...baseCall,
@@ -411,7 +477,7 @@ const importProjectResourceToolDetails = {
 for (const mode of ['chat', 'agent']) {
   for (const toolDetails of [
     addSceneEventsToolDetails,
-    deleteSceneToolDetails,
+    changeSceneToolDetails,
     importProjectResourceToolDetails,
   ]) {
     const statusText = statusModule.serializePlaymeshAiReturnStatus({
@@ -451,18 +517,25 @@ assert.equal(
   addSceneEventsToolDetails.eventPayloadSchema.properties.schemaVersion.const,
   '1.0.0'
 );
-assert.deepEqual(deleteSceneToolDetails.officialArguments, {
-  delete_this_scene: true,
-});
+assert.deepEqual(
+  changeSceneToolDetails.argumentsSchema.properties.delete_this_scene,
+  { type: 'boolean' }
+);
+assert.equal('officialArguments' in changeSceneToolDetails, false);
 assert.equal(
   importProjectResourceToolDetails.binaryStaging.requiredHeaders[0],
   'Authorization: Bearer <developer-token>'
+);
+assert.equal(
+  importProjectResourceToolDetails.binaryStaging.loopbackOnly,
+  false
 );
 
 {
   const statusText = statusModule.serializePlaymeshAiReturnStatus({
     mode: 'chat',
     session,
+    chatOperation: null,
     calls: [],
     approvals: [],
     failure: {
@@ -479,6 +552,7 @@ assert.equal(
   });
   const status = JSON.parse(statusText);
   assert.equal(status.latestTurn, null);
+  assert.equal(status.echo, null);
   assert.equal(status.failure.code, 'manual_call_envelope_required');
   assert.equal(status.failure.errorType, 'PlaymeshAiProtocolError');
   assert.match(status.failure.reason, /get_gdevelop_tool_details/);
@@ -514,6 +588,7 @@ assert.equal(
   const statusText = statusModule.serializePlaymeshAiReturnStatus({
     mode: 'chat',
     session,
+    chatOperation,
     calls: [
       {
         ...baseCall,
@@ -564,6 +639,7 @@ assert.equal(
   const chat = statusModule.buildPlaymeshAiReturnStatus({
     ...shared,
     mode: 'chat',
+    chatOperation,
   });
   const agent = statusModule.buildPlaymeshAiReturnStatus({
     ...shared,
@@ -572,6 +648,8 @@ assert.equal(
   assert.equal(chat.editorSession, undefined);
   assert.equal(chat.latestTurn.turnId, undefined);
   assert.equal(chat.latestTurn.calls[0].callId, undefined);
+  assert.equal(chat.echo, chatOperation.echo);
+  assert.equal(chat.latestTurn.calls[0].echo, undefined);
   assert.equal(agent.editorSession.editorSessionId, session.editorSessionId);
   assert.equal(agent.editorSession.gameId, session.gameId);
   assert.equal(agent.latestTurn.turnId, baseCall.turnId);

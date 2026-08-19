@@ -3,6 +3,11 @@
 本约定适用于 Game SDK、App Bridge SDK、网页运行片段、Dart 宿主执行器和 SDK
 精确版本发行定义。游戏作者 API 见 [Game SDK / App Bridge SDK](../game/sdk-v1.md)。
 
+Playmesh `4.2.0+28` 的 LAN feature 与 UI 自动菜单解绑已接入现有 Game SDK `4.1.0`、
+App Bridge SDK `3.3.0`，属于兼容新增，不提升 SDK 版本。自动化契约已完成；
+Android、Windows、macOS、Linux 的跨设备实机验收仍未完成。iOS 自动发现/发布明确为
+`unsupported`，扫码、手工邀请和分享链接不受影响。
+
 ## 核心原则：逻辑即定义
 
 SDK 唯一手写源位于：
@@ -159,11 +164,52 @@ adapterOptions
 
 平台 UI 命令必须作为独立 App Feature 注册，并由 App SDK 与宿主分别校验权限。
 例如 `app.ui.openSharePanel` 在网页侧检查用户激活，宿主侧再次
-检查当前前台 WebView、Authority、用户激活和 UI 可用性；错误使用稳定机器 code，
-且不得把分享 Token、URL 或二维码内容返回给游戏。打开前由 SDK 同步保存游戏
+检查当前前台 WebView、Authority、原生用户激活票据和 UI 可用性。票据只能由宿主观察
+到 pointer/key 事件后签发，2 秒内至多消费一次，导航或文档重置时清除；Bridge payload
+中的 `userActivation: true` 只是网页侧提示，不能自行通过宿主校验。错误使用稳定机器 code，
+该 UI 命令本身不返回分享 Token、URL 或二维码内容。需要房主程序化读取分享数据时，
+只能使用下述 `playmesh.app.lan.getShareLinks()`，不得从 UI 命令、DOM 或日志建立旁路。
+打开前由 SDK 同步保存游戏
 DOM 焦点，关闭后宿主只发送注册表内部的 `platform.ui.restoreGameFocus` 消息；
 它不进入 TypeScript、Schema、补全或公开返回值。已打开请求只重聚焦现有关闭按钮，
 关闭后 800 ms 内的 SDK 重开以 `rate_limited` 节流。
+
+App Bridge SDK `3.3.0` 的 `playmesh.app.lan` 是同一 Dart feature 中的网页声明、命令和
+宿主执行器，公开：
+
+```text
+discoverGames()                  当前 gameId 的无 token 发现投影
+PlaymeshLanGame.join()           用户操作下加入发现项
+joinByLink(invitationUrl)        用户操作下预检并加入链接
+scanQrAndJoin()                  用户操作下扫码、预检并加入
+setPublished()                   无参数、单向、当前房间幂等公开
+getShareLinks()                  无副作用读取统一分享快照
+```
+
+SDK feature 只能调用注入的 `AppLanHost` 薄接口，不得引用网卡 resolver、
+`GameWebGateway`、Relay session、token 解析器或二维码编码器。`discoverGames()` 只返回
+当前游戏的 `instanceId/gameId/name/host`，不含邀请 token；所有加入入口由宿主复用
+`GameJoinCoordinator` 与邀请预检，并通过 `afterResponse` 在 Bridge 回包后导航。App
+附近列表内部新增的主机昵称、人数、单机标记不扩展公开 SDK，也不增加图标字段或端点。
+
+发现 wire 对 SDK 完全不透明。唯一宿主实现使用 `239.255.80.77:53584` 的 IPv4 UDP
+multicast wire v1（1 秒公告、4 秒 TTL、单包最多 1200 字节），不提供旧服务发现、第二
+发现栈或已知节点单播适配器；`host` 来自数据报 source IP，而不是 JavaScript 或 payload。
+Android、Windows、macOS、Linux 支持该宿主能力，iOS/Web 返回明确不可用。
+
+`getShareLinks()` 是新的明确安全授权：只允许 Playmesh App WebView 中宿主确认的当前
+本机 Authority/standalone host，返回冻结的 `{url,type,img}` 数组；`url` 是完整 LAN
+或当前有效 Relay bearer 邀请，`img` 是同一 URL 的 PNG Data URL。它不创建分享通道、
+不公开 UDP multicast、不连接 Relay，也不要求 capability、确认弹窗或 user activation。普通
+浏览器、远程加入页、非房主或失效 context 必须拒绝。平台不得记录、持久化、分析或在
+错误中回显 URL、token、PNG；但已经被授权的房主游戏代码能够自行复制和外传它们，
+旧的绝对禁读结论不再适用。
+
+App UI feature 另提供同步无返回值的
+`playmesh.app.ui.disableSystemMenuTriggers()`。方法严格无参数，仅在 `app.ready` 完成后
+单向、幂等移除当前文档的 Escape/Menu/Back 监听 disposer；不影响显式
+`showGameSidebar()`、信息/日志覆盖层或已打开层的关闭。平台 UI 配置刷新不能重新绑定，
+WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必须拒绝。
 
 新增功能时：
 

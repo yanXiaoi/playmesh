@@ -3,7 +3,7 @@
 ## 结论
 
 Playmesh 的可视化开发入口以开源 GDevelop 5 Web IDE 为编辑内核，但不代理、伪装或兼容
-GDevelop 官方 Generation API。Playmesh AI v2 只负责把经过校验和用户审批的工具调用转交给
+GDevelop 官方 Generation API。Playmesh AI v4 只负责把经过校验和用户审批的工具调用转交给
 当前 Web IDE，再由 Web IDE 在当前页面的活动 `gdProject` 上调用 GDevelop 官方
 `EditorFunctions`。
 
@@ -64,7 +64,7 @@ GDevelop 侧复用固定版本源码中的：
 `assets/playmesh-library/public/GDevelop/playmesh/scripts/apply-source-policy.mjs` 隐藏的
 官方 Ask AI。
 
-## v2 架构
+## v4 架构
 
 ```text
 用户选择的 Chat / Agent
@@ -86,9 +86,11 @@ writer lease。它不是工程数据的第二所有者，也不能越过 Web IDE
 2. 用户把提示词交给模型，再把模型返回的 JSON 工具调用粘贴到控制台。
 3. 浏览器先清空旧输入，再读取本次粘贴内容；输入框保留本次实际执行的 JSON，复制返回
    状态不会清空它。
-4. 浏览器按唯一 Tool Schema 校验完整调用。`add_scene_events` 必须在调用同级携带完整
+4. 粘贴内容严格使用根 `{echo,calls}`；单个和批量调用都只有一个根级 `echo`，调用项内
+   不允许携带 `echo`。
+5. 浏览器按唯一 Tool Schema 校验完整调用。`add_scene_events` 必须在调用同级携带完整
    `eventPayload`；其他工具禁止携带它。
-5. 需要审批的调用先弹出不可忽略的审批对话框。批准后，当前 Web IDE 串行执行工具。
+6. 需要审批的调用先弹出不可忽略的审批对话框。批准后，当前 Web IDE 串行执行工具。
 
 ### Agent 模式
 
@@ -105,21 +107,66 @@ Chat/Agent 对话只存在于当前内存会话，不持久化 transcript。Gate
 
 ## 调用和执行协议
 
-Editor session wire 协议为 `2.0.0`。Tool Contract 的协议版本和工具版本由唯一文件
+Editor session wire 协议为 `4.0.0`。Tool Contract 的协议版本和工具版本由唯一文件
 `assets/playmesh-library/public/GDevelop/playmesh/runtime/ai/tools.json` 发布，客户端必须
-精确匹配，不能降级到 v1。
+精确匹配，不能降级到旧 editor-session wire。
+
+当前 Tool Contract 为破坏性的 `4.0.0`。GDevelop 5.6.276 源码 ZIP 发布
+`EditorFunctions` 实现和 `AI_ORCHESTRATOR_TOOLS_VERSION = 'v12'`，但不发布服务端交给 AI 的
+输入 JSON Schema。因此 `tools.json` 不是从官方 ZIP 自动生成的“官方 Schema”，而是针对固定
+5.6.276/v12 源码维护的兼容快照。clean-replay 会直接读取锁定源码，核对 v12 常量、17 个官方
+函数名、`modifiesProject` 以及实现实际通过 `SafeExtractor` 消费的字段。门禁还会分别冻结参数的
+完整嵌套路径（含数组 `items`）、类型、必填列表和枚举；字段放错层级、类型或必填/枚举漂移、
+多出字段都会阻断构建。这些参数定义是 Playmesh 对锁定源码的对齐快照，不表示官方 ZIP 发布了
+完整 JSON Schema。
+
+`implementation: official_editor_function` 只用于官方函数名与参数面完全一致的工具，调用参数
+原样交给官方 runner，不合并隐藏参数。`implementation: playmesh_wrapper` 明确表示本地 facade，
+不得冒充官方完整接口。旧的资源/对象子集别名和 `delete_object`、`remove_behavior`、
+`delete_scene` 已移除；删除能力由完整官方 change 函数的 `delete_this_*` 字段提供，整个函数按
+其最危险语义审批。场景对象组直接使用官方字段
+`changed_groups[].objects_to_add: string[]` 与 `objects_to_remove: string[]`，不翻译成员结构。
+Playmesh Tool Contract `4.0.0` 与官方 runner generation `v12` 是两个独立版本域。
 
 ### 调用信封
 
-普通工具入队请求至少包含：
+Chat 粘贴内容只接受严格根对象；即使只有一个调用也必须放入 `calls` 数组：
+
+```json
+{
+  "echo": 1,
+  "calls": [
+    {
+      "name": "change_object_properties_effects",
+      "arguments": {
+        "scene_name": "Game",
+        "object_name": "Player",
+        "changed_properties": [
+          {"property_name": "name", "new_value": "Hero"}
+        ]
+      }
+    }
+  ]
+}
+```
+
+`echo` 是整个本次提交的唯一编号，单个或批量提交都只有一个；调用项不得携带 `echo`。
+Web IDE 使用它创建 turn，再为 `calls` 中的项目生成内部 call。Gateway 内部普通工具入队
+请求至少包含：
 
 ```json
 {
   "turnId": "turn_...",
   "callId": "call_...",
   "idempotencyKey": "idem_...",
-  "toolName": "change_object_property",
-  "arguments": {}
+  "toolName": "change_object_properties_effects",
+  "arguments": {
+    "scene_name": "Game",
+    "object_name": "Player",
+    "changed_properties": [
+      {"property_name": "name", "new_value": "Hero"}
+    ]
+  }
 }
 ```
 
@@ -180,6 +227,22 @@ Web IDE 回传体只允许：
 commit evidence。循环引用、不可序列化 getter 等后处理错误会转换为一个可重放的失败结果，
 不能在修改已经发生后重新调用函数。
 
+Chat 复制给模型的返回状态使用 `playmesh.gdevelop.ai.return-status.v3`，并在
+`schemaVersion` 同级完整回显本次提交的根 `echo`：
+
+```json
+{
+  "schemaVersion": "playmesh.gdevelop.ai.return-status.v3",
+  "echo": 1,
+  "latestTurn": {
+    "calls": []
+  }
+}
+```
+
+`latestTurn.calls` 和 `failure` 不再携带 echo。Agent 返回状态保持
+`playmesh.gdevelop.ai.return-status.v1`，且不包含 echo。
+
 ## 工具边界
 
 唯一工具合约由 `GET /dev/api/gdevelop/ai/tools` 和上述 `tools.json` 提供。公开能力由固定
@@ -202,6 +265,8 @@ GDevelop 版本的 EditorFunctions 与少量本地 wrapper 组成；工具名、
 
 Agent 资源导入可使用当前 session 的一次性内存资源暂存路由。它只为当前工具调用提供字节，
 不写 GDevelop 工程历史或 App CAS；资源读取后仍由官方资源 wrapper 加入活动 `gdProject`。
+该路由对远程和回环 Agent 使用相同的 Bearer、gameId、editorSessionId 与前台会话边界，
+不再额外要求请求来源是回环地址。
 
 ## 审批与用户控制
 
@@ -213,10 +278,31 @@ Agent 资源导入可使用当前 session 的一次性内存资源暂存路由�
 审批解决的是用户对修改行为的授权，不是工程提交。批准不会保存工程，拒绝也不会修改工程。
 AI 修改完成后，是否保留、继续编辑或通过 GDevelop 正常方式保存，由用户在编辑器里决定。
 
-## Gateway v2 路由职责
+Editor session `4.0.0` 另外提供仅属于当前 WebIDE session 的 `approvalMode`：
+
+- `request_approval`（请求审批）是每个新 session 的默认值；需要审批的危险调用继续进入请求
+  审批流程。
+- `always_allow`（始终允许）立即放行当前 session 内所有正在等待审批的调用，并让该 session
+  后续危险调用直接获批。它不等同于逐工具授权，不写项目、历史、配置或授权文件。
+- 同一个 session 重新 attach 时保留当前模式；显式关闭 session，或 Developer Mode 进程/
+  Gateway 重启导致 session 重建时，一律恢复 `request_approval`。
+- 从 `always_allow` 切回 `request_approval` 只约束之后创建的危险调用；已经获批、排队、执行中
+  或完成的调用不回滚、不取消，也不重新进入审批。
+- 既有按 `scopeKind + scopeId + operationId` 保存的项目/工具授权仍然有效；即使 session 模式为
+  `request_approval`，命中已有授权的调用也按原语义获批。
+- 只有当前 WebIDE 的用户控制面可以修改 `approvalMode`。Chat 与外部 Agent 共用结果语义，
+  但外部 Agent 无权调用设置接口或通过工具参数提升自己的审批模式。
+- 编辑器 lease 的首次申请还必须携带 App 在 GDevelop 启动链接中签发的独立、内存态
+  bootstrap capability；它先出现在 App 生成的启动 URL 中，bootstrap 重定向消费后只保留在
+  HttpOnly acquire Cookie，申请成功后立即轮换。Developer Bearer、AI channel 请求头或普通
+  index GET 都不能签发或替代该能力，因此外部 Agent 也不能借通用审批接口批准自己的
+  GDevelop 调用。
+
+## Gateway v4 路由职责
 
 - `GET /dev/api/gdevelop/ai/tools`：返回唯一工具合约。
-- editor-session：创建、读取、更新 locale/context、关闭当前内存会话。
+- editor-session：创建、读取、更新 locale/context 和 session-scoped `approvalMode`、关闭当前
+  内存会话；设置模式的入口只接受 WebIDE 用户身份，不接受外部 Agent 身份。
 - turn/call：创建 turn、入队 call、增量查询、批准后的 lease、取消和 execution 回传。
 - session resource staging：为 Agent 资源工具提供一次上传、一次读取的有界内存字节。
 - scoped events：只发送最小状态唤醒事件；call 增量查询仍是状态事实源。
@@ -243,7 +329,10 @@ Playmesh 的多人兼容层只替换运行时，不改变编辑器公开调用�
 - Tool Schema：唯一合约、版本、数量、参数、未知/已删除工具、超限输入和执行元数据测试。
 - context：官方摘要/场景/能力存在性、大小/深度和 Token/URL/Bridge 拒绝。
 - 调用：输入在审批前锁定、幂等指纹、单 writer lease、超时和取消边界。
-- 审批：弹窗可见性、四种决策、双击保护、项目/工具隔离、撤销与损坏授权 fail-closed。
+- 审批：弹窗可见性、四种决策、双击保护、项目/工具隔离、撤销与损坏授权 fail-closed；
+  `request_approval -> always_allow` 立即释放当前 pending 和后续危险调用，
+  `always_allow -> request_approval` 不回滚已排队调用，reattach 保留，close/Developer Mode
+  重启恢复默认值，且外部 Agent 不能改设置。
 - live project：官方函数收到当前页面同一个 `gdProject`；没有 clone、serializer transaction、
   history、reload、pending journal 或 recovery 路径。
 - wrapper：事件、对象、扩展和资源修改分别触发正确的官方回调；dirty 通知在 HTTP 回传前

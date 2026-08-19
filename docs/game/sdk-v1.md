@@ -14,6 +14,11 @@ Game SDK `4.1.0`；App SDK 接受 `3.2.0` 或 `3.3.0`，并统一解析到向后
 最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词
 和 CLI/IDEA 均使用最新注册表内容。
 
+Playmesh App `4.2.0+28` 的 `playmesh.app.lan` 与
+`disableSystemMenuTriggers()` 是 App Bridge SDK `3.3.0` 的兼容新增，Game SDK
+`4.1.0` 与 App Bridge SDK 版本均保持不变。自动化契约已验证；五个原生平台的跨设备
+发布、发现、权限、网络切换和真实加入仍待实机验收。
+
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
 - `/dev/sdk-manifest.json`：逐方法签名、角色、环境、约束、返回值和错误。
@@ -429,6 +434,54 @@ const off = playmesh.main.sync.observe((snapshot) => render(snapshot.state));
 注入 `playmesh-app.js`；`playmesh.app.isAvailable()` 只表示原生 App SDK 宿主桥是否
 可用，不影响浏览器使用 SDK 游戏菜单。
 
+### `playmesh.app.lan`
+
+App Bridge SDK `3.3.0` 兼容新增局域网发现、加入和房主分享 API：
+
+```js
+const games = await playmesh.app.lan.discoverGames();
+await games[0]?.join(); // 必须由真实用户操作触发
+
+await playmesh.app.lan.joinByLink(invitationUrl); // 必须由真实用户操作触发
+await playmesh.app.lan.scanQrAndJoin();           // 必须由真实用户操作触发
+
+await playmesh.app.lan.setPublished();
+const links = await playmesh.app.lan.getShareLinks();
+// readonly { url, type: "lan" | "wan", img: "data:image/png;base64,..." }[]
+```
+
+`discoverGames()` 只返回与当前游戏 `gameId` 相同的附近对局投影，包含
+`instanceId/gameId/name/host`，不包含邀请 URL 或 token。发现项 `join()`、
+`joinByLink()` 和 `scanQrAndJoin()` 都要求当前用户操作；App 在回包前完成统一邀请
+预检，在 Promise 成功后切换到既有远程游戏页。普通浏览器、非 App 环境或失效游戏
+上下文会拒绝，不存在 SDK 专用 WebView 或 Relay 通道。附近列表内部使用的主机昵称、
+人数和单机标记不进入该 SDK 投影，也不增加图标字段或端点；iOS 自动发现/发布返回
+`discovery_unavailable`，但扫码、手工链接加入和分享链接仍可使用。
+
+“当前用户操作”由两层门禁组成：SDK 使用 `navigator.userActivation` 提前拒绝，App
+宿主只在原生 pointer/key 事件后提供一个 2 秒内、至多消费一次的内存票据。游戏脚本
+直接向 Bridge 上报 `userActivation: true` 不能伪造该票据；导航、刷新和页面退出都会
+清除它。
+
+`setPublished()` 严格无参数、单向且当前房间幂等。它只允许当前本机
+Authority/standalone host：首次调用复用或建立分享通道并公开 UDP multicast，后续成功调用
+不重复申请 publication lease；本局没有 SDK 取消公开方法。打开 App 分享面板使用同一操作，关闭面板不
+取消；退出游戏或页面销毁才停止公告并 best-effort 发送 goodbye。没有可公开 IPv4、平台
+不支持或 multicast 失败时以
+`discovery_unavailable` 拒绝，但已经建立的手工链接仍可使用。
+
+`getShareLinks()` 严格无参数且无副作用，只读取分享面板同一个不可变快照；没有通道时
+返回冻结空数组，不会为调用者创建网关、公开 UDP multicast 或连接 Relay。LAN 项在前、当前
+有效 Relay WAN 项在后，每项 `img` 是其 `url` 的同一 PNG。调用方不得假设存在
+`127.0.0.1` fallback。
+
+这是新的 App-only 房主授权：`getShareLinks()` 会把完整 bearer 邀请 URL、LAN/VPN
+地址、Relay 凭据和二维码交给游戏 JavaScript，不新增 capability、用户确认或 user
+activation。普通浏览器、远程加入页和非房主不能调用。游戏一旦取得结果即可复制或
+外传，开发者必须把它按邀请凭据保护，不写入日志、分析、持久存储、崩溃详情或错误文本。
+旧的“游戏脚本永远不能读取分享 Token、URL 或二维码”规则不再适用于该方法；上传密钥、
+Catalog 写入密钥和其他平台私密凭据仍然不可读。
+
 ### `playmesh.app.ui.openSharePanel()`
 
 当前 Authority 游戏可以在有效用户操作中请求 App 打开既有“二维码与链接”界面：
@@ -439,8 +492,10 @@ button.addEventListener("click", async () => {
 });
 ```
 
-Promise 在界面成功显示后完成，不返回 Token、URL 或二维码内容。SDK 与 App
-都会重新检查 Authority 身份和瞬时用户激活；非 Authority、后台页面或平台 UI
+Promise 在界面成功显示后完成；该 UI 方法本身不返回 Token、URL 或二维码内容，房主
+需要读取统一快照时应显式调用 `playmesh.app.lan.getShareLinks()`。SDK 与 App
+都会重新检查 Authority 身份和瞬时用户激活；App 侧使用上述宿主原生的一次性票据，
+不信任 Bridge payload 中的布尔值。非 Authority、后台页面或平台 UI
 不可用时分别以 `not_authority`、`user_activation_required` 或
 `ui_unavailable` 拒绝。界面已打开时重复调用复用同一层并重新聚焦关闭按钮；
 关闭后的短暂重复请求以 `rate_limited` 拒绝。
@@ -449,6 +504,19 @@ SDK 会在发出命令前同步记录当前游戏 DOM 的焦点元素。分享�
 不属于公开 API 的宿主消息要求 SDK 恢复该元素；元素已经移除时回退到游戏文档，
 普通浏览器再回退到游戏文档。这个私有过程不会把分享 Token、链接、二维码
 或 App 本地化词典暴露给游戏。
+
+### `playmesh.app.ui.disableSystemMenuTriggers()`
+
+```js
+await playmesh.app.ready;
+playmesh.app.ui.disableSystemMenuTriggers();
+```
+
+该同步方法严格不接受参数，只为当前 WebView 文档单向、幂等解绑默认的
+Escape/Menu/Back 自动菜单监听。它不禁用 `showGameSidebar()`、`openSharePanel()`、
+信息/日志覆盖层，也不阻止原生返回关闭已经显示的平台层。SDK 配置刷新不会重新绑定；
+页面刷新创建新文档后恢复默认监听。ready 前调用同步抛出 `app_not_ready`，任意多余
+参数同步抛出 `invalid_argument` 且不能发生部分解绑；不存在旧的 boolean 启停方法。
 
 ### 居中游戏菜单
 

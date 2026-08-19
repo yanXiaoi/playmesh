@@ -1,6 +1,7 @@
 // @flow
 
 import { processEditorFunctionCalls } from '../EditorFunctions/EditorFunctionCallRunner';
+import { AI_ORCHESTRATOR_TOOLS_VERSION } from '../AiGeneration/Utils';
 /*::
 import type { PlaymeshAiCall } from './PlaymeshAiProtocol';
 import type { EditorFunctionCall } from '../EditorFunctions';
@@ -92,17 +93,14 @@ export const toGDevelopEditorFunctionCall = ({
   toolsContract: PlaymeshAiToolsContract,
 |} */) /*: PlaymeshAiEditorFunctionCallMapping */ => {
   const definition = findTool(toolsContract, call.toolName);
-  const officialArguments =
-    definition.officialArguments &&
-    typeof definition.officialArguments === 'object' &&
-    !Array.isArray(definition.officialArguments)
-      ? definition.officialArguments
-      : {};
   return {
     definition,
     functionCall: {
       name: definition.officialImplementationName || definition.name,
-      arguments: JSON.stringify({ ...officialArguments, ...call.arguments }),
+      // The v4 contract exposes complete official v12 argument shapes. Calls
+      // therefore cross this adapter unchanged; there are no hidden/fixed
+      // arguments and no subset facade that can be widened by extra fields.
+      arguments: JSON.stringify(call.arguments),
       call_id: call.callId,
     },
   };
@@ -124,6 +122,10 @@ export const runGDevelopEditorFunctionCall = async ({
     // 安全覆盖永远位于 caller options 之后，wrapper/caller 无法重新打开云或商店。
     ...createNoNetworkRunnerOptions(project),
     project,
+    // Use the exact tools generation understood by this pinned official
+    // EditorFunctions implementation. Playmesh's own contract version is a
+    // different protocol and must not be substituted here.
+    toolsVersion: AI_ORCHESTRATOR_TOOLS_VERSION,
     functionCalls: [functionCall],
   });
   if (!result || !Array.isArray(result.results) || result.results.length !== 1) {

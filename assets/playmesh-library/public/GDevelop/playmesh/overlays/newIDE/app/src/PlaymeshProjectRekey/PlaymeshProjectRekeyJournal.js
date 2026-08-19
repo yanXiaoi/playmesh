@@ -29,7 +29,7 @@ export type PlaymeshProjectRekeyJournalPhase =
   | 'TARGET_APPLIED_PENDING_ACK'
   | 'SOURCE_RESTORED_PENDING_ROLLBACK_ACK';
 export type PlaymeshProjectRekeyJournalRecord = {|
-  schemaVersion: 1,
+  schemaVersion: 2,
   fileIdentifier: string,
   txId: string,
   idempotencyKey: string,
@@ -56,7 +56,7 @@ export type PlaymeshProjectRekeyBrowserClassification =
 type MixedRecord = { +[string]: mixed };
 */
 
-const JOURNAL_SCHEMA_VERSION = 1;
+const JOURNAL_SCHEMA_VERSION = 2;
 
 export class PlaymeshProjectRekeyJournalError extends Error {
   /*:: code: string; */
@@ -114,16 +114,16 @@ const assertLocalEvidence = (
   const evidence = asRecord(value);
   if (
     !evidence ||
-    !hasExactKeys(evidence, ['projectJsonHash', 'resourceManifestHash']) ||
-    typeof evidence.projectJsonHash !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(evidence.projectJsonHash) ||
+    !hasExactKeys(evidence, ['projectFilesHash', 'resourceManifestHash']) ||
+    typeof evidence.projectFilesHash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(evidence.projectFilesHash) ||
     typeof evidence.resourceManifestHash !== 'string' ||
     !/^[a-f0-9]{64}$/.test(evidence.resourceManifestHash)
   ) {
     return fail('journal_corrupt', 'Playmesh 项目身份迁移日志无效。');
   }
   return {
-    projectJsonHash: evidence.projectJsonHash,
+    projectFilesHash: evidence.projectFilesHash,
     resourceManifestHash: evidence.resourceManifestHash,
   };
 };
@@ -185,8 +185,8 @@ export const assertPlaymeshProjectRekeyJournalRecord = (
   const sourceEvidence = assertLocalEvidence(journal.sourceEvidence);
   const targetEvidence = assertLocalEvidence(journal.targetEvidence);
   if (
-    sourceEvidence.projectJsonHash !== browserSource.projectJsonHash ||
-    targetEvidence.projectJsonHash !== browserTarget.projectJsonHash
+    sourceEvidence.projectFilesHash !== browserSource.projectFilesHash ||
+    targetEvidence.projectFilesHash !== browserTarget.projectFilesHash
   ) {
     return fail('journal_corrupt', 'Playmesh 项目身份迁移日志无效。');
   }
@@ -245,9 +245,9 @@ export const createPlaymeshProjectRekeyJournalRecord = async (
     computePlaymeshHistoryBrowserEvidence(targetProject),
   ]);
   if (
-    sourceEvidence.projectJsonHash !==
-      transaction.browserSource.projectJsonHash ||
-    targetEvidence.projectJsonHash !== transaction.browserTarget.projectJsonHash
+    sourceEvidence.projectFilesHash !==
+      transaction.browserSource.projectFilesHash ||
+    targetEvidence.projectFilesHash !== transaction.browserTarget.projectFilesHash
   ) {
     return fail(
       'browser_target_mismatch',
@@ -386,7 +386,7 @@ export const classifyPlaymeshProjectRekeyBrowserState = async (
   const matches = (
     expected /*: PlaymeshHistoryRestoreBrowserEvidence */
   ) /*: boolean */ =>
-    evidence.projectJsonHash === expected.projectJsonHash &&
+    evidence.projectFilesHash === expected.projectFilesHash &&
     evidence.resourceManifestHash === expected.resourceManifestHash;
   if (project.gameId === journal.oldGameId && matches(journal.sourceEvidence)) {
     return 'source';
@@ -418,7 +418,7 @@ export const createPlaymeshProjectRekeyBrowserEvidence = (
       gameId,
     },
     packageName: gameId,
-    projectJsonHash: evidence.projectJsonHash,
+    projectFilesHash: evidence.projectFilesHash,
   };
 };
 

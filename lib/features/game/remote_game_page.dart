@@ -15,6 +15,8 @@ import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_web/android_webview_file_selector.dart';
 import '../../core/game_web/game_web_gateway_contract.dart';
+import '../../core/game_web/game_join_coordinator.dart';
+import '../../core/game_web/game_share_link_snapshot.dart';
 import '../../core/game_web/local_tunnel_gateway.dart';
 import '../../core/localization/platform_game_ui_assets.dart';
 import '../../core/localization/playmesh_localization.dart';
@@ -22,6 +24,10 @@ import '../../core/relay/relay_tunnel.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
+import '../../core/network/lan_game_discovery_service.dart';
+import 'game_app_lan_host.dart';
+import 'game_invitation_scanner_page.dart';
+import 'game_join_router.dart';
 import 'game_webview_exit.dart';
 import 'windows_local_game_web_view.dart';
 
@@ -33,11 +39,21 @@ class RemoteGamePage extends StatefulWidget {
     required this.nickname,
     this.nativeBackHandler,
     this.prepareRuntime = true,
+    this.gameId,
+    this.gameName,
+    this.sourceInstanceId,
+    this.discoveryService,
   });
+
+  static const routeName = '/remote-game';
 
   final Uri entryUri;
   final String userId;
   final String nickname;
+  final String? gameId;
+  final String? gameName;
+  final String? sourceInstanceId;
+  final LanGameDiscoveryService? discoveryService;
   @visibleForTesting
   final Future<bool> Function()? nativeBackHandler;
   @visibleForTesting
@@ -58,6 +74,9 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   late final WebViewMessageQueue _messageQueue;
   final AndroidWebViewFileSelector _androidFileSelector =
       const AndroidWebViewFileSelector();
+  GameAppLanHostAdapter? _appLanHost;
+  LanGameDiscoveryService? _lanGameDiscoveryService;
+  bool _ownsLanGameDiscoveryService = false;
   Future<void> Function(String)? _runWindowsJavaScript;
   Future<Object?> Function(String)? _evaluateWindowsJavaScript;
   String? _platformUiConfigurationKey;
@@ -72,8 +91,29 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   @override
   void initState() {
     super.initState();
+    final gameId = widget.gameId;
+    if (gameId != null) {
+      final discoveryService =
+          widget.discoveryService ?? LanGameDiscoveryService();
+      _lanGameDiscoveryService = discoveryService;
+      _ownsLanGameDiscoveryService = widget.discoveryService == null;
+      _appLanHost = GameAppLanHostAdapter(
+        gameId: () => gameId,
+        discoveryService: discoveryService,
+        isActive: () => mounted,
+        isAuthority: () => false,
+        selfInstanceId: () => widget.sourceInstanceId,
+        isSelfInvitation: (invitation) =>
+            invitation.entryUri == widget.entryUri,
+        scanQr: _scanQrFromAppSdk,
+        replaceGame: _replaceFromAppSdk,
+        publish: _rejectLanAuthorityOperation,
+        readShareLinks: _rejectLanShareLinks,
+      );
+    }
     developerEventHub.beginRuntime();
     _messageQueue = WebViewMessageQueue(_runJavaScript);
+    HardwareKeyboard.instance.addHandler(_recordHardwareUserActivation);
     if (widget.prepareRuntime) unawaited(_prepare());
   }
 
@@ -164,6 +204,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         platformUiConfiguration: _platformUiConfiguration,
         onOpenSharePanel: _rejectShareFromRemote,
         showShareAction: false,
+        lanHost: _appLanHost,
         onExitRequested: _exitFromAppGameMenu,
       );
       if (_usesFlutterWebView) {
@@ -196,10 +237,11 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
             ..addJavaScriptChannel(
               'PlaymeshAppBridge',
               onMessageReceived: (message) {
+                final generation = _messageQueue.generation;
                 unawaited(
                   _appBridge!.handleJavaScriptMessage(
                     message.message,
-                    _sendAppMessage,
+                    (reply) => _sendAppMessage(reply, generation),
                   ),
                 );
               },
@@ -246,8 +288,16 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     }
   }
 
-  Future<void> _sendAppMessage(String message) async {
-    await _messageQueue.add(appSdkReceiveScript(message));
+  Future<void> _sendAppMessage(String message, int generation) async {
+    await _messageQueue.addAndWait(
+      appSdkReceiveScript(message),
+      generation: generation,
+    );
+  }
+
+  bool _recordHardwareUserActivation(KeyEvent event) {
+    if (event is KeyDownEvent) _appBridge?.recordUserActivation();
+    return false;
   }
 
   Future<void> _runJavaScript(String script) async {
@@ -301,6 +351,8 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   @override
   void dispose() {
     _evaluateWindowsJavaScript = null;
+    HardwareKeyboard.instance.removeHandler(_recordHardwareUserActivation);
+    unawaited(_closeAppLanResources());
     unawaited(_appBridge?.close());
     unawaited(_coreGateway?.close());
     unawaited(_webGateway?.close());
@@ -310,37 +362,81 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     super.dispose();
   }
 
+  Future<void> _closeAppLanResources() async {
+    await _appLanHost?.close();
+    if (_ownsLanGameDiscoveryService) {
+      await _lanGameDiscoveryService?.dispose();
+    }
+  }
+
+  Future<String?> _scanQrFromAppSdk() {
+    final supported =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS);
+    if (!supported) {
+      throw const SdkCommandException('scanner_unavailable', '当前平台扫码不可用');
+    }
+    return Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const GameInvitationScannerPage()),
+    );
+  }
+
+  Future<void> _replaceFromAppSdk(RemoteGameLaunch launch) async {
+    if (!mounted) {
+      throw const SdkCommandException('operation_cancelled', '游戏退出，操作已取消');
+    }
+    await const GameJoinRouter().replace(
+      context,
+      launch: launch,
+      userId: widget.userId,
+      nickname: widget.nickname,
+      discoveryService: _ownsLanGameDiscoveryService
+          ? null
+          : _lanGameDiscoveryService,
+    );
+  }
+
+  Future<void> _rejectLanAuthorityOperation() async {
+    throw const SdkCommandException('not_authority', '当前页面不是本机房主');
+  }
+
+  Future<GameShareLinkSnapshot> _rejectLanShareLinks() async {
+    throw const SdkCommandException('not_authority', '当前页面不是本机房主');
+  }
+
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: _allowPop,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_handleNativeBack());
-      },
-      child: Focus(
-        autofocus: true,
-        onKeyEvent: _handleNativeBackKey,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(fit: StackFit.expand, children: [_buildWebView()]),
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _appBridge?.recordUserActivation(),
+      child: PopScope(
+        canPop: _allowPop,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_handleNativeBack());
+        },
+        child: Focus(
+          autofocus: true,
+          onKeyEvent: _handleNativeBackKey,
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: Stack(fit: StackFit.expand, children: [_buildWebView()]),
+          ),
         ),
       ),
     );
   }
 
   Widget _buildWebView() {
-    final error = _error;
-    if (error != null) {
+    if (_error != null) {
       return ColoredBox(
         color: const Color(0xff241516),
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              context.tr(
-                'game.remote_open_failed',
-                arguments: {'error': error},
-              ),
+              context.tr('game.remote_open_failed'),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white),
             ),

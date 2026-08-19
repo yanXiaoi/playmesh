@@ -54,7 +54,7 @@ managed project 的 App identity/index/current/history 是 canonical；浏览器
 编辑态。项目分配先在 App sibling staging 中写齐 exact project bytes、资源和首个 current，
 durable commit decision 后再原子发布，不能由浏览器缓存是否写入来决定 App 事务 phase。
 
-上述 `current/history` 只服务于项目分配、GDevelop 正常保存和用户主动恢复。Playmesh AI v2
+上述 `current/history` 只服务于项目分配、GDevelop 正常保存和用户主动恢复。Playmesh AI v4
 不调用这条存储链；它只在当前 WebIDE 的 live `gdProject` 上执行官方编辑函数，后续是否保存
 仍由用户通过 GDevelop 正常流程决定。
 
@@ -69,11 +69,12 @@ durable commit decision 后再原子发布，不能由浏览器缓存是否写�
   请求该源的 `update.json`，ZIP 镜像选择后才开始下载；两级选择互不自动代替用户决定。
 - `GameCreationPage` 监听三者并编排两个折叠入口；`DeveloperWorkspaceLinks` 只负责纯展示。
 
-安装链路固定为“内置配置源列表 → 用户选择的 `update.json` → 用户选择的 ZIP → 长度与
-SHA-256 校验 → 安全解压 staging → 原子替换 `GDevelop/official`”。修复复用同一链路但强制
-重新下载；失败或取消必须保留旧 `official`。安装完成后，同一 Developer Session 会重新读取
-Gateway 的 GDevelop 链接，不要求重启会话。该事务不得触碰 `projects`、`history`、Gateway
-元数据或 WebView profile/IndexedDB。
+安装链路固定为“内置 `App.json` 的 `gdevelop` 配置源投影 → 用户选择的 `update.json` →
+用户选择的 ZIP → 长度与 SHA-256 校验 → 安全解压 staging → 原子替换
+`GDevelop/official`”。缺少 `gdevelop` 的渠道不展示；其他资源键不参与这条链路。修复复用
+同一链路但强制重新下载；失败或取消必须保留旧 `official`。安装完成后，同一 Developer
+Session 会重新读取 Gateway 的 GDevelop 链接，不要求重启会话。该事务不得触碰 `projects`、
+`history`、Gateway 元数据或 WebView profile/IndexedDB。
 
 ## 耦合自审计
 

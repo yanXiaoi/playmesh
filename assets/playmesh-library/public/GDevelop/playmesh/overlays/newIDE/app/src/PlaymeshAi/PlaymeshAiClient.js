@@ -4,6 +4,7 @@ import {
   PLAYMESH_AI_SESSION_PROTOCOL_VERSION,
   PlaymeshAiProtocolError,
   validatePlaymeshAiCall,
+  validatePlaymeshAiApprovalMode,
   validatePlaymeshAiCapabilitiesReference,
   validatePlaymeshAiClientId,
   validatePlaymeshAiSession,
@@ -15,6 +16,7 @@ import { sha256Hex } from '../PlaymeshCrypto/PlaymeshSha256';
 /*::
 import type {
   PlaymeshAiCall,
+  PlaymeshAiApprovalMode,
   PlaymeshAiCapabilitiesReference,
   PlaymeshAiEnqueueRequest,
   PlaymeshAiObject,
@@ -52,6 +54,7 @@ type PlaymeshAiPromptTemplateContentValidation = {|
 |};
 type PlaymeshAiRequestErrorOptions = {|
   code: string,
+  echo?: ?number,
   status?: number,
   requestId?: ?string,
   operation?: ?string,
@@ -197,10 +200,11 @@ const hashCanonicalContract = async (
 };
 
 export class PlaymeshAiRequestError extends Error {
-  /*:: code: string; status: number; requestId: ?string; operation: ?string; stage: ?string; reason: ?string; errorType: ?string; */
+  /*:: code: string; echo: ?number; status: number; requestId: ?string; operation: ?string; stage: ?string; reason: ?string; errorType: ?string; */
 
   constructor({
     code,
+    echo = null,
     status = 0,
     requestId = null,
     operation = null,
@@ -211,6 +215,7 @@ export class PlaymeshAiRequestError extends Error {
     super(reason || 'The local GDevelop AI service is unavailable.');
     this.name = 'PlaymeshAiRequestError';
     this.code = code;
+    this.echo = echo;
     this.status = status;
     this.requestId = requestId;
     this.operation = operation;
@@ -269,6 +274,21 @@ const validatePathId = (
   }
 };
 
+// Approval grant ids are the unpadded base64url encoding of
+// `${scopeKind}::${scopeId}::${operationId}`. The persisted contract allows
+// 32, 128 and 256 ASCII characters respectively, so a valid id can be up to
+// 560 characters. Do not apply the unrelated 128-character session/call id
+// limit to this server-derived identifier.
+const validateApprovalGrantId = (value /*: mixed */) /*: string */ => {
+  if (
+    typeof value !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,560}$/.test(value)
+  ) {
+    throw new PlaymeshAiRequestError({ code: 'invalid_ai_response' });
+  }
+  return value;
+};
+
 const requireResponseObject = (
   value /*: mixed */
 ) /*: PlaymeshAiObject */ => {
@@ -285,7 +305,7 @@ const validateApprovalGrant = (
     throw new PlaymeshAiRequestError({ code: 'invalid_ai_response' });
   }
   const grant = requireResponseObject(value);
-  const grantId = validatePathId(grant.grantId, 'invalid_ai_response');
+  const grantId = validateApprovalGrantId(grant.grantId);
   const scopeKind = validatePathId(grant.scopeKind, 'invalid_ai_response');
   const scopeId = validatePathId(grant.scopeId, 'invalid_ai_response');
   const operationId = validatePathId(
@@ -416,6 +436,24 @@ const sessionBase = (
   `${projectBase(gameId)}/editor-sessions/${encodeURIComponent(
     validateSessionId(sessionId)
   )}`;
+
+const approvalModeUrl = (
+  gameId /*: string */,
+  sessionId /*: string */
+) /*: string */ =>
+  `${projectBase(gameId)}/editor-settings/${encodeURIComponent(
+    validateSessionId(sessionId)
+  )}/approval-mode`;
+
+const requireApprovalMode = (
+  value /*: mixed */
+) /*: PlaymeshAiApprovalMode */ => {
+  try {
+    return validatePlaymeshAiApprovalMode(value);
+  } catch (_) {
+    throw new PlaymeshAiRequestError({ code: 'invalid_approval_mode' });
+  }
+};
 
 const promptUrl = (
   gameId /*: string */,
@@ -658,9 +696,6 @@ export class PlaymeshAiClient {
         definition.implementation
       );
       const officialImplementationName = definition.officialImplementationName;
-      const officialArguments = requireResponseObject(
-        definition.officialArguments
-      );
       const chatEnabled = definition.chatEnabled;
       const agentEnabled = definition.agentEnabled;
       const timeoutMs = definition.timeoutMs;
@@ -699,7 +734,6 @@ export class PlaymeshAiClient {
         approvalRequired,
         implementation,
         officialImplementationName,
-        officialArguments,
         chatEnabled,
         agentEnabled,
         timeoutMs,
@@ -904,6 +938,22 @@ export class PlaymeshAiClient {
     return this.updateSession(gameId, sessionId, { locale }, signal);
   }
 
+  async updateApprovalMode(
+    gameId /*: string */,
+    sessionId /*: string */,
+    approvalMode /*: PlaymeshAiApprovalMode */,
+    signal /*: ?AbortSignal */
+  ) /*: Promise<PlaymeshAiSession> */ {
+    const normalizedApprovalMode = requireApprovalMode(approvalMode);
+    const result = requireResponseObject(
+      await this._request(
+        approvalModeUrl(gameId, sessionId),
+        this._json('PUT', { approvalMode: normalizedApprovalMode }, signal)
+      )
+    );
+    return validatePlaymeshAiSession(result.session);
+  }
+
   async closeSession(
     gameId /*: string */,
     sessionId /*: string */,
@@ -1024,19 +1074,43 @@ export class PlaymeshAiClient {
     gameId /*: string */,
     sessionId /*: string */,
     clientMessageId /*: ?string */,
+    echo /*: number */,
     signal /*: ?AbortSignal */
   ) /*: Promise<PlaymeshAiTurn> */ {
-    const result = requireResponseObject(
-      await this._request(
-        `${sessionBase(gameId, sessionId)}/turns`,
-        this._json(
-          'POST',
-          clientMessageId ? { clientMessageId } : {},
-          signal
+    if (!Number.isSafeInteger(echo) || echo < 1) {
+      throw new PlaymeshAiRequestError({ code: 'invalid_turn_echo' });
+    }
+    try {
+      const result = requireResponseObject(
+        await this._request(
+          `${sessionBase(gameId, sessionId)}/turns`,
+          this._json(
+            'POST',
+            {
+              ...(clientMessageId ? { clientMessageId } : {}),
+              echo,
+            },
+            signal
+          )
         )
-      )
-    );
-    return validatePlaymeshAiTurn(result.turn);
+      );
+      const turn = validatePlaymeshAiTurn(result.turn);
+      if (turn.echo !== echo) {
+        throw new PlaymeshAiRequestError({
+          code: 'turn_echo_mismatch',
+          echo,
+          operation: 'gdevelop.ai.turn.create',
+          stage: 'response',
+          reason: 'The GDevelop AI turn response did not preserve its echo.',
+        });
+      }
+      return turn;
+    } catch (error) {
+      if (error && typeof error === 'object') {
+        (error /*: any */).echo = echo;
+      }
+      throw error;
+    }
   }
 
   async cancelTurn(
@@ -1209,10 +1283,14 @@ export class PlaymeshAiClient {
     grantId /*: string */,
     signal /*: ?AbortSignal */
   ) /*: Promise<{| grantId: string, revoked: boolean |}> */ {
-    const validatedGrantId = validatePathId(
-      grantId,
-      'invalid_ai_approval_grant_id'
-    );
+    let validatedGrantId;
+    try {
+      validatedGrantId = validateApprovalGrantId(grantId);
+    } catch (_) {
+      throw new PlaymeshAiRequestError({
+        code: 'invalid_ai_approval_grant_id',
+      });
+    }
     try {
       const result = requireResponseObject(
         await this._request(

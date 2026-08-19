@@ -34,22 +34,31 @@ const archiveFiles = async options => {
   assert.equal(options.textFiles.length, 1);
   assert.equal(options.textFiles[0].filePath, 'game.json');
   assert.deepEqual(JSON.parse(options.textFiles[0].text), {
-    properties: { name: 'Fixture copy' },
+    properties: { name: 'Fixture copy', folderProject: true },
   });
+  assert.equal(options.textFiles[0].text.endsWith('\n'), true);
   assert.equal(options.blobFiles.length, 1);
   assert.equal(options.blobFiles[0].filePath, 'assets/image/player.png');
   assert.equal(options.blobFiles[0].blob instanceof Blob, true);
   return archivedBlob;
 };
-const serializeToJSObject = () => {
+const serializeToJSObject = projectCopy => {
   calls.push('serialize-json');
-  return { properties: { name: 'Fixture copy' } };
+  assert.equal(projectCopy.folderProject, true);
+  return { properties: { name: 'Fixture copy', folderProject: true } };
 };
+const splitPlaymeshProject = projectObject => [
+  { path: 'game.json', content: projectObject },
+];
+const formatPlaymeshProjectFile = content =>
+  `${JSON.stringify(content, null, 2)}\n`;
 globalThis.__playmeshDownloadArchiveMocks = {
   archiveFiles,
   serializeToJSObject,
   ensureGDevelopJsPlatformIsRegistered:
     platformModule.ensureGDevelopJsPlatformIsRegistered,
+  splitPlaymeshProject,
+  formatPlaymeshProjectFile,
 };
 archiveSource = archiveSource
   .replace(
@@ -63,6 +72,10 @@ archiveSource = archiveSource
   .replace(
     /import \{ ensureGDevelopJsPlatformIsRegistered \} from '[^']+';/,
     'const { ensureGDevelopJsPlatformIsRegistered } = globalThis.__playmeshDownloadArchiveMocks;'
+  )
+  .replace(
+    /import \{[\s\S]*?formatPlaymeshProjectFile,[\s\S]*?splitPlaymeshProject,[\s\S]*?\} from '\.\.\/PlaymeshLocalStorageProvider\/PlaymeshProjectFiles';/,
+    'const { formatPlaymeshProjectFile, splitPlaymeshProject } = globalThis.__playmeshDownloadArchiveMocks;'
   );
 const archiveModule = await importSource(archiveSource);
 
@@ -84,6 +97,11 @@ const gdImplementation = {
           if (!platformRegistered) {
             throw new Error('Platform "GDevelop JS platform" is unknown.');
           }
+        },
+        setFolderProject(value) {
+          assert.equal(value, true);
+          this.folderProject = value;
+          calls.push('set-folder-project');
         },
         delete() {
           calls.push('delete-project-copy');
@@ -132,6 +150,7 @@ assert.deepEqual(calls, [
   'unserialize-project-copy',
   'delete-serializer',
   'download-resources',
+  'set-folder-project',
   'serialize-json',
   'archive',
   'delete-project-copy',

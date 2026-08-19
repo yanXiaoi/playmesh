@@ -8,6 +8,7 @@ import 'foundation/gdevelop_project_mutation_lock.dart';
 import 'foundation/pending_project_commit_store.dart';
 import 'gdevelop_project_config.dart';
 import 'gdevelop_project_config_controller.dart';
+import 'gdevelop_project_files.dart';
 import 'gdevelop_project_history.dart';
 import 'gdevelop_project_root_resolver.dart';
 import 'gdevelop_restore_transaction.dart';
@@ -126,32 +127,32 @@ class GDevelopProjectRekeyExpectedEvidence {
 class GDevelopProjectRekeyBrowserTarget {
   const GDevelopProjectRekeyBrowserTarget({
     required this.fileIdentifier,
-    required this.projectJsonHash,
+    required this.projectFilesHash,
   });
 
   final String fileIdentifier;
-  final String projectJsonHash;
+  final String projectFilesHash;
 
   Map<String, Object?> toJson() => {
     'fileIdentifier': fileIdentifier,
-    'projectJsonHash': projectJsonHash,
+    'projectFilesHash': projectFilesHash,
   };
 
   factory GDevelopProjectRekeyBrowserTarget.fromJson(Object? value) {
     final json = _strictMap(value, 'rekey browser target');
-    _requireFields(json, const {'fileIdentifier', 'projectJsonHash'});
+    _requireFields(json, const {'fileIdentifier', 'projectFilesHash'});
     final fileIdentifier = json['fileIdentifier'];
-    final projectJsonHash = json['projectJsonHash'];
+    final projectFilesHash = json['projectFilesHash'];
     if (fileIdentifier is! String ||
         !RegExp(
           r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$',
         ).hasMatch(fileIdentifier) ||
-        !_isHash(projectJsonHash)) {
+        !_isHash(projectFilesHash)) {
       throw const FormatException('GDevelop rekey browser target 无效');
     }
     return GDevelopProjectRekeyBrowserTarget(
       fileIdentifier: fileIdentifier,
-      projectJsonHash: projectJsonHash! as String,
+      projectFilesHash: projectFilesHash! as String,
     );
   }
 }
@@ -161,18 +162,18 @@ class GDevelopProjectRekeyBrowserEvidence {
     required this.fileIdentifier,
     required this.gameId,
     required this.packageName,
-    required this.projectJsonHash,
+    required this.projectFilesHash,
   });
 
   final String fileIdentifier;
   final String gameId;
   final String packageName;
-  final String projectJsonHash;
+  final String projectFilesHash;
 
   Map<String, Object?> toJson() => {
     'fileMetadata': {'fileIdentifier': fileIdentifier, 'gameId': gameId},
     'packageName': packageName,
-    'projectJsonHash': projectJsonHash,
+    'projectFilesHash': projectFilesHash,
   };
 
   factory GDevelopProjectRekeyBrowserEvidence.fromJson(Object? value) {
@@ -180,13 +181,13 @@ class GDevelopProjectRekeyBrowserEvidence {
     _requireFields(json, const {
       'fileMetadata',
       'packageName',
-      'projectJsonHash',
+      'projectFilesHash',
     });
     final metadata = _strictMap(json['fileMetadata'], 'rekey fileMetadata');
     _requireFields(metadata, const {'fileIdentifier', 'gameId'});
     final target = GDevelopProjectRekeyBrowserTarget.fromJson({
       'fileIdentifier': metadata['fileIdentifier'],
-      'projectJsonHash': json['projectJsonHash'],
+      'projectFilesHash': json['projectFilesHash'],
     });
     final gameId = metadata['gameId'];
     final packageName = json['packageName'];
@@ -197,7 +198,7 @@ class GDevelopProjectRekeyBrowserEvidence {
       fileIdentifier: target.fileIdentifier,
       gameId: ProjectProvisioningService.validateGameId(gameId),
       packageName: ProjectProvisioningService.validateGameId(packageName),
-      projectJsonHash: target.projectJsonHash,
+      projectFilesHash: target.projectFilesHash,
     );
   }
 }
@@ -569,7 +570,7 @@ class GDevelopProjectRekeyCoordinator {
        clock = clock ?? DateTime.now,
        idFactory = idFactory ?? _defaultTransactionId;
 
-  static const namespace = 'gdevelop.rekey.v1';
+  static const namespace = 'gdevelop.rekey.v2';
   static int _sequence = 0;
 
   final GDevelopProjectHistoryAdapter history;
@@ -795,8 +796,8 @@ class GDevelopProjectRekeyCoordinator {
               payload.browserTarget.fileIdentifier ||
           browserEvidence.gameId != payload.newGameId ||
           browserEvidence.packageName != payload.newGameId ||
-          browserEvidence.projectJsonHash !=
-              payload.browserTarget.projectJsonHash) {
+          browserEvidence.projectFilesHash !=
+              payload.browserTarget.projectFilesHash) {
         throw const GDevelopProjectRekeyAckMismatch();
       }
       if (!await _projectEvidenceMatches(
@@ -1690,18 +1691,18 @@ class GDevelopProjectRekeyCoordinator {
     );
     final decoded = jsonDecode(await manifestFile.readAsString());
     if (decoded is! Map ||
-        decoded['schemaVersion'] != 2 ||
+        decoded['schemaVersion'] != 3 ||
         decoded['gameId'] != gameId ||
         decoded['revision'] is! int ||
         decoded['contentHash'] is! String ||
-        decoded['projectJsonHash'] is! String ||
+        decoded['projectFilesHash'] is! String ||
         decoded['resources'] is! List) {
       throw const FormatException('GDevelop current manifest evidence 无效');
     }
     return GDevelopRestoreHistoryEvidence(
       revision: decoded['revision']! as int,
       currentContentHash: decoded['contentHash']! as String,
-      projectJsonHash: decoded['projectJsonHash']! as String,
+      projectFilesHash: decoded['projectFilesHash']! as String,
       resourceManifestHash: await _hashJson(decoded['resources']),
     );
   }
@@ -1739,22 +1740,71 @@ class GDevelopProjectRekeyCoordinator {
       ..['updatedAt'] = clock().toUtc().toIso8601String();
     await _writeJson(metadataFile, metadata);
 
-    final currentManifest = File(
+    final currentRoot = Directory(
       '${staging.path}${Platform.pathSeparator}.playmesh'
       '${Platform.pathSeparator}gdevelop${Platform.pathSeparator}source'
-      '${Platform.pathSeparator}current${Platform.pathSeparator}manifest.json',
+      '${Platform.pathSeparator}current',
+    );
+    final currentManifest = File(
+      '${currentRoot.path}${Platform.pathSeparator}manifest.json',
     );
     final currentManifestJson = jsonDecode(
       await currentManifest.readAsString(),
     );
     if (currentManifestJson is! Map ||
-        currentManifestJson['schemaVersion'] != 2 ||
-        currentManifestJson['gameId'] != oldGameId) {
+        currentManifestJson['schemaVersion'] != 3 ||
+        currentManifestJson['gameId'] != oldGameId ||
+        currentManifestJson['projectFiles'] is! List) {
       throw const FormatException('GDevelop current manifest 身份无效');
     }
-    await _writeJson(
-      currentManifest,
-      Map<String, Object?>.from(currentManifestJson)..['gameId'] = newGameId,
+    final currentManifestMap = Map<String, Object?>.from(currentManifestJson);
+    final currentProjectFilesReference =
+        GDevelopProjectFilesReference.fromJson({
+          'contentHash': currentManifestMap['projectFilesHash'],
+          'size': currentManifestMap['projectFilesSize'],
+          'files': currentManifestMap['projectFiles'],
+        });
+    final projectFiles = <GDevelopProjectFile>[];
+    for (final reference in currentProjectFilesReference.files) {
+      final file = File(
+        '${currentRoot.path}${Platform.pathSeparator}project'
+        '${Platform.pathSeparator}'
+        '${reference.path.replaceAll('/', Platform.pathSeparator)}',
+      );
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map) {
+        throw const FormatException('GDevelop current 工程文件无效');
+      }
+      final content = Map<String, Object?>.from(decoded);
+      if (reference.path == 'game.json') {
+        final properties = content['properties'];
+        if (properties is! Map) {
+          throw const FormatException('GDevelop game.json properties 无效');
+        }
+        final rewrittenProperties = Map<String, Object?>.from(properties);
+        final packageName = rewrittenProperties['packageName'];
+        if (packageName is! String ||
+            ProjectProvisioningService.validateGameId(packageName) !=
+                oldGameId) {
+          throw const FormatException('GDevelop game.json packageName 身份无效');
+        }
+        rewrittenProperties['packageName'] = newGameId;
+        content['properties'] = rewrittenProperties;
+      }
+      projectFiles.add(
+        GDevelopProjectFile(path: reference.path, content: content),
+      );
+    }
+    final rootProjectFile = gdevelopRootProjectFile(projectFiles);
+    await File(
+      '${currentRoot.path}${Platform.pathSeparator}project'
+      '${Platform.pathSeparator}game.json',
+    ).writeAsBytes(
+      encodeOfficialGDevelopProjectFileBytes(rootProjectFile.content),
+      flush: true,
+    );
+    final rewrittenProjectFilesReference = await referenceGDevelopProjectFiles(
+      projectFiles,
     );
 
     final main = File('${staging.path}${Platform.pathSeparator}main.json');
@@ -1788,13 +1838,19 @@ class GDevelopProjectRekeyCoordinator {
       await _writeJson(configFile, targetConfigJson);
     }
 
-    final rewrittenCurrentManifest = Map<String, Object?>.from(
-      jsonDecode(await currentManifest.readAsString()) as Map,
-    )..['playmeshProjectConfig'] = targetConfigJson;
+    final rewrittenCurrentManifest = currentManifestMap
+      ..['gameId'] = newGameId
+      ..['projectFilesHash'] = rewrittenProjectFilesReference.contentHash
+      ..['projectFilesSize'] = rewrittenProjectFilesReference.size
+      ..['projectFiles'] = rewrittenProjectFilesReference.files
+          .map((file) => file.toJson())
+          .toList(growable: false)
+      ..['playmeshProjectConfig'] = targetConfigJson;
     final currentPayload = <String, Object?>{
-      'schemaVersion': 2,
-      'projectJsonHash': rewrittenCurrentManifest['projectJsonHash'],
-      'projectJsonBytes': rewrittenCurrentManifest['projectJsonBytes'],
+      'schemaVersion': 3,
+      'projectFilesHash': rewrittenCurrentManifest['projectFilesHash'],
+      'projectFilesSize': rewrittenCurrentManifest['projectFilesSize'],
+      'projectFiles': rewrittenCurrentManifest['projectFiles'],
       'resources': rewrittenCurrentManifest['resources'],
       'playmeshProjectConfig': targetConfigJson,
     };
@@ -1810,7 +1866,7 @@ class GDevelopProjectRekeyCoordinator {
   ) async => GDevelopRestoreHistoryEvidence(
     revision: snapshot.version.revision,
     currentContentHash: snapshot.version.contentHash,
-    projectJsonHash: snapshot.project.contentHash,
+    projectFilesHash: snapshot.projectFiles.contentHash,
     resourceManifestHash: await _hashJson(
       snapshot.resources.map((resource) => resource.toJson()).toList(),
     ),
@@ -2115,7 +2171,7 @@ bool _browserEvidenceMatches(
     left.fileIdentifier == right.fileIdentifier &&
     left.gameId == right.gameId &&
     left.packageName == right.packageName &&
-    left.projectJsonHash == right.projectJsonHash;
+    left.projectFilesHash == right.projectFilesHash;
 
 bool _sourceBrowserEvidenceMatches(
   GDevelopProjectRekeyPayload payload,
@@ -2124,7 +2180,7 @@ bool _sourceBrowserEvidenceMatches(
     evidence.fileIdentifier == payload.browserSource.fileIdentifier &&
     evidence.gameId == payload.oldGameId &&
     evidence.packageName == payload.oldGameId &&
-    evidence.projectJsonHash == payload.browserSource.projectJsonHash;
+    evidence.projectFilesHash == payload.browserSource.projectFilesHash;
 
 String _basename(String path) =>
     path.split(Platform.pathSeparator).where((part) => part.isNotEmpty).last;

@@ -13,6 +13,7 @@ import '../../core/developer/developer_run_controller.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
+import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_package/game_asset_gateway.dart';
 import '../../core/game_web/android_webview_file_selector.dart';
@@ -33,6 +34,7 @@ class LocalGameWebView extends StatefulWidget {
     this.localUserId = 'u_local',
     this.localNickname = playmeshDefaultLocalNickname,
     this.declaredCapabilities = const [],
+    this.appLanHost,
     this.onOpenSharePanel,
     this.onExitRequested,
     this.onSystemBackHandlerChanged,
@@ -48,6 +50,7 @@ class LocalGameWebView extends StatefulWidget {
   final String localUserId;
   final String localNickname;
   final List<String> declaredCapabilities;
+  final AppLanHost? appLanHost;
   final Future<void> Function()? onOpenSharePanel;
   final Future<void> Function()? onExitRequested;
   final ValueChanged<VoidCallback?>? onSystemBackHandlerChanged;
@@ -97,10 +100,12 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       userId: widget.localUserId,
       nickname: widget.localNickname,
       declaredCapabilities: widget.declaredCapabilities,
+      lanHost: widget.appLanHost,
       onOpenSharePanel: widget.onOpenSharePanel,
       onInputTakeover: _takeOverAppSdkInput,
       onExitRequested: _exitFromAppGameMenu,
     );
+    HardwareKeyboard.instance.addHandler(_recordHardwareUserActivation);
     widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);
     _messageQueue = WebViewMessageQueue(_runJavaScript);
     final supportsGateway =
@@ -191,10 +196,11 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
             ..addJavaScriptChannel(
               'PlaymeshAppBridge',
               onMessageReceived: (message) {
+                final generation = _messageQueue.generation;
                 unawaited(
                   _appBridge.handleJavaScriptMessage(
                     message.message,
-                    _sendAppMessage,
+                    (reply) => _sendAppMessage(reply, generation),
                   ),
                 );
               },
@@ -212,10 +218,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                 },
                 onPageStarted: (_) {
                   _androidNavigationCompleted = false;
-                  _resetAppSdkInputOwnership();
+                  _resetAppSdkDocument();
                   widget.onJavaScriptExecutorChanged?.call(null);
                   _messageQueue.pause(clearPending: true);
-                  unawaited(_appBridge.resetCapabilities());
                 },
                 onPageFinished: (_) {
                   _androidNavigationCompleted = true;
@@ -259,8 +264,11 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     }
   }
 
-  Future<void> _sendAppMessage(String message) async {
-    await _messageQueue.add(appSdkReceiveScript(message));
+  Future<void> _sendAppMessage(String message, int generation) async {
+    await _messageQueue.addAndWait(
+      appSdkReceiveScript(message),
+      generation: generation,
+    );
   }
 
   void _takeOverAppSdkInput() {
@@ -269,6 +277,11 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     _nativeInputFallbackFocusNode.unfocus();
     _resetAndroidWebViewFocus();
     _scheduleAndroidWebViewFocus();
+  }
+
+  bool _recordHardwareUserActivation(KeyEvent event) {
+    if (event is KeyDownEvent) _appBridge.recordUserActivation();
+    return false;
   }
 
   void _resetAppSdkInputOwnership() {
@@ -285,6 +298,11 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       }
       _nativeInputFallbackFocusNode.requestFocus();
     });
+  }
+
+  void _resetAppSdkDocument() {
+    _resetAppSdkInputOwnership();
+    unawaited(_appBridge.resetCapabilities());
   }
 
   KeyEventResult _handleNativeFallbackKey(FocusNode _, KeyEvent event) {
@@ -490,6 +508,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     widget.onSystemBackHandlerChanged?.call(null);
     widget.onJavaScriptExecutorChanged?.call(null);
     _runWindowsJavaScript = null;
+    HardwareKeyboard.instance.removeHandler(_recordHardwareUserActivation);
     _androidWebViewFocusRetryTimer?.cancel();
     _nativeInputFallbackFocusNode.dispose();
     _androidWebViewFocusScopeNode.dispose();
@@ -521,7 +540,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   bridge: widget.bridge,
                   appBridge: _appBridge,
                   appSdkInputTakenOver: _appSdkInputTakenOver,
-                  onNavigationStarted: _resetAppSdkInputOwnership,
+                  onNavigationStarted: _resetAppSdkDocument,
                   onRunJavaScriptReady: (executor) {
                     _runWindowsJavaScript = executor;
                     unawaited(_sendPlatformUiConfiguration());
@@ -542,6 +561,11 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       canRequestFocus: !_appSdkInputTakenOver,
       onKeyEvent: _handleNativeFallbackKey,
       child: AbsorbPointer(absorbing: !_appSdkInputTakenOver, child: content),
+    );
+    content = Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _appBridge.recordUserActivation(),
+      child: content,
     );
     if (widget.onSystemBackHandlerChanged != null) return content;
     return PopScope(

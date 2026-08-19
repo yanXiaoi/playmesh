@@ -29,6 +29,14 @@ const appDeviceSource = fs.readFileSync(
   "lib/core/game_sdk/features/app/app_device_feature.dart",
   "utf8",
 );
+const appLanSource = fs.readFileSync(
+  "lib/core/game_sdk/features/app/app_lan_feature.dart",
+  "utf8",
+);
+const appUiSource = fs.readFileSync(
+  "lib/core/game_sdk/features/app/app_ui_feature.dart",
+  "utf8",
+);
 const sdkRegistrySource = fs.readFileSync(
   "lib/core/game_sdk/sdk_feature_registry.dart",
   "utf8",
@@ -270,6 +278,43 @@ for (const eventName of [
   );
 }
 assert.match(game, /openSharePanel\(\): Promise<void>/);
+assert.match(game, /disableSystemMenuTriggers\(\): void/);
+assert.match(game, /type PlaymeshAppLanShareLinkType = "lan" \| "wan"/);
+assert.match(game, /interface PlaymeshAppLanShareLink/);
+assert.match(game, /interface PlaymeshLanGame/);
+assert.match(game, /interface PlaymeshAppLanApi/);
+assert.match(game, /readonly lan: PlaymeshAppLanApi/);
+assert.match(game, /discoverGames\(\): Promise<readonly PlaymeshLanGame\[\]>/);
+assert.match(game, /joinByLink\(invitationUrl: string\): Promise<void>/);
+assert.match(game, /scanQrAndJoin\(\): Promise<void>/);
+assert.match(game, /setPublished\(\): Promise<void>/);
+assert.match(
+  game,
+  /getShareLinks\(\): Promise<readonly PlaymeshAppLanShareLink\[\]>/,
+);
+assert.equal(
+  (game.match(/type PlaymeshAppLanShareLinkType/g) ?? []).length,
+  1,
+  "named LAN type alias must be emitted physically exactly once",
+);
+assert.doesNotMatch(app, /PlaymeshAppLanShareLinkType|PlaymeshAppLanApi/);
+assert.match(appLanSource, /declaration:\s*r'''[\s\S]*interface PlaymeshAppLanApi/);
+assert.match(appUiSource, /declaration:\s*r'''[\s\S]*disableSystemMenuTriggers/);
+for (const forbiddenLanDependency of [
+  "NetworkInterface",
+  "GameWebGateway",
+  "RelayHostSession",
+  "ShareQrCodeEncoder",
+  "invitationCandidates",
+]) {
+  assert.equal(
+    appLanSource.includes(forbiddenLanDependency),
+    false,
+    `App LAN feature must not depend on ${forbiddenLanDependency}`,
+  );
+}
+assert.match(sdkRegistrySource, /final String declaration;/);
+assert.match(sdkGeneratorSource, /declarationFragments: dartSdkSources\.declarations/);
 assert.match(game, /configure\(options: PlaymeshAppUiOptions\): PlaymeshAppUiOptions/);
 assert.match(game, /initializeBrowser\(\): boolean/);
 assert.match(game, /showGameSidebar\(\): Promise<boolean>/);

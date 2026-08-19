@@ -12,6 +12,8 @@ import { enumerateAllExpressions } from '../InstructionOrExpression/EnumerateExp
 import { enumerateEventsMetadata } from '../EventsSheet/EnumerateEventsMetadata';
 import { formatExpressionCall } from '../EventsSheet/ParameterFields/GenericExpressionField/FormatExpressionCall';
 import { playmeshAiRuntimeDebuggerTools } from './PlaymeshAiRuntimeDebuggerTools';
+import { createPlaymeshAiPiskelToolWrappers } from './PlaymeshAiPiskelTool';
+import { createPlaymeshAiJfxrYarnTools } from './PlaymeshAiJfxrYarnTools';
 const gd /*: libGDevelop */ = global.gd;
 /*::
 import type {
@@ -60,6 +62,9 @@ export type PlaymeshAiLocalToolWrappersOptions = {|
   |}) => Promise<mixed>,
   updatePlan?: PlaymeshAiPlan => Promise<mixed>,
   stagedResource?: PlaymeshAiStagedResource,
+  beforeProjectMutation?: () => void,
+  onFetchNewlyAddedResources?: () => Promise<void>,
+  onNewResourcesAdded?: () => void,
   toolsContract?: PlaymeshAiObject,
 |};
 
@@ -1047,6 +1052,9 @@ export const createPlaymeshAiLocalToolWrappers = ({
   readFullDocs,
   updatePlan,
   stagedResource,
+  beforeProjectMutation,
+  onFetchNewlyAddedResources,
+  onNewResourcesAdded,
   toolsContract,
 } /*: PlaymeshAiLocalToolWrappersOptions */ = {}) /*: PlaymeshAiLocalToolWrappers */ => {
   const createObject = async (
@@ -1075,6 +1083,17 @@ export const createPlaymeshAiLocalToolWrappers = ({
 
   return {
     ...playmeshAiRuntimeDebuggerTools.wrappers,
+    ...createPlaymeshAiPiskelToolWrappers({
+      stagedResource,
+      beforeProjectMutation,
+      onFetchNewlyAddedResources,
+      onNewResourcesAdded,
+    }),
+    ...createPlaymeshAiJfxrYarnTools({
+      beforeProjectMutation,
+      onFetchNewlyAddedResources,
+      onNewResourcesAdded,
+    }),
     list_event_types: async ({
       call,
     } /*: PlaymeshAiLocalToolContext */) /*: Promise<PlaymeshAiLocalToolExecution> */ =>

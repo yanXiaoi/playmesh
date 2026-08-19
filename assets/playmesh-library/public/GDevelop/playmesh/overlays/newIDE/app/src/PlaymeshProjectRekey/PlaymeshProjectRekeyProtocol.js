@@ -7,7 +7,7 @@ import {
   validatePlaymeshProjectGameType,
 } from '../PlaymeshProjectConfig/PlaymeshProjectConfigProtocol';
 
-export const PLAYMESH_PROJECT_REKEY_PROTOCOL = 'gdevelop.rekey.v1';
+export const PLAYMESH_PROJECT_REKEY_PROTOCOL = 'gdevelop.rekey.v2';
 export const PLAYMESH_PROJECT_REKEY_MAX_JSON_BYTES = 1024 * 1024;
 
 /*::
@@ -23,7 +23,7 @@ export type PlaymeshProjectRekeyPhase =
   | 'ABORTED';
 export type PlaymeshProjectRekeyBrowserTarget = {|
   fileIdentifier: string,
-  projectJsonHash: string,
+  projectFilesHash: string,
 |};
 export type PlaymeshProjectRekeyBrowserEvidence = {|
   fileMetadata: {|
@@ -31,12 +31,12 @@ export type PlaymeshProjectRekeyBrowserEvidence = {|
     gameId: string,
   |},
   packageName: string,
-  projectJsonHash: string,
+  projectFilesHash: string,
 |};
 export type PlaymeshProjectRekeyHistoryEvidence = {|
   revision: number,
   currentContentHash: string,
-  projectJsonHash: string,
+  projectFilesHash: string,
   resourceManifestHash: string,
 |};
 export type PlaymeshProjectRekeyConfig = {|
@@ -245,12 +245,12 @@ export const assertPlaymeshProjectRekeyBrowserTarget = (
   value /*: mixed */
 ) /*: PlaymeshProjectRekeyBrowserTarget */ => {
   const target = asRecord(value);
-  if (!target || !hasExactKeys(target, ['fileIdentifier', 'projectJsonHash'])) {
+  if (!target || !hasExactKeys(target, ['fileIdentifier', 'projectFilesHash'])) {
     return fail();
   }
   return {
     fileIdentifier: requireToken(target.fileIdentifier),
-    projectJsonHash: requireHash(target.projectJsonHash),
+    projectFilesHash: requireHash(target.projectFilesHash),
   };
 };
 
@@ -265,7 +265,7 @@ export const assertPlaymeshProjectRekeyBrowserEvidence = (
     !hasExactKeys(evidence, [
       'fileMetadata',
       'packageName',
-      'projectJsonHash',
+      'projectFilesHash',
     ]) ||
     !metadata ||
     !hasExactKeys(metadata, ['fileIdentifier', 'gameId'])
@@ -288,7 +288,7 @@ export const assertPlaymeshProjectRekeyBrowserEvidence = (
       gameId,
     },
     packageName,
-    projectJsonHash: requireHash(evidence.projectJsonHash),
+    projectFilesHash: requireHash(evidence.projectFilesHash),
   };
 };
 
@@ -301,7 +301,7 @@ const assertHistoryEvidence = (
     !hasExactKeys(evidence, [
       'revision',
       'currentContentHash',
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     ])
   ) {
@@ -310,7 +310,7 @@ const assertHistoryEvidence = (
   return {
     revision: requirePositiveInteger(evidence.revision),
     currentContentHash: requireHash(evidence.currentContentHash),
-    projectJsonHash: requireHash(evidence.projectJsonHash),
+    projectFilesHash: requireHash(evidence.projectFilesHash),
     resourceManifestHash: requireHash(evidence.resourceManifestHash),
   };
 };

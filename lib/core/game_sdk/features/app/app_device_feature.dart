@@ -71,6 +71,7 @@ const appDeviceSdkSource = SdkSourceFragment(
     media: {
       open: openAppMedia,
     },
+    lan: appLanApi,
     device: {
       getPlatform() {
         return bootstrap?.device?.platform || null;
@@ -96,6 +97,9 @@ const appDeviceSdkSource = SdkSourceFragment(
       },
     },
     ui: {
+      disableSystemMenuTriggers() {
+        return disableAppUiSystemMenuTriggers.apply(null, arguments);
+      },
       initializeBrowser() {
         return initializeBrowserAppUi();
       },
@@ -273,6 +277,7 @@ const appDeviceSdkSource = SdkSourceFragment(
       appPlatformUiConfiguration = null;
       initializeAppPlatformUi(runtimePlatformUi);
       global.console?.info?.("Playmesh App SDK 就绪");
+      appReadyCompleted = true;
       return appBootstrapResult;
     })
     : request("app.bootstrap").then((result) => {
@@ -288,6 +293,7 @@ const appDeviceSdkSource = SdkSourceFragment(
       initializeAppPlatformUi(privateUi);
       requestAppInputTakeover();
       global.console?.info?.("Playmesh App SDK 就绪");
+      appReadyCompleted = true;
       return appBootstrapResult;
     });
   Object.defineProperty(publicAppApi, "ready", {

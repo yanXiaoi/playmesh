@@ -6,6 +6,7 @@ import 'foundation/gdevelop_project_mutation_lock.dart';
 import 'foundation/pending_project_commit_store.dart';
 import 'gdevelop_project_config.dart';
 import 'gdevelop_project_config_controller.dart';
+import 'gdevelop_project_files.dart';
 import 'gdevelop_project_history.dart';
 import 'gdevelop_project_root_resolver.dart';
 import 'project_provisioning_service.dart';
@@ -64,26 +65,26 @@ class GDevelopRestoreHistoryEvidence {
   const GDevelopRestoreHistoryEvidence({
     required this.revision,
     required this.currentContentHash,
-    required this.projectJsonHash,
+    required this.projectFilesHash,
     required this.resourceManifestHash,
   });
 
   final int revision;
   final String currentContentHash;
-  final String projectJsonHash;
+  final String projectFilesHash;
   final String resourceManifestHash;
 
   Map<String, Object?> toJson() => {
     'revision': revision,
     'currentContentHash': currentContentHash,
-    'projectJsonHash': projectJsonHash,
+    'projectFilesHash': projectFilesHash,
     'resourceManifestHash': resourceManifestHash,
   };
 
   bool matches(GDevelopRestoreHistoryEvidence other) =>
       revision == other.revision &&
       currentContentHash == other.currentContentHash &&
-      projectJsonHash == other.projectJsonHash &&
+      projectFilesHash == other.projectFilesHash &&
       resourceManifestHash == other.resourceManifestHash;
 
   factory GDevelopRestoreHistoryEvidence.fromJson(Object? value) {
@@ -91,24 +92,24 @@ class GDevelopRestoreHistoryEvidence {
     _requireExactFields(json, const {
       'revision',
       'currentContentHash',
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     });
     final revision = json['revision'];
     final currentContentHash = json['currentContentHash'];
-    final projectJsonHash = json['projectJsonHash'];
+    final projectFilesHash = json['projectFilesHash'];
     final resourceManifestHash = json['resourceManifestHash'];
     if (revision is! int ||
         revision < 1 ||
         !_isHash(currentContentHash) ||
-        !_isHash(projectJsonHash) ||
+        !_isHash(projectFilesHash) ||
         !_isHash(resourceManifestHash)) {
       throw const FormatException('GDevelop restore history evidence 无效');
     }
     return GDevelopRestoreHistoryEvidence(
       revision: revision,
       currentContentHash: currentContentHash! as String,
-      projectJsonHash: projectJsonHash! as String,
+      projectFilesHash: projectFilesHash! as String,
       resourceManifestHash: resourceManifestHash! as String,
     );
   }
@@ -199,30 +200,30 @@ class GDevelopRestoreProjectEvidence {
 
 class GDevelopRestoreBrowserEvidence {
   const GDevelopRestoreBrowserEvidence({
-    required this.projectJsonHash,
+    required this.projectFilesHash,
     required this.resourceManifestHash,
   });
 
-  final String projectJsonHash;
+  final String projectFilesHash;
   final String resourceManifestHash;
 
   Map<String, Object?> toJson() => {
-    'projectJsonHash': projectJsonHash,
+    'projectFilesHash': projectFilesHash,
     'resourceManifestHash': resourceManifestHash,
   };
 
   factory GDevelopRestoreBrowserEvidence.fromJson(Object? value) {
     final json = _strictMap(value, 'restore browser evidence');
     _requireExactFields(json, const {
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     });
-    if (!_isHash(json['projectJsonHash']) ||
+    if (!_isHash(json['projectFilesHash']) ||
         !_isHash(json['resourceManifestHash'])) {
       throw const FormatException('GDevelop restore browser evidence 无效');
     }
     return GDevelopRestoreBrowserEvidence(
-      projectJsonHash: json['projectJsonHash']! as String,
+      projectFilesHash: json['projectFilesHash']! as String,
       resourceManifestHash: json['resourceManifestHash']! as String,
     );
   }
@@ -232,22 +233,26 @@ class GDevelopRestoreBrowserEvidence {
 class GDevelopRestoreTargetSnapshot {
   const GDevelopRestoreTargetSnapshot({
     required this.sourceVersion,
-    required this.projectReference,
-    required this.project,
+    required this.projectFilesReference,
+    required this.projectFiles,
     required this.resources,
     required this.projectConfigSnapshot,
   });
 
   final GDevelopProjectVersion sourceVersion;
-  final GDevelopProjectReference projectReference;
-  final Map<String, Object?> project;
+  final List<GDevelopProjectFileReference> projectFilesReference;
+  final List<GDevelopProjectFile> projectFiles;
   final List<GDevelopProjectResource> resources;
   final GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot;
 
   Map<String, Object?> toJson() => {
     'sourceVersion': sourceVersion.toJson(),
-    'projectReference': projectReference.toJson(),
-    'project': project,
+    'projectFilesReference': projectFilesReference
+        .map((reference) => reference.toJson())
+        .toList(growable: false),
+    'projectFiles': projectFiles
+        .map((file) => file.toJson())
+        .toList(growable: false),
     'resources': resources.map((resource) => resource.toJson()).toList(),
     if (projectConfigSnapshot.semantics !=
         GDevelopHistoryProjectConfigSemantics.legacy)
@@ -262,9 +267,9 @@ class GDevelopRestoreTransactionPayload {
     required this.targetRevision,
     required this.source,
     required this.clientId,
-    required this.currentProject,
+    required this.currentProjectFilesReference,
     required this.currentResources,
-    required this.targetProject,
+    required this.targetProjectFilesReference,
     required this.targetResources,
     this.sourceVersion,
     required this.oldEvidence,
@@ -277,16 +282,16 @@ class GDevelopRestoreTransactionPayload {
     this.conflict,
   });
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
 
   final String gameId;
   final int baseRevision;
   final int targetRevision;
   final GDevelopHistorySource source;
   final String? clientId;
-  final GDevelopProjectReference currentProject;
+  final GDevelopProjectFilesReference currentProjectFilesReference;
   final List<GDevelopProjectResource> currentResources;
-  final GDevelopProjectReference targetProject;
+  final GDevelopProjectFilesReference targetProjectFilesReference;
   final List<GDevelopProjectResource> targetResources;
   final GDevelopProjectVersion? sourceVersion;
   final GDevelopRestoreProjectEvidence oldEvidence;
@@ -307,9 +312,9 @@ class GDevelopRestoreTransactionPayload {
     targetRevision: targetRevision,
     source: source,
     clientId: clientId,
-    currentProject: currentProject,
+    currentProjectFilesReference: currentProjectFilesReference,
     currentResources: currentResources,
-    targetProject: targetProject,
+    targetProjectFilesReference: targetProjectFilesReference,
     targetResources: targetResources,
     sourceVersion: sourceVersion,
     oldEvidence: oldEvidence,
@@ -329,9 +334,9 @@ class GDevelopRestoreTransactionPayload {
         targetRevision: targetRevision,
         source: source,
         clientId: clientId,
-        currentProject: currentProject,
+        currentProjectFilesReference: currentProjectFilesReference,
         currentResources: currentResources,
-        targetProject: targetProject,
+        targetProjectFilesReference: targetProjectFilesReference,
         targetResources: targetResources,
         sourceVersion: sourceVersion,
         oldEvidence: oldEvidence,
@@ -353,9 +358,9 @@ class GDevelopRestoreTransactionPayload {
     targetRevision: targetRevision,
     source: source,
     clientId: clientId,
-    currentProject: currentProject,
+    currentProjectFilesReference: currentProjectFilesReference,
     currentResources: currentResources,
-    targetProject: targetProject,
+    targetProjectFilesReference: targetProjectFilesReference,
     targetResources: targetResources,
     sourceVersion: sourceVersion,
     oldEvidence: oldEvidence,
@@ -375,9 +380,9 @@ class GDevelopRestoreTransactionPayload {
         targetRevision: targetRevision,
         source: source,
         clientId: clientId,
-        currentProject: currentProject,
+        currentProjectFilesReference: currentProjectFilesReference,
         currentResources: currentResources,
-        targetProject: targetProject,
+        targetProjectFilesReference: targetProjectFilesReference,
         targetResources: targetResources,
         sourceVersion: sourceVersion,
         oldEvidence: oldEvidence,
@@ -397,11 +402,11 @@ class GDevelopRestoreTransactionPayload {
     'targetRevision': targetRevision,
     'source': source.wireName,
     if (clientId != null) 'clientId': clientId,
-    'currentProject': currentProject.toJson(),
+    'currentProjectFilesReference': currentProjectFilesReference.toJson(),
     'currentResources': currentResources
         .map((resource) => resource.toJson())
         .toList(),
-    'targetProject': targetProject.toJson(),
+    'targetProjectFilesReference': targetProjectFilesReference.toJson(),
     'targetResources': targetResources
         .map((resource) => resource.toJson())
         .toList(),
@@ -425,9 +430,9 @@ class GDevelopRestoreTransactionPayload {
       'baseRevision',
       'targetRevision',
       'source',
-      'currentProject',
+      'currentProjectFilesReference',
       'currentResources',
-      'targetProject',
+      'targetProjectFilesReference',
       'targetResources',
       'oldEvidence',
       'targetEvidence',
@@ -489,12 +494,18 @@ class GDevelopRestoreTransactionPayload {
       targetRevision: targetRevision,
       source: GDevelopHistorySource.parse(sourceValue),
       clientId: clientId,
-      currentProject: GDevelopProjectReference.fromJson(
-        _strictMap(json['currentProject'], 'current project reference'),
+      currentProjectFilesReference: GDevelopProjectFilesReference.fromJson(
+        _strictMap(
+          json['currentProjectFilesReference'],
+          'current project files reference',
+        ),
       ),
       currentResources: _resourceList(currentResourcesValue),
-      targetProject: GDevelopProjectReference.fromJson(
-        _strictMap(json['targetProject'], 'target project reference'),
+      targetProjectFilesReference: GDevelopProjectFilesReference.fromJson(
+        _strictMap(
+          json['targetProjectFilesReference'],
+          'target project files reference',
+        ),
       ),
       targetResources: _resourceList(targetResourcesValue),
       sourceVersion: json['sourceVersion'] == null
@@ -608,7 +619,7 @@ class GDevelopRestoreTransactionCoordinator {
        idFactory = idFactory ?? _defaultTransactionId,
        mutationLock = mutationLock ?? const GDevelopProjectMutationLock();
 
-  static const namespace = 'gdevelop.restore.v2';
+  static const namespace = 'gdevelop.restore.v3';
   static int _transactionSequence = 0;
 
   final GDevelopProjectHistoryAdapter history;
@@ -692,7 +703,7 @@ class GDevelopRestoreTransactionCoordinator {
     required int baseRevision,
     required int targetRevision,
     required GDevelopHistorySource source,
-    required Map<String, Object?> currentProject,
+    required List<GDevelopProjectFile> currentProjectFiles,
     required List<GDevelopProjectResource> currentResources,
     String? clientId,
   }) => _withProject(gameId, (store) async {
@@ -702,14 +713,15 @@ class GDevelopRestoreTransactionCoordinator {
     final normalizedClientId = _optionalClientId(clientId);
     final preparedCurrent = await history.prepareProjectState(
       projectId: gameId,
-      project: currentProject,
+      projectFiles: currentProjectFiles,
       resources: currentResources,
     );
     final requestValue = {
       'baseRevision': baseRevision,
       'targetRevision': targetRevision,
       'source': source.wireName,
-      'currentProject': preparedCurrent.projectReference.toJson(),
+      'currentProjectFilesReference': preparedCurrent.projectFilesReference
+          .toJson(),
       'currentResources': preparedCurrent.resources
           .map((resource) => resource.toJson())
           .toList(),
@@ -747,14 +759,14 @@ class GDevelopRestoreTransactionCoordinator {
     final oldHistory = await _historyEvidence(current);
     final targetPayloadHash = await history.revisionPayloadContentHash(
       projectId: gameId,
-      project: target.project,
+      projectFiles: target.projectFiles,
       resources: target.resources,
       projectConfigSnapshot: targetConfig.historySnapshot,
     );
     final targetHistory = GDevelopRestoreHistoryEvidence(
       revision: baseRevision + 1,
       currentContentHash: targetPayloadHash,
-      projectJsonHash: target.project.contentHash,
+      projectFilesHash: target.projectFiles.contentHash,
       resourceManifestHash: await _resourceManifestHash(target.resources),
     );
     final payload = GDevelopRestoreTransactionPayload(
@@ -763,9 +775,9 @@ class GDevelopRestoreTransactionCoordinator {
       targetRevision: targetRevision,
       source: source,
       clientId: normalizedClientId,
-      currentProject: preparedCurrent.projectReference,
+      currentProjectFilesReference: preparedCurrent.projectFilesReference,
       currentResources: preparedCurrent.resources,
-      targetProject: target.project,
+      targetProjectFilesReference: target.projectFiles,
       targetResources: target.resources,
       sourceVersion: target.version,
       oldEvidence: GDevelopRestoreProjectEvidence(
@@ -822,7 +834,7 @@ class GDevelopRestoreTransactionCoordinator {
       throw GDevelopRestoreTransactionUnavailable(record.phase);
     }
     final expected = record.payload.targetEvidence.history;
-    if (browserEvidence.projectJsonHash != expected.projectJsonHash ||
+    if (browserEvidence.projectFilesHash != expected.projectFilesHash ||
         browserEvidence.resourceManifestHash != expected.resourceManifestHash) {
       throw const GDevelopRestoreAckMismatch();
     }
@@ -904,19 +916,21 @@ class GDevelopRestoreTransactionCoordinator {
                   _sameStringLists(sourceConfig?.tags, targetConfig?.tags)));
       final plannedPayloadHash = await history.revisionPayloadContentHash(
         projectId: payload.gameId,
-        project: payload.targetProject,
+        projectFiles: payload.targetProjectFilesReference,
         resources: payload.targetResources,
         projectConfigSnapshot: preparedConfig,
       );
       if (jsonEncode(sourceVersion.toJson()) !=
               jsonEncode(source.version.toJson()) ||
-          source.project.contentHash != payload.targetProject.contentHash ||
-          source.project.size != payload.targetProject.size ||
+          source.projectFiles.contentHash !=
+              payload.targetProjectFilesReference.contentHash ||
+          source.projectFiles.size !=
+              payload.targetProjectFilesReference.size ||
           sourceResourcesHash != targetResourcesHash ||
           targetResourcesHash !=
               payload.targetEvidence.history.resourceManifestHash ||
-          payload.targetProject.contentHash !=
-              payload.targetEvidence.history.projectJsonHash ||
+          payload.targetProjectFilesReference.contentHash !=
+              payload.targetEvidence.history.projectFilesHash ||
           plannedPayloadHash !=
               payload.targetEvidence.history.currentContentHash ||
           payload.targetEvidence.history.revision != payload.baseRevision + 1 ||
@@ -931,14 +945,16 @@ class GDevelopRestoreTransactionCoordinator {
           contentHash: resource.contentHash,
         );
       }
-      final project = await history.readHistoryProjectReference(
+      final projectFiles = await history.readHistoryProjectFilesReference(
         projectId: payload.gameId,
-        reference: payload.targetProject,
+        reference: payload.targetProjectFilesReference,
       );
       return GDevelopRestoreTargetSnapshot(
         sourceVersion: sourceVersion,
-        projectReference: payload.targetProject,
-        project: Map<String, Object?>.unmodifiable(project),
+        projectFilesReference: List<GDevelopProjectFileReference>.unmodifiable(
+          payload.targetProjectFilesReference.files,
+        ),
+        projectFiles: List<GDevelopProjectFile>.unmodifiable(projectFiles),
         resources: List<GDevelopProjectResource>.unmodifiable(
           payload.targetResources,
         ),
@@ -957,13 +973,13 @@ class GDevelopRestoreTransactionCoordinator {
     final payload = transaction.record.payload;
     final version = payload.restoredVersion;
     if (version == null) return null;
-    final project = await history.readHistoryProjectReference(
+    final projectFiles = await history.readHistoryProjectFilesReference(
       projectId: payload.gameId,
-      reference: payload.targetProject,
+      reference: payload.targetProjectFilesReference,
     );
     return GDevelopProjectSnapshot(
       version: version,
-      project: project,
+      projectFiles: projectFiles,
       resources: payload.targetResources,
       projectConfigSnapshot: payload.targetEvidence.config.historySnapshot,
     );
@@ -1012,7 +1028,7 @@ class GDevelopRestoreTransactionCoordinator {
           baseRevision: record.payload.baseRevision,
           targetRevision: record.payload.targetRevision,
           source: record.payload.source,
-          currentProject: record.payload.currentProject,
+          currentProjectFiles: record.payload.currentProjectFilesReference,
           currentResources: record.payload.currentResources,
           currentProjectConfigSnapshot:
               record.payload.oldEvidence.config.historySnapshot,
@@ -1181,7 +1197,7 @@ class GDevelopRestoreTransactionCoordinator {
   ) async => GDevelopRestoreHistoryEvidence(
     revision: snapshot.version.revision,
     currentContentHash: snapshot.version.contentHash,
-    projectJsonHash: snapshot.project.contentHash,
+    projectFilesHash: snapshot.projectFiles.contentHash,
     resourceManifestHash: await _resourceManifestHash(snapshot.resources),
   );
 
@@ -1325,7 +1341,7 @@ class GDevelopRestoreTransactionCoordinator {
           '${root.path}${Platform.pathSeparator}.playmesh'
           '${Platform.pathSeparator}gdevelop'
           '${Platform.pathSeparator}pending-project-commits'
-          '${Platform.pathSeparator}restore-v1',
+          '${Platform.pathSeparator}restore-v3',
         ),
         namespace: namespace,
         codec: const PendingProjectCommitCodec(

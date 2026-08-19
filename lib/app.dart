@@ -16,6 +16,7 @@ import 'core/game_package/ordinary_web_package_importer.dart';
 import 'core/localization/playmesh_localization.dart';
 import 'core/localization/playmesh_ui_controller.dart';
 import 'core/localization/playmesh_ui_preferences.dart';
+import 'core/network/lan_game_discovery_service.dart';
 import 'core/developer/developer_background_host.dart';
 import 'core/developer/developer_channel.dart';
 import 'core/developer/developer_game_catalog_publisher.dart';
@@ -63,6 +64,7 @@ class PlaymeshApp extends StatefulWidget {
     this.uiBootstrap,
     this.gameLibraryScan,
     this.onShutdownStarted,
+    this.lanGameDiscoveryService,
   });
 
   final GoCoreStatusProvider? goCoreStatusProvider;
@@ -75,6 +77,9 @@ class PlaymeshApp extends StatefulWidget {
 
   @visibleForTesting
   final VoidCallback? onShutdownStarted;
+
+  @visibleForTesting
+  final LanGameDiscoveryService? lanGameDiscoveryService;
 
   static UserProfile createLocalUser() => UserProfile(
     userId: UserProfileStore.generateUserId(),
@@ -110,10 +115,16 @@ class _PlaymeshAppState extends State<PlaymeshApp>
   bool _windowCloseDialogVisible = false;
   bool _windowCloseConfirmed = false;
   bool _shutdownStarted = false;
+  late final LanGameDiscoveryService _lanGameDiscoveryService;
+  late final bool _ownsLanGameDiscoveryService;
 
   @override
   void initState() {
     super.initState();
+    final injectedDiscoveryService = widget.lanGameDiscoveryService;
+    _lanGameDiscoveryService =
+        injectedDiscoveryService ?? LanGameDiscoveryService();
+    _ownsLanGameDiscoveryService = injectedDiscoveryService == null;
     WidgetsBinding.instance.addObserver(this);
     if (!kIsWeb && Platform.isWindows) {
       windowManager.addListener(this);
@@ -250,6 +261,14 @@ class _PlaymeshAppState extends State<PlaymeshApp>
     final runtime = _runtime;
     if (_ownsRuntime && runtime != null) {
       unawaited(_observeShutdownOperation('Go Core', runtime.close()));
+    }
+    if (_ownsLanGameDiscoveryService) {
+      unawaited(
+        _observeShutdownOperation(
+          '局域网发现服务',
+          _lanGameDiscoveryService.dispose(),
+        ),
+      );
     }
     unawaited(_observeShutdownOperation('游戏目录服务', _catalogController.close()));
   }
@@ -566,6 +585,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
         onRetryGameLibrary: gameLibraryError == null
             ? null
             : _retryGameLibraryScan,
+        lanGameDiscoveryService: _lanGameDiscoveryService,
       ),
       routes: {
         ProfilePage.routeName: (_) =>
@@ -619,6 +639,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
         JoinGamePage.routeName: (_) => JoinGamePage(
           initialUserId: _profile.userId,
           initialNickname: _profile.nickname,
+          discoveryService: _lanGameDiscoveryService,
         ),
       },
       onGenerateRoute: (settings) {
@@ -665,6 +686,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
               catalogController: widget.games == null
                   ? _catalogController
                   : null,
+              lanGameDiscoveryService: _lanGameDiscoveryService,
               developerProjectId: launchArguments.developerProjectId,
               developerRunId: launchArguments.developerRunId,
               developerResourceSession:

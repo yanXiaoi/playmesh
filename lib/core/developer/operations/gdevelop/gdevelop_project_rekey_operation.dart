@@ -9,13 +9,13 @@ class _GDevelopProjectRekeyOperation implements _DeveloperHttpOperation {
     'required': [
       'revision',
       'currentContentHash',
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     ],
     'properties': {
       'revision': {'type': 'integer', 'minimum': 1},
       'currentContentHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
-      'projectJsonHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
+      'projectFilesHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
       'resourceManifestHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
     },
   };
@@ -72,19 +72,19 @@ class _GDevelopProjectRekeyOperation implements _DeveloperHttpOperation {
       'browserSource': {
         'type': 'object',
         'additionalProperties': false,
-        'required': ['fileIdentifier', 'projectJsonHash'],
+        'required': ['fileIdentifier', 'projectFilesHash'],
         'properties': {
           'fileIdentifier': {'type': 'string'},
-          'projectJsonHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
+          'projectFilesHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
         },
       },
       'browserTarget': {
         'type': 'object',
         'additionalProperties': false,
-        'required': ['fileIdentifier', 'projectJsonHash'],
+        'required': ['fileIdentifier', 'projectFilesHash'],
         'properties': {
           'fileIdentifier': {'type': 'string'},
-          'projectJsonHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
+          'projectFilesHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
         },
       },
       'clientId': {'type': 'string', 'minLength': 1, 'maxLength': 128},
@@ -94,7 +94,7 @@ class _GDevelopProjectRekeyOperation implements _DeveloperHttpOperation {
   static const _ackSchema = <String, Object?>{
     'type': 'object',
     'additionalProperties': false,
-    'required': ['fileMetadata', 'packageName', 'projectJsonHash'],
+    'required': ['fileMetadata', 'packageName', 'projectFilesHash'],
     'properties': {
       'fileMetadata': {
         'type': 'object',
@@ -106,7 +106,7 @@ class _GDevelopProjectRekeyOperation implements _DeveloperHttpOperation {
         },
       },
       'packageName': {'type': 'string'},
-      'projectJsonHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
+      'projectFilesHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
     },
   };
 

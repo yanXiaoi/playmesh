@@ -48,12 +48,15 @@ const fileMetadata = {
 };
 const prepared = gameId => ({
   fileMetadata: { ...fileMetadata, gameId },
-  snapshot: { project: {}, resources: [] },
+  snapshot: {
+    projectFiles: [{ path: 'game.json', content: {} }],
+    resources: [],
+  },
   storedProject: {
     id: fileMetadata.fileIdentifier,
     name: gameId === oldGameId ? 'Source' : 'Target',
     gameId,
-    projectJson: '{}',
+    projectFiles: [{ path: 'game.json', content: {} }],
     resources: [],
     savedAt: 1,
   },

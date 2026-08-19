@@ -23,6 +23,8 @@ var (
 
 type State string
 
+const maxSessionPlayers = 32
+
 const (
 	StateLobby   State = "lobby"
 	StateRunning State = "running"
@@ -119,7 +121,8 @@ func NewStore() *Store {
 
 func (s *Store) Create(input CreateInput) (Snapshot, Credentials, error) {
 	if strings.TrimSpace(input.GameID) == "" || strings.TrimSpace(input.DisplayMode) == "" ||
-		input.MinPlayers < 1 || input.MaxPlayers < input.MinPlayers || input.MaxPlayers > 16 {
+		input.MinPlayers < 1 || input.MaxPlayers < input.MinPlayers ||
+		input.MaxPlayers > maxSessionPlayers {
 		return Snapshot{}, Credentials{}, errors.New("创建会话参数无效")
 	}
 	// Authority is always the App runtime that creates the session. Whether that

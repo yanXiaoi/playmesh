@@ -63,6 +63,8 @@ type PlaymeshAiExecutorOptions = {
   |}) => Promise<mixed>,
   updatePlan?: PlaymeshAiPlan => Promise<mixed>,
   onProjectModified?: () => mixed,
+  onFetchNewlyAddedResources?: () => Promise<void>,
+  onNewResourcesAdded?: () => void,
   ...,
 };
 type PlaymeshAiExecutionIdentity = {|
@@ -102,6 +104,12 @@ const executionIdentityKey = (
 
 const sharedExecutionResults /*: Map<string, PlaymeshAiPendingExecutionResult> */ = new Map();
 const sharedExecutionOperations /*: Map<string, Promise<PlaymeshAiExecutionOutcome>> */ = new Map();
+const DEFERRED_PROJECT_MUTATION_TOOLS = new Set([
+  'import_sprite_sheet_animation',
+  'import_gif_animation',
+  'create_or_update_jfxr_sound',
+  'create_or_update_yarn_dialogue',
+]);
 
 const hasPendingExecutionResult = (
   gameId /*: string */,
@@ -448,6 +456,8 @@ export class PlaymeshAiExecutor {
   readFullDocs: ?$NonMaybeType<PlaymeshAiExecutorOptions['readFullDocs']>;
   updatePlan: ?$NonMaybeType<PlaymeshAiExecutorOptions['updatePlan']>;
   onProjectModified: () => mixed;
+  onFetchNewlyAddedResources: () => Promise<void>;
+  onNewResourcesAdded: () => void;
   executionResults: Map<string, PlaymeshAiPendingExecutionResult>;
   operation: Promise<mixed>;
   disposed: boolean;
@@ -461,6 +471,8 @@ export class PlaymeshAiExecutor {
     readFullDocs,
     updatePlan,
     onProjectModified = () => {},
+    onFetchNewlyAddedResources = async () => {},
+    onNewResourcesAdded = () => {},
   } /*: PlaymeshAiExecutorOptions */ = {}) {
     this.client = client;
     this.executeEditorFunction = executeEditorFunction;
@@ -469,6 +481,8 @@ export class PlaymeshAiExecutor {
     this.readFullDocs = readFullDocs;
     this.updatePlan = updatePlan;
     this.onProjectModified = onProjectModified;
+    this.onFetchNewlyAddedResources = onFetchNewlyAddedResources;
+    this.onNewResourcesAdded = onNewResourcesAdded;
     this.executionResults = sharedExecutionResults;
     this.operation = Promise.resolve();
     this.disposed = false;
@@ -505,9 +519,6 @@ export class PlaymeshAiExecutor {
     ) {
       throw new PlaymeshAiExecutionError('project_file_identity_mismatch');
     }
-    if (!project || project.getPackageName() !== gameId) {
-      throw new PlaymeshAiExecutionError('project_identity_mismatch');
-    }
     if (
       !Number.isSafeInteger(sessionEpoch) ||
       sessionEpoch < 1 ||
@@ -515,6 +526,9 @@ export class PlaymeshAiExecutor {
       isSessionEpochCurrent(sessionEpoch) !== true
     ) {
       throw new PlaymeshAiExecutionError('editor_session_epoch_mismatch');
+    }
+    if (!project || project.getPackageName() !== gameId) {
+      throw new PlaymeshAiExecutionError('project_identity_mismatch');
     }
   }
 
@@ -597,7 +611,8 @@ export class PlaymeshAiExecutor {
   _createWrappers(
     eventPayload /*: ?PlaymeshAiEventPayload */,
     stagedResource /*: ?PlaymeshAiStagedResource */ = null,
-    toolsContract /*: ?PlaymeshAiToolsContract */ = null
+    toolsContract /*: ?PlaymeshAiToolsContract */ = null,
+    beforeProjectMutation /*: () => void */ = () => {}
   ) /*: PlaymeshAiLocalToolWrappers */ {
     const options /*: PlaymeshAiLocalToolWrappersOptions */ = {};
     if (typeof this.applyEventPayload === 'function') {
@@ -614,6 +629,9 @@ export class PlaymeshAiExecutor {
     }
     if (typeof this.updatePlan === 'function') options.updatePlan = this.updatePlan;
     if (stagedResource) options.stagedResource = stagedResource;
+    options.beforeProjectMutation = beforeProjectMutation;
+    options.onFetchNewlyAddedResources = this.onFetchNewlyAddedResources;
+    options.onNewResourcesAdded = this.onNewResourcesAdded;
     if (toolsContract) options.toolsContract = toolsContract;
     return this.createLocalWrappers(options);
   }
@@ -790,19 +808,43 @@ export class PlaymeshAiExecutor {
         if (executionAbortHandle.isAborted()) {
           return cancelledExecutionOutcome(call);
         }
+        const defersProjectMutation =
+          definition.modifiesProject &&
+          DEFERRED_PROJECT_MUTATION_TOOLS.has(definition.name);
         if (
           definition.modifiesProject &&
+          !defersProjectMutation &&
           !executionAbortHandle.enterNonCancellableExecution()
         ) {
           return cancelledExecutionOutcome(call);
         }
-        mutationStarted = definition.modifiesProject;
+        mutationStarted = definition.modifiesProject && !defersProjectMutation;
+        const beforeProjectMutation = () => {
+          if (mutationStarted) return;
+          if (executionAbortHandle.isAborted()) {
+            throw new PlaymeshAiExecutionError('execution_aborted');
+          }
+          this._assertExecutionIdentity({
+            gameId,
+            sessionId,
+            sessionEpoch,
+            isSessionEpochCurrent,
+            call,
+            project,
+            fileMetadata,
+          });
+          if (!executionAbortHandle.enterNonCancellableExecution()) {
+            throw new PlaymeshAiExecutionError('execution_aborted');
+          }
+          mutationStarted = true;
+        };
         let executed;
         try {
           const playmeshWrappers = this._createWrappers(
             eventPayload,
             stagedResource,
-            toolsContract
+            toolsContract,
+            beforeProjectMutation
           );
           editorFunctionInvoked = true;
           executed = await this.executeEditorFunction({
@@ -818,7 +860,7 @@ export class PlaymeshAiExecutor {
           notifyProjectModifiedAfterExecution();
         } catch (error) {
           notifyProjectModifiedAfterExecution();
-          if (!definition.modifiesProject && executionAbortHandle.isAborted()) {
+          if (!mutationStarted && executionAbortHandle.isAborted()) {
             return cancelledExecutionOutcome(call);
           }
           const code = readExecutionErrorCode(

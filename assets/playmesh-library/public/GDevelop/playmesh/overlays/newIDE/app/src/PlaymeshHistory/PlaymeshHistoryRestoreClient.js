@@ -31,7 +31,7 @@ type PlaymeshHistoryRestorePrepareInput = {|
   baseRevision: number,
   targetRevision: number,
   source: 'user' | 'system',
-  currentProject: mixed,
+  currentProjectFiles: mixed,
   currentResources: mixed,
   clientId?: string,
   signal?: AbortSignal,
@@ -317,7 +317,7 @@ export const createPlaymeshHistoryRestoreClient = ({
         baseRevision: input.baseRevision,
         targetRevision: input.targetRevision,
         source: input.source,
-        currentProject: input.currentProject,
+        currentProjectFiles: input.currentProjectFiles,
         currentResources: input.currentResources,
         clientId: input.clientId,
       });
@@ -395,3 +395,38 @@ export const createPlaymeshHistoryRestoreClient = ({
 };
 
 export const playmeshHistoryRestoreClient /*: PlaymeshHistoryRestoreClient */ = createPlaymeshHistoryRestoreClient();
+
+// Called only after project open observed the durable mutation lock. PREPARED
+// is the sole pre-decision phase and can be rolled back; later phases must be
+// recovered forward by the restore coordinator.
+export const abortPreparedPlaymeshHistoryRestore = async ({
+  gameId,
+  signal,
+  client = playmeshHistoryRestoreClient,
+} /*: {|
+  gameId: string,
+  signal?: AbortSignal,
+  client?: PlaymeshHistoryRestoreClient,
+|} */) /*: Promise<boolean> */ => {
+  const recovery = await client.recover({
+    gameId,
+    signal,
+  });
+  const transaction = recovery.transaction;
+  if (!transaction) return true;
+  if (transaction.phase !== 'PREPARED') return false;
+  const aborted = await client.abort({
+    gameId,
+    txId: transaction.txId,
+    signal,
+  });
+  if (aborted.transaction.phase !== 'ABORTED') {
+    throw new PlaymeshHistoryRestoreRequestError(
+      'history_restore_abort_incomplete',
+      'Playmesh 历史恢复 PREPARED 事务未能安全回滚。',
+      0,
+      aborted
+    );
+  }
+  return true;
+};

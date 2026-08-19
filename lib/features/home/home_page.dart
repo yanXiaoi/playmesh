@@ -8,10 +8,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/game_package/game_package_icon.dart';
 import '../../core/localization/playmesh_localization.dart';
+import '../../core/network/lan_game_discovery_service.dart';
 import '../../models/game_summary.dart';
 import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
+import '../game/game_invitation_scanner_page.dart';
 import '../game/join_game_page.dart';
 import '../developer/game_creation_page.dart';
 import '../games/game_library_page.dart';
@@ -30,6 +32,7 @@ class HomePage extends StatelessWidget {
     this.gameLibraryError,
     this.onRetryGameLibrary,
     this.externalUrlLauncher,
+    this.lanGameDiscoveryService,
   });
 
   static const profileHeroKey = Key('home-profile-hero');
@@ -55,6 +58,7 @@ class HomePage extends StatelessWidget {
   final Object? gameLibraryError;
   final VoidCallback? onRetryGameLibrary;
   final Future<bool> Function(Uri uri)? externalUrlLauncher;
+  final LanGameDiscoveryService? lanGameDiscoveryService;
 
   List<GameSummary> get _visibleGames {
     final featured = featuredGame;
@@ -105,6 +109,7 @@ class HomePage extends StatelessWidget {
         builder: (_) => GameInvitationScannerPage(
           initialUserId: user.userId,
           initialNickname: user.nickname,
+          discoveryService: lanGameDiscoveryService,
         ),
       ),
     );

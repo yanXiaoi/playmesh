@@ -22,6 +22,12 @@ Map<String, String> parsePlaymeshInvitationFragment(String value) {
 abstract interface class GameWebGateway {
   int get port;
 
+  /// 当前分享通道的邀请凭据，只供统一分享协调器生成组播公告载荷。
+  String get invitationToken;
+
+  /// Relay 主机回环入口。它不属于可公开 LAN 地址，也不能进入分享快照。
+  Uri get loopbackInvitationUri;
+
   Future<List<Uri>> shareLinks();
 
   Future<void> close();

@@ -14,6 +14,12 @@ import {
 import PlaymeshGameManifest from '../../PlaymeshShared/GameManifest';
 import { sha256Blob } from '../../PlaymeshCrypto/PlaymeshSha256';
 import { playmeshResourceObjectUrlRegistry } from './PlaymeshResourceObjectUrlRegistry';
+import {
+  PLAYMESH_GDEVELOP_ROOT_PROJECT_FILE,
+  splitPlaymeshProject,
+  unsplitPlaymeshProject,
+  type PlaymeshProjectFile,
+} from './PlaymeshProjectFiles';
 
 const RESOURCE_URL_PREFIX = 'playmesh-local-resource://';
 const objectUrlToLogicalUrl = new Map<string, string>();
@@ -122,8 +128,47 @@ export const restoreStoredResources = (
   );
 };
 
+/**
+ * Materialize a temporary resource Blob produced by an official GDevelop
+ * ResourceFetcher into the Playmesh-local live resource registry. The caller
+ * can then let the official external-editor lifecycle revoke its temporary
+ * Blob URL without invalidating the gdProject resource.
+ */
+export const adoptPlaymeshLocalResourceBlob = ({
+  resource,
+  blob,
+  fileMetadata,
+}: {|
+  resource: gdResource,
+  blob: Blob,
+  fileMetadata: FileMetadata,
+|}): StoredProjectResource => {
+  const resourceName = resource.getName();
+  const previousObjectUrl = resource.getFile();
+  const logicalUrl = `${RESOURCE_URL_PREFIX}${encodeURIComponent(
+    fileMetadata.fileIdentifier
+  )}/${createId()}/${encodeURIComponent(resourceName)}`;
+  const storedResource: StoredProjectResource = {
+    logicalUrl,
+    name: resourceName,
+    blob,
+  };
+  const objectUrl = playmeshResourceObjectUrlRegistry.acquire(storedResource);
+  objectUrlToLogicalUrl.set(objectUrl, logicalUrl);
+  objectUrlToStoredResource.set(objectUrl, storedResource);
+  resource.setFile(objectUrl);
+  if (
+    previousObjectUrl !== objectUrl &&
+    !playmeshResourceObjectUrlRegistry.owns(previousObjectUrl)
+  ) {
+    objectUrlToLogicalUrl.delete(previousObjectUrl);
+    objectUrlToStoredResource.delete(previousObjectUrl);
+  }
+  return storedResource;
+};
+
 export type PlaymeshProjectSnapshot = {|
-  project: Object,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
 |};
 
@@ -137,6 +182,9 @@ export const createProjectSnapshot = async (
   project: gdProject,
   fileMetadata: FileMetadata
 ): Promise<PlaymeshProjectSnapshot> => {
+  // Playmesh WebIDE has one storage mode. Persist the upstream folder-project
+  // flag so opening the exported source in desktop GDevelop keeps that mode.
+  project.setFolderProject(true);
   const serializedProject = requireSerializableObject(
     serializeToJSObject(project)
   );
@@ -193,7 +241,9 @@ export const createProjectSnapshot = async (
     replacements
   );
   return {
-    project: requireSerializableObject(projectWithLogicalResourceUrls),
+    projectFiles: splitPlaymeshProject(
+      requireSerializableObject(projectWithLogicalResourceUrls)
+    ),
     resources,
   };
 };
@@ -246,7 +296,7 @@ export const prepareProjectPersistence = async (
     id: fileMetadata.fileIdentifier,
     name: project.getName(),
     gameId,
-    projectJson: JSON.stringify(snapshot.project),
+    projectFiles: snapshot.projectFiles,
     resources: snapshot.resources,
     savedAt,
   };
@@ -259,16 +309,16 @@ export const mirrorPreparedProject = (
 
 export const persistRestoredProject = async ({
   fileMetadata,
-  project,
+  projectFiles,
   resources,
 }: {|
   fileMetadata: FileMetadata,
-  project: Object,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
 |}): Promise<FileMetadata> => {
   const result = createRestoredStoredProject({
     fileMetadata,
-    project,
+    projectFiles,
     resources,
   });
   await putStoredProject(result.storedProject);
@@ -277,18 +327,22 @@ export const persistRestoredProject = async ({
 
 export const createRestoredStoredProject = ({
   fileMetadata,
-  project,
+  projectFiles,
   resources,
   savedAt = Date.now(),
 }: {|
   fileMetadata: FileMetadata,
-  project: Object,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
   savedAt?: number,
 |}): {|
   fileMetadata: FileMetadata,
   storedProject: StoredProject,
 |} => {
+  const rootFile = projectFiles.find(
+    file => file.path === PLAYMESH_GDEVELOP_ROOT_PROJECT_FILE
+  );
+  const project = rootFile && rootFile.content;
   const name =
     project && project.properties && project.properties.name
       ? String(project.properties.name)
@@ -297,7 +351,7 @@ export const createRestoredStoredProject = ({
     id: fileMetadata.fileIdentifier,
     name,
     ...(fileMetadata.gameId ? { gameId: fileMetadata.gameId } : {}),
-    projectJson: JSON.stringify(project),
+    projectFiles,
     resources,
     savedAt,
   };
@@ -313,6 +367,6 @@ export const readProjectContent = async (
   const storedProject = await getStoredProject(fileIdentifier);
   if (!storedProject)
     throw new Error('The Playmesh local project does not exist.');
-  const content = JSON.parse(storedProject.projectJson);
+  const content = await unsplitPlaymeshProject(storedProject.projectFiles);
   return restoreStoredResources(content, storedProject.resources || []);
 };

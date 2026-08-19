@@ -317,6 +317,43 @@ const patchedMainFrameSource = await readFile(
   path.join(sourceRoot, 'newIDE/app/src/MainFrame/index.js'),
   'utf8'
 );
+assert.match(
+  patchedMainFrameSource,
+  /createPlaymeshAutosaveController/,
+  'preview and periodic autosaves must share the Playmesh success cursor'
+);
+assert.match(
+  patchedMainFrameSource,
+  /autosaveProjectIfNeeded\('periodic'\)[\s\S]*60 \* 1000/,
+  'PlaymeshLocal autosave must run once per minute through the shared entrypoint'
+);
+assert.match(
+  patchedMainFrameSource,
+  /generation: getChangesGeneration\(\)/,
+  'autosave de-duplication must use a reset-safe edit generation'
+);
+const patchedUnsavedChangesSource = await readFile(
+  path.join(sourceRoot, 'newIDE/app/src/MainFrame/UnsavedChangesContext.js'),
+  'utf8'
+);
+assert.match(patchedUnsavedChangesSource, /changesGeneration\.current \+ 1/);
+assert.doesNotMatch(
+  patchedUnsavedChangesSource,
+  /const sealUnsavedChanges[\s\S]{0,240}changesGeneration\.current = 0/,
+  'manual sealing must not reset the monotonic autosave generation'
+);
+const patchedPreferencesSource = await readFile(
+  path.join(
+    sourceRoot,
+    'newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js'
+  ),
+  'utf8'
+);
+assert.match(
+  patchedPreferencesSource,
+  /usePlaymeshAutosavePreferenceLabel/,
+  'the existing switch must describe both minute and preview autosaves in the app locale'
+);
 assert.doesNotMatch(
   patchedMainFrameSource,
   /getPlaymeshInitialProjectFileMetadata/,

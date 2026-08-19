@@ -50,21 +50,29 @@ void main() {
     });
     final base = Uri.parse('http://127.0.0.1:${gateway.port}');
     final shareLinks = await gateway.shareLinks();
-    expect(shareLinks, isNotEmpty);
     expect(
-      shareLinks.every(
-        (link) =>
-            link.path == playmeshGameInvitationPath &&
+      shareLinks.every((link) {
+        final inviteToken = parsePlaymeshInvitationFragment(
+          link.fragment,
+        )[playmeshGameInvitationTokenParameter];
+        return link.path == playmeshGameInvitationPath &&
             !link.hasQuery &&
-            RegExp(r'^[A-Za-z0-9_-]{32}$').hasMatch(
-              Uri.splitQueryString(
-                    link.fragment,
-                  )[playmeshGameInvitationTokenParameter] ??
-                  '',
-            ),
-      ),
+            link.host != InternetAddress.loopbackIPv4.address &&
+            link.host != InternetAddress.loopbackIPv6.address &&
+            inviteToken == gateway.invitationToken &&
+            RegExp(r'^[A-Za-z0-9_-]{32}$').hasMatch(inviteToken ?? '');
+      }),
       isTrue,
     );
+    final loopbackInvitation = gateway.loopbackInvitationUri;
+    expect(loopbackInvitation.scheme, 'http');
+    expect(loopbackInvitation.host, InternetAddress.loopbackIPv4.address);
+    expect(loopbackInvitation.port, gateway.port);
+    expect(loopbackInvitation.path, playmeshGameInvitationPath);
+    expect(loopbackInvitation.hasQuery, isFalse);
+    expect(parsePlaymeshInvitationFragment(loopbackInvitation.fragment), {
+      playmeshGameInvitationTokenParameter: gateway.invitationToken,
+    });
 
     final unauthorizedStorage = await sendStandardJsonBucketRequest(
       baseUri: base,
@@ -76,9 +84,11 @@ void main() {
     );
     expect(unauthorizedStorage.statusCode, HttpStatus.forbidden);
 
-    final opened = await _openInvitation(shareLinks.first);
+    final opened = await _openInvitation(loopbackInvitation);
     final controller = opened.entry;
     expect(opened.landing.body, contains('正在进入游戏'));
+    expect(opened.exchangePayload['gameId'], 'com.playmesh.test-game');
+    expect(opened.exchangePayload['gameName'], '测试游戏');
     expect(opened.entryUri.path, '/controller/index.html');
     expect(opened.entryUri.hasQuery, isFalse);
     expect(controller.statusCode, HttpStatus.ok);
@@ -290,7 +300,7 @@ void main() {
       await packageRoot.delete(recursive: true);
     });
 
-    final authorityInvitation = (await gateway.shareLinks()).first;
+    final authorityInvitation = gateway.loopbackInvitationUri;
     final tunnelInvitation = authorityInvitation.replace(
       scheme: tunnel.localBaseUri.scheme,
       host: tunnel.localBaseUri.host,
@@ -367,7 +377,7 @@ void main() {
       path: playmeshCoreTunnelPath,
       headers: {
         playmeshShareTokenHeader: parsePlaymeshInvitationFragment(
-          (await gateway.shareLinks()).first.fragment,
+          gateway.loopbackInvitationUri.fragment,
         )[playmeshGameInvitationTokenParameter]!,
       },
     );
@@ -431,7 +441,7 @@ void main() {
     });
 
     final response = (await _openInvitation(
-      (await gateway.shareLinks()).first,
+      gateway.loopbackInvitationUri,
     )).entry;
 
     expect(response.statusCode, HttpStatus.ok);
@@ -473,11 +483,10 @@ void main() {
       await root.delete(recursive: true);
     });
 
-    final links = await gateway.shareLinks();
-    expect(links, isNotEmpty);
-    expect(links.first.path, playmeshGameInvitationPath);
-    expect(links.first.hasQuery, isFalse);
-    final response = (await _openInvitation(links.first)).entry;
+    final invitation = gateway.loopbackInvitationUri;
+    expect(invitation.path, playmeshGameInvitationPath);
+    expect(invitation.hasQuery, isFalse);
+    final response = (await _openInvitation(invitation)).entry;
 
     expect(response.statusCode, HttpStatus.ok);
     expect(response.body, contains('SOLO_ENTRY'));
@@ -521,7 +530,7 @@ void main() {
       await packageRoot.delete(recursive: true);
     });
 
-    final invitation = (await gateway.shareLinks()).first;
+    final invitation = gateway.loopbackInvitationUri;
     final response = await http.get(
       Uri(
         scheme: invitation.scheme,
@@ -589,7 +598,7 @@ void main() {
       await root.delete(recursive: true);
     });
 
-    final invitation = (await gateway.shareLinks()).first;
+    final invitation = gateway.loopbackInvitationUri;
     expect(invitation.path, playmeshGameInvitationPath);
     expect(invitation.hasQuery, isFalse);
     final opened = await _openInvitation(invitation);
@@ -681,7 +690,7 @@ void main() {
       await upstream.close(force: true);
     });
 
-    final invitation = (await gateway.shareLinks()).first;
+    final invitation = gateway.loopbackInvitationUri;
     final opened = await _openInvitation(invitation);
     final entry = opened.entry;
     final script = await http.get(invitation.resolve('/assets/hot.js?v=1'));
@@ -755,7 +764,7 @@ void main() {
     );
     addTearDown(gateway.close);
 
-    final invitation = (await gateway.shareLinks()).first;
+    final invitation = gateway.loopbackInvitationUri;
     expect(invitation.path, playmeshGameInvitationPath);
     final opened = await _openInvitation(invitation);
     expect(opened.entryUri.path, '/app/index.html');
@@ -768,12 +777,14 @@ void main() {
 final class _OpenedInvitation {
   const _OpenedInvitation({
     required this.landing,
+    required this.exchangePayload,
     required this.entryUri,
     required this.entry,
     required this.cookie,
   });
 
   final http.Response landing;
+  final Map<String, Object?> exchangePayload;
   final Uri entryUri;
   final http.Response entry;
   final String cookie;
@@ -805,6 +816,7 @@ Future<_OpenedInvitation> _openInvitation(Uri invitation) async {
   final entry = await http.get(entryUri, headers: {'Cookie': cookie});
   return _OpenedInvitation(
     landing: landing,
+    exchangePayload: payload,
     entryUri: entryUri,
     entry: entry,
     cookie: cookie,

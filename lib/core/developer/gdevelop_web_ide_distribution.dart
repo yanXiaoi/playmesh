@@ -2,10 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
+import '../download/app_resource_source_catalog.dart';
 import '../download/endpoint_document_contract.dart';
 import '../download/named_download_endpoint.dart';
-
-const gdevelopWebIdeConfigSourcesAssetPath = 'assets/app/GdevelopWebIDE.json';
 
 class GDevelopWebIdeConfigSources {
   const GDevelopWebIdeConfigSources(this.sources);
@@ -15,10 +14,9 @@ class GDevelopWebIdeConfigSources {
   bool get configured => sources.isNotEmpty;
 
   factory GDevelopWebIdeConfigSources.parse(String source) {
-    final parsed = NamedDownloadEndpointList.parse(
+    final parsed = AppResourceSourceCatalog.parse(
       source,
-      field: 'GDevelop Web IDE config sources',
-    );
+    ).endpointsFor('gdevelop', field: 'GDevelop Web IDE config sources');
     return GDevelopWebIdeConfigSources(parsed.endpoints);
   }
 }
@@ -30,7 +28,7 @@ class GDevelopWebIdeConfigSourcesLoader {
 
   Future<GDevelopWebIdeConfigSources> load() async {
     final source = await (bundle ?? rootBundle).loadString(
-      gdevelopWebIdeConfigSourcesAssetPath,
+      appResourceSourceCatalogAssetPath,
       cache: false,
     );
     return GDevelopWebIdeConfigSources.parse(source);

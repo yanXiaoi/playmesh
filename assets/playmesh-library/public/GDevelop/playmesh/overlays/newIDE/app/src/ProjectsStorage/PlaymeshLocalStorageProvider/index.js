@@ -16,9 +16,17 @@ import {
   prepareProjectPersistence,
   restoreStoredResources,
   type PlaymeshProjectSnapshot,
-  type PreparedPlaymeshProjectPersistence,
 } from './PlaymeshProjectSerializer';
-import { createPlaymeshManagedProjectStorageController } from './PlaymeshManagedProjectStorageController';
+import { unsplitPlaymeshProject } from './PlaymeshProjectFiles';
+import {
+  createPlaymeshManagedProjectStorageController,
+  openPlaymeshProjectWithPreparedRestoreRecovery,
+} from './PlaymeshManagedProjectStorageController';
+import {
+  createPlaymeshAuthoritativeProjectCommit,
+  type PlaymeshAuthoritativeHistoryResult,
+  type PlaymeshManagedSaveInput,
+} from './PlaymeshAuthoritativeProjectCommit';
 import {
   ensureGDevelopGameId,
   generateCopiedGDevelopGameId,
@@ -42,6 +50,7 @@ import {
   PlaymeshHistoryError,
   syncPlaymeshHistory,
 } from '../../PlaymeshHistory/PlaymeshHistoryClient';
+import { abortPreparedPlaymeshHistoryRestore } from '../../PlaymeshHistory/PlaymeshHistoryRestoreClient';
 import {
   runPlaymeshProjectMutation,
   tryRunPlaymeshProjectAutosave,
@@ -55,11 +64,13 @@ import {
 
 type LifecycleAndHistoryCommitOptions = {|
   projectRef: PlaymeshProjectRef,
-  origin: 'duplicate' | 'open' | 'create',
+  origin: 'open',
   fileMetadata: FileMetadata,
   snapshot: PlaymeshProjectSnapshot,
+  source: 'user' | 'system',
   reason: ?string,
   mutationLease: PlaymeshProjectMutationLease,
+  shouldBindFileIdentifier: boolean,
 |};
 
 type SaveAsSelection = {|
@@ -67,19 +78,11 @@ type SaveAsSelection = {|
   saveAsOptions: ?SaveAsOptions,
 |};
 
-type ManagedSaveInput = {|
-  project: gdProject,
-  fileMetadata: FileMetadata,
-  origin: 'duplicate' | 'open' | 'create',
-  reason: ?string,
-  mutationLease: PlaymeshProjectMutationLease,
-|};
-
 export type PlaymeshManagedProjectFile = {|
   id: string,
   name: string,
   gameId: string,
-  projectJson: string,
+  projectFiles: Array<mixed>,
   resources: Array<mixed>,
   savedAt: number,
   hasCurrent: boolean,
@@ -222,15 +225,22 @@ const commitLifecycleAndHistory = async ({
   origin,
   fileMetadata,
   snapshot,
+  source,
   reason,
   mutationLease,
-}: LifecycleAndHistoryCommitOptions): Promise<void> => {
+  shouldBindFileIdentifier,
+}: LifecycleAndHistoryCommitOptions): Promise<PlaymeshAuthoritativeHistoryResult> => {
+  // Opening a project already binds its existing fileIdentifier. Only an
+  // explicit Save As that keeps the same gameId introduces a new identifier
+  // and needs the lifecycle endpoint before committing current/history.
   if (origin === 'open') {
-    await openPlaymeshProject({
-      projectRef,
-      fileIdentifier: fileMetadata.fileIdentifier,
-      name: fileMetadata.name,
-    });
+    if (shouldBindFileIdentifier) {
+      await openPlaymeshProject({
+        projectRef,
+        fileIdentifier: fileMetadata.fileIdentifier,
+        name: fileMetadata.name,
+      });
+    }
   } else {
     await createOrResumePlaymeshProject({
       projectRef,
@@ -241,7 +251,7 @@ const commitLifecycleAndHistory = async ({
   const historyResult = await syncPlaymeshHistory({
     gameId: projectRef.gameId,
     snapshot,
-    source: 'user',
+    source,
     reason,
     mutationLease,
   });
@@ -251,6 +261,7 @@ const commitLifecycleAndHistory = async ({
       '当前 Playmesh 无法提交 GDevelop 工程。'
     );
   }
+  return historyResult;
 };
 
 const commitNewProjectAllocation = async ({
@@ -311,7 +322,7 @@ export const listAuthoritativeProjects = async (): Promise<{|
       id: identity.fileIdentifiers[0] || identity.gameId,
       name: identity.name || identity.gameId,
       gameId: identity.gameId,
-      projectJson: '',
+      projectFiles: ([]: Array<mixed>),
       resources: ([]: Array<mixed>),
       savedAt: updatedAt,
       hasCurrent: project.hasCurrent,
@@ -328,7 +339,7 @@ export const listAuthoritativeProjects = async (): Promise<{|
   };
 };
 
-const openAuthoritativeProject = async (
+const openAuthoritativeProjectUnderLease = async (
   fileMetadata: FileMetadata
 ): Promise<Object> => {
   if (!fileMetadata.gameId) {
@@ -338,10 +349,16 @@ const openAuthoritativeProject = async (
     );
   }
   const projectRef = createPlaymeshProjectRef(fileMetadata.gameId);
-  await openPlaymeshProject({
-    projectRef,
-    fileIdentifier: fileMetadata.fileIdentifier,
-    name: fileMetadata.name,
+  const openProject = () =>
+    openPlaymeshProject({
+      projectRef,
+      fileIdentifier: fileMetadata.fileIdentifier,
+      name: fileMetadata.name,
+    });
+  await openPlaymeshProjectWithPreparedRestoreRecovery({
+    openProject,
+    recoverPreparedRestore: () =>
+      abortPreparedPlaymeshHistoryRestore({ gameId: projectRef.gameId }),
   });
   const current = await loadPlaymeshHistoryCurrentProject(projectRef.gameId);
   if (!current) {
@@ -353,47 +370,47 @@ const openAuthoritativeProject = async (
   const versionTime = Date.parse(current.version.timestamp);
   const restored = createRestoredStoredProject({
     fileMetadata,
-    project: current.project,
+    projectFiles: current.projectFiles,
     resources: current.resources,
     savedAt: Number.isFinite(versionTime) ? versionTime : Date.now(),
   });
   return {
-    content: restoreStoredResources(current.project, current.resources),
+    content: restoreStoredResources(
+      await unsplitPlaymeshProject(current.projectFiles),
+      current.resources
+    ),
     fileMetadata: restored.fileMetadata,
     storedProject: restored.storedProject,
   };
 };
 
+const openAuthoritativeProject = async (
+  fileMetadata: FileMetadata
+): Promise<Object> => {
+  const gameId = fileMetadata.gameId;
+  if (!gameId) {
+    return openAuthoritativeProjectUnderLease(fileMetadata);
+  }
+  return runPlaymeshProjectMutation({
+    gameId,
+    owner: 'project-open',
+    operation: () => openAuthoritativeProjectUnderLease(fileMetadata),
+  });
+};
+
+const commitAuthoritativeProject = createPlaymeshAuthoritativeProjectCommit({
+  createProjectRef: createPlaymeshProjectRef,
+  ensureGameId: ensureGDevelopGameId,
+  commitNewProjectAllocation,
+  commitLifecycleAndHistory,
+});
+
 const managedStorage = createPlaymeshManagedProjectStorageController({
   listAuthoritativeProjects,
   openAuthoritativeProject,
-  prepareProject: (input: ManagedSaveInput) =>
+  prepareProject: (input: PlaymeshManagedSaveInput) =>
     prepareProjectPersistence(input.project, input.fileMetadata),
-  commitAuthoritativeProject: async (
-    prepared: PreparedPlaymeshProjectPersistence,
-    input: ManagedSaveInput
-  ) => {
-    const projectRef = createPlaymeshProjectRef(
-      prepared.fileMetadata.gameId || ensureGDevelopGameId(input.project)
-    );
-    if (input.origin !== 'open') {
-      await commitNewProjectAllocation({
-        project: input.project,
-        origin: input.origin,
-        fileMetadata: prepared.fileMetadata,
-        snapshot: prepared.snapshot,
-      });
-      return;
-    }
-    await commitLifecycleAndHistory({
-      projectRef,
-      origin: input.origin,
-      fileMetadata: prepared.fileMetadata,
-      snapshot: prepared.snapshot,
-      reason: input.reason,
-      mutationLease: input.mutationLease,
-    });
-  },
+  commitAuthoritativeProject,
 });
 
 export default ({
@@ -441,8 +458,10 @@ export default ({
             project,
             fileMetadata,
             origin: fileMetadata.lastModifiedDate ? 'open' : 'create',
+            source: 'user',
             reason: 'explicit_save',
             mutationLease,
+            shouldBindFileIdentifier: false,
           });
           return {
             wasSaved: true,
@@ -519,8 +538,10 @@ export default ({
             project,
             fileMetadata,
             origin,
+            source: 'user',
             reason: 'explicit_save',
             mutationLease,
+            shouldBindFileIdentifier: origin === 'open',
           });
           return {
             wasSaved: true,
@@ -544,20 +565,46 @@ export default ({
       });
       return null;
     },
-    onAutoSaveProject: async (project, fileMetadata) => {
+    onAutoSaveProject: async (
+      project: gdProject,
+      fileMetadata: FileMetadata
+    ): Promise<void | {| skipped: string |}> => {
       const gameId = fileMetadata.gameId || ensureGDevelopGameId(project);
-      await tryRunPlaymeshProjectAutosave({
+      const autosaveResult = await tryRunPlaymeshProjectAutosave({
         gameId,
         operation: mutationLease =>
           managedStorage.saveProject({
             project,
             fileMetadata,
             origin: 'open',
-            // 自动保存只更新 current，不创建历史 revision。
-            reason: null,
+            source: 'system',
+            reason: 'autosave',
             mutationLease,
+            shouldBindFileIdentifier: false,
           }),
       });
+      if ('skipped' in autosaveResult) {
+        const skippedResult: {| skipped: string |} = {
+          skipped: autosaveResult.skipped,
+        };
+        return skippedResult;
+      }
+      const historyResult = autosaveResult.value.authoritativeResult;
+      if (
+        historyResult &&
+        'historyCreated' in historyResult &&
+        historyResult.historyCreated === false &&
+        (!('deduplicated' in historyResult) ||
+          historyResult.deduplicated !== true)
+      ) {
+        // current 已落盘但可见 revision 未创建。不要前移自动保存游标，
+        // 下一次周期继续通过新的 CAS baseRevision 重试历史提交。
+        const skippedResult: {| skipped: string |} = {
+          skipped: 'history_not_created',
+        };
+        return skippedResult;
+      }
+      return undefined;
     },
     getOpenErrorMessage: (error: Error): MessageDescriptor => {
       const diagnostic = getPlaymeshProjectOpenDiagnostic(error);

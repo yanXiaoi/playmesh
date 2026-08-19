@@ -1,5 +1,6 @@
 enum LanAddressType {
   privateIpv4,
+  linkLocalIpv4,
   carrierGradeNatIpv4,
   benchmarkIpv4,
   publicIpv4,
@@ -44,6 +45,12 @@ class LanEndpointCandidate {
         (first == 172 && second >= 16 && second <= 31) ||
         (first == 192 && second == 168)) {
       return (type: LanAddressType.privateIpv4, risk: LanEndpointRisk.low);
+    }
+    if (first == 169 && second == 254) {
+      return (
+        type: LanAddressType.linkLocalIpv4,
+        risk: LanEndpointRisk.caution,
+      );
     }
     if (first == 100 && second >= 64 && second <= 127) {
       return (

@@ -3,9 +3,11 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 
 import {
   assertManifestMatchesWebIdeLock,
+  computeDirectoryTreeDigest,
   loadSourcePolicyOutputManifest,
   sha256Bytes,
   verifyOverlayTreeDigest,
@@ -85,6 +87,101 @@ const replaceAllExactly = (
   return content.split(from).join(to);
 };
 
+const replaceSectionsExactly = (
+  content,
+  startMarker,
+  endMarker,
+  replacement,
+  expectedCount,
+  description
+) => {
+  let cursor = 0;
+  let count = 0;
+  let replaced = '';
+  while (true) {
+    const startIndex = content.indexOf(startMarker, cursor);
+    if (startIndex === -1) break;
+    const endIndex = content.indexOf(
+      endMarker,
+      startIndex + startMarker.length
+    );
+    if (endIndex === -1) {
+      throw new Error(`Missing section end: ${description}`);
+    }
+    replaced += content.slice(cursor, startIndex) + replacement;
+    cursor = endIndex + endMarker.length;
+    count++;
+  }
+  if (count !== expectedCount) {
+    throw new Error(
+      `Expected ${expectedCount} sections for ${description}, found ${count}`
+    );
+  }
+  return replaced + content.slice(cursor);
+};
+
+const loadExternalEditorCatalog = async ({
+  editorName,
+  localeEntry,
+  overlayDirectory,
+}) => {
+  if (
+    !localeEntry ||
+    typeof localeEntry.catalog !== 'string' ||
+    !/^playmesh-i18n\/locales\/[A-Za-z0-9-]+\.js$/.test(
+      localeEntry.catalog
+    )
+  ) {
+    throw new Error(`Playmesh ${editorName} locale catalog path is invalid`);
+  }
+  const catalogPath = path.join(
+    overlayDirectory,
+    ...localeEntry.catalog.split('/')
+  );
+  const registered = [];
+  const catalogRoot = Object.freeze({
+    PlaymeshExternalEditorI18n: Object.freeze({
+      registerCatalog: catalog => registered.push(catalog),
+    }),
+  });
+  runInNewContext(
+    await readFile(catalogPath, 'utf8'),
+    { globalThis: catalogRoot, window: catalogRoot },
+    {
+      timeout: 1000,
+      contextCodeGeneration: { strings: false, wasm: false },
+    }
+  );
+  if (registered.length !== 1) {
+    throw new Error(
+      `Playmesh ${editorName} ${localeEntry.id} catalog registration is invalid`
+    );
+  }
+  const catalog = registered[0];
+  if (
+    !catalog ||
+    catalog.editor !== editorName ||
+    catalog.locale !== localeEntry.id ||
+    !catalog.messages ||
+    typeof catalog.messages !== 'object' ||
+    Array.isArray(catalog.messages)
+  ) {
+    throw new Error(
+      `Playmesh ${editorName} ${localeEntry.id} catalog payload is invalid`
+    );
+  }
+  const keys = Object.keys(catalog.messages).sort();
+  if (
+    keys.length !== localeEntry.messageCount ||
+    keys.some(key => typeof catalog.messages[key] !== 'string')
+  ) {
+    throw new Error(
+      `Playmesh ${editorName} ${localeEntry.id} catalog count or values do not match its manifest`
+    );
+  }
+  return keys;
+};
+
 const patchFile = async ({ relativePath, expectedGitBlobSha, transform }) => {
   const filePath = path.join(sourceRoot, ...relativePath.split('/'));
   const originalBytes = await readFile(filePath);
@@ -160,6 +257,320 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const playmeshDirectory = path.resolve(scriptDirectory, '..');
 const overlayDirectory = path.join(playmeshDirectory, 'overlays');
 await cp(overlayDirectory, sourceRoot, { recursive: true });
+const lockedExternalEditorsRoot = path.resolve(
+  playmeshDirectory,
+  '..',
+  'official',
+  'external-editors'
+);
+const lockedExternalEditorsManifest = JSON.parse(
+  await readFile(
+    path.resolve(
+      playmeshDirectory,
+      '..',
+      'official',
+      'external-editors.json'
+    ),
+    'utf8'
+  )
+);
+const localExternalEditorsRoot = path.join(
+  playmeshDirectory,
+  'external-editors'
+);
+const localExternalEditorsManifest = JSON.parse(
+  await readFile(
+    path.join(localExternalEditorsRoot, 'manifest.json'),
+    'utf8'
+  )
+);
+if (
+  lockedExternalEditorsManifest.schemaVersion !== 1 ||
+  lockedExternalEditorsManifest.gdevelopVersion !== '5.6.276' ||
+  !Array.isArray(lockedExternalEditorsManifest.editors) ||
+  lockedExternalEditorsManifest.editors
+    .map(editor => editor && editor.name)
+    .sort()
+    .join(',') !== 'jfxr,piskel,yarn'
+) {
+  throw new Error('Locked GDevelop external-editor manifest is invalid');
+}
+if (
+  localExternalEditorsManifest.schemaVersion !== 1 ||
+  localExternalEditorsManifest.gdevelopVersion !== '5.6.276' ||
+  localExternalEditorsManifest.sharedRuntime !== 'shared/manifest.json' ||
+  !Array.isArray(localExternalEditorsManifest.packages)
+) {
+  throw new Error('Playmesh external-editor derivative manifest is invalid');
+}
+if (
+  localExternalEditorsManifest.packages
+    .map(packageReference => packageReference && packageReference.name)
+    .sort()
+    .join(',') !== 'jfxr,piskel,yarn'
+) {
+  throw new Error(
+    'Playmesh external-editor derivative manifest must contain jfxr, piskel and yarn'
+  );
+}
+const sharedExternalEditorManifest = JSON.parse(
+  await readFile(
+    path.join(localExternalEditorsRoot, 'shared', 'manifest.json'),
+    'utf8'
+  )
+);
+if (
+  sharedExternalEditorManifest.schemaVersion !== 1 ||
+  sharedExternalEditorManifest.name !== 'playmesh-external-editor-i18n' ||
+  typeof sharedExternalEditorManifest.version !== 'string' ||
+  sharedExternalEditorManifest.targetDirectory !==
+    'newIDE/app/public/external/playmesh-i18n' ||
+  !sharedExternalEditorManifest.overlay ||
+  !/^[a-f0-9]{64}$/.test(
+    sharedExternalEditorManifest.overlay.treeSha256 || ''
+  ) ||
+  !Number.isSafeInteger(sharedExternalEditorManifest.overlay.fileCount) ||
+  sharedExternalEditorManifest.overlay.fileCount <= 0
+) {
+  throw new Error('Playmesh shared external-editor runtime manifest is invalid');
+}
+const sharedExternalEditorOverlayDirectory = path.join(
+  localExternalEditorsRoot,
+  'shared',
+  'overlay'
+);
+const sharedExternalEditorOverlayTree = await computeDirectoryTreeDigest(
+  sharedExternalEditorOverlayDirectory
+);
+if (
+  sharedExternalEditorOverlayTree.sha256 !==
+    sharedExternalEditorManifest.overlay.treeSha256 ||
+  sharedExternalEditorOverlayTree.files.length !==
+    sharedExternalEditorManifest.overlay.fileCount
+) {
+  throw new Error('Playmesh shared external-editor runtime tree is invalid');
+}
+const localExternalEditorPackages = new Map();
+for (const packageReference of localExternalEditorsManifest.packages) {
+  if (
+    !packageReference ||
+    typeof packageReference.name !== 'string' ||
+    !/^[a-z][a-z0-9-]*$/.test(packageReference.name) ||
+    packageReference.manifest !== `${packageReference.name}/manifest.json` ||
+    localExternalEditorPackages.has(packageReference.name)
+  ) {
+    throw new Error('Playmesh external-editor package reference is invalid');
+  }
+  const packageManifest = JSON.parse(
+    await readFile(
+      path.join(localExternalEditorsRoot, packageReference.manifest),
+      'utf8'
+    )
+  );
+  const lockedEditor = lockedExternalEditorsManifest.editors.find(
+    editor => editor.name === packageReference.name
+  );
+  if (
+    !lockedEditor ||
+    packageManifest.schemaVersion !== 1 ||
+    packageManifest.name !== packageReference.name ||
+    typeof packageManifest.derivedVersion !== 'string' ||
+    !packageManifest.base ||
+    packageManifest.base.gdevelopExternalEditorVersion !==
+      lockedEditor.version ||
+    packageManifest.base.officialArchiveSha256 !==
+      lockedEditor.officialArchiveSha256 ||
+    packageManifest.base.officialTreeSha256 !== lockedEditor.treeSha256 ||
+    !Array.isArray(packageManifest.locales) ||
+    packageManifest.locales
+      .map(locale => locale && locale.id)
+      .sort()
+      .join(',') !== 'en,zh-CN' ||
+    packageManifest.locales.some(
+      locale =>
+        !locale ||
+        !Number.isSafeInteger(locale.messageCount) ||
+        locale.messageCount <= 0 ||
+        (locale.id === 'en'
+          ? locale.fallback !== null
+          : locale.fallback !== 'en')
+    ) ||
+    !packageManifest.coverage ||
+    !Array.isArray(packageManifest.coverage.neverTranslate) ||
+    !packageManifest.overlay ||
+    !/^[a-f0-9]{64}$/.test(packageManifest.overlay.treeSha256 || '') ||
+    !Number.isSafeInteger(packageManifest.overlay.fileCount) ||
+    packageManifest.overlay.fileCount <= 0
+  ) {
+    throw new Error(
+      `Playmesh ${packageReference.name} derivative manifest is invalid`
+    );
+  }
+  const overlayDirectory = path.join(
+    localExternalEditorsRoot,
+    packageReference.name,
+    'overlay'
+  );
+  const overlayTree = await computeDirectoryTreeDigest(overlayDirectory);
+  if (
+    overlayTree.sha256 !== packageManifest.overlay.treeSha256 ||
+    overlayTree.files.length !== packageManifest.overlay.fileCount
+  ) {
+    throw new Error(
+      `Playmesh ${packageReference.name} derivative tree is invalid`
+    );
+  }
+  const localeKeySets = new Map();
+  for (const localeEntry of packageManifest.locales) {
+    localeKeySets.set(
+      localeEntry.id,
+      await loadExternalEditorCatalog({
+        editorName: packageReference.name,
+        localeEntry,
+        overlayDirectory,
+      })
+    );
+  }
+  if (
+    localeKeySets.get('en').join('\n') !==
+    localeKeySets.get('zh-CN').join('\n')
+  ) {
+    throw new Error(
+      `Playmesh ${packageReference.name} locale catalogs have different key sets`
+    );
+  }
+  localExternalEditorPackages.set(packageReference.name, {
+    manifest: packageManifest,
+    overlayDirectory,
+    overlayTree,
+  });
+}
+for (const editor of lockedExternalEditorsManifest.editors) {
+  if (
+    !editor ||
+    !['piskel', 'jfxr', 'yarn'].includes(editor.name) ||
+    typeof editor.version !== 'string' ||
+    !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(editor.version) ||
+    !/^[a-f0-9]{64}$/.test(editor.officialArchiveSha256) ||
+    !/^[a-f0-9]{64}$/.test(editor.treeSha256) ||
+    !Number.isSafeInteger(editor.fileCount) ||
+    editor.fileCount <= 0
+  ) {
+    throw new Error('Locked GDevelop external-editor entry is invalid');
+  }
+  const sourceEditorDirectory = path.join(
+    lockedExternalEditorsRoot,
+    editor.name,
+    `${editor.name}-editor`
+  );
+  const sourceTree = await computeDirectoryTreeDigest(sourceEditorDirectory);
+  if (
+    sourceTree.sha256 !== editor.treeSha256 ||
+    sourceTree.files.length !== editor.fileCount
+  ) {
+    throw new Error(
+      `Locked GDevelop ${editor.name} editor tree does not match its manifest`
+    );
+  }
+  const targetEditorDirectory = path.resolve(
+    sourceRoot,
+    'newIDE',
+    'app',
+    'public',
+    'external',
+    editor.name,
+    `${editor.name}-editor`
+  );
+  await mkdir(path.dirname(targetEditorDirectory), { recursive: true });
+  await cp(sourceEditorDirectory, targetEditorDirectory, {
+    recursive: true,
+    force: true,
+  });
+  const targetTree = await computeDirectoryTreeDigest(targetEditorDirectory);
+  if (targetTree.sha256 !== sourceTree.sha256) {
+    throw new Error(`Copying the locked ${editor.name} editor tree failed`);
+  }
+}
+const sharedExternalEditorTargetDirectory = path.resolve(
+  sourceRoot,
+  ...sharedExternalEditorManifest.targetDirectory.split('/')
+);
+await mkdir(sharedExternalEditorTargetDirectory, { recursive: true });
+await cp(
+  sharedExternalEditorOverlayDirectory,
+  sharedExternalEditorTargetDirectory,
+  { recursive: true, force: true }
+);
+const copiedSharedExternalEditorTree = await computeDirectoryTreeDigest(
+  sharedExternalEditorTargetDirectory
+);
+if (
+  copiedSharedExternalEditorTree.sha256 !==
+  sharedExternalEditorOverlayTree.sha256
+) {
+  throw new Error('Copying the shared external-editor runtime failed');
+}
+for (const file of sharedExternalEditorOverlayTree.files) {
+  generatedOutputRecords.push({
+    relativePath: `${sharedExternalEditorManifest.targetDirectory}/${file.relativePath}`,
+    postPatchSha256: file.sha256,
+  });
+}
+for (const [editorName, derivative] of localExternalEditorPackages) {
+  const targetEditorDirectory = path.resolve(
+    sourceRoot,
+    'newIDE',
+    'app',
+    'public',
+    'external',
+    editorName,
+    `${editorName}-editor`
+  );
+  await cp(derivative.overlayDirectory, targetEditorDirectory, {
+    recursive: true,
+    force: true,
+  });
+  for (const file of derivative.overlayTree.files) {
+    const targetFile = path.join(
+      targetEditorDirectory,
+      ...file.relativePath.split('/')
+    );
+    const targetSha256 = sha256Bytes(await readFile(targetFile));
+    if (targetSha256 !== file.sha256) {
+      throw new Error(
+        `Copying the Playmesh ${editorName} derivative failed at ${file.relativePath}`
+      );
+    }
+    generatedOutputRecords.push({
+      relativePath: `newIDE/app/public/external/${editorName}/${editorName}-editor/${file.relativePath}`,
+      postPatchSha256: file.sha256,
+    });
+  }
+}
+const officialPackageJson = JSON.parse(
+  await readFile(path.join(sourceRoot, 'newIDE', 'app', 'package.json'), 'utf8')
+);
+const expectedExternalEditorImportCommand = `cd scripts && ${[
+  'piskel',
+  'jfxr',
+  'yarn',
+]
+  .map(name => {
+    const editor = lockedExternalEditorsManifest.editors.find(
+      candidate => candidate.name === name
+    );
+    return `node import-zipped-editor.js ${editor.name} ${editor.version} ${editor.officialArchiveSha256}`;
+  })
+  .join(' && ')}`;
+if (
+  !officialPackageJson.scripts ||
+  officialPackageJson.scripts['import-zipped-external-editors'] !==
+    expectedExternalEditorImportCommand
+) {
+  throw new Error(
+    'Locked external-editor versions and archive hashes do not match the official GDevelop package.json'
+  );
+}
 const sharedManifestSource = path.resolve(
   scriptDirectory,
   '..',
@@ -193,7 +604,9 @@ generatedOutputRecords.push({
   relativePath: 'newIDE/app/src/PlaymeshShared/GameManifest.js',
   postPatchSha256: sharedManifestTargetHash,
 });
-process.stdout.write('Copied Playmesh source overlays\n');
+process.stdout.write(
+  'Copied Playmesh source overlays, locked external editors and local derivative layers\n'
+);
 
 const generateCanonicalBrowserSourceModule = async ({
   sourceFilename,
@@ -283,7 +696,7 @@ await patchFile({
       content,
       `    "import-resources": "npm run make-version-metadata && npm run import-zipped-external-editors && npm run build-theme-resources && npm run make-service-worker && cd scripts && node import-libGD.js && node import-GDJS-Runtime.js && node import-monaco-editor.js && node import-zipped-external-libs.js",`,
       `    "import-resources": "npm run make-version-metadata && npm run build-theme-resources && npm run make-service-worker && cd scripts && node import-libGD.js && node import-GDJS-Runtime.js && node import-monaco-editor.js && node import-zipped-external-libs.js",`,
-      'skip downloads for browser external editors disabled by Playmesh'
+      'use the locked external-editor assets copied from the local Playmesh input'
     ),
 });
 
@@ -462,21 +875,9 @@ import { cleanupPlaymeshLegacyBrowserPersistence } from './PlaymeshBrowserPersis
     );
     content = replaceExactly(
       content,
-      `import browserResourceExternalEditors from './ResourcesList/BrowserResourceExternalEditors';\n`,
-      '',
-      'remove browser Piskel external editor registration'
-    );
-    content = replaceExactly(
-      content,
       `import ShareDialog from './ExportAndShare/ShareDialog';`,
       `import ShareDialog from './ExportAndShare/PlaymeshPublishDialog';`,
       'replace all GDevelop export and invite options with Playmesh HTML publishing'
-    );
-    content = replaceExactly(
-      content,
-      `              resourceExternalEditors={browserResourceExternalEditors}`,
-      `              resourceExternalEditors={[]}`,
-      'disable Piskel and other browser external editors'
     );
     content = replaceExactly(
       content,
@@ -532,6 +933,969 @@ import { cleanupPlaymeshLegacyBrowserPersistence } from './PlaymeshBrowserPersis
       'keep localization and the project write guard authoritative for this entry'
     );
     return content;
+  },
+});
+
+await patchFile({
+  relativePath:
+    'newIDE/app/src/ResourcesList/BrowserResourceExternalEditors.js',
+  expectedGitBlobSha: '05df70f29ffec1b3ac38f712b9b7b5fc49bb5e1e',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `import { isBlobURL, isURL } from './ResourceUtils';`,
+      `import { isURL } from './ResourceUtils';
+import PlaymeshLocalStorageProvider from '../ProjectsStorage/PlaymeshLocalStorageProvider';
+import { getPlaymeshPromptLocale } from '../PlaymeshLocalization/PlaymeshLocalizationSession';
+import {
+  closePlaymeshEmbeddedExternalEditorWindow,
+  isPlaymeshEmbeddedExternalEditorWindow,
+  markPlaymeshEmbeddedExternalEditorReady,
+  openPlaymeshEmbeddedExternalEditorWindow,
+  setPlaymeshEmbeddedExternalEditorCloseRequestHandler,
+} from './PlaymeshEmbeddedExternalEditorWindow';`,
+      'connect the official browser resource editors to Playmesh local storage'
+    );
+    content = replaceExactly(
+      content,
+      `const externalEditorIndexHtml: { ['piskel' | 'yarn' | 'jfxr']: string } = {
+  piskel: 'external/piskel/piskel-index.html',
+  yarn: 'external/yarn/yarn-index.html',
+  jfxr: 'external/jfxr/jfxr-index.html',
+};`,
+      `const externalEditorIndexHtml: { ['piskel' | 'yarn' | 'jfxr']: string } = {
+  piskel: 'external/piskel/piskel-index.html',
+  yarn: 'external/yarn/yarn-index.html',
+  jfxr: 'external/jfxr/jfxr-index.html',
+};
+
+const closeExternalEditorWindow = (externalEditorWindow: any) => {
+  if (
+    !closePlaymeshEmbeddedExternalEditorWindow(externalEditorWindow)
+  ) {
+    externalEditorWindow['close']();
+  }
+};`,
+      'close native popup and embedded iframe editor surfaces through one seam'
+    );
+    content = replaceExactly(
+      content,
+      `    let externalEditorLoaded = false;
+    let externalEditorClosed = false;
+    let externalEditorOutput: ?ExternalEditorOutput = null;`,
+      `    let externalEditorLoaded = false;
+    let externalEditorReady = false;
+    let externalEditorClosed = false;
+    let externalEditorOutput: ?ExternalEditorOutput = null;
+    let readinessTimeoutId: ?TimeoutID = null;
+    let isUnloadListenerAttached = false;
+    let removeEmbeddedCloseRequestHandler = () => {};`,
+      'track external-editor readiness and disposable listeners independently from HTML load'
+    );
+    content = replaceExactly(
+      content,
+      `    externalEditorWindow.location = externalEditorIndexHtml[externalEditorName];`,
+      `    const externalEditorUrl = new URL(
+      externalEditorIndexHtml[externalEditorName],
+      window.location.href
+    );
+    externalEditorUrl.searchParams.set('locale', getPlaymeshPromptLocale());
+    externalEditorWindow.location = externalEditorUrl.toString();`,
+      'pass the authoritative Playmesh localization session locale to local external editors'
+    );
+    content = replaceExactly(
+      content,
+      `        // Some browsers like Safari might not trigger the "load" event, but now we can
+        // be sure the editor is loaded: the proof being that we received this message.
+        // Mark the editor as loaded and re-attach a unload listener to be safe.
+        externalEditorLoaded = true;
+        externalEditorWindow.addEventListener('unload', () => {
+          onExternalEditorWindowClosed();
+        });`,
+      `        // Some browsers like Safari might not trigger the "load" event, but now we can
+        // be sure the editor is ready: the proof being that we received this message.
+        externalEditorLoaded = true;
+        externalEditorReady = true;
+        markPlaymeshEmbeddedExternalEditorReady(externalEditorWindow);
+        attachExternalEditorUnloadListener();`,
+      'treat the official ready message, not HTML load, as successful startup'
+    );
+    content = replaceExactly(
+      content,
+      `    window.addEventListener('message', onMessageEvent);
+
+    const onExternalEditorWindowClosed = () => {
+      if (externalEditorClosed) {
+        // Somehow this editor was already closed.
+        return;
+      }
+      externalEditorClosed = true;
+      console.info(\`External editor "\${externalEditorName}" closed.\`);
+      window.removeEventListener('message', onMessageEvent);
+      resolve(externalEditorOutput);
+    };
+
+    signal.addEventListener('abort', () => {
+      reject(new UserCancellationError(''));
+      if (externalEditorClosed) return;
+      externalEditorWindow.close();
+      onExternalEditorWindowClosed();
+    });
+
+    externalEditorWindow.addEventListener('load', () => {
+      console.info(\`External editor "\${externalEditorName}" loaded.\`);
+      externalEditorLoaded = true;
+
+      externalEditorWindow.addEventListener('unload', () => {
+        onExternalEditorWindowClosed();
+      });
+    });`,
+      `    const attachExternalEditorUnloadListener = () => {
+      if (isUnloadListenerAttached) return;
+      isUnloadListenerAttached = true;
+      externalEditorWindow.addEventListener(
+        'unload',
+        onExternalEditorWindowClosed
+      );
+    };
+    const cleanupExternalEditorListeners = () => {
+      window.removeEventListener('message', onMessageEvent);
+      signal.removeEventListener('abort', onAbort);
+      externalEditorWindow.removeEventListener(
+        'load',
+        onExternalEditorWindowLoaded
+      );
+      if (isUnloadListenerAttached) {
+        externalEditorWindow.removeEventListener(
+          'unload',
+          onExternalEditorWindowClosed
+        );
+      }
+      if (readinessTimeoutId !== null) clearTimeout(readinessTimeoutId);
+      removeEmbeddedCloseRequestHandler();
+    };
+    const onExternalEditorWindowClosed = () => {
+      if (externalEditorClosed) {
+        // Somehow this editor was already closed.
+        return;
+      }
+      externalEditorClosed = true;
+      console.info(\`External editor "\${externalEditorName}" closed.\`);
+      cleanupExternalEditorListeners();
+      closePlaymeshEmbeddedExternalEditorWindow(externalEditorWindow);
+      resolve(externalEditorOutput);
+    };
+    const onAbort = () => {
+      reject(new UserCancellationError(''));
+      if (externalEditorClosed) return;
+      externalEditorWindow.close();
+      onExternalEditorWindowClosed();
+    };
+    const onEmbeddedCloseRequest = () => {
+      if (externalEditorClosed) return;
+      closeExternalEditorWindow(externalEditorWindow);
+      onExternalEditorWindowClosed();
+    };
+    const onExternalEditorWindowLoaded = () => {
+      console.info(\`External editor "\${externalEditorName}" loaded.\`);
+      externalEditorLoaded = true;
+      attachExternalEditorUnloadListener();
+    };
+
+    window.addEventListener('message', onMessageEvent);
+    signal.addEventListener('abort', onAbort, { once: true });
+    externalEditorWindow.addEventListener(
+      'load',
+      onExternalEditorWindowLoaded
+    );
+    removeEmbeddedCloseRequestHandler = setPlaymeshEmbeddedExternalEditorCloseRequestHandler(
+      externalEditorWindow,
+      onEmbeddedCloseRequest
+    );`,
+      'clean up embedded and native editor listeners through the official close lifecycle'
+    );
+    content = replaceExactly(
+      content,
+      `    setTimeout(() => {
+      if (externalEditorLoaded || externalEditorClosed) return;
+      console.info(
+        \`External editor "\${externalEditorName} not loaded after 10 seconds - closing its window."\`
+      );
+
+      // The external editor is not loaded after 10 seconds, abort.
+      externalEditorWindow.close();
+      onExternalEditorWindowClosed();
+    }, 10000);`,
+      `    readinessTimeoutId = setTimeout(() => {
+      const externalEditorStarted = isPlaymeshEmbeddedExternalEditorWindow(
+        externalEditorWindow
+      )
+        ? externalEditorReady
+        : externalEditorLoaded;
+      if (externalEditorStarted || externalEditorClosed) return;
+      console.info(
+        \`External editor "\${externalEditorName}" not ready after 10 seconds - closing its window.\`
+      );
+
+      // The external editor did not complete its official ready handshake.
+      externalEditorWindow.close();
+      onExternalEditorWindowClosed();
+    }, 10000);`,
+      'close an embedded editor that loads HTML but never completes its ready handshake'
+    );
+    content = replaceExactly(
+      content,
+      `  // Fetch all edited resources as base64 encoded "data urls" (\`data:...\`).
+  const resources = await downloadAndPrepareExternalEditorBase64Resources({
+    project,
+    resourceNames,
+  });
+
+  const externalEditorInput: ExternalEditorInput = {
+    singleFrame: options.extraOptions.singleFrame,
+    externalEditorData: readMetadata(
+      metadataKey,
+      options.extraOptions.existingMetadata
+    ),
+    fps: options.extraOptions.fps,
+    isLooping: options.extraOptions.isLooping,
+    name: options.extraOptions.name || resourceNames[0] || defaultName,
+    resources,
+  };
+
+  sendExternalEditorOpened(externalEditorName);
+  const externalEditorOutput: ?ExternalEditorOutput = await openAndWaitForExternalEditorWindow(
+    { externalEditorWindow, externalEditorName, externalEditorInput, signal }
+  );`,
+      `  let preparationCancelled = false;
+  const onPreparationCancelled = () => {
+    preparationCancelled = true;
+    closePlaymeshEmbeddedExternalEditorWindow(externalEditorWindow);
+  };
+  const removePreparationCloseRequestHandler = setPlaymeshEmbeddedExternalEditorCloseRequestHandler(
+    externalEditorWindow,
+    onPreparationCancelled
+  );
+  signal.addEventListener('abort', onPreparationCancelled, { once: true });
+
+  let externalEditorOutput: ?ExternalEditorOutput = null;
+  try {
+    if (signal.aborted) throw new UserCancellationError('');
+
+    // Fetch all edited resources as base64 encoded "data urls" (\`data:...\`).
+    const resources = await downloadAndPrepareExternalEditorBase64Resources({
+      project,
+      resourceNames,
+    });
+    if (preparationCancelled || signal.aborted) {
+      throw new UserCancellationError('');
+    }
+
+    const externalEditorInput: ExternalEditorInput = {
+      singleFrame: options.extraOptions.singleFrame,
+      externalEditorData: readMetadata(
+        metadataKey,
+        options.extraOptions.existingMetadata
+      ),
+      fps: options.extraOptions.fps,
+      isLooping: options.extraOptions.isLooping,
+      name: options.extraOptions.name || resourceNames[0] || defaultName,
+      resources,
+    };
+
+    sendExternalEditorOpened(externalEditorName);
+    signal.removeEventListener('abort', onPreparationCancelled);
+    removePreparationCloseRequestHandler();
+    externalEditorOutput = await openAndWaitForExternalEditorWindow({
+      externalEditorWindow,
+      externalEditorName,
+      externalEditorInput,
+      signal,
+    });
+  } catch (error) {
+    // A native popup retains GDevelop's official behavior. Only an embedded
+    // surface must be removed so an error dialog cannot be hidden behind it.
+    closePlaymeshEmbeddedExternalEditorWindow(externalEditorWindow);
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', onPreparationCancelled);
+    removePreparationCloseRequestHandler();
+  }`,
+      'close only the Playmesh iframe when resource preparation is cancelled or fails'
+    );
+    content = replaceAllExactly(
+      content,
+      `externalEditorWindow.close();`,
+      `closeExternalEditorWindow(externalEditorWindow);`,
+      3,
+      'close embedded external editors on save, abort and load timeout'
+    );
+    content = replaceExactly(
+      content,
+      `  const externalEditorWindow = window.open(
+    'about:blank',
+    targetId,
+    \`width=\${width},height=\${height},left=\${left},top=\${top}\`
+  );`,
+      `  const externalEditorWindow =
+    openPlaymeshEmbeddedExternalEditorWindow({ targetId }) ||
+    window.open(
+      'about:blank',
+      targetId,
+      \`width=\${width},height=\${height},left=\${left},top=\${top}\`
+    );`,
+      'present official browser external editors inside the Playmesh WebView'
+    );
+    content = replaceExactly(
+      content,
+      `  displayBlackLoadingScreenOrThrow(externalEditorWindow);
+
+  return externalEditorWindow;`,
+      `  try {
+    displayBlackLoadingScreenOrThrow(externalEditorWindow);
+  } catch (error) {
+    closePlaymeshEmbeddedExternalEditorWindow(externalEditorWindow);
+    throw error;
+  }
+
+  return externalEditorWindow;`,
+      'remove an embedded surface when its synchronous loading screen fails'
+    );
+    content = replaceExactly(
+      content,
+      `    if (isURL(url)) {
+      if (isBlobURL(url)) {
+        console.error('Unsupported blob URL for a resource - ignoring it.');
+      } else {
+        urlsToDownload.push({
+          url,
+          resourceName,
+        });
+      }
+    } else {`,
+      `    if (isURL(url)) {
+      urlsToDownload.push({
+        url,
+        resourceName,
+      });
+    } else {`,
+      'let the official editor bridge read Playmesh live blob resources'
+    );
+    content = replaceAllExactly(
+      content,
+      `      if (options.getStorageProvider().internalName !== 'Cloud') {`,
+      `      if (
+        options.getStorageProvider().internalName !== 'Cloud' &&
+        options.getStorageProvider().internalName !==
+          PlaymeshLocalStorageProvider.internalName
+      ) {`,
+      3,
+      'allow the three official browser resource editors on Playmesh local projects'
+    );
+    return content;
+  },
+});
+
+await patchFile({
+  relativePath:
+    'newIDE/app/public/external/utils/parent-editor-interface.js',
+  expectedGitBlobSha: '64d7474a3b654d9e87b8326836d13a474a0f4632',
+  transform: content =>
+    replaceExactly(
+      content,
+      `  } else if (window && window.opener) {
+    window.opener.postMessage({
+      id,
+      payload,
+    }, '*');
+  } else {`,
+      `  } else if (
+    window &&
+    (window.opener || (window.parent && window.parent !== window))
+  ) {
+    const parentEditorWindow = window.opener || window.parent;
+    parentEditorWindow.postMessage({
+      id,
+      payload,
+    }, '*');
+  } else {`,
+      'preserve the official external-editor message protocol in an embedded iframe'
+    ),
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/src/UI/ExternalEditorOpenedDialog.js',
+  expectedGitBlobSha: 'c09d9d0744ca4cbc6cfbe4316fd7a28cea18ef98',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `import FlatButton from './FlatButton';`,
+      `import FlatButton from './FlatButton';
+import { shouldUsePlaymeshEmbeddedExternalEditorWindow } from '../ResourcesList/PlaymeshEmbeddedExternalEditorWindow';`,
+      'share the Playmesh WebView external-editor presentation decision'
+    );
+    return replaceExactly(
+      content,
+      `  if (!!electron) return null;`,
+      `  if (
+    !!electron ||
+    shouldUsePlaymeshEmbeddedExternalEditorWindow()
+  )
+    return null;`,
+      'avoid trapping focus behind the embedded external-editor iframe'
+    );
+  },
+});
+
+const offlineExternalEditorContentSecurityPolicy =
+  "default-src 'self' data: blob:; connect-src 'self' data: blob:; font-src 'self' data:; frame-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; form-action 'self'; base-uri 'none'";
+
+await patchFile({
+  relativePath:
+    'newIDE/app/public/external/piskel/piskel-editor/index.html',
+  expectedGitBlobSha: '2b8e5f760e3ca9ff8aa1475bc2ca89898ff11002',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `  <meta charset="UTF-8">`,
+      `  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${offlineExternalEditorContentSecurityPolicy}">`,
+      'keep the bundled Piskel editor on local assets only'
+    );
+    content = replaceExactly(
+      content,
+      `<script type="text/javascript">
+    (function () {`,
+      `<script src="../../playmesh-i18n/playmesh-external-editor-i18n.js"></script>
+<script src="playmesh-i18n/locales/en.js"></script>
+<script src="playmesh-i18n/locales/zh-CN.js"></script>
+<script src="playmesh-i18n/piskel-i18n.js"></script>
+<script type="text/javascript">
+    (function () {`,
+      'load the versioned local Piskel catalogs and translator before its packaged runtime'
+    );
+    content = replaceExactly(
+      content,
+      `    pskl.app.init();`,
+      `    window.PlaymeshPiskelI18n.beforePiskelInit(pskl);
+    // Piskel's bundled GIF encoder defaults to a blob: worker. Nested App
+    // WebViews can accept the worker creation but never deliver its completion
+    // message. In the native host only, keep the official encoder and point it
+    // at the official local worker file Piskel ships for its non-blob fallback.
+    // Ordinary browsers retain Piskel's original blob-worker behavior.
+    var playmeshNativeBlobSaver = null;
+    try {
+      playmeshNativeBlobSaver =
+        window.top && window.top.__playmeshSaveBlobDownload;
+    } catch (_) {}
+    if (typeof playmeshNativeBlobSaver === 'function') {
+      var OfficialGifEncoder = window.GIF;
+      window.GIF = function(options) {
+        var localWorkerOptions = Object.assign({}, options || {});
+        localWorkerOptions.workerScript = 'js/lib/gif/gif.ie.worker.js';
+        return new OfficialGifEncoder(localWorkerOptions);
+      };
+      window.GIF.prototype = OfficialGifEncoder.prototype;
+    }
+    pskl.app.init();
+    window.PlaymeshPiskelI18n.afterPiskelInit();`,
+      'install Piskel translations and its official local GIF worker before controllers render dynamic UI'
+    );
+    return content;
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/public/external/piskel/piskel-main.js',
+  expectedGitBlobSha: '8c2fbd09864ec599ca7d0288eedb39d2ec72db3b',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `import { createExternalEditorHeader } from '../utils/external-editor-header.js';`,
+      `import { createExternalEditorHeader } from '../utils/external-editor-header.js';
+
+const getPlaymeshNativeBlobSaver = () => {
+  try {
+    const hostWindow = window.top;
+    const nativeBlobSaver =
+      hostWindow && hostWindow.__playmeshSaveBlobDownload;
+    return typeof nativeBlobSaver === 'function' ? nativeBlobSaver : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const installPlaymeshPiskelDownloadAdapter = piskelWindow => {
+  const nativeBlobSaver = getPlaymeshNativeBlobSaver();
+  const fileUtils =
+    piskelWindow.pskl &&
+    piskelWindow.pskl.utils &&
+    piskelWindow.pskl.utils.FileUtils;
+  const urlApi = piskelWindow.URL;
+  if (
+    !nativeBlobSaver ||
+    !fileUtils ||
+    fileUtils.__playmeshNativeDownloadAdapterInstalled ||
+    !urlApi ||
+    typeof urlApi.createObjectURL !== 'function'
+  ) {
+    return;
+  }
+
+  fileUtils.downloadAsFile = (content, filename) => {
+    const url = urlApi.createObjectURL(content);
+    const saveCompletion = nativeBlobSaver({ url, filename });
+    if (
+      saveCompletion &&
+      typeof saveCompletion.then === 'function' &&
+      typeof urlApi.revokeObjectURL === 'function'
+    ) {
+      Promise.resolve(saveCompletion).then(
+        () => urlApi.revokeObjectURL(url),
+        () => urlApi.revokeObjectURL(url)
+      );
+    } else if (typeof urlApi.revokeObjectURL === 'function') {
+      // Hosts released before the completion Promise was added still consume
+      // the Blob URL asynchronously. Retain their bounded compatibility window.
+      piskelWindow.setTimeout(() => urlApi.revokeObjectURL(url), 60000);
+    }
+  };
+  fileUtils.__playmeshNativeDownloadAdapterInstalled = true;
+};
+
+const installPlaymeshEmbeddedPopupAdapter = piskelWindow => {
+  const parentEditorWindow =
+    window.parent && window.parent !== window ? window.parent : null;
+  const embeddedPopupApi =
+    parentEditorWindow &&
+    parentEditorWindow.__playmeshEmbeddedExternalEditorWindowApi;
+  if (
+    !embeddedPopupApi ||
+    typeof embeddedPopupApi.openPopup !== 'function' ||
+    piskelWindow.__playmeshEmbeddedPopupAdapterInstalled
+  ) {
+    return;
+  }
+
+  const nativeOpen = piskelWindow.open.bind(piskelWindow);
+  try {
+    piskelWindow.open = (url, target, features) => {
+      const isAboutBlank =
+        String(url === undefined || url === null ? '' : url)
+          .trim()
+          .toLowerCase() === 'about:blank';
+      if (isAboutBlank) {
+        const embeddedPopup = embeddedPopupApi.openPopup({
+          ownerWindow: piskelWindow,
+          url,
+          target,
+          features,
+        });
+        if (embeddedPopup) return embeddedPopup;
+      }
+      return nativeOpen(url, target, features);
+    };
+    piskelWindow.__playmeshEmbeddedPopupAdapterInstalled = true;
+  } catch (error) {
+    console.warn('Unable to install the embedded Piskel popup adapter.', error);
+  }
+};`,
+      'route only Piskel local about:blank popups through the WebView iframe seam'
+    );
+    content = replaceExactly(
+      content,
+      `    if (typeof pskl === 'object') {
+      sendMessageToParentEditor('external-editor-ready');`,
+      `    if (typeof pskl === 'object') {
+      installPlaymeshPiskelDownloadAdapter(editorFrameEl.contentWindow);
+      installPlaymeshEmbeddedPopupAdapter(editorFrameEl.contentWindow);
+      sendMessageToParentEditor('external-editor-ready');`,
+      'install Piskel WebView adapters before announcing readiness'
+    );
+    content = replaceExactly(
+      content,
+      `const editorFrameEl = document.getElementById('piskel-frame');
+let pskl = document.querySelector('#piskel-frame').contentWindow.pskl;`,
+      `const resolvePiskelLocale = () => {
+  const explicitLocale = new URL(window.location.href).searchParams.get(
+    'locale'
+  );
+  if (explicitLocale) return explicitLocale;
+
+  const hostWindow =
+    window.opener || (window.parent && window.parent !== window
+      ? window.parent
+      : null);
+  try {
+    const hostLanguage =
+      hostWindow && hostWindow.document.documentElement.getAttribute('lang');
+    if (hostLanguage) return hostLanguage;
+  } catch (_) {}
+  return (
+    document.documentElement.getAttribute('lang') ||
+    navigator.language ||
+    'en'
+  );
+};
+
+const editorFrameEl = document.getElementById('piskel-frame');
+let pskl = document.querySelector('#piskel-frame').contentWindow.pskl;`,
+      'resolve Piskel locale from the wrapper query before DOM and browser fallbacks'
+    );
+    content = replaceExactly(
+      content,
+      `editorFrameEl.src = 'piskel-editor/index.html';`,
+      `const piskelEditorUrl = new URL(
+  'piskel-editor/index.html',
+  window.location.href
+);
+piskelEditorUrl.searchParams.set('locale', resolvePiskelLocale());
+editorFrameEl.src = piskelEditorUrl.toString();`,
+      'forward the wrapper locale into the self-maintained Piskel derivative'
+    );
+    return replaceExactly(
+      content,
+      `  const piskelAppHeader = editorContentDocument.getElementsByClassName(
+    'fake-piskelapp-header'
+  )[0];
+  piskelAppHeader.style.display = 'none';`,
+      `  const piskelAppHeader = editorContentDocument.getElementsByClassName(
+    'fake-piskelapp-header'
+  )[0];
+  piskelAppHeader.style.display = 'none';
+
+  // Keep Piskel's local editor and download features unchanged while removing
+  // the two public online services from the embedded tool.
+  const galleryLink = editorContentDocument.querySelector(
+    'a[href*="piskelapp.com"]'
+  );
+  if (galleryLink) {
+    const galleryItem = galleryLink.closest('.settings-item');
+    if (galleryItem) {
+      galleryItem.style.display = 'none';
+      const galleryTitle = galleryItem.previousElementSibling;
+      if (galleryTitle && galleryTitle.classList.contains('settings-title')) {
+        galleryTitle.style.display = 'none';
+      }
+    }
+  }
+  const gifUploadButton = editorContentDocument.querySelector(
+    '.gif-upload-button'
+  );
+  if (gifUploadButton) {
+    const gifUploadRow = gifUploadButton.closest('.export-panel-row');
+    if (gifUploadRow) gifUploadRow.style.display = 'none';
+  }
+  const gifUploadPanel = editorContentDocument.querySelector('.gif-upload');
+  if (gifUploadPanel) gifUploadPanel.style.display = 'none';`,
+      'remove Piskel gallery and public GIF-upload surfaces only'
+    );
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/public/external/jfxr/jfxr-editor/index.html',
+  expectedGitBlobSha: 'ed02d1bfd80f442144e1b18bfbe784e757132afa',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `<meta charset="utf-8">`,
+      `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${offlineExternalEditorContentSecurityPolicy}">`,
+      'keep the bundled Jfxr editor on local assets only'
+    );
+    content = replaceExactly(
+      content,
+      `<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto+Condensed:400,300,700|Chango">`,
+      '',
+      'remove the Jfxr Google Fonts request'
+    );
+    content = replaceSectionExactly(
+      content,
+      `<script>(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;`,
+      `<script src="419d227b2992f0e1b41a.js"></script>`,
+      '',
+      'remove Jfxr Google Analytics bootstrap and pageview'
+    );
+    return replaceExactly(
+      content,
+      `<script src="419d227b2992f0e1b41a.js"></script>`,
+      `<script src="../../playmesh-i18n/playmesh-external-editor-i18n.js"></script><script src="playmesh-i18n/locales/en.js"></script><script src="playmesh-i18n/locales/zh-CN.js"></script><script src="playmesh-i18n/install.js"></script><script src="419d227b2992f0e1b41a.js"></script>`,
+      'load the local Jfxr catalogs and selector-scoped translator before Angular bootstraps'
+    );
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/public/external/jfxr/jfxr-main.js',
+  expectedGitBlobSha: 'd2f2bce80847c4feeedf3e6fddbaf24fbd0040cc',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `onMessageFromParentEditor('open-external-editor-input', externalEditorInput => {
+  loadExistingSound(externalEditorInput.externalEditorData);
+
+  // Jfxr only reads a single resource (a single audio file).`,
+      `onMessageFromParentEditor('open-external-editor-input', externalEditorInput => {
+  // Jfxr only reads a single resource (a single audio file).`,
+      'defer project sound parsing until the official cancel control exists'
+    );
+    content = replaceExactly(
+      content,
+      `  const externalEditorHeader = createExternalEditorHeader({
+    parentElement: pathEditorHeaderDiv,
+    editorContentDocument: document,
+    onSaveChanges: saveSoundEffect,
+    onCancelChanges: closeWindow,
+    name: externalEditorInput.name,
+  });`,
+      `  const externalEditorHeader = createExternalEditorHeader({
+    parentElement: pathEditorHeaderDiv,
+    editorContentDocument: document,
+    onSaveChanges: saveSoundEffect,
+    onCancelChanges: closeWindow,
+    name: externalEditorInput.name,
+  });
+
+  loadExistingSound(externalEditorInput.externalEditorData);`,
+      'keep the official cancel control available if Jfxr metadata parsing fails'
+    );
+    content = replaceExactly(
+      content,
+      `editorFrameEl.src = 'jfxr-editor/index.html';`,
+      `const jfxrEditorUrl = new URL(
+  'jfxr-editor/index.html',
+  window.location.href
+);
+const jfxrEditorLocale = new URL(window.location.href).searchParams.get(
+  'locale'
+);
+if (jfxrEditorLocale) {
+  jfxrEditorUrl.searchParams.set('locale', jfxrEditorLocale);
+}
+editorFrameEl.src = jfxrEditorUrl.toString();`,
+      'forward the authoritative wrapper locale into the local Jfxr derivative'
+    );
+    content = replaceExactly(
+      content,
+      `  loadExistingSound(externalEditorInput.externalEditorData);
+
+  setTitle(
+    'GDevelop Sound Effects Editor (Jfxr) - ' + externalEditorInput.name
+  );
+
+  const isOverwritingExistingResource = resource && resource.name && resource.dataUrl;
+  if (isOverwritingExistingResource) externalEditorHeader.setOverwriteExistingResource();`,
+      `  loadExistingSound(externalEditorInput.externalEditorData);
+
+  const playmeshJfxrI18n = editorFrameEl.contentWindow.PlaymeshJfxrI18n;
+  if (playmeshJfxrI18n) {
+    playmeshJfxrI18n.translateWrapperDocument(document);
+  }
+  setTitle(
+    playmeshJfxrI18n
+      ? playmeshJfxrI18n.t('wrapper.title', {
+          name: externalEditorInput.name,
+        })
+      : 'GDevelop Sound Effects Editor (Jfxr) - ' + externalEditorInput.name
+  );
+
+  const isOverwritingExistingResource = resource && resource.name && resource.dataUrl;
+  if (isOverwritingExistingResource) {
+    externalEditorHeader.setOverwriteExistingResource();
+    if (playmeshJfxrI18n) {
+      playmeshJfxrI18n.translateWrapperDocument(document);
+    }
+  }`,
+      'localize the official Jfxr wrapper header and window title without changing save behavior'
+    );
+    return replaceExactly(
+      content,
+      `  // Disable google analytics from collecting personal information.
+  editorFrameEl.contentWindow.ga('set', 'allowAdFeatures', false);
+
+  // Alter the interface of the external editor.
+  const editorContentDocument = editorFrameEl.contentDocument;
+  editorContentDocument.getElementsByClassName('github')[0].remove();
+
+  // Disable inside iframe links - they break the embedding.
+  editorContentDocument.getElementsByClassName(
+    'titlepane column-left'
+  )[0].childNodes[0].onclick = () => {
+    return false;
+  };
+  editorContentDocument.getElementsByClassName(
+    'titlepane column-left'
+  )[0].childNodes[1].onclick = () => {
+    return false;
+  };`,
+      `  // Alter the interface of the external editor without exposing its
+  // unrelated online navigation, donation or account surfaces.
+  const editorContentDocument = editorFrameEl.contentDocument;
+  const githubRibbon = editorContentDocument.getElementsByClassName('github')[0];
+  if (githubRibbon) githubRibbon.remove();
+  editorContentDocument
+    .querySelectorAll('form[action^="http:"] , form[action^="https:"]')
+    .forEach(form => form.remove());
+  editorContentDocument
+    .querySelectorAll(
+      'a[href^="http:"], a[href^="https:"], a[href^="//"], a[href^="mailto:"]'
+    )
+    .forEach(anchor => {
+      anchor.removeAttribute('href');
+      anchor.removeAttribute('target');
+    });`,
+      'remove Jfxr online-only UI while preserving its local editor controls'
+    );
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/public/external/yarn/yarn-editor/index.html',
+  expectedGitBlobSha: '53eba3edf0dec877f635d2ccf14b1c453356d2cd',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `<meta charset="utf-8" name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0">`,
+      `<meta charset="utf-8" name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0"><meta http-equiv="Content-Security-Policy" content="${offlineExternalEditorContentSecurityPolicy}">`,
+      'keep the bundled Yarn editor on local assets only'
+    );
+    content = replaceExactly(
+      content,
+      `<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>`,
+      '',
+      'remove the Yarn Twitter widget loader'
+    );
+    content = replaceSectionExactly(
+      content,
+      `<span id="gistTryOpen" class="item"`,
+      `<span id="pwaTryShare" class="item"`,
+      '',
+      'remove Yarn GitHub Gist file actions while retaining local and system-share actions'
+    );
+    content = replaceSectionExactly(
+      content,
+      `<!-- Gist token -->`,
+      `</div><!-- settgins-column --><div class="settings-column"><!-- Spellcheck -->`,
+      '',
+      'remove Yarn GitHub account and Gist settings'
+    );
+    content = replaceSectionExactly(
+      content,
+      `<span class="find-text" onclick="app.showRandomQuote()">`,
+      `<span class="hide-when-narrow">&nbsp;</span> <span class="hide-when-narrow">&nbsp;</span> Row Index:`,
+      '',
+      'remove the Yarn online random-quote action'
+    );
+    return replaceExactly(
+      content,
+      `<script src="js/runtime.80b352588636fbc67c02.js"></script>`,
+      `<script src="../../playmesh-i18n/playmesh-external-editor-i18n.js"></script><script src="playmesh-i18n/locales/en.js"></script><script src="playmesh-i18n/locales/zh-CN.js"></script><script src="playmesh-i18n/install.js"></script><script src="js/runtime.80b352588636fbc67c02.js"></script>`,
+      'load the local Yarn catalogs and selector-scoped translator before its packaged runtime'
+    );
+  },
+});
+
+await patchFile({
+  relativePath:
+    'newIDE/app/public/external/yarn/yarn-editor/js/main.80b352588636fbc67c02.js',
+  expectedGitBlobSha: '32c47bb56c28a1b81ffdb4b22df77c9dec7e3267',
+  transform: content => {
+    content = replaceSectionExactly(
+      content,
+      `this.showRandomQuote=function(){e.ajax({url:"https://api.forismatic.com/api/1.0/?"`,
+      `this.editNode=function`,
+      `this.showRandomQuote=function(){},`,
+      'remove the Yarn Forismatic request implementation'
+    );
+    content = replaceExactly(
+      content,
+      `.fail((function(){console.error(t+" not found locally. Loading dictionary from server instead..."),s=\`https://raw.githubusercontent.com/wooorm/dictionaries/master/dictionaries/\${t}/index.dic\`,r=\`https://raw.githubusercontent.com/wooorm/dictionaries/master/dictionaries/\${t}/index.aff\`,e.get(s,(function(e){dicData=e})).done((function(){e.get(r,(function(e){affData=e})).done((function(){console.log("Dictionary loaded from server"),a=new i(affData,dicData),d=!0}))}))}))`,
+      `.fail((function(){console.error(t+" not found locally.")}))`,
+      'remove the Yarn remote dictionary fallback'
+    );
+    return replaceAllExactly(
+      content,
+      `,t){const e=[];i=i.replace(/(https?:\\/\\/twitter.com\\/[^\\s\\<]+\\/[^\\s\\<]+\\/[^\\s\\<]+)/gi,(function(t){const o=t.match(/https:\\/\\/twitter.com\\/.*\\/status\\/([0-9]+)/i);if(o.length>1)return e.push(o[1]),\`<a class="tweet" id="\${o[1]}"></a>\`})),setTimeout(()=>{const t=document.querySelectorAll(".tweet");e.forEach((e,o)=>{twttr.widgets.createTweet(e,t[o],{align:"center",follow:!1})})},500)}`,
+      `,t){}`,
+      2,
+      'remove the two exact Yarn Twitter embed branches while preserving the surrounding if statements'
+    );
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/public/external/yarn/yarn-main.js',
+  expectedGitBlobSha: '17fdf2fb283556af02b35bf731febd447e25c1f1',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `editorFrameEl.src = 'yarn-editor/index.html';`,
+      `const yarnEditorUrl = new URL(
+  'yarn-editor/index.html',
+  window.location.href
+);
+const yarnEditorLocale = new URL(window.location.href).searchParams.get(
+  'locale'
+);
+if (yarnEditorLocale) {
+  yarnEditorUrl.searchParams.set('locale', yarnEditorLocale);
+}
+editorFrameEl.src = yarnEditorUrl.toString();`,
+      'forward the authoritative wrapper locale into the local Yarn derivative'
+    );
+    content = replaceExactly(
+      content,
+      `    const externalEditorHeader = createExternalEditorHeader({
+      parentElement: pathEditorHeaderDiv,
+      editorContentDocument: document,
+      onSaveChanges: saveAndClose,
+      onCancelChanges: closeWindow,
+      name: externalEditorInput.name,
+    });`,
+      `    const externalEditorHeader = createExternalEditorHeader({
+      parentElement: pathEditorHeaderDiv,
+      editorContentDocument: document,
+      onSaveChanges: saveAndClose,
+      onCancelChanges: closeWindow,
+      name: externalEditorInput.name,
+    });
+    const playmeshYarnI18n = editorFrameEl.contentWindow.PlaymeshYarnI18n;
+    if (playmeshYarnI18n) {
+      playmeshYarnI18n.translateWrapperDocument(document);
+    }`,
+      'localize the official Yarn wrapper header after it is created'
+    );
+    content = replaceExactly(
+      content,
+      `    saveToGdButton.childNodes[2].innerHTML = 'Apply';`,
+      `    saveToGdButton.childNodes[2].innerHTML = playmeshYarnI18n
+      ? playmeshYarnI18n.t('action.apply')
+      : 'Apply';`,
+      'localize the GDevelop Apply control without changing its callback'
+    );
+    content = replaceExactly(
+      content,
+      `        externalEditorHeader.setOverwriteExistingResource();`,
+      `        externalEditorHeader.setOverwriteExistingResource();
+        if (playmeshYarnI18n) {
+          playmeshYarnI18n.translateWrapperDocument(document);
+        }`,
+      'refresh Yarn header labels after official overwrite-state rendering'
+    );
+    return replaceExactly(
+      content,
+      `    setTitle(
+      'GDevelop Dialogue Tree Editor (Yarn) - ' + externalEditorInput.name
+    );`,
+      `    setTitle(
+      playmeshYarnI18n
+        ? playmeshYarnI18n.t('wrapper.title', {
+            name: externalEditorInput.name,
+          })
+        : 'GDevelop Dialogue Tree Editor (Yarn) - ' + externalEditorInput.name
+    );`,
+      'localize the official Yarn wrapper title from the same committed locale'
+    );
   },
 });
 
@@ -3087,7 +4451,8 @@ await patchFile({
       content,
       `import UrlStorageProvider from '../UrlStorageProvider';`,
       `import UrlStorageProvider from '../UrlStorageProvider';
-import PlaymeshLocalStorageProvider from '../PlaymeshLocalStorageProvider';`,
+import PlaymeshLocalStorageProvider from '../PlaymeshLocalStorageProvider';
+import { fetchPlaymeshLocalResources } from '../PlaymeshLocalStorageProvider/PlaymeshLocalResourceFetcher';`,
       'import Playmesh local storage for resource fetching'
     );
     content = replaceExactly(
@@ -3095,17 +4460,11 @@ import PlaymeshLocalStorageProvider from '../PlaymeshLocalStorageProvider';`,
       `const fetchers: {
   [string]: FetchAllProjectResourcesFunction,
 } = {`,
-      `const fetchNothing = async (
-  _options: FetchAllProjectResourcesOptions
-): Promise<FetchAllProjectResourcesResult> => ({
-  erroredResources: [],
-});
-
-const fetchers: {
+      `const fetchers: {
   [string]: FetchAllProjectResourcesFunction,
 } = {
-  [PlaymeshLocalStorageProvider.internalName]: fetchNothing,`,
-      'register Playmesh local resource fetcher'
+  [PlaymeshLocalStorageProvider.internalName]: fetchPlaymeshLocalResources,`,
+      'materialize official external-editor blobs through the Playmesh local resource fetcher'
     );
     return content;
   },
@@ -3376,6 +4735,7 @@ await patchFile({
       }
 
       const playmeshGDevelopRootKey = '$playmesh.gdevelop.root.v1';
+      let playmeshGDevelopStorageFolder: string | null = null;
       const getPlaymeshStorageBucket = (name: string): any | null => {
         if (typeof window === 'undefined') return null;
         const playmesh = (window as any).playmesh;
@@ -3386,7 +4746,55 @@ await patchFile({
             '不兼容的 PlayMesh Game SDK：GDevelop 需要 4.1.0 的同步存储能力。'
           );
         }
-        const bucket = storage.getBucket(name);
+        if (playmeshGDevelopStorageFolder === null) {
+          const gameInfoApi = playmesh.main && playmesh.main.gameInfo;
+          const gameInfo =
+            gameInfoApi && typeof gameInfoApi.getCurrent === 'function'
+              ? gameInfoApi.getCurrent()
+              : null;
+          if (gameInfo === null) {
+            throw new Error(
+              'PlayMesh Game SDK 尚未就绪，无法确定 GDevelop 存档用户。'
+            );
+          }
+          const playerApi = playmesh.main && playmesh.main.player;
+          const player =
+            playerApi && typeof playerApi.getCurrent === 'function'
+              ? playerApi.getCurrent()
+              : null;
+          const sessionApi = playmesh.main && playmesh.main.session;
+          const isAuthority =
+            sessionApi && typeof sessionApi.isAuthority === 'function'
+              ? sessionApi.isAuthority()
+              : false;
+          const isPublicAuthority = isAuthority && player === null;
+          const identityApi = playmesh.app && playmesh.app.identity;
+          const identity =
+            identityApi && typeof identityApi.getCurrent === 'function'
+              ? identityApi.getCurrent()
+              : null;
+          const username =
+            player && typeof player.nickname === 'string' && player.nickname
+              ? player.nickname
+              : !isPublicAuthority &&
+                  identity &&
+                  typeof identity.nickname === 'string' &&
+                  identity.nickname
+                ? identity.nickname
+                : null;
+          if (!isPublicAuthority && username === null) {
+            if (gameInfo.multiplayer === false) return null;
+            throw new Error(
+              'PlayMesh 当前页面没有可用于 GDevelop 个人存档的玩家身份。'
+            );
+          }
+          playmeshGDevelopStorageFolder = isPublicAuthority
+            ? 'auth'
+            : 'users/' + encodeURIComponent(username);
+        }
+        const bucket = storage.getBucket(
+          'GDJS/' + playmeshGDevelopStorageFolder + '/' + name
+        );
         if (
           !bucket ||
           typeof bucket.getDataSync !== 'function' ||
@@ -4531,6 +5939,54 @@ import { usePlaymeshLocalization } from '../PlaymeshLocalization/PlaymeshLocaliz
     );
     content = replaceExactly(
       content,
+      `  let [isFolderProject, setIsFolderProject] = React.useState(
+    initialProperties.isFolderProject
+  );`,
+      `  const isFolderProject = true;`,
+      'make the official folder-project mode mandatory in Playmesh'
+    );
+    content = replaceExactly(
+      content,
+      `                <SelectField
+                  fullWidth
+                  floatingLabelText={<Trans>Project file type</Trans>}
+                  value={isFolderProject ? 'folder-project' : 'single-file'}
+                  onChange={(e, i, value: string) => {
+                    const newIsFolderProject = value === 'folder-project';
+                    if (newIsFolderProject === isFolderProject) {
+                      return;
+                    }
+                    setIsFolderProject(newIsFolderProject);
+                    notifyOfChange();
+                  }}
+                  helperMarkdownText={i18n._(
+                    t\`Note that this option will only have an effect when saving your project on your computer's filesystem from the desktop app. Read about [using Git or GitHub with projects in multiple files](https://wiki.gdevelop.io/gdevelop5/tutorials/using-github-desktop/).\`
+                  )}
+                >
+                  <SelectOption
+                    value={'single-file'}
+                    label={t\`Single file (default)\`}
+                  />
+                  <SelectOption
+                    value={'folder-project'}
+                    label={t\`Multiple files, saved in folder next to the main file\`}
+                  />
+                </SelectField>`,
+      `                <SelectField
+                  fullWidth
+                  disabled
+                  floatingLabelText={<Trans>Project file type</Trans>}
+                  value={'folder-project'}
+                >
+                  <SelectOption
+                    value={'folder-project'}
+                    label={t\`Multiple files, saved in folder next to the main file\`}
+                  />
+                </SelectField>`,
+      'show the only supported Playmesh project file mode'
+    );
+    content = replaceExactly(
+      content,
       `  const onApply = async () => {
     const specialPropertiesChanged =
       name !== initialProperties.name ? { newName: name } : {};
@@ -4994,14 +6450,141 @@ import { usePlaymeshProjectRekeyControllerState } from '../PlaymeshProjectRekey/
 });
 
 await patchFile({
+  relativePath: 'newIDE/app/src/MainFrame/UnsavedChangesContext.js',
+  expectedGitBlobSha: 'd34a95dacfb55817d2989d0a5271a157786e4b27',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `  getChangesCount: () => number,
+  getTimeOfFirstChangeSinceLastSave: () => number | null,`,
+      `  getChangesCount: () => number,
+  getChangesGeneration: () => number,
+  getTimeOfFirstChangeSinceLastSave: () => number | null,`,
+      'expose a monotonic edit generation without changing the official dirty count'
+    );
+    content = replaceExactly(
+      content,
+      `  getChangesCount: () => 0,
+  getTimeOfFirstChangeSinceLastSave: () => null,`,
+      `  getChangesCount: () => 0,
+  getChangesGeneration: () => 0,
+  getTimeOfFirstChangeSinceLastSave: () => null,`,
+      'initialize the monotonic edit generation accessor'
+    );
+    content = replaceExactly(
+      content,
+      `  const changesCount = React.useRef<number>(0); // Cannot be stored in a state variable, otherwise it re-renders children at each change.
+  const timeOfFirstChangeSinceLastSave`,
+      `  const changesCount = React.useRef<number>(0); // Cannot be stored in a state variable, otherwise it re-renders children at each change.
+  const changesGeneration = React.useRef<number>(0); // Monotonic across manual seals, for autosave de-duplication.
+  const timeOfFirstChangeSinceLastSave`,
+      'keep a reset-safe autosave generation alongside the official dirty counter'
+    );
+    content = replaceExactly(
+      content,
+      `    changesCount.current = changesCount.current + 1;
+    setHasUnsavedChanges(true);`,
+      `    changesCount.current = changesCount.current + 1;
+    changesGeneration.current = changesGeneration.current + 1;
+    setHasUnsavedChanges(true);`,
+      'advance the autosave generation on every official unsaved-change trigger'
+    );
+    content = replaceExactly(
+      content,
+      `  const getChangesCount = React.useCallback(() => changesCount.current, []);
+  const getTimeOfFirstChangeSinceLastSave`,
+      `  const getChangesCount = React.useCallback(() => changesCount.current, []);
+  const getChangesGeneration = React.useCallback(
+    () => changesGeneration.current,
+    []
+  );
+  const getTimeOfFirstChangeSinceLastSave`,
+      'read the monotonic edit generation without causing editor rerenders'
+    );
+    return replaceExactly(
+      content,
+      `        getChangesCount,
+        getTimeOfFirstChangeSinceLastSave,`,
+      `        getChangesCount,
+        getChangesGeneration,
+        getTimeOfFirstChangeSinceLastSave,`,
+      'publish the autosave generation through the existing unsaved-changes context'
+    );
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/src/ProjectsStorage/index.js',
+  expectedGitBlobSha: '002175089bdfff742655ee6e8e3e89d76c21cb9a',
+  transform: content =>
+    replaceExactly(
+      content,
+      `  onAutoSaveProject?: (
+    project: gdProject,
+    fileMetadata: FileMetadata
+  ) => Promise<void>,`,
+      `  onAutoSaveProject?: (
+    project: gdProject,
+    fileMetadata: FileMetadata
+  ) => Promise<void | {| skipped: string |}>,`,
+      'allow the Playmesh provider to report a busy or incomplete autosave without treating it as success'
+    ),
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js',
+  expectedGitBlobSha: 'a7ab698b33db3e124e51a863ec236bd268c82415',
+  transform: content => {
+    content = replaceExactly(
+      content,
+      `import ErrorBoundary from '../../UI/ErrorBoundary';`,
+      `import ErrorBoundary from '../../UI/ErrorBoundary';
+import { usePlaymeshAutosavePreferenceLabel } from '../../PlaymeshLocalization/PlaymeshAutosavePreference';`,
+      'use the app locale for the Playmesh autosave preference wording'
+    );
+    content = replaceExactly(
+      content,
+      `  const { isMobile } = useResponsiveWindowSize();
+  const [currentTab, setCurrentTab]`,
+      `  const { isMobile } = useResponsiveWindowSize();
+  const autosavePreferenceLabel = usePlaymeshAutosavePreferenceLabel();
+  const [currentTab, setCurrentTab]`,
+      'bind the preferences dialog to the current Playmesh locale'
+    );
+    return replaceExactly(
+      content,
+      `                label={i18n._(t\`Auto-save project on preview\`)}`,
+      `                label={autosavePreferenceLabel}`,
+      'describe the one autosave switch as both minute cadence and preview save'
+    );
+  },
+});
+
+await patchFile({
   relativePath: 'newIDE/app/src/MainFrame/index.js',
   expectedGitBlobSha: '0268fc9b7862c026ce99c756d896e28526aa809f',
   transform: content => {
     content = replaceExactly(
       content,
       `import useVersionHistory from '../VersionHistory/UseVersionHistory';`,
-      `import useVersionHistory from '../PlaymeshHistory/UsePlaymeshHistory';`,
+      `import useVersionHistory from '../PlaymeshHistory/UsePlaymeshHistory';
+import { createPlaymeshAutosaveController } from '../PlaymeshProjectMutation/PlaymeshAutosaveController';`,
       'route the file history drawer to Playmesh local history'
+    );
+    content = replaceExactly(
+      content,
+      `  const {
+    hasUnsavedChanges,
+    sealUnsavedChanges,
+    triggerUnsavedChanges,
+  } = unsavedChanges;`,
+      `  const {
+    hasUnsavedChanges,
+    sealUnsavedChanges,
+    triggerUnsavedChanges,
+    getChangesGeneration,
+  } = unsavedChanges;`,
+      'read the reset-safe edit generation for Playmesh autosave de-duplication'
     );
     content = replaceExactly(
       content,
@@ -5014,6 +6597,135 @@ await patchFile({
       `  } = useVersionHistory({\n    getStorageProvider,\n    isSavingProject,\n    fileMetadata: currentFileMetadata,`,
       `  } = useVersionHistory({\n    getStorageProvider,\n    isSavingProject,\n    fileMetadata: currentFileMetadata,\n    project: currentProject,`,
       'give the Playmesh history hook the live project for validated restores'
+    );
+    content = replaceExactly(
+      content,
+      `  const autosaveProjectIfNeeded = React.useCallback(
+    async () => {
+      if (!currentProject) return;
+
+      const storageProviderOperations = getStorageProviderOperations();
+      if (
+        hasUnsavedChanges && // Only create an autosave if there are unsaved changes.
+        preferences.values.autosaveOnPreview &&
+        storageProviderOperations.onAutoSaveProject &&
+        currentFileMetadata
+      ) {
+        try {
+          await storageProviderOperations.onAutoSaveProject(
+            currentProject,
+            currentFileMetadata
+          );
+        } catch (err) {
+          console.error('Error while auto-saving the project: ', err);
+          _showSnackMessage(
+            i18n._(
+              t\`There was an error while making an auto-save of the project. Verify that you have permissions to write in the project folder.\`
+            )
+          );
+        }
+      }
+    },
+    [
+      i18n,
+      _showSnackMessage,
+      currentProject,
+      currentFileMetadata,
+      getStorageProviderOperations,
+      preferences.values.autosaveOnPreview,
+      hasUnsavedChanges,
+    ]
+  );`,
+      `  const playmeshAutosaveController = React.useMemo(
+    () => createPlaymeshAutosaveController(),
+    []
+  );
+
+  const autosaveProjectIfNeeded = React.useCallback(
+    async (trigger: 'preview' | 'periodic' = 'preview') => {
+      if (
+        !currentProject ||
+        !currentFileMetadata ||
+        !hasUnsavedChanges ||
+        !preferences.values.autosaveOnPreview
+      ) {
+        return;
+      }
+
+      const storageProvider = getStorageProvider();
+      const isPlaymeshLocal =
+        storageProvider.internalName === 'PlaymeshLocal';
+      if (trigger === 'periodic' && !isPlaymeshLocal) return;
+
+      const storageProviderOperations = getStorageProviderOperations();
+      const { onAutoSaveProject } = storageProviderOperations;
+      if (!onAutoSaveProject) return;
+      if (isPlaymeshLocal && isSavingProject) return;
+
+      try {
+        const save = () =>
+          onAutoSaveProject(currentProject, currentFileMetadata);
+        if (isPlaymeshLocal) {
+          await playmeshAutosaveController.autosave({
+            project: currentProject,
+            fileIdentifier: currentFileMetadata.fileIdentifier,
+            generation: getChangesGeneration(),
+            trigger,
+            save,
+          });
+        } else {
+          await save();
+        }
+      } catch (err) {
+        console.error('Error while auto-saving the project: ', err);
+        _showSnackMessage(
+          i18n._(
+            t\`There was an error while making an auto-save of the project. Verify that you have permissions to write in the project folder.\`
+          )
+        );
+      }
+    },
+    [
+      i18n,
+      _showSnackMessage,
+      currentProject,
+      currentFileMetadata,
+      getStorageProvider,
+      getStorageProviderOperations,
+      preferences.values.autosaveOnPreview,
+      hasUnsavedChanges,
+      isSavingProject,
+      getChangesGeneration,
+      playmeshAutosaveController,
+    ]
+  );
+
+  React.useEffect(
+    () => {
+      if (
+        !currentProject ||
+        !currentFileMetadata ||
+        !preferences.values.autosaveOnPreview ||
+        getStorageProvider().internalName !== 'PlaymeshLocal'
+      ) {
+        return undefined;
+      }
+      const intervalId = window.setInterval(() => {
+        autosaveProjectIfNeeded('periodic').catch(err => {
+          console.error('Error while scheduling the periodic auto-save.', err);
+        });
+      }, 60 * 1000);
+      return () => window.clearInterval(intervalId);
+    },
+    [
+      currentProject,
+      currentFileMetadata,
+      preferences.values.autosaveOnPreview,
+      getStorageProvider,
+      autosaveProjectIfNeeded,
+    ]
+  );`,
+      'save changed Playmesh projects every minute and de-duplicate preview autosaves'
     );
     content = replaceExactly(
       content,

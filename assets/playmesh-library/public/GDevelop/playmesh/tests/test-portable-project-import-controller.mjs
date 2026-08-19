@@ -52,6 +52,43 @@ const archiveBlob = new Blob(['portable-project']);
 }
 
 {
+  const projectJsonBlob = new Blob(['{"properties":{}}'], {
+    type: 'application/json',
+  });
+  const calls = [];
+  const controller = await loadController({
+    importProject: async options => {
+      calls.push(options);
+      return calls.length === 1
+        ? {
+            status: 'needsNewPackageName',
+            reason: 'allocation_conflict',
+            sourcePackageName: 'com.example.original',
+          }
+        : {
+            status: 'imported',
+            identityMode: 'copy',
+            packageName: options.packageName,
+          };
+    },
+    generatePackageName: () => 'com.playmesh.rawcopy',
+  });
+  const result = await controller.importPortableProjectWithCopyDecision({
+    projectJsonBlob,
+    confirmCopy: () => true,
+  });
+  assert.equal(result.status, 'imported');
+  assert.deepEqual(calls, [
+    { projectJsonBlob },
+    {
+      projectJsonBlob,
+      packageName: 'com.playmesh.rawcopy',
+      identityMode: 'copy',
+    },
+  ]);
+}
+
+{
   const calls = [];
   const controller = await loadController({
     importProject: async options => {

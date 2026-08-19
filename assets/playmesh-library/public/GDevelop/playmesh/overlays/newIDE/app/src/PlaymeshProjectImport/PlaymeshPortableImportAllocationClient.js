@@ -166,7 +166,7 @@ const assertWorkspaceTarget = (value /*: mixed */) /*: Object */ => {
     'gameId',
     'packageName',
     'projectUuid',
-    'projectJsonHash',
+    'projectFilesHash',
     'resourceManifestHash',
   ];
   if (!target || !hasExactKeys(target, keys)) return invalidResponse();
@@ -178,7 +178,7 @@ const assertWorkspaceTarget = (value /*: mixed */) /*: Object */ => {
     gameId,
     packageName,
     projectUuid: requireToken(target.projectUuid),
-    projectJsonHash: requireHash(target.projectJsonHash),
+    projectFilesHash: requireHash(target.projectFilesHash),
     resourceManifestHash: requireHash(target.resourceManifestHash),
   };
 };
@@ -192,7 +192,7 @@ const assertSameTarget = (
     'gameId',
     'packageName',
     'projectUuid',
-    'projectJsonHash',
+    'projectFilesHash',
     'resourceManifestHash',
   ]) {
     if (actual[key] !== expected[key]) return invalidResponse();
@@ -231,8 +231,8 @@ const assertWorkspaceProject = (value /*: mixed */) /*: Object */ => {
   const keys = [
     'packageName',
     'projectUuid',
-    'projectJsonHash',
-    'projectJsonSize',
+    'projectFilesHash',
+    'projectFilesSize',
     'resourceReferences',
   ];
   if (!project || !hasExactKeys(project, keys)) return invalidResponse();
@@ -253,8 +253,8 @@ const assertWorkspaceProject = (value /*: mixed */) /*: Object */ => {
   return {
     packageName: requireGameId(project.packageName),
     projectUuid: requireToken(project.projectUuid),
-    projectJsonHash: requireHash(project.projectJsonHash),
-    projectJsonSize: requirePositiveInteger(project.projectJsonSize),
+    projectFilesHash: requireHash(project.projectFilesHash),
+    projectFilesSize: requirePositiveInteger(project.projectFilesSize),
     resourceReferences: references,
   };
 };
@@ -264,16 +264,16 @@ const assertWorkspaceFinalization = (value /*: mixed */) /*: Object */ => {
   const keys = [
     'packageName',
     'projectUuid',
-    'projectJsonHash',
-    'projectJsonSize',
+    'projectFilesHash',
+    'projectFilesSize',
     'resourceManifestHash',
   ];
   if (!evidence || !hasExactKeys(evidence, keys)) return invalidResponse();
   return {
     packageName: requireGameId(evidence.packageName),
     projectUuid: requireToken(evidence.projectUuid),
-    projectJsonHash: requireHash(evidence.projectJsonHash),
-    projectJsonSize: requirePositiveInteger(evidence.projectJsonSize),
+    projectFilesHash: requireHash(evidence.projectFilesHash),
+    projectFilesSize: requirePositiveInteger(evidence.projectFilesSize),
     resourceManifestHash: requireHash(evidence.resourceManifestHash),
   };
 };
@@ -425,7 +425,7 @@ const assertTransaction = (
     if (
       workspaceProject.packageName !== workspaceTarget.packageName ||
       workspaceProject.projectUuid !== workspaceTarget.projectUuid ||
-      workspaceProject.projectJsonHash !== workspaceTarget.projectJsonHash
+      workspaceProject.projectFilesHash !== workspaceTarget.projectFilesHash
     ) {
       return invalidResponse();
     }
@@ -435,8 +435,8 @@ const assertTransaction = (
       !workspaceProject ||
       workspaceFinalization.packageName !== workspaceTarget.packageName ||
       workspaceFinalization.projectUuid !== workspaceTarget.projectUuid ||
-      workspaceFinalization.projectJsonHash !==
-        workspaceTarget.projectJsonHash ||
+      workspaceFinalization.projectFilesHash !==
+        workspaceTarget.projectFilesHash ||
       workspaceFinalization.resourceManifestHash !==
         workspaceTarget.resourceManifestHash
     ) {
@@ -596,8 +596,8 @@ const operationForRequest = (
   if (/\/resources\/[a-f0-9]{64}$/.test(url) && method === 'PUT') {
     return 'gdevelop.project.allocation.resource.put';
   }
-  if (url.endsWith('/workspace/project')) {
-    return 'gdevelop.project.allocation.workspace.project.put';
+  if (url.endsWith('/workspace/project-files')) {
+    return 'gdevelop.project.allocation.workspace.project-files.put';
   }
   if (url.endsWith('/workspace/finalize')) {
     return 'gdevelop.project.allocation.workspace.finalize';
@@ -926,17 +926,17 @@ export const createPlaymeshPortableImportAllocationClient = ({
       return reference;
     },
 
-    uploadProject: async (value, projectJson) => {
+    uploadProjectFiles: async (value, projectFilesJson) => {
       const input = requireTransactionInput(value);
-      if (typeof projectJson !== 'string' || !projectJson)
+      if (typeof projectFilesJson !== 'string' || !projectFilesJson)
         return invalidResponse();
-      const blob = new Blob([projectJson], {
+      const blob = new Blob([projectFilesJson], {
         type: 'application/json; charset=utf-8',
       });
       const { response, payload, operation } = await send({
         url: `${BASE_URL}/${encodeURIComponent(
           input.transactionId
-        )}/workspace/project`,
+        )}/workspace/project-files`,
         method: 'PUT',
         body: blob,
         contentType: 'application/json; charset=utf-8',
@@ -951,7 +951,7 @@ export const createPlaymeshPortableImportAllocationClient = ({
       requireToken(envelope.requestId);
       const reference = assertProjectReference(envelope.project);
       if (
-        reference.contentHash !== input.target.projectJsonHash ||
+        reference.contentHash !== input.target.projectFilesHash ||
         reference.size !== blob.size
       ) {
         return invalidResponse();
@@ -965,7 +965,7 @@ export const createPlaymeshPortableImportAllocationClient = ({
       if (
         normalizedEvidence.packageName !== input.target.packageName ||
         normalizedEvidence.projectUuid !== input.target.projectUuid ||
-        normalizedEvidence.projectJsonHash !== input.target.projectJsonHash ||
+        normalizedEvidence.projectFilesHash !== input.target.projectFilesHash ||
         normalizedEvidence.resourceManifestHash !==
           input.target.resourceManifestHash
       ) {

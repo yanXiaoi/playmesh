@@ -57,7 +57,7 @@ const fileIdentifier = 'file-a';
 const historyEvidence = marker => ({
   revision: 1,
   currentContentHash: hash(marker),
-  projectJsonHash: hash(marker),
+  projectFilesHash: hash(marker),
   resourceManifestHash: hash(marker),
 });
 const configEvidence = gameId => ({
@@ -84,12 +84,12 @@ const backendEvidence = (gameId, marker) => ({
 });
 const browserTarget = marker => ({
   fileIdentifier,
-  projectJsonHash: hash(marker),
+  projectFilesHash: hash(marker),
 });
 const browserEvidence = (gameId, marker) => ({
   fileMetadata: { fileIdentifier, gameId },
   packageName: gameId,
-  projectJsonHash: hash(marker),
+  projectFilesHash: hash(marker),
 });
 const transaction = phase => ({
   txId: 'tx-a',

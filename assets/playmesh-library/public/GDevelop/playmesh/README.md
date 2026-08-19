@@ -126,14 +126,16 @@ pending rather than silently becoming authoritative in IndexedDB.
 
 Portable create/import uses the replayable allocation transaction API. It
 prepares an immutable `workspaceTarget`, declares the complete resource plan,
-uploads only missing raw blobs plus the exact raw GDevelop project JSON,
+uploads only missing raw blobs plus the exact official `projectFiles` DTO,
 finalizes the workspace and then commits the sibling staging directory. The
 server derives the resource manifest in official `project.resources.resources`
 order; client upload order is not evidence. Resource/project PUT requests may be
 HTTP chunked. A present `Content-Length` is only an early limit check, while the
-actual byte count and SHA-256 are always decisive. Autosave only updates the
-current version, while an explicit save creates a history revision. A restore
-verifies every resource size and SHA-256 before replacing the editor cache.
+actual byte count and SHA-256 are always decisive. When the existing
+`autosaveOnPreview` preference is enabled, PlaymeshLocal attempts an autosave
+for a new change generation every 60 seconds and before preview; autosaves and
+explicit saves both create visible history revisions. A restore verifies every
+resource size and SHA-256 before replacing the editor cache.
 
 Publishing runs the pinned official browser HTML export pipeline and hands a
 text/Blob file map to `PlaymeshPackageUploader.js`; it never builds a second

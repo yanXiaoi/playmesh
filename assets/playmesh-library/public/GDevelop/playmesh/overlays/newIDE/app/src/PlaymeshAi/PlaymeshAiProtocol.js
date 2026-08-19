@@ -39,10 +39,12 @@ export type PlaymeshAiProjectContextMetadata = {|
   size: number,
   selectedSceneName: ?string,
 |};
+export type PlaymeshAiApprovalMode = 'request_approval' | 'always_allow';
 export type PlaymeshAiSession = {
   editorSessionId: string,
   gameId: string,
   mode: 'chat' | 'agent',
+  approvalMode: PlaymeshAiApprovalMode,
   locale: string,
   projectContext: ?PlaymeshAiProjectContextMetadata,
   sequence: number,
@@ -52,9 +54,20 @@ export type PlaymeshAiSession = {
 export type PlaymeshAiTurn = {
   turnId: string,
   editorSessionId: string,
+  echo?: number,
   sequence: number,
+  createdAt?: string,
+  clientMessageId?: string,
   ...,
 };
+type ValidatedPlaymeshAiTurnDto = {|
+  turnId: string,
+  editorSessionId: string,
+  echo?: number,
+  sequence: number,
+  createdAt?: string,
+  clientMessageId?: string,
+|};
 export type PlaymeshAiCallState =
   | 'queued'
   | 'awaiting_approval'
@@ -110,6 +123,10 @@ export type PlaymeshAiManualCall = {|
   arguments: PlaymeshAiObject,
   eventPayload?: PlaymeshAiEventPayload,
 |};
+export type PlaymeshAiManualSubmission = {|
+  echo: number,
+  calls: Array<PlaymeshAiManualCall>,
+|};
 export type PlaymeshAiToolDefinition = {
   +name: string,
   +executionKind: 'editor_function' | 'event_payload' | 'agent_resource_cas',
@@ -128,7 +145,7 @@ export type PlaymeshAiEnqueueRequest = {|
 |};
 */
 
-export const PLAYMESH_AI_SESSION_PROTOCOL_VERSION = '2.0.0';
+export const PLAYMESH_AI_SESSION_PROTOCOL_VERSION = '4.0.0';
 export const PLAYMESH_AI_PROJECT_CONTEXT_SCHEMA_VERSION = '1.0.0';
 export const PLAYMESH_AI_EVENT_PAYLOAD_SCHEMA_VERSION = '1.0.0';
 
@@ -148,6 +165,16 @@ export const PLAYMESH_AI_TERMINAL_CALL_STATES /*: $ReadOnlyArray<PlaymeshAiCallS
   'cancelled',
   'timed_out',
 ]);
+
+export const validatePlaymeshAiApprovalMode = (
+  value /*: mixed */
+) /*: PlaymeshAiApprovalMode */ => {
+  if (value === 'request_approval' || value === 'always_allow') return value;
+  throw new PlaymeshAiProtocolError(
+    'invalid_ai_response',
+    'GDevelop AI approval mode is invalid.'
+  );
+};
 
 const terminalCallStateSet = new Set(PLAYMESH_AI_TERMINAL_CALL_STATES);
 
@@ -792,6 +819,7 @@ export const validatePlaymeshAiSession = (
     ),
     gameId: requireString(session.gameId, 'game id'),
     mode,
+    approvalMode: validatePlaymeshAiApprovalMode(session.approvalMode),
     locale: requireString(session.locale, 'locale'),
     projectContext: validateProjectContextMetadata(session.projectContext),
     sequence: requireInteger(session.sequence, 'session sequence'),
@@ -803,8 +831,7 @@ export const validatePlaymeshAiTurn = (
   value /*: mixed */
 ) /*: PlaymeshAiTurn */ => {
   const turn = requireObject(value, 'turn');
-  return {
-    ...turn,
+  const validated /*: ValidatedPlaymeshAiTurnDto */ = {
     turnId: validatePlaymeshAiClientId(turn.turnId, 'turn id'),
     editorSessionId: validatePlaymeshAiClientId(
       turn.editorSessionId,
@@ -812,12 +839,31 @@ export const validatePlaymeshAiTurn = (
     ),
     sequence: requireInteger(turn.sequence, 'turn sequence'),
   };
+  if ('echo' in turn) {
+    validated.echo = requirePositiveInteger(turn.echo, 'turn echo');
+  }
+  if ('createdAt' in turn) {
+    validated.createdAt = requireString(turn.createdAt, 'turn created at');
+  }
+  if ('clientMessageId' in turn) {
+    validated.clientMessageId = validatePlaymeshAiClientId(
+      turn.clientMessageId,
+      'turn client message id'
+    );
+  }
+  return validated;
 };
 
 export const validatePlaymeshAiCall = (
   value /*: mixed */
 ) /*: PlaymeshAiCall */ => {
   const call = requireObject(value, 'call');
+  if ('echo' in call) {
+    throw new PlaymeshAiProtocolError(
+      'invalid_ai_response',
+      'GDevelop AI call echo is invalid; echo belongs to the turn.'
+    );
+  }
   const state = requireCallState(call.state);
   const validated /*: any */ = {
     callId: validatePlaymeshAiClientId(call.callId, 'call id'),
@@ -900,24 +946,13 @@ const extractJsonCandidate = (input /*: string */) /*: string */ => {
 };
 
 const parseArguments = (value /*: mixed */) /*: PlaymeshAiObject */ => {
-  let parsed = value;
-  if (typeof parsed === 'string') {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch (_) {
-      throw new PlaymeshAiProtocolError(
-        'invalid_manual_calls',
-        'A pasted GDevelop AI call has invalid JSON arguments.'
-      );
-    }
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new PlaymeshAiProtocolError(
       'invalid_manual_calls',
       'A pasted GDevelop AI call must contain an arguments object.'
     );
   }
-  return parsed;
+  return value;
 };
 
 /**
@@ -927,8 +962,9 @@ const parseArguments = (value /*: mixed */) /*: PlaymeshAiObject */ => {
  */
 export const parsePlaymeshManualToolCalls = (
   input /*: string */,
-  tools /*: $ReadOnlyArray<PlaymeshAiToolDefinition> */ = []
-) /*: Array<PlaymeshAiManualCall> */ => {
+  tools /*: $ReadOnlyArray<PlaymeshAiToolDefinition> */ = [],
+  previousEcho /*: number */ = 0
+) /*: PlaymeshAiManualSubmission */ => {
   let parsed;
   try {
     parsed = JSON.parse(extractJsonCandidate(input));
@@ -938,80 +974,131 @@ export const parsePlaymeshManualToolCalls = (
       'The pasted GDevelop AI response does not contain valid JSON.'
     );
   }
-  const rawCalls = Array.isArray(parsed)
-    ? parsed
-    : parsed && Array.isArray(parsed.calls)
-    ? parsed.calls
-    : parsed && Array.isArray(parsed.toolCalls)
-    ? parsed.toolCalls
-    : parsed && Array.isArray(parsed.tool_calls)
-    ? parsed.tool_calls
-    : [parsed];
-  if (!rawCalls.length) {
+  const submission = requireObject(parsed, 'manual submission');
+  const submittedEcho =
+    Number.isSafeInteger(submission.echo) && submission.echo > 0
+      ? Number(submission.echo)
+      : null;
+  if (
+    !hasExactFields(submission, ['calls', 'echo']) ||
+    submittedEcho == null
+  ) {
+    const error = new PlaymeshAiProtocolError(
+      'manual_submission_echo_required',
+      'A pasted GDevelop AI submission must contain one positive safe-integer echo beside calls.',
+      true
+    );
+    if (submittedEcho != null) (error /*: any */).echo = submittedEcho;
+    throw error;
+  }
+  const echo = submittedEcho;
+  const correlateError = (error /*: mixed */) /*: mixed */ => {
+    if (error && typeof error === 'object') {
+      (error /*: any */).echo = echo;
+    }
+    return error;
+  };
+  if (!Number.isSafeInteger(previousEcho) || previousEcho < 0) {
     throw new PlaymeshAiProtocolError(
-      'invalid_manual_calls',
-      'The pasted GDevelop AI response has an invalid call count.'
+      'invalid_ai_response',
+      'The previous GDevelop AI submission echo is invalid.'
     );
   }
-  return rawCalls.map(rawCall => {
-    const call = requireObject(rawCall, 'manual call');
-    const functionCall =
-      call.function && typeof call.function === 'object'
-        ? call.function
-        : call;
-    const declaredToolName =
-      typeof functionCall.name === 'string' && functionCall.name.trim()
-        ? functionCall.name
-        : typeof functionCall.toolName === 'string' &&
-          functionCall.toolName.trim()
-        ? functionCall.toolName
-        : '';
-    if (!declaredToolName) {
-      throw new PlaymeshAiProtocolError(
-        'manual_call_envelope_required',
-        'Use a complete GDevelop AI call: {"name":"the exact tool name from the index","arguments":{}}.',
+  if (echo <= previousEcho) {
+    throw correlateError(
+      new PlaymeshAiProtocolError(
+        'manual_submission_echo_not_monotonic',
+        'The pasted GDevelop AI submission echo must be greater than every earlier echo in this editor session.',
         true
-      );
-    }
-    const toolName = requireString(declaredToolName, 'manual tool name');
-    const toolArguments = parseArguments(functionCall.arguments);
-    const toolDefinition = tools.find(tool => tool.name === toolName);
-    const expectsEventPayload =
-      toolDefinition && toolDefinition.executionKind === 'event_payload';
-    const hasEventPayload = 'eventPayload' in functionCall;
-    if (expectsEventPayload && !hasEventPayload) {
-      throw new PlaymeshAiProtocolError(
-        'event_payload_required',
-        'This pasted call must contain eventPayload next to name and arguments.'
-      );
-    }
-    if (tools.length && !expectsEventPayload && hasEventPayload) {
-      throw new PlaymeshAiProtocolError(
-        'event_payload_not_allowed',
-        'The registered tool does not accept an event payload.'
-      );
-    }
-    const sceneArgument =
-      toolDefinition &&
-      toolDefinition.executionConfig &&
-      toolDefinition.executionConfig.sceneArgument;
-    const eventPayload = hasEventPayload
-      ? validatePlaymeshAiEventPayload(
-          functionCall.eventPayload,
-          requireString(
-            toolArguments[
-              typeof sceneArgument === 'string' ? sceneArgument : 'scene_name'
-            ],
-            'event scene name'
+      )
+    );
+  }
+  const rawCalls = submission.calls;
+  if (!Array.isArray(rawCalls)) {
+    throw correlateError(
+      new PlaymeshAiProtocolError(
+        'invalid_manual_calls',
+        'A pasted GDevelop AI submission must contain a calls array.'
+      )
+    );
+  }
+  if (!rawCalls.length) {
+    throw correlateError(
+      new PlaymeshAiProtocolError(
+        'invalid_manual_calls',
+        'The pasted GDevelop AI response has an invalid call count.'
+      )
+    );
+  }
+  let calls /*: Array<PlaymeshAiManualCall> */;
+  try {
+    calls = rawCalls.map(rawCall => {
+      const call = requireObject(rawCall, 'manual call');
+      const allowedFields =
+        'eventPayload' in call
+          ? ['arguments', 'eventPayload', 'name']
+          : ['arguments', 'name'];
+      const declaredToolName =
+        typeof call.name === 'string' && call.name.trim() ? call.name : '';
+      if (!declaredToolName) {
+        throw new PlaymeshAiProtocolError(
+          'manual_call_envelope_required',
+          'Use a complete GDevelop AI call: {"name":"the exact tool name from the index","arguments":{}}.',
+          true
+        );
+      }
+      if (!hasExactFields(call, allowedFields)) {
+        throw new PlaymeshAiProtocolError(
+          'manual_call_envelope_invalid',
+          'Each pasted GDevelop AI call must contain only name, arguments, and an eventPayload when declared by the tool.',
+          true
+        );
+      }
+      const toolName = requireString(declaredToolName, 'manual tool name');
+      const toolArguments = parseArguments(call.arguments);
+      const toolDefinition = tools.find(tool => tool.name === toolName);
+      const expectsEventPayload =
+        toolDefinition && toolDefinition.executionKind === 'event_payload';
+      const hasEventPayload = 'eventPayload' in call;
+      if (expectsEventPayload && !hasEventPayload) {
+        throw new PlaymeshAiProtocolError(
+          'event_payload_required',
+          'This pasted call must contain eventPayload next to name and arguments.'
+        );
+      }
+      if (tools.length && !expectsEventPayload && hasEventPayload) {
+        throw new PlaymeshAiProtocolError(
+          'event_payload_not_allowed',
+          'The registered tool does not accept an event payload.'
+        );
+      }
+      const sceneArgument =
+        toolDefinition &&
+        toolDefinition.executionConfig &&
+        toolDefinition.executionConfig.sceneArgument;
+      const eventPayload = hasEventPayload
+        ? validatePlaymeshAiEventPayload(
+            call.eventPayload,
+            requireString(
+              toolArguments[
+                typeof sceneArgument === 'string'
+                  ? sceneArgument
+                  : 'scene_name'
+              ],
+              'event scene name'
+            )
           )
-        )
-      : null;
-    return {
-      toolName,
-      arguments: toolArguments,
-      ...(eventPayload ? { eventPayload } : {}),
-    };
-  });
+        : null;
+      return {
+        toolName,
+        arguments: toolArguments,
+        ...(eventPayload ? { eventPayload } : {}),
+      };
+    });
+  } catch (error) {
+    throw correlateError(error);
+  }
+  return { echo, calls };
 };
 
 export const createPlaymeshAiClientId = (

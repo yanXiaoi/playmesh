@@ -9,6 +9,7 @@ import {
 import type {
   PlaymeshHistoryRestoreResult,
   PlaymeshHistorySnapshotInput,
+  PlaymeshHistoryVersion,
   PreparedPlaymeshHistoryResource,
 } from './PlaymeshHistoryClient';
 import {
@@ -40,10 +41,12 @@ import {
 } from './PlaymeshHistoryEvidence';
 import type {
   PlaymeshHistoryRestoreBrowserEvidence,
+  PlaymeshHistoryRestoreEnvelope,
   PlaymeshHistoryRestoreHistoryEvidence,
   PlaymeshHistoryRestoreSource,
   PlaymeshHistoryRestoreTargetSnapshot,
   PlaymeshHistoryRestoreTransaction,
+  PlaymeshHistoryRestoreVersion,
 } from './PlaymeshHistoryRestoreProtocol';
 
 /*::
@@ -218,7 +221,7 @@ const resolveDependencies = (
 export const toPlaymeshHistoryBrowserEvidence = (
   historyEvidence /*: PlaymeshHistoryRestoreHistoryEvidence */
 ) /*: PlaymeshHistoryRestoreBrowserEvidence */ => ({
-  projectJsonHash: historyEvidence.projectJsonHash,
+  projectFilesHash: historyEvidence.projectFilesHash,
   resourceManifestHash: historyEvidence.resourceManifestHash,
 });
 
@@ -226,7 +229,7 @@ const sameBrowserEvidence = (
   left /*: PlaymeshHistoryRestoreBrowserEvidence */,
   right /*: PlaymeshHistoryRestoreBrowserEvidence */
 ) /*: boolean */ =>
-  left.projectJsonHash === right.projectJsonHash &&
+  left.projectFilesHash === right.projectFilesHash &&
   left.resourceManifestHash === right.resourceManifestHash;
 
 export const classifyPlaymeshHistoryBrowserEvidence = (
@@ -289,8 +292,8 @@ const assertRestoredMatchesTarget = async (
     );
   }
   if (
-    (await hashPlaymeshHistoryJson(restored.project)) !==
-      (await hashPlaymeshHistoryJson(targetSnapshot.project)) ||
+    (await hashPlaymeshHistoryJson(restored.projectFiles)) !==
+      (await hashPlaymeshHistoryJson(targetSnapshot.projectFiles)) ||
     (await hashPlaymeshHistoryJson(restored.resources)) !==
       (await hashPlaymeshHistoryJson(targetSnapshot.resources))
   ) {
@@ -323,9 +326,22 @@ const createTargetStoredProject = (
 ) /*: PlaymeshHistoryStoredProjectResult */ =>
   dependencies.createStoredProject({
     fileMetadata: { ...fileMetadata, gameId },
-    project: materialized.project,
+    projectFiles: materialized.projectFiles,
     resources: materialized.resources,
   });
+
+const toPlaymeshHistoryVersion = (
+  version /*: PlaymeshHistoryRestoreVersion */
+) /*: PlaymeshHistoryVersion */ => ({
+  id: version.id,
+  gameId: version.gameId,
+  revision: version.revision,
+  timestamp: version.timestamp,
+  reason: version.reason,
+  contentHash: version.contentHash,
+  source: version.source,
+  contentBytes: version.contentBytes,
+});
 
 const finalizeCommittedRestore = async (
   {
@@ -407,10 +423,12 @@ const finalizeCommittedRestore = async (
   }
   return {
     restored: {
-      version: restored.version,
-      project: materialized.project,
+      version: toPlaymeshHistoryVersion(restored.version),
+      projectFiles: materialized.projectFiles,
       resources: materialized.resources,
-      backupVersion: committedTransaction.backupVersion || null,
+      backupVersion: committedTransaction.backupVersion
+        ? toPlaymeshHistoryVersion(committedTransaction.backupVersion)
+        : null,
     },
     fileMetadata: storedProjectResult.fileMetadata,
   };
@@ -507,7 +525,7 @@ export const restorePlaymeshHistoryToLocalStore = async (
       );
       const currentStoredProject = dependencies.createStoredProject({
         fileMetadata: { ...fileMetadata, gameId },
-        project: preparedCurrent.project,
+        projectFiles: preparedCurrent.projectFiles,
         resources: preparedCurrent.resources.map(preparedResourceToStored),
       }).storedProject;
       const oldBrowserEvidence = await dependencies.computeBrowserEvidence(
@@ -519,18 +537,42 @@ export const restorePlaymeshHistoryToLocalStore = async (
         signal
       );
       const baseRevision = await dependencies.resolveRevision(gameId, signal);
-      const preparedEnvelope = await dependencies.restoreClient.prepare({
-        gameId,
-        idempotencyKey: dependencies.idempotencyKeyFactory(),
-        baseRevision,
-        targetRevision,
-        source,
-        currentProject: preparedCurrent.project,
-        currentResources: preparedCurrent.resources.map(
-          toPlaymeshHistoryResourceDto
-        ),
-        signal,
-      });
+      const idempotencyKey = dependencies.idempotencyKeyFactory();
+      let preparedEnvelope /*: ?PlaymeshHistoryRestoreEnvelope */ = null;
+      try {
+        preparedEnvelope = await dependencies.restoreClient.prepare({
+          gameId,
+          idempotencyKey,
+          baseRevision,
+          targetRevision,
+          source,
+          currentProjectFiles: preparedCurrent.projectFiles,
+          currentResources: preparedCurrent.resources.map(
+            toPlaymeshHistoryResourceDto
+          ),
+          signal,
+        });
+      } catch (prepareError) {
+        try {
+          const recovery = await dependencies.restoreClient.recover({
+            gameId,
+            signal,
+          });
+          const transaction = recovery.transaction;
+          if (
+            transaction &&
+            transaction.idempotencyKey === idempotencyKey &&
+            transaction.phase === 'PREPARED' &&
+            transaction.targetSnapshot
+          ) {
+            preparedEnvelope = {
+              requestId: recovery.requestId,
+              transaction,
+            };
+          }
+        } catch (_) {}
+        if (!preparedEnvelope) throw prepareError;
+      }
       const preparedTransaction = preparedEnvelope.transaction;
       const targetSnapshot = preparedTransaction.targetSnapshot;
       if (preparedTransaction.phase !== 'PREPARED' || !targetSnapshot) {

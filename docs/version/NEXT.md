@@ -24,17 +24,57 @@
 
 ## 未发布变更
 
-- 设置页“关于 Playmesh”新增手动检查更新。App 只打包 `assets/app/App.json` 更新源列表，
-  并发请求全部远端 JSON 后按严格语义版本选择最高有效清单，再按当前平台展示下载线路
-  名称与复用的端点延迟检测结果；界面始终显示当前/远端版本和新版本说明。下载地址只
-  交给系统默认浏览器，App 不下载、不校验安装包且不安装；动态 `app_update.json` 不打包。
+- 完成默认不公开的局域网附近对局：游戏启动和开发预览不申请 publication lease；用户
+  打开分享面板或
+  本机房主调用无参数 `playmesh.app.lan.setPublished()` 后，App 才通过唯一自定义 IPv4
+  UDP multicast 发布，关闭面板不取消，退出游戏或页面销毁时停止公告并 best-effort 发送
+  goodbye。协议固定 `239.255.80.77:53584`、wire v1、1 秒公告、4 秒 TTL、单包最多
+  1200 字节；不保留 DNS-SD/TXT、第二发现栈或已知节点单播兼容。
+- Android、Windows、macOS、Linux 分别覆盖全部有效物理 IPv4 网卡和支持组播的虚拟网卡，
+  不依赖默认路由；接口动态重整且部分失败隔离，发现地址只取数据报真实 source IP。iOS
+  自动发现/发布显式为 `unsupported`，扫码、手工邀请和分享链接仍可用。该能力不承诺穿透
+  AP 隔离、VLAN、防火墙、禁用组播或 VPN/虚拟网卡策略。`169.254/16` link-local 只放宽给
+  游戏发现/分享，不扩大到 Developer Gateway 等其他地址暴露链。
+- App 加入页显示所有 gameId，并以纯文本展示游戏名、主机昵称、真实 source IP、多人
+  当前/最大人数或“单机”，随公告/presence 自动更新且保留手动刷新；点击后发现 lease 与
+  候选保留至统一预检和复查结束。游戏 SDK 仍只投影当前 gameId 的既有
+  `instanceId/gameId/name/host`，不增加内部展示元数据或图标端点；手工链接、扫码、发现项
+  和 SDK 加入复用同一邀请预检及既有 `RemoteGamePage`。
+- Go Core Session 的 `MaxPlayers` 硬上限由 16 提升为 32，局域网 presence 同步接受
+  `maxPlayers <= 32`，33 及以上仍在创建 Session 时拒绝。GDevelop 联机运行时的独立 8 人
+  编号与 readiness 协议不随本项机械扩容。
+- 分享链收口为单一 `GameShareCoordinator`：Core/standalone 授权、网关、multicast
+  publication lease、Relay、generation、清理和不可变 `GameShareLinkSnapshot` 由一个
+  权威写入者管理。分享面板、开发状态与 App SDK 读取同一组非回环 IPv4/当前有效 Relay
+  URL 和同一 PNG；没有可用 LAN 地址时不返回 `127.0.0.1` fallback，Relay 内部使用独立
+  回环邀请入口。multicast 公开失败保留手工分享通道并允许只重试公开。
+- App Bridge SDK `3.3.0` 兼容新增 `playmesh.app.lan`：发现、链接加入和扫码加入需要
+  真实用户操作；`getShareLinks()` 则只允许 App-only 当前本机 Authority/standalone host
+  无副作用读取完整 LAN/Relay bearer URL 与逐链接 PNG Data URL，不新增 capability、确认
+  或 user activation。这一授权替代旧的绝对禁读规则；平台仍不把 URL、token 或 PNG 写入
+  日志、磁盘、分析、崩溃详情或错误。另新增无参数、单向且幂等的
+  `playmesh.app.ui.disableSystemMenuTriggers()`，可解绑当前文档默认 Escape/Menu/Back 自动
+  菜单触发而不影响显式 UI 方法，刷新文档后恢复默认绑定。
+- 本功能保持 App `4.2.0+28`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Go Core
+  `0.5.0`、Core 协议 `1.3.0`、Catalog `3.0.0` 与 Relay `3.0.0` 不变；
+  `/playmesh/join` 只兼容增加 `gameId/gameName` 预检字段。自动化与静态契约已完成，
+  Android、Windows、macOS、Linux 的发布、发现、丢失、权限、网络切换和实际加入仍待
+  跨设备实机验收，尚不能标记为已发布；iOS 回归范围是稳定 unsupported 与保留入口。
+- 设置页“关于 Playmesh”新增手动检查更新。App 只打包统一资源渠道目录
+  `assets/app/App.json`，检查更新时仅投影存在 `app` 字段的渠道；缺少该资源的渠道跳过，
+  其他资源键不校验。并发请求全部 App 远端 JSON 后按严格语义版本选择最高有效清单，再按
+  当前平台展示下载线路名称与复用的端点延迟检测结果；界面始终显示当前/远端版本和新版本
+  说明。下载地址只交给系统默认浏览器，App 不下载、不校验安装包且不安装；动态
+  `app_update.json` 不打包。
 - 设置页不再承载开发者模式。首页“加入对局/在线游戏库”下方新增“制作游戏”入口，统一
   控制同一个 Developer Gateway 会话；源代码开发与基于开源 GDevelop 的可视化开发使用
   两个独立折叠入口，各自维护链接、可用性和打开语义，公共层不再使用
-  `workspaceKind` 条件分支。GDevelop 官方 WebIDE 仍为运行时可替换资源，不内置下载器或
-  新服务器。
+  `workspaceKind` 条件分支。GDevelop WebIDE 的远端版本清单渠道同样只从 `App.json` 的
+  `gdevelop` 字段投影，不再维护独立入口文件。GDevelop 官方 WebIDE 仍为运行时可替换资源，
+  不内置下载器或新服务器。
 - Developer API / OpenAPI 兼容升级到 `4.2.0`，新增独立 capability
-  `gdevelop.history.v1`。GDevelop 当前工程与历史 revision 同时保存标准 project JSON、
+  `gdevelop.history.v3`。GDevelop 当前工程与历史 revision 同时保存官方 folder-project
+  多文件树、
   图片、音频、视频、字体、3D 等完整 PlaymeshLocal 资源 manifest；每项目独立 CAS 以 SHA-256
   去重并由 current/history 分别 pin，只有零引用 blob 才可 GC。
 - GDevelop 资源通过现有同源 Developer Gateway 流式暂存；Content-Length 存在时只用于提前
@@ -45,20 +85,24 @@
 - WebIDE 在保存前使用批量 presence 接口检查最多 2048 个 `{contentHash,size}`，只上传
   CAS 中缺失的新增或更新资源。连续相同快照、删除资源和改回仍由历史 pin 的旧 hash 都
   不产生重复 Blob 上传；客户端不能用受项目 pin 授权的逐个资源 GET 代替存在性预检。
-- GDevelop 历史移动默认保留每项目 50 revision、每项目 unique CAS 256 MiB、
-  project JSON 32 MiB、单资源 64 MiB、未 pin staging 24 小时；桌面配置对象可提高到
+- GDevelop 的既有 `autosaveOnPreview` 开关成为自动保存总开关：PlaymeshLocal 有新修改时
+  每 60 秒自动保存，并在预览前复用同一去重入口；成功自动保存以 `autosave` reason 创建
+  可见历史修订，不清除手动保存 dirty 状态。busy、历史未创建和瞬时失败保留游标供下一周期
+  重试；revision conflict 则阻断定时器重放同一 generation，直到出现新的本地修改。
+- GDevelop 历史默认保留每项目 50 revision、每项目 unique CAS 256 MiB、
+  project files 合计 32 MiB、单资源 64 MiB、未 pin staging 24 小时；桌面配置对象可提高到
   每项目 100 revision / 1 GiB / 单资源 128 MiB。不存在全局历史配额或跨项目淘汰；
   项目内淘汰永不删除 current，配额失败保持其他项目原状态。
 - GDevelop managed project 的身份、项目列表、canonical current 与历史证据改由 App Gateway
   持有，浏览器 IndexedDB 仅作为可丢弃编辑缓存。新增 project-allocation 事务：冻结 immutable
-  workspace target，声明完整资源计划，上传缺失 raw blob 与 exact project JSON，finalize 时按
+  workspace target，声明完整资源计划，上传缺失 raw blob 与 exact projectFiles tree，finalize 时按
   官方资源顺序建立首个 history current，durable decision 后原子发布项目根，并支持幂等查询、
   只向前 recover 和决议前 abort。生命周期和历史 wire 直接使用与
   `properties.packageName`、`main.json.id` 相同的
   `gameId`，不签发额外 opaque handle。managed root 固定为 `packages/{gameId}`，历史位于
   平台 sidecar `.playmesh/gdevelop/history`；另存为共享历史，复制为新工程分配新 ID 和
   独立历史。
-- GDevelop 本地 AI 开发流升级为 v2：Chat/Agent 共用固定 5.6.276 的唯一 49-tool 合约、
+- GDevelop 本地 AI 开发流升级为 v4：Chat/Agent 共用固定 5.6.276 的唯一 50-tool 合约、
   两套可覆盖提示词、短期内存 editor session、turn/call 幂等状态机、统一危险操作审批、
   单 writer lease 以及明确的超时/取消边界。Gateway 只协调调用；当前 WebIDE 直接把同一个
   活动 `gdProject` 传给官方 EditorFunctions，并在函数返回后触发官方回调和 dirty 状态。
@@ -66,10 +110,13 @@
   回滚、浏览器 pending journal、启动恢复或事件纠错。用户继续按 GDevelop 正常流程自行
   保存。Chat 提示词不包含 Token；Agent 继续使用现有 Developer Gateway Token，不签发
   第二种凭据。SSE 断开时可按 sequence 轮询调用状态，AI、prompt 或 locale 加载失败不影响
-  普通编辑、保存和预览。
+  普通编辑、保存和预览。Chat 粘贴协议严格使用根 `{echo,calls}`；单个或批量提交都只带
+  一个根级 echo，调用项不带 echo。Chat 返回状态升级为
+  `playmesh.gdevelop.ai.return-status.v3` 并在 `schemaVersion` 同级回显 echo；Agent 返回状态
+  保持 v1 且不包含 echo。
 - GDevelop 内核升级至 5.6.276（Playmesh revision 18）；移除上游已经正式修复的本地
   SceneEditor/Mosaic 补丁，重新冻结源码策略、官方 libGD 配对与完整测试包证明链。
-- GDevelop AI editor-session wire 升级为不兼容旧宿主的 `2.0.0`，保留独立 `GDevelopAiProjectContext
+- GDevelop AI editor-session wire 升级为不兼容旧宿主的 `4.0.0`，保留独立 `GDevelopAiProjectContext
   1.0.0`：上下文直接使用官方完整 SimplifiedProject、ExtensionSummary、选中场景事件和
   当前工具能力引用，并做 canonical SHA-256、体积/深度限制及 Token/URL/Bridge 拒绝。
   session 创建或 PATCH 均可提交 context。execution 只接受 `success`、`output` 以及失败时
@@ -80,8 +127,28 @@
   `name`、`arguments` 同级携带完整 `eventPayload`；浏览器校验后把它作为
   `input.eventPayload` 与 call 一次入队，并纳入幂等指纹。输入在审批前锁定，审批后不能补交
   或替换；不存在 `awaiting_event_payload`、correction API、自动纠错或旧 CAS 引用兼容。
+- GDevelop Tool Contract 破坏性升级为 `4.0.0`。GDevelop 5.6.276 源码 ZIP 不包含服务端
+  AI 输入 Schema，因此本地契约明确标记为针对固定源码的 v12 兼容快照，而不再声称由官方
+  Schema 自动生成。17 个直传工具统一使用官方当前函数名与完整参数，参数原样进入官方
+  runner；旧资源/对象子集别名以及 `delete_object`、`remove_behavior`、`delete_scene` 被移除，
+  删除语义由完整 change 函数的 `delete_this_*` 字段提供，并按完整函数的最高风险审批。
+  对象组成员使用 `objects_to_add: string[]` / `objects_to_remove: string[]`，同时补齐 2D 实例
+  rotation/opacity、首场景、图层可见性、批量变量与资源必需名称等源码消费字段。新增
+  clean-replay 校验直接读取锁定的 `Utils.js` 与 `EditorFunctions/index.js`，核对官方 v12、
+  实现名、修改标记及 `SafeExtractor` 字段，旧 `objects` 形状或字段漂移会阻断构建。
+- 恢复 GDevelop 5.6.276 官方 Piskel、Jfxr、Yarn 本地外部编辑器及原入口。三套固定版本编辑器
+  作为离线锁定构建输入，资源继续走官方 `save -> fetch -> free` 生命周期并由 PlaymeshLocal
+  接管存储；分析、账号、公共发布、远程词典等联网服务被移除。本地 AI 工具真实复用同一套
+  Piskel 切图/GIF 解码、Jfxr 合成与 Yarn 数据引擎，不复制其算法。
 - AI “始终允许”授权改为按 `scopeKind + scopeId + operationId` 持久化，新增授权列表与撤销
   API；source/GDevelop 项目删除分别清理自身授权，损坏授权文件按 fail-closed 处理。
+- GDevelop WebIDE 新增 editor-session scoped `approvalMode`。新 session 固定从 `request_approval`
+  开始，同一 session reattach 保留；显式 close 或 Developer Mode 进程/Gateway 重启后恢复
+  `request_approval`，且模式不写项目、历史、配置或授权文件。切到 `always_allow` 会立即批准
+  当前 session 所有 pending 及后续危险调用；切回 `request_approval` 不撤销已经批准、排队或
+  执行的调用。既有按工具与 scope 保存的 grant 继续生效；外部 Agent 无权修改该设置。
+  WebIDE 首次申请 editor lease 还要求 App 启动链接签发的独立内存 capability，并在成功申请
+  后轮换；Developer Bearer 本身不能获取 lease，也不能经通用审批 API 自行批准 GDevelop 调用。
 - GDevelop 临时预览只接受标准 Playmesh ZIP，并通过 DeveloperRun -> GamePage ->
   GameWebGateway/Core 的现有运行链启动；不安装、不写 Catalog、不暴露临时资源凭据。
   GDevelop `index.html` 的 locale bootstrap 只含 `workspace.gdevelop_*` UI 文案，桥接失败

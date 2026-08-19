@@ -25,7 +25,10 @@ wrapperSource = wrapperSource
   .replace(/^import .*;\r?\n/gm, '')
   .replace(
     '// @flow',
-    '// @flow\nconst playmeshAiRuntimeDebuggerTools = { wrappers: {} };'
+    '// @flow\n' +
+      'const playmeshAiRuntimeDebuggerTools = { wrappers: {} };\n' +
+      'const createPlaymeshAiPiskelToolWrappers = () => ({});\n' +
+      'const createPlaymeshAiJfxrYarnTools = () => ({});'
   );
 
 const localTools = await import(
@@ -144,10 +147,15 @@ await assert.rejects(
 );
 
 let adapterSource = await readFile(adapterPath, 'utf8');
-adapterSource = adapterSource.replace(
-  "import { processEditorFunctionCalls } from '../EditorFunctions/EditorFunctionCallRunner';",
-  'const processEditorFunctionCalls = async () => { throw new Error("unexpected default runner"); };'
-);
+adapterSource = adapterSource
+  .replace(
+    "import { processEditorFunctionCalls } from '../EditorFunctions/EditorFunctionCallRunner';",
+    'const processEditorFunctionCalls = async () => { throw new Error("unexpected default runner"); };'
+  )
+  .replace(
+    "import { AI_ORCHESTRATOR_TOOLS_VERSION } from '../AiGeneration/Utils';",
+    "const AI_ORCHESTRATOR_TOOLS_VERSION = 'v12';"
+  );
 const adapter = await import(
   `data:text/javascript;base64,${Buffer.from(adapterSource).toString('base64')}`
 );
@@ -170,6 +178,8 @@ const inspectResult = await adapter.executePlaymeshAiEditorFunction({
         name: 'inspect_variables',
         implementation: 'official_editor_function',
         officialImplementationName: 'inspect_variables',
+        // An obsolete hidden-argument field must never alter v4 direct calls.
+        officialArguments: { variable_scope: 'global' },
       },
     ],
   },
@@ -191,6 +201,7 @@ const inspectResult = await adapter.executePlaymeshAiEditorFunction({
   },
 });
 assert.equal(inspectResult.result.success, true);
+assert.equal(officialRunnerOptions.toolsVersion, 'v12');
 assert.equal(officialRunnerOptions.functionCalls.length, 1);
 assert.equal(
   officialRunnerOptions.functionCalls[0].name,
@@ -203,6 +214,50 @@ assert.deepEqual(
     scene_name: 'Game',
     object_name: 'Actors',
     variable_names_or_paths: ['health'],
+  }
+);
+
+const groupMembershipMapping = adapter.toGDevelopEditorFunctionCall({
+  call: {
+    callId: 'change-group-members',
+    toolName: 'change_scene_properties_layers_effects_groups',
+    arguments: {
+      scene_name: 'Game',
+      changed_groups: [
+        {
+          group_name: 'grp_TerrainChunks',
+          objects_to_add: ['GroundTile', 'WaterTile'],
+          objects_to_remove: ['OldTile'],
+        },
+      ],
+    },
+  },
+  toolsContract: {
+    tools: [
+      {
+        name: 'change_scene_properties_layers_effects_groups',
+        implementation: 'official_editor_function',
+        officialImplementationName:
+          'change_scene_properties_layers_effects_groups',
+      },
+    ],
+  },
+});
+assert.equal(
+  groupMembershipMapping.functionCall.name,
+  'change_scene_properties_layers_effects_groups'
+);
+assert.deepEqual(
+  JSON.parse(groupMembershipMapping.functionCall.arguments),
+  {
+    scene_name: 'Game',
+    changed_groups: [
+      {
+        group_name: 'grp_TerrainChunks',
+        objects_to_add: ['GroundTile', 'WaterTile'],
+        objects_to_remove: ['OldTile'],
+      },
+    ],
   }
 );
 

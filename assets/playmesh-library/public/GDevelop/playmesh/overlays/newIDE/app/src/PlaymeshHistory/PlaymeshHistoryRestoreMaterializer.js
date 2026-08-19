@@ -6,20 +6,26 @@ import {
   validatePlaymeshHistoryRestoreRevision,
 } from './PlaymeshHistoryRestoreProtocol';
 import type {
-  PlaymeshHistoryRestoreJsonObject,
   PlaymeshHistoryRestoreTargetSnapshot,
 } from './PlaymeshHistoryRestoreProtocol';
 import {
-  encodePlaymeshHistoryCanonicalJson,
   hashPlaymeshHistoryBlob,
   hashPlaymeshHistoryBytes,
 } from './PlaymeshHistoryEvidence';
+import {
+  formatPlaymeshProjectFile,
+  unsplitPlaymeshProject,
+} from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
+import type {
+  PlaymeshProjectFile,
+  PlaymeshProjectJsonObject,
+} from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
 
 /*::
 type Fetch = (input: RequestInfo, init?: RequestOptions) => Promise<Response>;
 type RequestOptions = { signal?: AbortSignal };
 export type PlaymeshHistoryMaterializedTarget = {|
-  project: PlaymeshHistoryRestoreJsonObject,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
 |};
 type PlaymeshHistoryValidationDependencies = {|
@@ -45,16 +51,33 @@ const fail = (code /*: string */, message /*: string */) /*: empty */ => {
 export const verifyPlaymeshHistoryTargetProjectReference = async (
   targetSnapshot /*: PlaymeshHistoryRestoreTargetSnapshot */
 ) /*: Promise<void> */ => {
-  const bytes = encodePlaymeshHistoryCanonicalJson(targetSnapshot.project);
   if (
-    bytes.byteLength !== targetSnapshot.projectReference.size ||
-    (await hashPlaymeshHistoryBytes(bytes.buffer)) !==
-      targetSnapshot.projectReference.contentHash
+    targetSnapshot.projectFiles.length !==
+    targetSnapshot.projectFilesReference.length
   ) {
-    return fail(
-      'target_project_reference_mismatch',
-      'Playmesh 历史恢复项目快照校验失败。'
+    return fail('target_project_reference_mismatch', 'Playmesh 历史恢复项目快照校验失败。');
+  }
+  const references = new Map(
+    targetSnapshot.projectFilesReference.map(reference => [
+      reference.path,
+      reference,
+    ])
+  );
+  for (const file of targetSnapshot.projectFiles) {
+    const reference = references.get(file.path);
+    const bytes = new TextEncoder().encode(
+      formatPlaymeshProjectFile(file.content)
     );
+    if (
+      !reference ||
+      bytes.byteLength !== reference.size ||
+      (await hashPlaymeshHistoryBytes(bytes.buffer)) !== reference.contentHash
+    ) {
+      return fail(
+        'target_project_reference_mismatch',
+        'Playmesh 历史恢复项目快照校验失败。'
+      );
+    }
   }
 };
 
@@ -127,7 +150,7 @@ const replaceStringsDeep = (
 };
 
 export const validatePlaymeshHistoryTargetProject = (
-  project /*: PlaymeshHistoryRestoreJsonObject */,
+  project /*: PlaymeshProjectJsonObject */,
   resources /*: $ReadOnlyArray<StoredProjectResource> */,
   dependencies /*: ?PlaymeshHistoryValidationDependencies */ = null
 ) /*: void */ => {
@@ -211,9 +234,9 @@ export const materializePlaymeshHistoryTarget = async (
   if (gd) validationDependencies.gd = gd;
   if (urlApi) validationDependencies.urlApi = urlApi;
   validatePlaymeshHistoryTargetProject(
-    targetSnapshot.project,
+    await unsplitPlaymeshProject(targetSnapshot.projectFiles),
     resources,
     validationDependencies
   );
-  return { project: targetSnapshot.project, resources };
+  return { projectFiles: targetSnapshot.projectFiles, resources };
 };

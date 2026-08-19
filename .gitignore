@@ -61,4 +61,4 @@ app.*.map.json
 
 # 一次性官方 GDevelop 源码树
 /GDevelop-*/
-/work/gdevelop-webide-build-cache/
+/work/

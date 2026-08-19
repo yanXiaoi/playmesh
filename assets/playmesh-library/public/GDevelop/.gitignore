@@ -1,3 +1,5 @@
 official/*
 !official/LICENSE.md
-
+!official/external-editors.json
+!official/external-editors/
+!official/external-editors/**

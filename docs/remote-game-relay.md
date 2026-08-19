@@ -1,9 +1,10 @@
 # Playmesh 局域网与公共中转联机架构
 
-状态：开发基线
+状态：Relay 3.0 开发基线；4.2.0 LAN 发现与统一分享协调器已开发，待 Android、Windows、
+macOS、Linux 实机验收；iOS 自动发现/发布显式 unsupported
 适用版本：NEXT
 范围：App 运行时、游戏分享、在线游戏源、`go-server`
-当前协议：Relay `3.0.0`、Catalog `3.0.0`
+当前协议：Relay `3.0.0`、Catalog `3.0.0`、LAN discovery wire v1
 
 ## 1. 目标与破坏性边界
 
@@ -340,31 +341,48 @@ Authority 必须接受回环形式的 Host、使用相对资源地址，并避�
 
 ## 8. GameShareCoordinator
 
-主机 App 使用一个统一协调器管理：
+主机 App 使用一个统一协调器管理当前房间的分享生产链：
 
 ```text
 GameShareCoordinator
-  - LAN Share Channel
-  - Relay Share Channel
-  - Player Connection Context Registry
+  - Core/standalone share access + GameWebGateway
+  - LAN URL + Relay joinUri
+  - UDP multicast publication lease
+  - immutable GameShareLinkSnapshot + QR bytes
+  - generation / concurrency / cleanup
 ```
 
-局域网和公共中转共用同一个 Core 分享授权。第一个通道开启时创建授权，
-第二个通道复用；最后一个通道关闭时才释放。关闭分享弹窗不释放授权。
+分享通道与 UDP multicast 公开是正交状态。游戏启动和开发预览默认不公开；打开分享面板或
+本机房主调用无参数 `playmesh.app.lan.setPublished()` 时，协调器复用同一个通道并向
+App 级 `LanGameDiscoveryService` 申请 publication lease。Android、Windows、macOS、Linux
+使用固定 `239.255.80.77:53584`、wire v1 的唯一自定义 IPv4 UDP multicast 链；iOS 自动
+发现/发布显式不支持，但扫码、手工邀请与分享链接保留。
+该链不保留旧服务记录、第二发现栈或已知节点单播探测，主机 IP 只取数据报真实 source；
+AP 隔离、VLAN、防火墙、禁用组播及 VPN/虚拟网卡策略仍可能使设备互不可见。
+并发入口等待同一 Future，成功后本局幂等。关闭分享弹窗不释放授权或撤销公开；退出
+游戏、页面销毁或进程结束才停止公告、best-effort 发送 goodbye，并关闭 Relay、网关和
+分享授权。
 
-玩家在线状态、昵称和延迟以 Go Core 会话为权威，连接上下文只补充来源：
+multicast 公开失败不关闭已经建立的 LAN 分享通道，手工复制和扫码继续可用；后续
+`setPublished()` 只重试公开。没有非回环 IPv4 时 LAN 快照为空且发布返回
+`discovery_unavailable`，不能用 `127.0.0.1` 伪装可公开地址。清理采用终止优先的
+best-effort 顺序，generation/cancellation 检查保证晚到 Gateway、Relay 或二维码结果
+不会写回新游戏或已关闭页面。
 
-```text
-playerId
-source
-relaySourceId（可选）
-relayTunnelId（内部）
-latencyMs
-connectionState
-lastSeenAt
-```
+LAN 与 Relay 必须组合成一个 `GameShareLinkSnapshot`：LAN 来自
+`GameWebGateway.shareLinks()` 的首次生产结果，WAN 只来自当前有效
+`RelayHostSession.joinUri`；LAN 在前、WAN 在后并按完整 URL 去重。Relay 建立 Authority
+入口时必须使用网关显式提供的 `loopbackInvitationUri`，不能依赖公开 LAN 列表的第一项。
+LAN 可显式包含只供游戏分享使用的 `169.254/16` link-local；该放宽不得传给 Developer
+Gateway 或 Relay 内部入口。
+共享 `ShareQrCodeEncoder` 为每个精确 URL 生成唯一 PNG bytes，分享面板直接渲染，App
+SDK 只序列化 Data URL；任何消费者都不得重新枚举网卡、拼 URL 或生成二维码。
 
-这些是运行时投影，不新增持久化玩家实体。
+App SDK `getShareLinks()` 仅允许宿主确认的当前本机 Authority/standalone host，返回的
+LAN/Relay URL 与二维码都是 bearer 凭据。Go Server 仍不得接收 Authority 分享 token、
+页面入口或端到端密钥；平台日志、磁盘、分析和异常也不得记录完整 URL、token 或 PNG。
+玩家在线状态、昵称和延迟继续只以 Go Core 会话为权威，不由分享协调器建立第二份玩家
+状态。
 
 ## 9. Go Server
 

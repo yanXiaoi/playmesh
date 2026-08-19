@@ -42,7 +42,7 @@ const String playmeshNativeFileSaveScript = r'''
     enumerable: false,
     value: ({ url, filename }) => {
       const requestId = nextRequestId();
-      Promise.resolve().then(async () => {
+      return Promise.resolve().then(async () => {
         if (typeof url !== "string" || !url.startsWith("blob:")) {
           throw new Error("GDevelop download URL is not a Blob URL");
         }

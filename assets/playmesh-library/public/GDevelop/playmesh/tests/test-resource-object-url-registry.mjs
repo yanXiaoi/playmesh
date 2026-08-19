@@ -48,6 +48,8 @@ const firstUrl = registry.acquire({
   blob: imageA,
   contentHash: hashA,
 });
+assert.equal(registry.owns(firstUrl), true);
+assert.equal(registry.owns('blob:temporary-external-editor-url'), false);
 const sameContentUrl = registry.acquire({
   logicalUrl: 'playmesh-local-resource://two/copy.png',
   blob: new Blob(['image-a'], { type: 'image/png' }),
@@ -81,6 +83,7 @@ assert.equal(created.length, 3);
 assert.deepEqual(revoked, []);
 
 registry.dispose();
+assert.equal(registry.owns(firstUrl), false);
 assert.deepEqual(
   revoked.sort(),
   [firstUrl, sameContentUrl, replacementUrl].sort()

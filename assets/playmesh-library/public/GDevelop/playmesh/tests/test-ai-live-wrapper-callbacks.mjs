@@ -35,6 +35,10 @@ registrySource = registrySource
     /const acquire = \(resource: StoredResource\): string =>/,
     'const acquire = resource =>'
   )
+  .replace(
+    /const owns = \(objectUrl: string\): boolean =>/,
+    'const owns = objectUrl =>'
+  )
   .replace(/const dispose = \(\): void =>/, 'const dispose = () =>')
   .replace(/new Map<string, string>\(\)/g, 'new Map()')
   .replace(/new Set<string>\(\)/g, 'new Set()');
@@ -129,6 +133,7 @@ assert.equal(
 let swapAccepted = true;
 let importedResourceFile = null;
 let installedExtensionNames = new Set();
+const externalEditorToolOptions = [];
 const wrapperDependencies = {
   swapAsset: () => swapAccepted,
   PixiResourcesLoader: {},
@@ -158,6 +163,14 @@ const wrapperDependencies = {
   enumerateEventsMetadata: () => [],
   formatExpressionCall: () => '',
   playmeshAiRuntimeDebuggerTools: { wrappers: {} },
+  createPlaymeshAiPiskelToolWrappers: options => {
+    externalEditorToolOptions.push(['piskel', options]);
+    return {};
+  },
+  createPlaymeshAiJfxrYarnTools: options => {
+    externalEditorToolOptions.push(['jfxr-yarn', options]);
+    return {};
+  },
   gd: {},
 };
 globalThis.__playmeshWrapperDeps = wrapperDependencies;
@@ -177,10 +190,44 @@ wrappersSource = wrappersSource.replace(
     enumerateEventsMetadata,
     formatExpressionCall,
     playmeshAiRuntimeDebuggerTools,
+    createPlaymeshAiPiskelToolWrappers,
+    createPlaymeshAiJfxrYarnTools,
     gd,
   } = globalThis.__playmeshWrapperDeps;`
 );
 const wrappersModule = await dataModule(wrappersSource);
+
+externalEditorToolOptions.length = 0;
+const beforeProjectMutation = () => {};
+const onFetchNewlyAddedResources = async () => {};
+const onNewResourcesAdded = () => {};
+wrappersModule.createPlaymeshAiLocalToolWrappers({
+  beforeProjectMutation,
+  onFetchNewlyAddedResources,
+  onNewResourcesAdded,
+});
+assert.deepEqual(
+  externalEditorToolOptions.map(([name, options]) => ({
+    name,
+    beforeProjectMutation: options.beforeProjectMutation,
+    onFetchNewlyAddedResources: options.onFetchNewlyAddedResources,
+    onNewResourcesAdded: options.onNewResourcesAdded,
+  })),
+  [
+    {
+      name: 'piskel',
+      beforeProjectMutation,
+      onFetchNewlyAddedResources,
+      onNewResourcesAdded,
+    },
+    {
+      name: 'jfxr-yarn',
+      beforeProjectMutation,
+      onFetchNewlyAddedResources,
+      onNewResourcesAdded,
+    },
+  ]
+);
 
 const targetObject = { getType: () => 'Sprite' };
 const sourceObject = { getType: () => 'Sprite' };

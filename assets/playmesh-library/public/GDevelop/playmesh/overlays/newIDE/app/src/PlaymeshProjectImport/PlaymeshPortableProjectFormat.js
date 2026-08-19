@@ -2,9 +2,9 @@
 
 /**
  * The portable source archive is deliberately smaller than a generic ZIP
- * importer. It accepts the archive emitted by GDevelop's browser
- * DownloadFileStorageProvider: one root game.json and the local resources
- * referenced by that project.
+ * importer. It accepts the layout emitted by GDevelop's desktop
+ * folder-project writer: game.json, referenced split JSON files and
+ * the local resources referenced by the recomposed project.
  */
 
 // These values are conservative browser fallbacks, not a frozen product
@@ -13,7 +13,7 @@
 export const PLAYMESH_PORTABLE_PROJECT_CONSERVATIVE_LIMITS = Object.freeze({
   maxArchiveBytes: 100 * 1024 * 1024,
   maxExpandedBytes: 256 * 1024 * 1024,
-  maxProjectJsonBytes: 32 * 1024 * 1024,
+  maxProjectFileBytes: 32 * 1024 * 1024,
   maxSingleResourceBytes: 64 * 1024 * 1024,
   maxResourceCount: 2048,
   maxArchiveEntries: 4096,
@@ -283,15 +283,15 @@ export const inspectPortableProjectEntries = (
 
     if (
       normalizedPath === 'game.json' &&
-      uncompressedSize > limits.maxProjectJsonBytes
+      uncompressedSize > limits.maxProjectFileBytes
     ) {
       fail(
         'project_json_too_large',
         'game.json 超过当前设备的导入预算。',
         limitDetails(
-          'maxProjectJsonBytes',
+          'maxProjectFileBytes',
           uncompressedSize,
-          limits.maxProjectJsonBytes,
+          limits.maxProjectFileBytes,
           { path: normalizedPath }
         )
       );
@@ -358,13 +358,6 @@ export const inspectPortableProjectEntries = (
   if (!files.has('game.json')) {
     fail('missing_project_json', '工程 ZIP 根目录缺少 game.json。');
   }
-  if (files.size - 1 > limits.maxResourceCount) {
-    fail(
-      'too_many_resources',
-      '工程 ZIP 资源数量超过当前设备的导入预算。',
-      limitDetails('maxResourceCount', files.size - 1, limits.maxResourceCount)
-    );
-  }
   const archiveRatio = expandedBytes / Math.max(1, compressedBytes);
   if (
     expandedBytes >= 1024 * 1024 &&
@@ -427,12 +420,6 @@ const validateJsonValue = (
     }
     const objectValue: { [string]: mixed } = (value: any);
     Object.keys(objectValue).forEach(key => {
-      if (key === '__REFERENCE_TO_SPLIT_OBJECT') {
-        fail(
-          'split_project_not_supported',
-          'portable ZIP 不支持桌面版拆分 JSON 引用。'
-        );
-      }
       stack.push({
         value: Reflect.get(objectValue, key),
         depth: depth + 1,
@@ -453,14 +440,14 @@ export const parsePortableProjectJson = (
   if (byteLength < 1) {
     fail('invalid_project_json', 'game.json 不能为空。');
   }
-  if (byteLength > limits.maxProjectJsonBytes) {
+  if (byteLength > limits.maxProjectFileBytes) {
     fail(
       'project_json_too_large',
       'game.json 超过当前设备的导入预算。',
       limitDetails(
-        'maxProjectJsonBytes',
+        'maxProjectFileBytes',
         byteLength,
-        limits.maxProjectJsonBytes
+        limits.maxProjectFileBytes
       )
     );
   }
@@ -485,6 +472,32 @@ export const parsePortableProjectJson = (
   return parsed;
 };
 
+export const parsePortableProjectPartialJson = (
+  bytes /*: ArrayBuffer | Uint8Array */,
+  limitOverrides /*: ?Object */ = null
+) /*: Object */ => {
+  const limits = resolvePortableImportLimits(limitOverrides);
+  if (!(bytes instanceof ArrayBuffer) && !(bytes instanceof Uint8Array)) {
+    fail('invalid_project_json', 'GDevelop 工程分片必须是字节数据。');
+  }
+  if (bytes.byteLength < 1 || bytes.byteLength > limits.maxProjectFileBytes) {
+    fail('project_json_too_large', 'GDevelop 工程分片大小无效。');
+  }
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    );
+  } catch (_) {
+    fail('invalid_project_json', 'GDevelop 工程分片必须是有效 UTF-8 JSON。');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    fail('invalid_project_json', 'GDevelop 工程分片根节点必须是对象。');
+  }
+  validateJsonValue(parsed, limits);
+  return parsed;
+};
+
 const isExternalResource = (file /*: string */) /*: boolean */ =>
   /^(?:https?|ftp|data):/i.test(file);
 
@@ -492,10 +505,12 @@ export const planPortableProjectResources = (
   {
     inspectedArchive,
     projectResources,
+    projectFilePaths,
     limits: limitOverrides,
   } /*: {|
   inspectedArchive: any,
   projectResources: Array<{| name: string, file: string, kind?: string |}>,
+  projectFilePaths: $ReadOnlySet<string>,
   limits?: Object,
 |} */
 ) /*: any */ => {
@@ -551,12 +566,12 @@ export const planPortableProjectResources = (
     planned.resources.push(resource);
   }
 
-  // The official browser exporter writes game.json, directory entries and only
-  // the local files referenced by the serialized project. Directory entries
+  // The official desktop folder-project writer produces game.json and the
+  // split files; Playmesh adds only locally referenced resources. ZIP directory entries
   // are removed during inspection, so any remaining undeclared file is not an
   // official portable-project artifact and is rejected.
   for (const archivePath of inspectedArchive.files.keys()) {
-    if (archivePath === 'game.json') continue;
+    if (projectFilePaths.has(archivePath)) continue;
     if (!localFiles.has(archivePath)) {
       fail(
         'unexpected_archive_file',
@@ -564,7 +579,7 @@ export const planPortableProjectResources = (
       );
     }
   }
-  if (localFiles.size !== inspectedArchive.files.size - 1) {
+  if (localFiles.size !== inspectedArchive.files.size - projectFilePaths.size) {
     fail(
       'resource_manifest_mismatch',
       '工程 ZIP 资源清单与 game.json 不一致。'

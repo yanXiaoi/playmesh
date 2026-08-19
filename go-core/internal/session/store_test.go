@@ -42,6 +42,26 @@ func TestStoreAuthorityAndCapacity(t *testing.T) {
 	}
 }
 
+func TestStoreCreateEnforcesMaximumPlayers(t *testing.T) {
+	if maxSessionPlayers != 32 {
+		t.Fatalf("maxSessionPlayers = %d, want 32", maxSessionPlayers)
+	}
+	accepted, _, err := NewStore().Create(CreateInput{
+		GameID: "maximum-capacity", DisplayMode: "single_screen_multiplayer",
+		MinPlayers: 1, MaxPlayers: 32, Nickname: "房主",
+	})
+	if err != nil || accepted.MaxPlayers != 32 {
+		t.Fatalf("Create(maximum) = %#v, %v", accepted, err)
+	}
+
+	if _, _, err := NewStore().Create(CreateInput{
+		GameID: "over-capacity", DisplayMode: "single_screen_multiplayer",
+		MinPlayers: 1, MaxPlayers: 33, Nickname: "房主",
+	}); err == nil {
+		t.Fatalf("Create(maximum + 1) unexpectedly succeeded")
+	}
+}
+
 func TestStoreRejectsInvalidTokenAndAllowsLateJoin(t *testing.T) {
 	store := NewStore()
 	snapshot, host, err := store.Create(CreateInput{

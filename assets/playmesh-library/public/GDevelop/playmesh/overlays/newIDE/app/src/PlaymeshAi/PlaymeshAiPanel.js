@@ -9,6 +9,7 @@ import FlatButton from '../UI/FlatButton';
 import RaisedButton from '../UI/RaisedButton';
 import SelectField from '../UI/SelectField';
 import SelectOption from '../UI/SelectOption';
+import Toggle from '../UI/Toggle';
 import { CompactTextAreaField } from '../UI/CompactTextAreaField';
 import { ColumnStackLayout, LineStackLayout } from '../UI/Layout';
 import {
@@ -20,6 +21,7 @@ import { usePlaymeshLocalization } from '../PlaymeshLocalization/PlaymeshLocaliz
 import { playmeshMessages } from '../PlaymeshLocalization/PlaymeshMessageKeys';
 import {
   isPlaymeshAiTerminalCall,
+  type PlaymeshAiApprovalMode,
   type PlaymeshAiCall,
   type PlaymeshAiSession,
 } from './PlaymeshAiProtocol';
@@ -62,6 +64,11 @@ export type PlaymeshAiAgentBaseUrlsStatus =
   | 'loading'
   | 'ready'
   | 'load_failed';
+export type PlaymeshAiApprovalModeStatus =
+  | 'idle'
+  | 'saving'
+  | 'save_failed'
+  | 'uncertain';
 
 type Props = {|
   view: 'chat' | 'agent',
@@ -76,6 +83,8 @@ type Props = {|
     | 'ready'
     | 'load_failed'
     | 'revoke_failed',
+  approvalMode: PlaymeshAiApprovalMode,
+  approvalModeStatus: PlaymeshAiApprovalModeStatus,
   plan: ?PlaymeshAiPlan,
   manualInput: string,
   onManualInputChanged: string => void,
@@ -114,6 +123,8 @@ type Props = {|
   onReject: string => Promise<void>,
   onRefreshApprovalGrants: () => Promise<void>,
   onRevokeApprovalGrant: string => Promise<void>,
+  onApprovalModeChanged: PlaymeshAiApprovalMode => Promise<void>,
+  onRetryApprovalMode: () => Promise<void>,
   onPromptTemplateContentChanged: string => void,
   onRetryPromptTemplates: () => Promise<void>,
   onSavePromptTemplate: () => Promise<void>,
@@ -134,6 +145,9 @@ const styles = {
     boxSizing: 'border-box',
   },
   call: {
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
     padding: 12,
     border: '1px solid rgba(255, 255, 255, 0.14)',
     borderRadius: 4,
@@ -143,6 +157,24 @@ const styles = {
     flexWrap: 'wrap',
     gap: 8,
     alignItems: 'center',
+  },
+  approvalModeSection: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
+    padding: '2px 4px',
+  },
+  approvalModeFeedback: {
+    display: 'flex',
+    flex: '1 1 100%',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
   },
   callHeader: {
     display: 'flex',
@@ -155,6 +187,25 @@ const styles = {
   sectionBody: {
     width: '100%',
     minWidth: 0,
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+  },
+  approvalGrantRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    minWidth: 0,
+  },
+  approvalGrantIdentity: {
+    flex: '1 1 180px',
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  approvalGrantAction: {
+    flex: '0 0 auto',
+    marginLeft: 'auto',
   },
   chatActionSection: {
     display: 'grid',
@@ -338,6 +389,8 @@ export const PlaymeshAiPanel = ({
   approvals,
   approvalGrants,
   approvalGrantsStatus,
+  approvalMode,
+  approvalModeStatus,
   plan,
   manualInput,
   onManualInputChanged,
@@ -373,6 +426,8 @@ export const PlaymeshAiPanel = ({
   onReject,
   onRefreshApprovalGrants,
   onRevokeApprovalGrant,
+  onApprovalModeChanged,
+  onRetryApprovalMode,
   onPromptTemplateContentChanged,
   onRetryPromptTemplates,
   onSavePromptTemplate,
@@ -422,6 +477,60 @@ export const PlaymeshAiPanel = ({
               },
             ]}
           />
+          <section
+            id="playmesh-ai-approval-mode"
+            aria-label={t(playmeshMessages.aiApprovalModeTitle)}
+            style={styles.approvalModeSection}
+          >
+            <Toggle
+              labelPosition="right"
+              label={t(
+                approvalMode === 'always_allow'
+                  ? playmeshMessages.aiApprovalModeAlways
+                  : playmeshMessages.aiApprovalModeRequest
+              )}
+              toggled={approvalMode === 'always_allow'}
+              onToggle={(event, toggled) =>
+                onApprovalModeChanged(
+                  toggled ? 'always_allow' : 'request_approval'
+                )
+              }
+              disabled={
+                !session ||
+                approvalModeStatus === 'saving' ||
+                approvalModeStatus === 'uncertain'
+              }
+            />
+            {approvalModeStatus !== 'idle' && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={styles.approvalModeFeedback}
+              >
+                {approvalModeStatus === 'saving' && (
+                  <Text noMargin color="secondary">
+                    {t(playmeshMessages.aiApprovalModeSaving)}
+                  </Text>
+                )}
+                {approvalModeStatus === 'save_failed' && (
+                  <AlertMessage kind="warning">
+                    {t(playmeshMessages.aiApprovalModeSaveFailed)}
+                  </AlertMessage>
+                )}
+                {approvalModeStatus === 'uncertain' && (
+                  <AlertMessage kind="warning">
+                    {t(playmeshMessages.aiApprovalModeUncertain)}
+                  </AlertMessage>
+                )}
+                {approvalModeStatus === 'uncertain' && (
+                  <FlatButton
+                    label={t(playmeshMessages.aiApprovalModeRetry)}
+                    onClick={onRetryApprovalMode}
+                  />
+                )}
+              </div>
+            )}
+          </section>
           {isOffline && (
             <AlertMessage kind="warning">
               {t(playmeshMessages.aiOffline)}
@@ -883,9 +992,6 @@ export const PlaymeshAiPanel = ({
                 style={styles.sectionBody}
               >
                 <ColumnStackLayout noMargin>
-                  <Text color="secondary">
-                    {t(playmeshMessages.aiApprovalGrantsDescription)}
-                  </Text>
                   {approvalGrantsStatus === 'load_failed' && (
                     <AlertMessage kind="warning">
                       {t(playmeshMessages.aiApprovalGrantsLoadFailed)}
@@ -902,27 +1008,39 @@ export const PlaymeshAiPanel = ({
                     )}
                   {approvalGrants.map(grant => (
                     <div key={grant.grantId} style={styles.call}>
-                      <LineStackLayout
-                        noMargin
-                        justifyContent="space-between"
-                        alignItems="center"
-                      >
-                        <ColumnStackLayout noMargin>
-                          <Text>{grant.operationId}</Text>
-                          <Text color="secondary">
+                      <div style={styles.approvalGrantRow}>
+                        <div style={styles.approvalGrantIdentity}>
+                          <Text
+                            noMargin
+                            allowSelection
+                            style={{
+                              overflowWrap: 'anywhere',
+                              fontFamily: '"Lucida Console", Monaco, monospace',
+                            }}
+                          >
+                            {grant.operationId}
+                          </Text>
+                          <Text
+                            noMargin
+                            allowSelection
+                            color="secondary"
+                            style={{ overflowWrap: 'anywhere' }}
+                          >
                             {`${grant.scopeKind} · ${grant.scopeId}`}
                           </Text>
-                        </ColumnStackLayout>
-                        <FlatButton
-                          label={t(playmeshMessages.aiApprovalGrantRevoke)}
-                          onClick={() =>
-                            onRevokeApprovalGrant(grant.grantId)
-                          }
-                          disabled={
-                            busy || approvalGrantsStatus === 'loading'
-                          }
-                        />
-                      </LineStackLayout>
+                        </div>
+                        <div style={styles.approvalGrantAction}>
+                          <FlatButton
+                            label={t(playmeshMessages.aiApprovalGrantRevoke)}
+                            onClick={() =>
+                              onRevokeApprovalGrant(grant.grantId)
+                            }
+                            disabled={
+                              busy || approvalGrantsStatus === 'loading'
+                            }
+                          />
+                        </div>
+                      </div>
                     </div>
                   ))}
                   <FlatButton

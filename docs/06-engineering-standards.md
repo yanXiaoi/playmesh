@@ -4,7 +4,8 @@
 
 Playmesh 的开发必须满足四个目标：
 
-- 可复用：通用能力只有一份实现，页面、Go 服务、Game SDK 和游戏包不重复造轮子。
+- 可复用：同一职责和运行时边界内的通用能力只有一份生产实现；页面、Go 服务、Game SDK
+  和游戏包共享版本化契约，不建立平行业务规则。
 - 可回溯：一次用户操作可以追踪到页面、协议、服务端、游戏和日志。
 - 可验证：每个重要行为都有对应的单元测试、集成测试或手工验收步骤。
 - 可演进：协议、游戏包和 SDK 具备明确版本，所有改动同步更新实现、契约、模板、测试和文档。
@@ -155,6 +156,85 @@ WebView -> GameAssetGateway -> DevelopmentGameWebResourceProvider
 
 ## 可复用代码规范
 
+### 单一生产实现与薄适配器（强制）
+
+下列条款是所有新功能、修改、修复和重构的阻断性准则，不是建议项：
+
+1. 开始设计前必须先审计现有生产调用链、状态所有者、协议模型和公共组件；已有能力能够
+   满足语义时必须直接复用，不得因入口、页面、SDK、CLI、平台或展示形式不同而另写一套。
+2. 同一职责和运行时边界内的业务能力只能有一个生产实现和一个权威状态写入者。不同入口
+   只能是薄适配器，负责参数校验、权限门禁、投影、序列化或展示，不得重新读取、重新解析、
+   重新拼装、重新计算或维护可独立写入的同义状态。
+3. 复用受 UI 私有状态或具体入口耦合阻挡时，必须先在不改变行为的前提下，把逻辑提取为
+   共享应用服务、协调器、领域值对象、协议模型、Repository/Client 或通用组件，再让原
+   入口和新入口共同调用；不得复制后再承诺长期同步。
+4. 抽象必须保持现有架构边界。优先使用组合、明确接口和不可变值对象；只有存在真实的
+   “可替换同类”关系时才使用继承或基类。禁止为了形式上的复用创建万能工具类、空壳父类、
+   跨层 facade 或新的旁路。
+5. 仅展示不同的数据必须来自同一生产快照或同一底层结果，由各展示层做最终渲染；不得让
+   每个消费者再次访问网卡、文件、数据库、网络、凭据或运行时状态来重建相同结果。
+6. 业务生命周期、并发、幂等、缓存、错误映射和安全门禁必须由共享权威写入者统一处理。
+   薄适配器不得建立第二套锁、队列、缓存、重试、降级、业务权限判断或清理流程。
+7. 确实不能复用时，设计文档必须逐项写明现有实现、语义差异、不能复用的证据、新边界和
+   回归风险，并在编码前通过评审；“改起来更快”“当前入口私有”或“以后再合并”不是理由。
+8. 测试必须证明旧入口与新入口经过同一生产实现，并覆盖共享结果、错误、竞态和生命周期。
+   必要时增加来源门禁，阻止再次出现平行实现；仅比较两份复制代码的最终输出不算复用证明。
+
+代码评审发现重复业务实现、同义状态所有者、绕过既有生产链路或可提取却直接复制的代码
+时，必须先完成合并或共享抽象，相关功能不得以“后续重构”方式通过。
+
+“单一生产实现”不表示取消跨进程、跨语言或跨信任边界的防御。每个边界仍必须分别执行
+协议解码、Schema/类型/长度校验、认证授权和必要的防御性检查；这些检查必须引用同一
+版本化契约，最终权威判定仍由职责所属服务完成，不属于平行业务实现。“一个状态所有者”
+是指一个权威写入者；允许不可变、可丢弃且带 generation/revision 的只读投影或缓存，但
+投影不得反向恢复、独立修改或取代权威状态。
+
+### 游戏分享、附近发现与 App LAN SDK（强制）
+
+- 当前房间的分享授权、网关、LAN URL、Relay session、UDP multicast 公开意图、generation、
+  链接/二维码快照与清理流程只能由 `GameShareCoordinator` 写入。页面、App SDK、开发
+  预览和 Relay 适配器不得持有可独立修改的同义状态。
+- 平台 multicast publication lease 与发现缓存只能由 App 级
+  `LanGameDiscoveryService` 持有。建立分享通道不等于公开：默认和开发预览不得自动
+  发布；只有打开分享面板或无参数 `setPublished()` 才能单向公开，关闭面板不撤销，
+  game/session/page/process 生命周期结束必须停止公告、best-effort 发送 goodbye 并回收
+  全部资源。
+- 唯一生产发现链必须是 `lan_game_multicast_protocol.dart` 定义的自定义 IPv4 UDP
+  multicast：`239.255.80.77:53584`、wire v1、1 秒公告、4 秒本地 TTL、单包不超过
+  1200 字节。不得恢复 DNS-SD/TXT、第二发现栈、双栈发现或已知节点单播探测。实例地址只
+  能取数据报真实 source IP，payload 自报地址无效；坏包必须独立丢弃且不得记录凭据。
+- 所有有效非 loopback IPv4 物理网卡和支持组播的虚拟网卡都必须独立 join/send，不得依赖
+  默认路由；接口动态增删要周期重整，单接口失败不得拖垮其他接口，全部失败才报告发现
+  不可用。产品不得承诺穿透 AP 隔离、VLAN、防火墙、禁用组播或 VPN/虚拟网卡策略。
+- `GameWebGateway.shareLinks()` 是 LAN 邀请的唯一生产路径，只返回网关实际监听的非
+  loopback、非 unspecified 唯一 IPv4；游戏分享可显式包含 `169.254/16` link-local，但
+  该放宽不得进入 Developer Gateway 或其他地址暴露链。没有可用地址时返回空列表，禁止
+  `127.0.0.1` fallback。Relay 内部只能使用显式 `loopbackInvitationUri`，不能从公开 LAN
+  列表选取、解析或重新拼接内部入口。
+- 面板、开发状态与 SDK 只能读取同一不可变 `GameShareLinkSnapshot`。LAN 在前、当前
+  有效 WAN 在后，按完整 URL 去重；二维码只由共享编码器按精确 URL 生成一次并缓存，
+  面板渲染同一 PNG bytes，SDK 只做 Data URL 序列化。单 URL、项目数、单 PNG 与总
+  Bridge JSON 必须执行文档化上限，超限整体失败，不得截断或返回缺图项目。
+- 手工输入、扫码、附近发现项与 SDK 加入必须复用 `GameJoinCoordinator`、
+  `GameInvitationInspector` 和既有 `RemoteGamePage`。SDK feature 不得自行请求邀请入口、
+  判断 gameId、自建 Tunnel/WebView 或先导航后校验；Bridge 回包完成后才执行页面切换。
+- App 附近列表可以读取发现服务的内部展示投影，显示游戏名、主机昵称、数据报真实来源
+  IP、多人当前/最大人数或“单机”，并支持自动更新和手动刷新。点击加入后必须保留发现
+  lease 与短期候选，直到统一预检及候选复查结束。App SDK `discoverGames()` 继续只导出
+  `instanceId/gameId/name/host`，不得新增内部展示字段或图标端点。
+- `playmesh.app.lan.getShareLinks()` 是 App-only 本机 Authority/standalone host 的明确
+  授权，返回完整 bearer LAN/Relay URL 与逐链接 PNG Data URL；不新增 capability、确认
+  弹窗或 user activation。普通浏览器、远程加入页、非房主和失效上下文必须拒绝。旧的
+  “所有游戏脚本绝不能读取分享 URL/二维码”不再是有效基线；但平台与 SDK 不得自动把
+  URL、token 或 PNG 写入日志、分析、磁盘、崩溃详情、异常消息或跨会话缓存。
+- `playmesh.app.ui.disableSystemMenuTriggers()` 必须严格无参数、仅在 App UI ready 后
+  单向且幂等地移除当前文档的 Escape/Menu/Back 自动监听；不得影响显式菜单/信息/日志
+  覆盖层 API，配置刷新不得重新绑定，文档刷新恢复默认。旧 boolean setter 不得恢复。
+- 分享与发现涉及平台能力时，自动化测试和 Manifest/entitlement 检查不能替代跨设备
+  实机验收。Android、Windows、macOS、Linux 的发布、发现、丢失、权限、多网卡切换和
+  实际加入必须分别记录；未执行项必须明确标为未完成。iOS 自动发现/发布必须稳定返回
+  `unsupported`，同时回归扫码、手工邀请和分享链接仍可用。
+
 - 代码注释必须使用中文；变量名、类名、接口名和协议字段可以继续使用项目约定的英文命名。
 - 注释应说明设计原因、边界条件或不直观的行为，不写逐行翻译代码的无效注释。
 - 新增复杂调用链、权限判断和限流策略时，必须在关键位置添加简短中文注释。
@@ -261,18 +341,18 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `4.0.0+26` | `pubspec.yaml` |
+| Playmesh App | `4.2.0+28` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
 | Game SDK | `4.1.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
 | App Bridge SDK | `3.3.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
-| Developer API / OpenAPI | `4.0.0` | Developer Gateway 与临时开发资源会话契约 |
+| Developer API / OpenAPI | `4.2.0` | Developer Gateway 与临时开发资源会话契约 |
 | Developer CLI | `2.0.0` | `dev-cli/`、adapter.Adapter、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `3.0.0` | `/apps/info`、根相对入口、包校验、版本化下载、图标与上传声明 |
 | Relay 协议 | `3.0.0` | 根相对邀请入口、App 端点加密邀请与 Go Server 中转协议 |
 
 该矩阵描述当前代码与生成契约；发布状态和历史版本见
-`docs/version/README.md` 与 `docs/version/4.0.0.md`，3.0.0 的工程落点见
+`docs/version/README.md`、`docs/version/4.1.0.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `dev/run` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段并与目标 App 精确核对，禁止手工声明不一致版本。CLI 2.0 只接受根 `playmesh-cli.json`；发布内容隔离在 `playmesh/package/`，SDK/类型隔离在 `playmesh/sdk/`，上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根 `icon.png` 和必需物理 `app/`。`outputDirectory` 和入口都相对于外层 `packageRoot/app/`；首段 `app` 合法，例如入口 `app/index.html` 对应物理 `packageRoot/app/app/index.html` 和运行时 `/app/index.html`。项目平台差异只能通过唯一 `adapter.Registry` 中的 `Adapter` 实现，公共命令不得按 Cocos/语言复制分支或维护第二份适配器实例表。
@@ -327,7 +407,9 @@ Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 
 }
 ```
 
-日志禁止记录长期 token、完整头像文件、摄像头画面、传感器原始敏感数据和用户未公开的资料。输入事件可以记录摘要，调试原始数据必须显式开启。
+日志禁止记录长期 token、完整分享邀请 URL、邀请 fragment、二维码 PNG/Data URL、完整
+头像文件、摄像头画面、传感器原始敏感数据和用户未公开的资料。输入事件可以记录摘要，
+调试原始数据必须显式开启；`getShareLinks()` 的结果也不得进入异常文本或崩溃详情。
 
 ## 测试规范
 

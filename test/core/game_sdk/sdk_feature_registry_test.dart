@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 
@@ -25,25 +27,37 @@ void main() {
       'app.media.close',
       'app.input.takeover',
       'app.ui.openSharePanel',
+      'app.lan.discover',
+      'app.lan.joinDiscovered',
+      'app.lan.joinByLink',
+      'app.lan.scanQr',
+      'app.lan.setPublished',
+      'app.lan.getShareLinks',
       'app.device.fullscreen',
       'app.game.exit',
       'app.identity.syncAvatar',
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;
-    expect(fragments, hasLength(15));
-    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(15));
+    expect(fragments, hasLength(16));
+    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(16));
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.game),
       hasLength(8),
     );
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.app),
-      hasLength(7),
+      hasLength(8),
     );
     expect(
       fragments.every((fragment) => fragment.typeScript.trim().isNotEmpty),
       isTrue,
+    );
+    expect(
+      fragments
+          .where((fragment) => fragment.declaration.trim().isNotEmpty)
+          .map((fragment) => fragment.id),
+      containsAll(['app.ui', 'app.lan']),
     );
 
     final gameTypeScript =
@@ -137,6 +151,14 @@ void main() {
         contains('readonly app: PlaymeshAppApi'),
         contains('avatar: string | null'),
         contains('openSharePanel(): Promise<void>'),
+        contains('disableSystemMenuTriggers(): void'),
+        contains('type PlaymeshAppLanShareLinkType = "lan" | "wan"'),
+        contains('interface PlaymeshAppLanApi'),
+        contains('readonly lan: PlaymeshAppLanApi'),
+        contains('discoverGames(): Promise<readonly PlaymeshLanGame[]>'),
+        contains(
+          'getShareLinks(): Promise<readonly PlaymeshAppLanShareLink[]>',
+        ),
         contains('showGameSidebar(): Promise<boolean>'),
         contains('exitGame(): Promise<void>'),
         contains('readonly media: PlaymeshAppMediaApi'),
@@ -147,6 +169,10 @@ void main() {
         isNot(contains('__PLAYMESH')),
         isNot(contains('platform.ui.restoreGameFocus')),
       ]),
+    );
+    expect(
+      SdkFeatureRegistry.sdkFile('playmesh-app.d.ts').trim(),
+      '/// <reference path="./playmesh-main.d.ts" />',
     );
     expect(
       () => SdkFeatureRegistry.sdkFile('playmesh.d.ts'),
@@ -193,6 +219,22 @@ void main() {
       expect(
         SdkFeatureRegistry.sdkFileForPublicPath('sdk/v1/$internalFile'),
         isNull,
+      );
+    }
+  });
+
+  test('官方声明生成物与 Dart declaration fragments 逐字一致', () {
+    const generatedFiles = {
+      'assets/playmesh-library/public/sdk/v1/playmesh-main.d.ts':
+          'playmesh-main.d.ts',
+      'assets/playmesh-library/public/sdk/v1/playmesh-app.d.ts':
+          'playmesh-app.d.ts',
+    };
+    for (final entry in generatedFiles.entries) {
+      expect(
+        File(entry.key).readAsStringSync(),
+        SdkFeatureRegistry.sdkFile(entry.value),
+        reason: '${entry.key} 必须只由统一生成器产生',
       );
     }
   });

@@ -69,7 +69,7 @@ Flutter App
 - iOS 发布能力
 - 创意工坊
 - 云端账号
-- 房间自动发现（mDNS、局域网广播等）
+- 房间自动发现
 - 观看/旁观者模式
 - 体感识别
 - AI 游戏生成器
@@ -79,11 +79,13 @@ Flutter App
 
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
 `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。当前
-当前正式版本为 Playmesh `4.0.0+26`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
-`4.0.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`；两套 SDK 已收敛为 Dart
+正式版本为 Playmesh `4.1.0+27`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
+`4.0.0`、App Bridge SDK `3.2.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
+Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`；未发布工作树目标为 App
+`4.2.0+28`、Game SDK `4.1.0`、App Bridge SDK `3.3.0` 与 Developer API / OpenAPI
+`4.2.0`。两套 SDK 已收敛为 Dart
 唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。当前 Game SDK 只接受
-`4.0.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0` 的清单请求，并统一解析到兼容的
+`4.1.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0` 的清单请求，并统一解析到兼容的
 `3.3.0` 运行包。更旧或未知版本直接拒绝。所有游戏、
 分享和 Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority
 决定玩法开始和结束条件，SDK 只提交受控会话状态请求。当前变化记录在
@@ -91,6 +93,9 @@ Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`；两套 SDK 已收敛�
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。后续不再建立阶段，
 所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并
 按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
+本轮局域网发现与 App SDK 功能已完成开发和自动化验证，但 Android、Windows、macOS、
+Linux 的跨设备实机验收尚未完成，不能据此标记为已发布；iOS 自动发现/发布明确为
+`unsupported`，只保留扫码、手工邀请和分享链接入口。
 
 App 内置 Developer Workspace 和平台注入游戏 WebView 的 UI 都使用 App
 `app.json` 作为唯一文案源，并由宿主同步 locale/messages；网页端不维护独立词典。
@@ -139,6 +144,10 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 游戏库进入游戏详情，只有详情页提供“开始游戏”。
 - 游戏页默认最大化显示 WebView，主机与 App 扫码加入页共用可拖动、可展开/收纳的悬浮工具坞；扫码加入不显示主机分享入口。
 - 游戏菜单由 `playmesh-app.js` 在网页中央渲染，App WebView 通过 Escape/Menu 打开，普通浏览器显示可拖动入口；刷新游戏会在保留会话的前提下重建 WebView。主机可打开链接/二维码，加入者隐藏分享入口。
+- App SDK 默认绑定 Escape/Menu/Back 自动打开系统菜单；游戏可在
+  `playmesh.app.ready` 后无参数调用一次或重复调用
+  `playmesh.app.ui.disableSystemMenuTriggers()` 单向解绑。该操作不关闭显式菜单 API，
+  页面刷新后恢复默认绑定，多余参数必须拒绝且不能产生副作用。
 - 游戏库右上角可以手动后台扫描；扫描期间继续展示旧缓存，成功后原子替换列表，新增游戏不要求重启 App。App 级缓存保留 revision、刷新时间和搜索索引，为后续分页/搜索提供数据源。
 - 游戏必须声明横屏或竖屏；WebView 创建前切换方向，离开后恢复。
 - Go Core 使用系统分配端口，设置页展示当前实际服务地址和结构化状态。
@@ -149,7 +158,18 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 联机码用于定位会话；浏览器二维码和链接还必须携带当前游戏会话有效的随机 token。关闭分享附加层和刷新游戏都不撤销 token；刷新只重建 WebView 内容，不重置 Core 会话，并保留会话、网关和 token；退出游戏、会话关闭或 Core 重启后失效。
 - 分享附加层居中显示并根据视口动态调整宽高；内容超过屏幕时整体可滚动。它列出全部可用局域网地址，用户点选任一地址时二维码必须立即切换到该地址。
 - 加入前允许查看房主昵称、游戏名称、最小/最大人数和当前在线人数。
-- 不提供房间列表、局域网自动发现和旁观者入口。
+- 不提供中心化房间大厅和旁观者入口。App 在用户显式打开分享面板或本机房主调用
+  `playmesh.app.lan.setPublished()` 后，才在 Android、Windows、macOS、Linux 通过唯一的
+  自定义 IPv4 UDP multicast 链（`239.255.80.77:53584`，wire v1）公开当前对局；默认不
+  公开，关闭面板不取消，退出游戏或页面销毁时停止公告并 best-effort 发送 goodbye。
+  生产链逐个覆盖有效物理 IPv4 网卡和支持组播的虚拟网卡，主机地址只取数据报 source；
+  `169.254/16` 只放宽给游戏发现/分享。不保留 DNS-SD/TXT 兼容、双发现栈或已知节点单播
+  探测。iOS 自动发现/发布显式不支持，但扫码、手工邀请和分享链接继续可用。
+- App 加入页显示所有游戏的附近对局，并以纯文本展示游戏名、主机昵称、数据报真实来源
+  IP，以及多人当前/最大人数或单机标记；公告和 presence 自动更新，也保留手动刷新。
+  点击加入时必须把发现 lease 与短期候选保留到统一预检和候选复查结束。游戏 SDK 的
+  `discoverGames()` 仍只投影当前 `gameId` 的 `instanceId/gameId/name/host`，不增加内部
+  展示元数据或图标端点。
 - 游戏声明文件是游戏能力的来源，至少描述名称、版本、运行入口、单机/联机模式和人数范围。
 - 游戏声明必须使用 `orientation` 明确声明 `landscape` 或 `portrait`，不允许缺失或自动猜测。
 - 游戏声明文件使用 `displayModes` 声明唯一显示模式：`single_screen_multiplayer`（大屏模式）或 `multi_screen`（普通模式）。当前不允许同时声明两者。
@@ -164,6 +184,15 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 所有 SDK 持久化数据统一写入开始游戏的 Authority 主机；JSON 读写经 Game SDK 的受控连接完成，文件通过 `/bucket/**` 上传和读取，加入设备不能写入自己的游戏库副本。
 - FPS 默认显示在游戏页左上角，可在悬浮工具坞关闭。当前客户端 App SDK 只统计游戏在实际渲染完成处调用 `playmesh.app.performance.reportFrame()` 上报的帧；未接入时显示 `-- FPS`。
 - 二维码与链接统一放在游戏分享弹窗中，并与“局域网 / 服务器 / 房间状态”同级页签配合展示；局域网和公共中转可以同时承载同一会话的加入。
+- 当前本机 Authority 或 standalone host 的 App WebView 可以通过
+  `playmesh.app.lan.getShareLinks()` 读取与分享面板相同的 LAN/有效 Relay 完整邀请
+  URL 和逐链接 PNG Data URL。这是 App-only 房主能力：不新增 capability、用户确认或
+  user activation；普通浏览器、远程加入页和非房主仍不可用。邀请 URL 与二维码均是
+  bearer 凭据，游戏取得后可以外传，平台不得把它们写入日志、磁盘或错误详情。
+- 分享通道、公开租约、Relay 和不可变链接/二维码快照由单一
+  `GameShareCoordinator` 管理；SDK、分享面板和开发状态只做投影，不重新枚举网卡、
+  拼接 URL 或生成二维码。所有手工链接、扫码和附近对局加入复用
+  `GameJoinCoordinator` 的邀请预检与既有 `RemoteGamePage`。
 - App 通过局域网或公共中转加入时都从本地回环入口加载；普通浏览器只能直接使用主机公开的局域网 Authority 地址。
 - 局域网分享链接固定进入 `/playmesh/join#inviteToken=...`。落地页以 POST 交换
   邀请凭据，网关写入短期 HttpOnly Cookie 后重定向到 `main.json` 声明的真实页面；

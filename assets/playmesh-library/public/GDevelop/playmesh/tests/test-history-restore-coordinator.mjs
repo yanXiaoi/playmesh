@@ -37,7 +37,7 @@ globalThis.__historyClient = {
   uploadMissingPlaymeshHistoryResources: async () => 0,
 };
 globalThis.__historySerializer = {
-  createProjectSnapshot: async () => ({ project: {}, resources: [] }),
+  createProjectSnapshot: async () => ({ projectFiles: [], resources: [] }),
   createRestoredStoredProject: () => {
     throw new Error('serializer dependency must be overridden');
   },
@@ -154,11 +154,11 @@ const fileMetadata = {
   gameId,
 };
 const oldEvidence = {
-  projectJsonHash: '1'.repeat(64),
+  projectFilesHash: '1'.repeat(64),
   resourceManifestHash: '2'.repeat(64),
 };
 const targetEvidence = {
-  projectJsonHash: '3'.repeat(64),
+  projectFilesHash: '3'.repeat(64),
   resourceManifestHash: '4'.repeat(64),
 };
 const projectConfigEvidence = {
@@ -166,6 +166,9 @@ const projectConfigEvidence = {
   status: 'missing',
 };
 const targetProject = { properties: { name: 'Target' } };
+const targetProjectFiles = [
+  { path: 'game.json', content: targetProject },
+];
 const targetResources = [];
 const targetSnapshot = {
   sourceVersion: {
@@ -178,15 +181,17 @@ const targetSnapshot = {
     source: 'user',
     contentBytes: 1,
   },
-  projectReference: { contentHash: '6'.repeat(64), size: 1 },
-  project: targetProject,
+  projectFilesReference: [
+    { path: 'game.json', contentHash: '6'.repeat(64), size: 1 },
+  ],
+  projectFiles: targetProjectFiles,
   resources: targetResources,
   playmeshProjectConfig: null,
 };
 const baseTransaction = {
   txId: 'tx-a',
   gameId,
-  idempotencyKey: 'restore.tx-a',
+  idempotencyKey: 'restore.test',
   phase: 'PREPARED',
   baseRevision: 7,
   targetRevision: 4,
@@ -217,7 +222,7 @@ const restoredSnapshot = {
     id: 'version-8',
     revision: 8,
   },
-  project: targetProject,
+  projectFiles: targetProjectFiles,
   resources: targetResources,
   playmeshProjectConfig: null,
 };
@@ -282,7 +287,12 @@ const createScenario = () => {
     snapshotFactory: async () => {
       order.push('snapshot');
       return {
-        project: { browserEvidence: oldEvidence },
+        projectFiles: [
+          {
+            path: 'game.json',
+            content: { browserEvidence: oldEvidence },
+          },
+        ],
         resources: [],
       };
     },
@@ -299,18 +309,23 @@ const createScenario = () => {
     materializeTarget: async () => {
       order.push('materialize');
       return {
-        project: { ...targetProject, browserEvidence: targetEvidence },
+        projectFiles: [
+          {
+            path: 'game.json',
+            content: { ...targetProject, browserEvidence: targetEvidence },
+          },
+        ],
         resources: [],
       };
     },
-    createStoredProject: ({ fileMetadata: metadata, project }) => ({
+    createStoredProject: ({ fileMetadata: metadata, projectFiles }) => ({
       fileMetadata: { ...metadata, name: 'Target', lastModifiedDate: 2 },
       storedProject: {
         id: metadata.fileIdentifier,
         gameId: metadata.gameId,
-        projectJson: JSON.stringify(project),
+        projectFiles,
         resources: [],
-        evidence: project.browserEvidence,
+        evidence: projectFiles[0].content.browserEvidence,
       },
     }),
     computeBrowserEvidence: async project => {
@@ -451,7 +466,7 @@ thirdState.setBrowserProject({
   id: fileMetadata.fileIdentifier,
   gameId,
   evidence: {
-    projectJsonHash: 'a'.repeat(64),
+    projectFilesHash: 'a'.repeat(64),
     resourceManifestHash: 'b'.repeat(64),
   },
 });
@@ -511,28 +526,22 @@ prepareResponseLoss.restoreClient.prepare = async () => {
   prepareResponseLoss.order.push('prepare-remote');
   throw new Error('prepare response lost');
 };
-await assert.rejects(
-  coordinator.restorePlaymeshHistoryToLocalStore({
-    gameId,
-    targetRevision: 4,
-    fileMetadata,
-    project: {},
-    dependencies: prepareResponseLoss.dependencies,
-  }),
-  /prepare response lost/
-);
-assert.equal(prepareResponseLoss.getJournal(), null);
 prepareResponseLoss.setRecoveryTransaction(baseTransaction);
-const recoveredPrepareLoss = await coordinator.recoverPlaymeshHistoryRestoreToLocalStore(
-  {
-    gameId,
-    fileMetadata,
-    dependencies: prepareResponseLoss.dependencies,
-  }
+const recoveredPrepareLoss = await coordinator.restorePlaymeshHistoryToLocalStore({
+  gameId,
+  targetRevision: 4,
+  fileMetadata,
+  project: {},
+  dependencies: prepareResponseLoss.dependencies,
+});
+assert.equal(recoveredPrepareLoss.fileMetadata.gameId, gameId);
+assert.ok(
+  prepareResponseLoss.order.indexOf('prepare-remote') <
+    prepareResponseLoss.order.indexOf('recover')
 );
-assert.equal(recoveredPrepareLoss.status, 'completed');
 assert.equal(prepareResponseLoss.order.includes('apply-idb'), true);
 assert.equal(prepareResponseLoss.order.includes('ack'), true);
+assert.equal(prepareResponseLoss.getJournal(), null);
 
 const commitResponseLoss = createScenario();
 commitResponseLoss.restoreClient.commit = async () => {
@@ -665,11 +674,11 @@ assert.equal(persistedWithoutJournal.order.includes('reload'), true);
 
 for (const partialTargetEvidence of [
   {
-    projectJsonHash: targetEvidence.projectJsonHash,
+    projectFilesHash: targetEvidence.projectFilesHash,
     resourceManifestHash: 'd'.repeat(64),
   },
   {
-    projectJsonHash: 'e'.repeat(64),
+    projectFilesHash: 'e'.repeat(64),
     resourceManifestHash: targetEvidence.resourceManifestHash,
   },
 ]) {

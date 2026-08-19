@@ -209,14 +209,96 @@ function main() {
       .filter((argument) => staticString(argument) === null)
       .map((argument) => argument.replaceAll(/\s+/g, " ")),
   );
+  const joinErrorKeys = [
+    "join.invalid_invite",
+    "join.game_mismatch",
+    "join.self_invitation",
+    "join.discovery_not_found",
+    "join.nearby_failed",
+    "join.game_context_unavailable",
+    "join.cancelled",
+  ];
+  const dynamicKeyFamilies = new Map([
+    ["'release.highlight_${index + 1}'", []],
+    [
+      "'settings.theme_${preferences.theme.wireName}'",
+      ["settings.theme_system", "settings.theme_light", "settings.theme_dark"],
+    ],
+    [
+      "'settings.update_platform_$platform'",
+      [
+        "settings.update_platform_android",
+        "settings.update_platform_ios",
+        "settings.update_platform_linux",
+        "settings.update_platform_macos",
+        "settings.update_platform_web",
+        "settings.update_platform_windows",
+      ],
+    ],
+    [
+      "_avatarBytes == null ? 'profile.choose_avatar' : 'profile.choose_avatar_again'",
+      ["profile.choose_avatar", "profile.choose_avatar_again"],
+    ],
+    ["_joinErrorKey!", joinErrorKeys],
+    [
+      "_relayErrorCode!",
+      [
+        "game.relay_catalog_unavailable",
+        "game.relay_load_failed_safe",
+        "game.relay_not_declared",
+        "game.relay_transport_unsupported",
+        "game.relay_version_unsupported_safe",
+        "game.relay_connect_failed_safe",
+      ],
+    ],
+    [
+      "enabled ? 'game.fullscreen_enter_failed' : 'game.fullscreen_exit_failed'",
+      ["game.fullscreen_enter_failed", "game.fullscreen_exit_failed"],
+    ],
+    ["gameJoinErrorLocalizationKey(error)", joinErrorKeys],
+    [
+      "messageKey",
+      [
+        "join.nearby_empty",
+        "join.nearby_scanning",
+        "join.nearby_permission_denied",
+        "join.nearby_unsupported",
+        "join.nearby_failed",
+      ],
+    ],
+    [
+      "opened ? 'settings.update_browser_opened' : 'settings.update_browser_failed'",
+      ["settings.update_browser_opened", "settings.update_browser_failed"],
+    ],
+    [
+      "state.targetEnabled == false ? 'creator.stopping' : 'creator.starting'",
+      ["creator.stopping", "creator.starting"],
+    ],
+    [
+      "switch (risk) { LanEndpointRisk.low => 'creator.lan_risk_low', LanEndpointRisk.caution => 'creator.lan_risk_caution', LanEndpointRisk.high => 'creator.lan_risk_high', }",
+      [
+        "creator.lan_risk_low",
+        "creator.lan_risk_caution",
+        "creator.lan_risk_high",
+      ],
+    ],
+    [
+      "switch (type) { LanAddressType.privateIpv4 => 'creator.lan_type_private_ipv4', LanAddressType.linkLocalIpv4 => 'creator.lan_type_link_local_ipv4', LanAddressType.carrierGradeNatIpv4 => 'creator.lan_type_carrier_nat_ipv4', LanAddressType.benchmarkIpv4 => 'creator.lan_type_benchmark_ipv4', LanAddressType.publicIpv4 => 'creator.lan_type_public_ipv4', LanAddressType.uniqueLocalIpv6 => 'creator.lan_type_unique_local_ipv6', LanAddressType.globalIpv6 => 'creator.lan_type_global_ipv6', LanAddressType.other => 'creator.lan_type_other', }",
+      [
+        "creator.lan_type_private_ipv4",
+        "creator.lan_type_link_local_ipv4",
+        "creator.lan_type_carrier_nat_ipv4",
+        "creator.lan_type_benchmark_ipv4",
+        "creator.lan_type_public_ipv4",
+        "creator.lan_type_unique_local_ipv6",
+        "creator.lan_type_global_ipv6",
+        "creator.lan_type_other",
+      ],
+    ],
+  ]);
   assert.deepEqual(
     [...dynamicArguments].sort(),
-    [
-      "'release.highlight_${index + 1}'",
-      "'settings.theme_${preferences.theme.wireName}'",
-      "_avatarBytes == null ? 'profile.choose_avatar' : 'profile.choose_avatar_again'",
-      "enabled ? 'game.fullscreen_enter_failed' : 'game.fullscreen_exit_failed'",
-    ].sort(),
+    [...dynamicKeyFamilies.keys()].sort(),
     "Every dynamic BuildContext.tr key family must have explicit coverage",
   );
   const releaseNotesSource = fs.readFileSync(
@@ -233,19 +315,16 @@ function main() {
     releaseNotesSource.match(/playmeshReleaseHighlightCount\s*=\s*(\d+)/)?.[1],
   );
   assert.ok(Number.isInteger(highlightCount) && highlightCount > 0);
-  const requiredKeys = new Set([
-    ...staticKeys,
-    "game.fullscreen_enter_failed",
-    "game.fullscreen_exit_failed",
-    "profile.choose_avatar",
-    "profile.choose_avatar_again",
-    "settings.theme_system",
-    "settings.theme_light",
-    "settings.theme_dark",
-    ...Array.from(
+  dynamicKeyFamilies.set(
+    "'release.highlight_${index + 1}'",
+    Array.from(
       { length: highlightCount },
       (_, index) => `release.highlight_${index + 1}`,
     ),
+  );
+  const requiredKeys = new Set([
+    ...staticKeys,
+    ...[...dynamicKeyFamilies.values()].flat(),
   ]);
 
   const localizationRoot = path.join(workspaceRoot, "assets", "playmesh-localization");
@@ -255,16 +334,41 @@ function main() {
   const enabledLocales = manifest.locales.filter((locale) => locale.enabled);
   assert.ok(enabledLocales.length > 0, "Localization manifest has no enabled locales");
 
+  const appMessagesByLocale = new Map();
   for (const locale of enabledLocales) {
     const messages = JSON.parse(
       fs.readFileSync(path.join(localizationRoot, locale.bundles.app), "utf8"),
     );
+    appMessagesByLocale.set(locale.id, messages);
     const missing = [...requiredKeys].filter((key) => !(key in messages)).sort();
     assert.deepEqual(
       missing,
       [],
       `${locale.id} app.json is missing static BuildContext.tr keys`,
     );
+  }
+
+  const referenceLocale = enabledLocales[0].id;
+  const referenceMessages = appMessagesByLocale.get(referenceLocale);
+  const referenceKeys = Object.keys(referenceMessages).sort();
+  const placeholders = value =>
+    [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)]
+      .map(match => match[1])
+      .sort();
+  for (const locale of enabledLocales.slice(1)) {
+    const messages = appMessagesByLocale.get(locale.id);
+    assert.deepEqual(
+      Object.keys(messages).sort(),
+      referenceKeys,
+      `${locale.id} app.json keys must exactly match ${referenceLocale}`,
+    );
+    for (const key of referenceKeys) {
+      assert.deepEqual(
+        placeholders(messages[key]),
+        placeholders(referenceMessages[key]),
+        `${locale.id} app.json placeholders for ${key} must match ${referenceLocale}`,
+      );
+    }
   }
 
   const localizationSource = fs.readFileSync(
@@ -300,6 +404,24 @@ function main() {
     appSource,
     /Playmesh UI configuration failed|Could not open file/,
   );
+
+  const remoteGameSource = fs.readFileSync(
+    path.join(workspaceRoot, "lib", "features", "game", "remote_game_page.dart"),
+    "utf8",
+  );
+  assert.match(remoteGameSource, /context\.tr\('game\.remote_open_failed'\)/);
+  assert.doesNotMatch(
+    remoteGameSource,
+    /game\.remote_open_failed[\s\S]{0,160}arguments\s*:\s*\{\s*['"]error['"]\s*:/,
+    "Remote game failures must not expose raw platform or WebView error text",
+  );
+  for (const messages of appMessagesByLocale.values()) {
+    assert.doesNotMatch(
+      messages["game.remote_open_failed"],
+      /\{error\}/,
+      "The public remote-game failure message must remain sanitized",
+    );
+  }
 
   console.log(
     `Flutter localization source contract passed: ${libCalls.length} App tr calls, ` +

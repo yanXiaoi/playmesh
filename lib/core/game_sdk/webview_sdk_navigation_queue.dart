@@ -74,10 +74,12 @@ class WebViewSdkNavigationQueue {
   }
 
   Future<void> addApp(String script, {required int generation}) async {
-    if (_disposed || generation != _generation) return;
+    if (_disposed || generation != _generation) {
+      throw StateError('App SDK response belongs to a stale WebView document');
+    }
     final id = 'app-${++_messageSequence}';
     _appScripts[id] = _QueuedSdkScript(script, null, generation);
-    await _app.add(id);
+    await _app.addAndWait(id, generation: _app.generation);
   }
 
   Future<void> addGame(
@@ -110,21 +112,25 @@ class WebViewSdkNavigationQueue {
     if (queued == null) return;
     if (!_isCurrent(scripts, id, queued)) {
       _removeIfCurrent(scripts, id, queued);
-      return;
+      throw StateError('SDK response belongs to a stale WebView document');
     }
     final beforeSend = queued.beforeSend;
     if (beforeSend != null) {
       await beforeSend();
       if (!_isCurrent(scripts, id, queued)) {
         _removeIfCurrent(scripts, id, queued);
-        return;
+        throw StateError('SDK response belongs to a stale WebView document');
       }
     }
     if (!_isCurrent(scripts, id, queued)) {
       _removeIfCurrent(scripts, id, queued);
-      return;
+      throw StateError('SDK response belongs to a stale WebView document');
     }
     await _send(queued.script);
+    if (!_isCurrent(scripts, id, queued)) {
+      _removeIfCurrent(scripts, id, queued);
+      throw StateError('SDK response belongs to a stale WebView document');
+    }
     _removeIfCurrent(scripts, id, queued);
   }
 

@@ -228,6 +228,29 @@ AI 心智负担要求：
 
 第六阶段是最后一个阶段。后续更改不再新增阶段、阶段中间状态或阶段完成文档，改为按实际发布版本维护 `docs/version/{MAJOR.MINOR.PATCH}.md` 详细更新日志，并同步 App 内简略更新日志。版本与日志规则见 `docs/version/README.md` 和 `docs/06-engineering-standards.md`。
 
+### Playmesh 4.2.0 局域网发现与 App SDK（已开发，待实机）
+
+- 已实现默认不公开的自定义 IPv4 UDP multicast：打开分享面板或本机房主调用
+  `playmesh.app.lan.setPublished()` 才单向发布，关闭面板不取消，生命周期结束停止公告并
+  best-effort 发送 goodbye。唯一发现链固定为 `239.255.80.77:53584`、wire v1、1 秒公告、
+  4 秒 TTL、单包最多 1200 字节，不保留 DNS-SD/TXT、双栈或已知节点单播兼容。
+- 已以 `GameShareCoordinator` 收口分享通道、公开租约、Relay、generation、清理和
+  `GameShareLinkSnapshot`；分享面板、开发状态和 SDK 读取同一 LAN/WAN URL 与 PNG。
+- 已以 `LanGameDiscoveryService` 提供 App 全 gameId 附近列表。列表显示主机昵称、真实来源
+  IP、多人当前/最大人数或“单机”，自动更新并支持手动刷新；点击预检结束前保留发现
+  lease。游戏 SDK 仍只投影当前 gameId 的既有字段，不增加内部展示元数据或图标端点；
+  手工链接、扫码、发现结果与 SDK 加入复用统一邀请预检和 `RemoteGamePage`。
+- App Bridge SDK `3.3.0` 已兼容新增 `playmesh.app.lan`，其中 App-only 本机
+  Authority/standalone host 可由 `getShareLinks()` 读取完整 bearer URL 与 PNG Data URL；
+  该授权替代旧的绝对禁读结论。
+- 已新增 `playmesh.app.ui.disableSystemMenuTriggers()`，用于当前文档单向解绑默认
+  Escape/Menu/Back 自动菜单触发，不影响显式 UI 方法。
+- App `4.2.0+28`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Go Core `0.5.0`、
+  Core `1.3.0` 与 Relay `3.0.0` 保持不变；`/playmesh/join` 只兼容增加预检字段。
+- 自动化与静态契约已完成；Android、Windows、macOS、Linux 的跨设备发布、发现、丢失、
+  权限、物理/虚拟网卡切换和实际加入仍须实机验收，未完成前不得标记发布完成。iOS 自动
+  发现/发布显式为 `unsupported`，扫码、手工邀请和分享链接保留。
+
 ## 阶段调整规则
 
 本节仅适用于已经结束的第一至第六阶段。历史实施中如果阶段定义与实际实现、技术限制或验证结果冲突，文档更正必须记录原定义、实际发现、调整原因、影响范围和新的验收标准。第六阶段之后不再定义新阶段。

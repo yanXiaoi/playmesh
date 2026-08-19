@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/features/game/game_page.dart';
+import 'package:playmesh/features/game/game_invitation_scanner_page.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
 import 'package:playmesh/features/developer/game_creation_page.dart';
 import 'package:playmesh/features/games/game_library_page.dart';

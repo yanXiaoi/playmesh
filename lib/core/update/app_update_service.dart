@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../download/app_resource_source_catalog.dart';
 import '../download/endpoint_document.dart';
 import '../download/endpoint_probe.dart';
 import '../download/named_download_endpoint.dart';
@@ -70,8 +71,6 @@ final class AppUpdateService implements AppUpdateChecker {
       },
     );
   }
-
-  static const String sourcesAssetKey = 'assets/app/App.json';
 
   final AppUpdateAssetLoader _assetLoader;
   final EndpointDocumentLoader _documentLoader;
@@ -163,12 +162,10 @@ final class AppUpdateService implements AppUpdateChecker {
 
   Future<NamedDownloadEndpointList> _loadSources(String requestId) async {
     try {
-      final source = await _assetLoader(sourcesAssetKey);
-      return NamedDownloadEndpointList.parse(
+      final source = await _assetLoader(appResourceSourceCatalogAssetPath);
+      return AppResourceSourceCatalog.parse(
         source,
-        allowEmpty: false,
-        field: 'appUpdateSources',
-      );
+      ).endpointsFor('app', allowEmpty: false, field: 'appUpdateSources');
     } on Object catch (error) {
       debugPrint(
         '[$requestId] Invalid App update source configuration: $error',

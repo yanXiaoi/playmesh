@@ -494,13 +494,13 @@ export class PlaymeshAiRuntimeDebuggerTools {
   async _control(
     context /*: PlaymeshAiEditorFunctionWrapperContext */,
     command /*: 'pause' | 'play' | 'set' | 'call' */,
-    officialArguments /*: PlaymeshAiObject */ = {}
+    commandArguments /*: PlaymeshAiObject */ = {}
   ) /*: Promise<PlaymeshAiEditorFunctionExecution> */ {
     const current = this._currentDebugger();
     if (current.status === 'unavailable') return finished(context, current);
     try {
       this.previewDebuggerServer.sendMessage(current.debuggerId, {
-        ...officialArguments,
+        ...commandArguments,
         command,
       });
       return finished(context, {

@@ -192,6 +192,9 @@ class DeveloperAiApprovalBroker {
   List<Map<String, Object?>> get pending =>
       _pending.values.map((item) => item.toJson()).toList(growable: false);
 
+  DeveloperAiApprovalSubject? pendingSubject(String approvalId) =>
+      _pending[approvalId]?.subject;
+
   Future<void> initialize() => _initialization ??= () async {
     try {
       final loaded = await _persistence.load();
@@ -215,15 +218,27 @@ class DeveloperAiApprovalBroker {
     );
   }
 
+  Future<DeveloperAiApprovalGrant?> alwaysGrant(String grantId) async {
+    await _persistentBarrier();
+    for (final grant in _alwaysApprovals.values) {
+      if (grant.id == grantId) return grant;
+    }
+    return null;
+  }
+
   Future<DeveloperAiApprovalResult> request({
     required String requestId,
     required DeveloperAiApprovalSubject subject,
     DeveloperAiCancellationSignal? cancellation,
+    bool Function()? autoApprove,
   }) async {
     if (!subject.dangerous) return DeveloperAiApprovalResult.approved;
     await _persistentBarrier();
     if (_disposed || cancellation?.isCancelled == true) {
       return DeveloperAiApprovalResult.rejected;
+    }
+    if (autoApprove?.call() == true) {
+      return DeveloperAiApprovalResult.approved;
     }
     if (_alwaysApprovals.containsKey(subject.projectCacheKey) ||
         (subject.scopeId != null &&
@@ -277,6 +292,26 @@ class DeveloperAiApprovalBroker {
       'timestamp': _clock().toUtc().millisecondsSinceEpoch,
     });
     return result;
+  }
+
+  int approvePendingForEditorSession(String editorSessionId) {
+    final approvals = _pending.values
+        .where(
+          (approval) =>
+              approval.subject.scopeKind == 'gdevelop' &&
+              approval.subject.editorSessionId == editorSessionId &&
+              !approval.cancelled &&
+              !approval.completer.isCompleted,
+        )
+        .toList(growable: false);
+    for (final approval in approvals) {
+      approval.timer?.cancel();
+      if (identical(_pending[approval.id], approval)) {
+        _pending.remove(approval.id);
+      }
+      approval.completer.complete(DeveloperAiApprovalResult.approved);
+    }
+    return approvals.length;
   }
 
   Future<void> decide(
@@ -339,7 +374,9 @@ class DeveloperAiApprovalBroker {
           if (!approval.cancelled) _restoreApprovalTimer(approval);
           rethrow;
         }
-        approval.completer.complete(DeveloperAiApprovalResult.approved);
+        if (!approval.completer.isCompleted) {
+          approval.completer.complete(DeveloperAiApprovalResult.approved);
+        }
       case DeveloperAiApprovalDecision.reject:
         approval.completer.complete(DeveloperAiApprovalResult.rejected);
     }

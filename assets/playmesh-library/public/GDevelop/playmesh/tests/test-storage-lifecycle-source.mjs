@@ -30,6 +30,13 @@ const managedStorageController = await readFile(
   ),
   'utf8'
 );
+const authoritativeCommit = await readFile(
+  path.resolve(
+    overlayRoot,
+    'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshAuthoritativeProjectCommit.js'
+  ),
+  'utf8'
+);
 const projectPicker = await readFile(
   path.resolve(
     overlayRoot,
@@ -77,9 +84,10 @@ assert.match(
 );
 assert.match(provider, /generateNewProjectUuid \? 'duplicate' : 'open'/);
 assert.match(provider, /reason: 'explicit_save'/);
-assert.match(provider, /reason: null/);
+assert.match(provider, /reason: 'autosave'/);
+assert.match(provider, /source: 'system'/);
 assert.match(provider, /allocatePlaymeshProjectSnapshot/);
-assert.match(provider, /input\.origin !== 'open'/);
+assert.match(authoritativeCommit, /input\.origin !== 'open'/);
 assert.match(
   provider,
   /pendingSaveAsOrigins\.get\(fileIdentifier\) \|\| 'create'/
@@ -139,10 +147,64 @@ const commitSection = provider.slice(
   provider.indexOf('const dispatchProjectListDiagnostics')
 );
 assert.ok(
-  commitSection.indexOf('await openPlaymeshProject') <
+  commitSection.indexOf('if (shouldBindFileIdentifier)') <
+    commitSection.indexOf('await openPlaymeshProject') &&
+    commitSection.indexOf('await openPlaymeshProject') <
     commitSection.indexOf('await syncPlaymeshHistory'),
-  'App lifecycle must be established before authoritative current commit'
+  'same-gameId Save As binding must be established before authoritative current commit'
 );
+const openSection = provider.slice(
+  provider.indexOf('const openAuthoritativeProject'),
+  provider.indexOf('const managedStorage')
+);
+assert.match(
+  openSection,
+  /await openPlaymeshProjectWithPreparedRestoreRecovery\([\s\S]*loadPlaymeshHistoryCurrentProject/,
+  'the initial project open must retain its lifecycle binding'
+);
+assert.match(
+  openSection,
+  /openPlaymeshProjectWithPreparedRestoreRecovery\([\s\S]*openProject,[\s\S]*abortPreparedPlaymeshHistoryRestore/,
+  'project open must safely abort and retry an orphaned PREPARED restore'
+);
+assert.match(
+  provider,
+  /owner: 'project-open'[\s\S]*openAuthoritativeProjectUnderLease/,
+  'project open recovery must share the browser project mutation lease'
+);
+const explicitSaveSection = provider.slice(
+  provider.indexOf('onSaveProject: async'),
+  provider.indexOf('onChooseSaveProjectAsLocation')
+);
+assert.match(explicitSaveSection, /shouldBindFileIdentifier: false/);
+const saveAsSection = provider.slice(
+  provider.indexOf('onSaveProjectAs: async'),
+  provider.indexOf('onChangeProjectProperty')
+);
+assert.match(
+  saveAsSection,
+  /shouldBindFileIdentifier: origin === 'open'/,
+  'Save As retaining gameId must bind its new fileIdentifier'
+);
+const autosaveSection = provider.slice(
+  provider.indexOf('onAutoSaveProject: async'),
+  provider.indexOf('getOpenErrorMessage')
+);
+assert.match(autosaveSection, /shouldBindFileIdentifier: false/);
+assert.match(autosaveSection, /tryRunPlaymeshProjectAutosave/);
+assert.match(autosaveSection, /historyResult\.historyCreated === false/);
+assert.match(autosaveSection, /skipped: 'history_not_created'/);
+assert.doesNotMatch(explicitSaveSection, /openPlaymeshProject/);
+assert.doesNotMatch(autosaveSection, /openPlaymeshProject/);
+assert.match(sourcePolicy, /getChangesGeneration/);
+assert.match(sourcePolicy, /createPlaymeshAutosaveController/);
+assert.match(sourcePolicy, /autosaveProjectIfNeeded\('periodic'\)/);
+assert.match(
+  sourcePolicy,
+  /generation: getChangesGeneration\(\),\s*trigger,\s*save,/
+);
+assert.match(sourcePolicy, /60 \* 1000/);
+assert.match(sourcePolicy, /usePlaymeshAutosavePreferenceLabel/);
 assert.match(serializer, /gameId = ensureGDevelopGameId\(project\)/);
 assert.doesNotMatch(serializer, /gameId: project\.getProjectUuid\(\)/);
 const serializerPrepare = serializer.slice(
@@ -152,6 +214,12 @@ const serializerPrepare = serializer.slice(
 assert.doesNotMatch(serializerPrepare, /putStoredProject/);
 assert.doesNotMatch(managedStorageController, /selectPlaymeshInitialProject/);
 assert.match(managedStorageController, /activeGameId/);
+assert.match(provider, /createPlaymeshAuthoritativeProjectCommit/);
+assert.match(authoritativeCommit, /return commitLifecycleAndHistory\(/);
+assert.doesNotMatch(
+  authoritativeCommit,
+  /await commitLifecycleAndHistory\([\s\S]*return undefined/
+);
 assert.doesNotMatch(managedStorageController, /listCachedProjects/);
 assert.doesNotMatch(managedStorageController, /mirrorPreparedProject/);
 assert.doesNotMatch(managedStorageController, /source: 'cache'/);
@@ -190,7 +258,13 @@ assert.match(
 assert.doesNotMatch(createSection, /PreferencesContext/);
 assert.doesNotMatch(createSection, /PlaymeshOfficialExamplesDialog/);
 assert.doesNotMatch(createSection, /homeOfficialExamples/);
-assert.match(importButton, /accept="\.zip,application\/zip/);
+assert.match(
+  importButton,
+  /accept="\.zip,application\/zip,application\/x-zip-compressed,\.json,application\/json"/
+);
+assert.match(importButton, /sourceFile\.name\.toLowerCase\(\)\.endsWith\('\.json'\)/);
+assert.match(importButton, /\{ projectJsonBlob: sourceFile \}/);
+assert.match(importButton, /\{ archiveBlob: sourceFile \}/);
 assert.match(importButton, /importPortableProjectWithCopyDecision/);
 assert.match(historyUi, /restorePlaymeshHistoryToLocalStore/);
 assert.match(historyUi, /width: "min\(720px, 72vw\)"/);
@@ -199,6 +273,19 @@ assert.match(historyUi, /<PlaymeshHistoryDiffDialog/);
 assert.match(historyDiffDialog, /id="playmesh-history-diff-dialog"/);
 assert.match(historyDiffDialog, /onRequestClose=\{onClose\}/);
 assert.match(historyUi, /playmeshMessages\.historyErrorEditingSafe/);
+assert.match(
+  historyUi,
+  /error\.code === "gdevelop_revision_conflict"/,
+  'an authoritative save conflict must not be presented as a history loading failure'
+);
+const historyStatusSection = historyUi.slice(
+  historyUi.indexOf('const onHistoryStatus'),
+  historyUi.indexOf('window.addEventListener', historyUi.indexOf('const onHistoryStatus'))
+);
+assert.match(
+  historyStatusSection,
+  /isHistoryRevisionConflict\(detail\.error\)[\s\S]*loadVersions\(\);[\s\S]*return;/
+);
 for (const client of [lifecycleClient, historyClient]) {
   assert.match(client, /credentials: 'same-origin'/);
   assert.match(client, /requestId/);

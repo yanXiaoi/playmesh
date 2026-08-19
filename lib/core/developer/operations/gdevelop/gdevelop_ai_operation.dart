@@ -8,6 +8,8 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
   static const _projectBase = '/dev/api/gdevelop/projects/{gameId}/ai';
   static const _sessionBase = '$_projectBase/editor-sessions';
   static const _sessionPath = '$_sessionBase/{editorSessionId}';
+  static const _approvalModePath =
+      '$_projectBase/editor-settings/{editorSessionId}/approval-mode';
   static const _callBase = '$_sessionPath/calls';
   static const _resourceStagingPath =
       '$_sessionPath/resource-staging/{contentHash}';
@@ -75,6 +77,27 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
     },
   };
 
+  static const _approvalModeSchema = <String, Object?>{
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['approvalMode'],
+    'properties': {
+      'approvalMode': {
+        'type': 'string',
+        'enum': ['request_approval', 'always_allow'],
+      },
+    },
+  };
+
+  static const _turnSchema = <String, Object?>{
+    'type': 'object',
+    'additionalProperties': false,
+    'properties': {
+      'clientMessageId': {'type': 'string'},
+      'echo': {'type': 'integer', 'minimum': 1, 'maximum': 9007199254740991},
+    },
+  };
+
   static const _callSchema = <String, Object?>{
     'type': 'object',
     'additionalProperties': false,
@@ -121,6 +144,29 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
       summary: '读取 GDevelop AI 编辑器会话',
       permission: 'gdevelop.ai.read',
       parameters: [developerGameIdParameter],
+      chatEnabled: false,
+      agentEnabled: false,
+    ),
+    DeveloperOperationDefinition(
+      id: 'gdevelop.ai.approval_mode.get',
+      method: 'GET',
+      path: _approvalModePath,
+      summary: '读取当前 GDevelop AI 编辑器会话的审批模式',
+      permission: 'ai.approval.manage',
+      parameters: [developerGameIdParameter],
+      chatEnabled: false,
+      agentEnabled: false,
+    ),
+    DeveloperOperationDefinition(
+      id: 'gdevelop.ai.approval_mode.update',
+      method: 'PUT',
+      path: _approvalModePath,
+      summary: '修改当前 GDevelop AI 编辑器会话的审批模式',
+      permission: 'ai.approval.manage',
+      risk: DeveloperOperationRisk.high,
+      idempotent: true,
+      parameters: [developerGameIdParameter],
+      requestBodySchema: _approvalModeSchema,
       chatEnabled: false,
       agentEnabled: false,
     ),
@@ -177,9 +223,9 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
       id: 'gdevelop.ai.resource_staging.put',
       method: 'PUT',
       path: _resourceStagingPath,
-      summary: 'Agent-only 流式暂存 GDevelop 资源到现有项目 CAS',
+      summary: 'Agent-only 流式暂存 GDevelop 资源到当前 AI 会话',
       description:
-          '仅接受前台 loopback Agent；原始 body 不进入日志。支持 chunked 流；以 Content-Type 与 SHA-256 path 透传并校验资源。',
+          '仅接受前台 Agent 通道；远程与回环地址使用相同的会话和认证边界。原始 body 不进入日志。支持 chunked 流；以 Content-Type 与 SHA-256 path 透传并校验资源。',
       permission: 'gdevelop.ai.write',
       risk: DeveloperOperationRisk.medium,
       requiresForegroundView: true,
@@ -192,7 +238,7 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
           required: true,
         ),
       ],
-      additionalResponses: {403: '非 Agent、非 loopback 或前台视图不可用'},
+      additionalResponses: {403: '非 Agent 通道'},
       chatEnabled: false,
       agentEnabled: false,
     ),
@@ -212,10 +258,11 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
       id: 'gdevelop.ai.turn.create',
       method: 'POST',
       path: '$_sessionPath/turns',
-      summary: '创建具有 clientMessageId 幂等边界的 AI turn',
+      summary: '创建具有 clientMessageId 幂等边界和可选批次 echo 的 AI turn',
       permission: 'gdevelop.ai.write',
       successStatus: 201,
       parameters: [developerGameIdParameter],
+      requestBodySchema: _turnSchema,
       chatEnabled: false,
       agentEnabled: false,
     ),
@@ -401,6 +448,36 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
           'session': session.toJson(),
         });
         return;
+      case 'gdevelop.ai.approval_mode.get':
+        await _json(request.response, HttpStatus.ok, {
+          'requestId': requestId,
+          'session': session.toJson(),
+        });
+        return;
+      case 'gdevelop.ai.approval_mode.update':
+        final body = await _jsonBodyWithLimit(request, 16 * 1024);
+        final rawApprovalMode = body['approvalMode'];
+        if (body.length != 1 || rawApprovalMode is! String) {
+          throw const FormatException(
+            'GDevelop AI approvalMode 请求必须精确包含 approvalMode',
+          );
+        }
+        final approvalMode = GDevelopAiApprovalMode.parse(rawApprovalMode);
+        final updated = gateway.gdevelopAiSessions.updateSession(
+          editorSessionId,
+          approvalMode: approvalMode,
+        );
+        if (approvalMode == GDevelopAiApprovalMode.alwaysAllow) {
+          gateway.approvalBroker.approvePendingForEditorSession(
+            editorSessionId,
+          );
+        }
+        _emitGDevelopAiSession(updated, action: 'approval_mode_updated');
+        await _json(request.response, HttpStatus.ok, {
+          'requestId': requestId,
+          'session': updated.toJson(),
+        });
+        return;
       case 'gdevelop.ai.session.locale':
         final body = await _jsonBodyWithLimit(
           request,
@@ -469,11 +546,20 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
       case 'gdevelop.ai.turn.create':
         final body = await _jsonBodyWithLimit(request, 16 * 1024);
         final clientMessageId = body['clientMessageId'];
-        if (clientMessageId != null && clientMessageId is! String) {
-          throw const FormatException('clientMessageId 必须是字符串');
+        final echo = body['echo'];
+        if ((clientMessageId != null && clientMessageId is! String) ||
+            (echo != null &&
+                (echo is! int || echo < 1 || echo > 9007199254740991))) {
+          throw const FormatException('GDevelop AI turn 请求无效');
+        }
+        if (body.keys.any(
+          (key) => !const {'clientMessageId', 'echo'}.contains(key),
+        )) {
+          throw const FormatException('GDevelop AI turn 请求包含未知字段');
         }
         final turn = gateway.gdevelopAiSessions.createTurn(
           editorSessionId,
+          echo: echo as int?,
           clientMessageId: clientMessageId as String?,
         );
         developerEventHub.emit({
@@ -585,17 +671,13 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
     String contentHash,
   ) async {
     final channel = request.headers.value(developerAiChannelHeader)?.trim();
-    final remoteAddress = request.connectionInfo?.remoteAddress;
-    if (session.mode != GDevelopAiMode.agent ||
-        channel != 'agent' ||
-        remoteAddress == null ||
-        !remoteAddress.isLoopback) {
+    if (session.mode != GDevelopAiMode.agent || channel != 'agent') {
       await _error(
         request.response,
         HttpStatus.forbidden,
         requestId,
         'gdevelop_ai_resource_staging_agent_only',
-        'GDevelop AI 资源暂存仅允许前台 loopback Agent 通道',
+        'GDevelop AI 资源暂存仅允许前台 Agent 通道',
       );
       return;
     }
@@ -989,6 +1071,20 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
         session.id,
         call.id,
       ),
+      autoApprove: () {
+        try {
+          final currentSession = gateway.gdevelopAiSessions.session(session.id);
+          final currentCall = gateway.gdevelopAiSessions.call(
+            session.id,
+            call.id,
+          );
+          return currentSession.approvalMode ==
+                  GDevelopAiApprovalMode.alwaysAllow ||
+              currentCall.state != GDevelopAiCallState.awaitingApproval;
+        } on GDevelopAiSessionNotFound {
+          return false;
+        }
+      },
       subject: DeveloperAiApprovalSubject(
         scopeKind: 'gdevelop',
         scopeId: gameId,

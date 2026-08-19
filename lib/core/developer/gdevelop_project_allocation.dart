@@ -6,6 +6,7 @@ import 'foundation/gdevelop_project_mutation_lock.dart';
 import 'foundation/local_version_store.dart';
 import 'foundation/pending_project_commit_store.dart';
 import 'gdevelop_project_config.dart';
+import 'gdevelop_project_files.dart';
 import 'gdevelop_project_history.dart';
 import 'gdevelop_project_root_resolver.dart';
 import 'project_provisioning_service.dart';
@@ -100,7 +101,7 @@ class GDevelopProjectAllocationWorkspaceTarget {
     required this.gameId,
     required this.packageName,
     required this.projectUuid,
-    required this.projectJsonHash,
+    required this.projectFilesHash,
     required this.resourceManifestHash,
   });
 
@@ -108,7 +109,7 @@ class GDevelopProjectAllocationWorkspaceTarget {
   final String gameId;
   final String packageName;
   final String projectUuid;
-  final String projectJsonHash;
+  final String projectFilesHash;
   final String resourceManifestHash;
 
   Map<String, Object?> toJson() => {
@@ -116,7 +117,7 @@ class GDevelopProjectAllocationWorkspaceTarget {
     'gameId': gameId,
     'packageName': packageName,
     'projectUuid': projectUuid,
-    'projectJsonHash': projectJsonHash,
+    'projectFilesHash': projectFilesHash,
     'resourceManifestHash': resourceManifestHash,
   };
 
@@ -127,7 +128,7 @@ class GDevelopProjectAllocationWorkspaceTarget {
       'gameId',
       'packageName',
       'projectUuid',
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     });
     final fileIdentifier = _fileIdentifier(json['fileIdentifier']);
@@ -135,7 +136,7 @@ class GDevelopProjectAllocationWorkspaceTarget {
     final packageName = _gameId(json['packageName']);
     final projectUuid = _projectUuid(json['projectUuid']);
     if (gameId != packageName ||
-        !_isHash(json['projectJsonHash']) ||
+        !_isHash(json['projectFilesHash']) ||
         !_isHash(json['resourceManifestHash'])) {
       throw const FormatException('GDevelop allocation workspaceTarget 无效');
     }
@@ -144,7 +145,7 @@ class GDevelopProjectAllocationWorkspaceTarget {
       gameId: gameId,
       packageName: packageName,
       projectUuid: projectUuid,
-      projectJsonHash: json['projectJsonHash']! as String,
+      projectFilesHash: json['projectFilesHash']! as String,
       resourceManifestHash: json['resourceManifestHash']! as String,
     );
   }
@@ -184,26 +185,43 @@ class GDevelopProjectAllocationResourceReference {
   }
 }
 
+/// Raw `projectFiles` DTO upload evidence returned to the WebIDE.
+///
+/// This hash/size pair covers the exact request bytes. The authoritative
+/// current/history reference is computed separately from the official
+/// formatted files contained by the DTO.
+class GDevelopProjectAllocationProjectFilesUploadReference {
+  const GDevelopProjectAllocationProjectFilesUploadReference({
+    required this.contentHash,
+    required this.size,
+  });
+
+  final String contentHash;
+  final int size;
+
+  Map<String, Object?> toJson() => {'contentHash': contentHash, 'size': size};
+}
+
 class GDevelopProjectAllocationWorkspaceProject {
   const GDevelopProjectAllocationWorkspaceProject({
     required this.packageName,
     required this.projectUuid,
-    required this.projectJsonHash,
-    required this.projectJsonSize,
+    required this.projectFilesHash,
+    required this.projectFilesSize,
     required this.resourceReferences,
   });
 
   final String packageName;
   final String projectUuid;
-  final String projectJsonHash;
-  final int projectJsonSize;
+  final String projectFilesHash;
+  final int projectFilesSize;
   final List<GDevelopProjectAllocationResourceReference> resourceReferences;
 
   Map<String, Object?> toJson() => {
     'packageName': packageName,
     'projectUuid': projectUuid,
-    'projectJsonHash': projectJsonHash,
-    'projectJsonSize': projectJsonSize,
+    'projectFilesHash': projectFilesHash,
+    'projectFilesSize': projectFilesSize,
     'resourceReferences': resourceReferences
         .map((reference) => reference.toJson())
         .toList(),
@@ -214,15 +232,15 @@ class GDevelopProjectAllocationWorkspaceProject {
     _requireFields(json, const {
       'packageName',
       'projectUuid',
-      'projectJsonHash',
-      'projectJsonSize',
+      'projectFilesHash',
+      'projectFilesSize',
       'resourceReferences',
     });
-    if (!_isHash(json['projectJsonHash']) ||
-        json['projectJsonSize'] is! int ||
-        (json['projectJsonSize']! as int) < 1 ||
-        (json['projectJsonSize']! as int) >
-            GDevelopProjectHistoryAdapter.maxProjectBytes ||
+    if (!_isHash(json['projectFilesHash']) ||
+        json['projectFilesSize'] is! int ||
+        (json['projectFilesSize']! as int) < 1 ||
+        (json['projectFilesSize']! as int) >
+            GDevelopProjectHistoryAdapter.maxProjectFilesBytes ||
         json['resourceReferences'] is! List) {
       throw const FormatException('GDevelop allocation workspaceProject 无效');
     }
@@ -236,8 +254,8 @@ class GDevelopProjectAllocationWorkspaceProject {
     return GDevelopProjectAllocationWorkspaceProject(
       packageName: _gameId(json['packageName']),
       projectUuid: _projectUuid(json['projectUuid']),
-      projectJsonHash: json['projectJsonHash']! as String,
-      projectJsonSize: json['projectJsonSize']! as int,
+      projectFilesHash: json['projectFilesHash']! as String,
+      projectFilesSize: json['projectFilesSize']! as int,
       resourceReferences: List.unmodifiable(references),
     );
   }
@@ -247,22 +265,22 @@ class GDevelopProjectAllocationWorkspaceFinalization {
   const GDevelopProjectAllocationWorkspaceFinalization({
     required this.packageName,
     required this.projectUuid,
-    required this.projectJsonHash,
-    required this.projectJsonSize,
+    required this.projectFilesHash,
+    required this.projectFilesSize,
     required this.resourceManifestHash,
   });
 
   final String packageName;
   final String projectUuid;
-  final String projectJsonHash;
-  final int projectJsonSize;
+  final String projectFilesHash;
+  final int projectFilesSize;
   final String resourceManifestHash;
 
   Map<String, Object?> toJson() => {
     'packageName': packageName,
     'projectUuid': projectUuid,
-    'projectJsonHash': projectJsonHash,
-    'projectJsonSize': projectJsonSize,
+    'projectFilesHash': projectFilesHash,
+    'projectFilesSize': projectFilesSize,
     'resourceManifestHash': resourceManifestHash,
   };
 
@@ -273,16 +291,16 @@ class GDevelopProjectAllocationWorkspaceFinalization {
     _requireFields(json, const {
       'packageName',
       'projectUuid',
-      'projectJsonHash',
-      'projectJsonSize',
+      'projectFilesHash',
+      'projectFilesSize',
       'resourceManifestHash',
     });
-    if (!_isHash(json['projectJsonHash']) ||
+    if (!_isHash(json['projectFilesHash']) ||
         !_isHash(json['resourceManifestHash']) ||
-        json['projectJsonSize'] is! int ||
-        (json['projectJsonSize']! as int) < 1 ||
-        (json['projectJsonSize']! as int) >
-            GDevelopProjectHistoryAdapter.maxProjectBytes) {
+        json['projectFilesSize'] is! int ||
+        (json['projectFilesSize']! as int) < 1 ||
+        (json['projectFilesSize']! as int) >
+            GDevelopProjectHistoryAdapter.maxProjectFilesBytes) {
       throw const FormatException(
         'GDevelop allocation workspace finalization 无效',
       );
@@ -290,11 +308,21 @@ class GDevelopProjectAllocationWorkspaceFinalization {
     return GDevelopProjectAllocationWorkspaceFinalization(
       packageName: _gameId(json['packageName']),
       projectUuid: _projectUuid(json['projectUuid']),
-      projectJsonHash: json['projectJsonHash']! as String,
-      projectJsonSize: json['projectJsonSize']! as int,
+      projectFilesHash: json['projectFilesHash']! as String,
+      projectFilesSize: json['projectFilesSize']! as int,
       resourceManifestHash: json['resourceManifestHash']! as String,
     );
   }
+}
+
+class _GDevelopProjectAllocationWorkspaceProjectInspection {
+  const _GDevelopProjectAllocationWorkspaceProjectInspection({
+    required this.project,
+    required this.projectFiles,
+  });
+
+  final GDevelopProjectAllocationWorkspaceProject project;
+  final GDevelopProjectFilesReference projectFiles;
 }
 
 class GDevelopProjectAllocationEvidence {
@@ -346,7 +374,7 @@ class GDevelopProjectAllocationPayload {
     this.conflict,
   });
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
 
   final String gameId;
   final GDevelopProjectAllocationOrigin origin;
@@ -793,7 +821,8 @@ class GDevelopProjectAllocationCoordinator {
     });
   }
 
-  Future<GDevelopProjectReference> uploadWorkspaceProject({
+  Future<GDevelopProjectAllocationProjectFilesUploadReference>
+  uploadWorkspaceProjectFiles({
     required String txId,
     required Stream<List<int>> bytes,
     int? contentLength,
@@ -813,24 +842,26 @@ class GDevelopProjectAllocationCoordinator {
       }
       if (contentLength != null &&
           (contentLength < 1 ||
-              contentLength > GDevelopProjectHistoryAdapter.maxProjectBytes)) {
+              contentLength >
+                  GDevelopProjectHistoryAdapter.maxProjectFilesBytes)) {
         throw const FormatException('GDevelop allocation 工程大小无效');
       }
       final staged = await _workspaceStore(record.payload).stageStream(
         bytes,
         expectedBytes: contentLength,
-        maxBytes: GDevelopProjectHistoryAdapter.maxProjectBytes,
+        maxBytes: GDevelopProjectHistoryAdapter.maxProjectFilesBytes,
         timeout: inactivityTimeout,
       );
-      if (staged.hash != record.payload.workspaceTarget.projectJsonHash) {
+      if (staged.hash != record.payload.workspaceTarget.projectFilesHash) {
         throw const GDevelopProjectAllocationEvidenceMismatch(
-          'workspace_project_hash_mismatch',
+          'workspace_project_files_hash_mismatch',
         );
       }
-      final project = await _inspectWorkspaceProject(
+      final inspection = await _inspectWorkspaceProjectFiles(
         record.payload,
-        GDevelopProjectReference(contentHash: staged.hash, size: staged.bytes),
+        LocalCasObjectReference(hash: staged.hash, bytes: staged.bytes),
       );
+      final project = inspection.project;
       final previous = record.payload.workspaceProject;
       if (previous != null && !_sameWorkspaceProject(previous, project)) {
         throw const GDevelopProjectAllocationEvidenceMismatch(
@@ -843,7 +874,7 @@ class GDevelopProjectAllocationCoordinator {
           payload: record.payload.copyWith(workspaceProject: project),
         );
       }
-      return GDevelopProjectReference(
+      return GDevelopProjectAllocationProjectFilesUploadReference(
         contentHash: staged.hash,
         size: staged.bytes,
       );
@@ -868,11 +899,18 @@ class GDevelopProjectAllocationCoordinator {
             'workspace_finalization_changed',
           );
         }
+        final inspection = await _inspectFinalizedWorkspace(
+          record.payload,
+          projectRoot: await _materializedProjectRoot(record.payload),
+        );
         try {
           record = await located.store.markPayloadFinalized(
             txId: txId,
             payload: record.payload,
-            evidence: _payloadFinalizationEvidence(record.payload),
+            evidence: _payloadFinalizationEvidence(
+              record.payload,
+              inspection.projectFiles,
+            ),
           );
         } on PendingProjectCommitPayloadFinalizationConflict {
           throw const GDevelopProjectAllocationEvidenceMismatch(
@@ -906,10 +944,7 @@ class GDevelopProjectAllocationCoordinator {
         projectRoot: Directory(record.payload.stagingPath),
         historyRoot: _historyRoot(Directory(record.payload.stagingPath)),
         projectId: record.payload.gameId,
-        project: GDevelopProjectReference(
-          contentHash: workspaceProject.projectJsonHash,
-          size: workspaceProject.projectJsonSize,
-        ),
+        projectFiles: inspection.projectFiles,
         resources: inspection.orderedResources,
         projectConfigSnapshot: GDevelopHistoryProjectConfigSnapshot.ready(
           config,
@@ -922,7 +957,10 @@ class GDevelopProjectAllocationCoordinator {
         record = await located.store.markPayloadFinalized(
           txId: txId,
           payload: finalizedPayload,
-          evidence: _payloadFinalizationEvidence(finalizedPayload),
+          evidence: _payloadFinalizationEvidence(
+            finalizedPayload,
+            inspection.projectFiles,
+          ),
         );
       } on PendingProjectCommitPayloadFinalizationConflict {
         throw const GDevelopProjectAllocationEvidenceMismatch(
@@ -1245,25 +1283,41 @@ class GDevelopProjectAllocationCoordinator {
     return List.unmodifiable(merged);
   }
 
-  Future<GDevelopProjectAllocationWorkspaceProject> _inspectWorkspaceProject(
+  Future<_GDevelopProjectAllocationWorkspaceProjectInspection>
+  _inspectWorkspaceProjectFiles(
     GDevelopProjectAllocationPayload payload,
-    GDevelopProjectReference reference, {
+    LocalCasObjectReference reference, {
     Directory? projectRoot,
   }) async {
-    final bytes = await _workspaceStore(
-      payload,
-      projectRoot: projectRoot,
-    ).readObject(reference.casReference);
+    final store = _workspaceStore(payload, projectRoot: projectRoot);
+    final bytes = await store.readObject(reference);
     late final Object? decoded;
     try {
       decoded = jsonDecode(utf8.decode(bytes));
     } on Object {
-      throw const FormatException('GDevelop allocation 工程必须是 UTF-8 JSON');
+      throw const FormatException(
+        'GDevelop allocation projectFiles 必须是 UTF-8 JSON',
+      );
     }
-    if (decoded is! Map) {
-      throw const FormatException('GDevelop allocation 工程 JSON 根必须是对象');
+    final projectFiles = gdevelopProjectFilesFromJson(decoded);
+    final projectFilesReference = await referenceGDevelopProjectFiles(
+      projectFiles,
+    );
+    if (projectFilesReference.size >
+        GDevelopProjectHistoryAdapter.maxProjectFilesBytes) {
+      throw const FormatException('GDevelop allocation 工程大小无效');
     }
-    final project = Map<String, Object?>.from(decoded);
+    for (var index = 0; index < projectFiles.length; index += 1) {
+      final staged = await store.stageObject(
+        encodeOfficialGDevelopProjectFileBytes(projectFiles[index].content),
+      );
+      final expected = projectFilesReference.files[index];
+      if (staged.hash != expected.contentHash ||
+          staged.bytes != expected.size) {
+        throw StateError('GDevelop allocation 工程文件写入 CAS 时发生变化');
+      }
+    }
+    final project = gdevelopRootProjectFile(projectFiles).content;
     final properties = project['properties'];
     if (properties is! Map) {
       throw const FormatException('GDevelop allocation 工程 properties 无效');
@@ -1275,18 +1329,21 @@ class GDevelopProjectAllocationCoordinator {
     if (packageName != target.gameId ||
         packageName != target.packageName ||
         projectUuid != target.projectUuid ||
-        reference.contentHash != target.projectJsonHash) {
+        reference.hash != target.projectFilesHash) {
       throw const GDevelopProjectAllocationEvidenceMismatch(
         'workspace_project_identity_mismatch',
       );
     }
     final references = _officialResourceReferences(project);
-    return GDevelopProjectAllocationWorkspaceProject(
-      packageName: packageName,
-      projectUuid: projectUuid,
-      projectJsonHash: reference.contentHash,
-      projectJsonSize: reference.size,
-      resourceReferences: references,
+    return _GDevelopProjectAllocationWorkspaceProjectInspection(
+      project: GDevelopProjectAllocationWorkspaceProject(
+        packageName: packageName,
+        projectUuid: projectUuid,
+        projectFilesHash: reference.hash,
+        projectFilesSize: reference.bytes,
+        resourceReferences: references,
+      ),
+      projectFiles: projectFilesReference,
     );
   }
 
@@ -1294,6 +1351,7 @@ class GDevelopProjectAllocationCoordinator {
     ({
       GDevelopProjectAllocationWorkspaceFinalization finalization,
       List<GDevelopProjectResource> orderedResources,
+      GDevelopProjectFilesReference projectFiles,
     })
   >
   _inspectWorkspace(
@@ -1316,14 +1374,15 @@ class GDevelopProjectAllocationCoordinator {
         'workspace_project_missing',
       );
     }
-    final project = await _inspectWorkspaceProject(
+    final projectInspection = await _inspectWorkspaceProjectFiles(
       payload,
-      GDevelopProjectReference(
-        contentHash: persistedProject.projectJsonHash,
-        size: persistedProject.projectJsonSize,
+      LocalCasObjectReference(
+        hash: persistedProject.projectFilesHash,
+        bytes: persistedProject.projectFilesSize,
       ),
       projectRoot: projectRoot,
     );
+    final project = projectInspection.project;
     if (!_sameWorkspaceProject(project, persistedProject)) {
       throw const GDevelopProjectAllocationEvidenceMismatch(
         'workspace_project_changed',
@@ -1353,12 +1412,108 @@ class GDevelopProjectAllocationCoordinator {
       finalization: GDevelopProjectAllocationWorkspaceFinalization(
         packageName: project.packageName,
         projectUuid: project.projectUuid,
-        projectJsonHash: project.projectJsonHash,
-        projectJsonSize: project.projectJsonSize,
+        projectFilesHash: project.projectFilesHash,
+        projectFilesSize: project.projectFilesSize,
         resourceManifestHash: resourceManifestHash,
       ),
       orderedResources: orderedResources,
+      projectFiles: projectInspection.projectFiles,
     );
+  }
+
+  Future<
+    ({
+      GDevelopProjectAllocationWorkspaceFinalization finalization,
+      List<GDevelopProjectResource> orderedResources,
+      GDevelopProjectFilesReference projectFiles,
+    })
+  >
+  _inspectFinalizedWorkspace(
+    GDevelopProjectAllocationPayload payload, {
+    required Directory projectRoot,
+  }) async {
+    final normalizedPlan = _normalizeResourceBatch(
+      payload.resourcePlan,
+      allowEmpty: true,
+    );
+    final validatedPlan = _mergeResourcePlan(const [], normalizedPlan);
+    if (!_sameResourceLists(validatedPlan, payload.resourcePlan)) {
+      throw const GDevelopProjectAllocationEvidenceMismatch(
+        'resource_plan_noncanonical',
+      );
+    }
+    final persistedProject = payload.workspaceProject;
+    final config = payload.allocationEvidence.config.config;
+    if (persistedProject == null || config == null) {
+      throw const GDevelopProjectAllocationEvidenceMismatch(
+        'workspace_project_missing',
+      );
+    }
+    final snapshot = await history.currentAtProjectRoot(
+      projectRoot: projectRoot,
+      projectId: payload.gameId,
+    );
+    if (snapshot == null) {
+      throw const GDevelopProjectAllocationEvidenceMismatch(
+        'workspace_project_missing',
+      );
+    }
+    final projectFiles = await referenceGDevelopProjectFiles(
+      snapshot.projectFiles,
+    );
+    final rootProject = gdevelopRootProjectFile(snapshot.projectFiles).content;
+    final properties = rootProject['properties'];
+    if (properties is! Map) {
+      throw const FormatException('GDevelop allocation 工程 properties 无效');
+    }
+    final propertyJson = Map<String, Object?>.from(properties);
+    final project = GDevelopProjectAllocationWorkspaceProject(
+      packageName: _gameId(propertyJson['packageName']),
+      projectUuid: _projectUuid(propertyJson['projectUuid']),
+      projectFilesHash: persistedProject.projectFilesHash,
+      projectFilesSize: persistedProject.projectFilesSize,
+      resourceReferences: _officialResourceReferences(rootProject),
+    );
+    if (!_sameWorkspaceProject(project, persistedProject)) {
+      throw const GDevelopProjectAllocationEvidenceMismatch(
+        'workspace_project_changed',
+      );
+    }
+    final orderedResources = _orderedResources(payload);
+    await history.verifyCurrentAtProjectRoot(
+      projectRoot: projectRoot,
+      projectId: payload.gameId,
+      projectFiles: projectFiles,
+      resources: orderedResources,
+      projectConfigSnapshot: GDevelopHistoryProjectConfigSnapshot.ready(config),
+    );
+    final resourceManifestHash = await PendingProjectCommitComparator.hashJson(
+      orderedResources.map((resource) => resource.toJson()).toList(),
+    );
+    if (resourceManifestHash != payload.workspaceTarget.resourceManifestHash) {
+      throw const GDevelopProjectAllocationEvidenceMismatch(
+        'resource_manifest_mismatch',
+      );
+    }
+    return (
+      finalization: GDevelopProjectAllocationWorkspaceFinalization(
+        packageName: project.packageName,
+        projectUuid: project.projectUuid,
+        projectFilesHash: project.projectFilesHash,
+        projectFilesSize: project.projectFilesSize,
+        resourceManifestHash: resourceManifestHash,
+      ),
+      orderedResources: orderedResources,
+      projectFiles: projectFiles,
+    );
+  }
+
+  Future<Directory> _materializedProjectRoot(
+    GDevelopProjectAllocationPayload payload,
+  ) async {
+    final staging = Directory(payload.stagingPath);
+    if (await staging.exists()) return staging;
+    return rootResolver.projectRootLocation(payload.gameId);
   }
 
   List<GDevelopProjectResource> _orderedResources(
@@ -1425,17 +1580,17 @@ class GDevelopProjectAllocationCoordinator {
           config == null) {
         return false;
       }
-      final inspection = await _inspectWorkspace(payload, projectRoot: root);
+      final inspection = await _inspectFinalizedWorkspace(
+        payload,
+        projectRoot: root,
+      );
       if (!_sameFinalization(inspection.finalization, persistedFinalization)) {
         return false;
       }
       await history.verifyCurrentAtProjectRoot(
         projectRoot: root,
         projectId: payload.gameId,
-        project: GDevelopProjectReference(
-          contentHash: workspaceProject.projectJsonHash,
-          size: workspaceProject.projectJsonSize,
-        ),
+        projectFiles: inspection.projectFiles,
         resources: inspection.orderedResources,
         projectConfigSnapshot: GDevelopHistoryProjectConfigSnapshot.ready(
           config,
@@ -1443,7 +1598,7 @@ class GDevelopProjectAllocationCoordinator {
       );
       if (expectedFinalizationHash != null &&
           await PendingProjectCommitComparator.hashJson(
-                _payloadFinalizationEvidence(payload),
+                _payloadFinalizationEvidence(payload, inspection.projectFiles),
               ) !=
               expectedFinalizationHash) {
         return false;
@@ -1456,6 +1611,7 @@ class GDevelopProjectAllocationCoordinator {
 
   Object _payloadFinalizationEvidence(
     GDevelopProjectAllocationPayload payload,
+    GDevelopProjectFilesReference projectFiles,
   ) {
     final project = payload.workspaceProject;
     final finalization = payload.workspaceFinalization;
@@ -1476,10 +1632,11 @@ class GDevelopProjectAllocationCoordinator {
           .toList(),
       'stagedCurrent': {
         'revision': 1,
-        'project': {
-          'contentHash': project.projectJsonHash,
-          'size': project.projectJsonSize,
-        },
+        'projectFilesHash': projectFiles.contentHash,
+        'projectFilesSize': projectFiles.size,
+        'projectFiles': projectFiles.files
+            .map((file) => file.toJson())
+            .toList(growable: false),
         'resources': orderedResources
             .map((resource) => resource.toJson())
             .toList(),

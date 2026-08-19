@@ -579,3 +579,45 @@ interface PlaymeshApi {
 /** 游戏页面使用的全局 Playmesh SDK。 */
 declare const playmesh: PlaymeshApi;
 interface Window { playmesh: PlaymeshApi; }
+
+interface PlaymeshAppUiApi {
+  /**
+   * 解除当前文档用于自动打开系统游戏菜单的按键与返回触发；只能在 `playmesh.app.ready` 完成后调用。
+   * 本操作单向且幂等，不影响显式打开的平台覆盖层。 @playmesh-completion playmesh.app.ui.disableSystemMenuTriggers
+   */
+  disableSystemMenuTriggers(): void;
+}
+
+type PlaymeshAppLanShareLinkType = "lan" | "wan";
+
+interface PlaymeshAppLanShareLink {
+  readonly url: string;
+  readonly type: PlaymeshAppLanShareLinkType;
+  readonly img: `data:image/png;base64,${string}`;
+}
+
+interface PlaymeshLanGame {
+  readonly instanceId: string;
+  readonly gameId: string;
+  readonly name: string;
+  readonly host: string;
+  /** 加入此发现结果；只能在真实用户操作中调用。 @playmesh-completion playmesh.app.lan.discoverGames.join */
+  join(): Promise<void>;
+}
+
+interface PlaymeshAppLanApi {
+  /** 发现与当前游戏匹配的局域网房间；结果不包含邀请 URL 或 token。 @playmesh-completion playmesh.app.lan.discoverGames */
+  discoverGames(): Promise<readonly PlaymeshLanGame[]>;
+  /** 通过邀请链接加入；宿主完成预检并在 Bridge 回包后切换页面。 @playmesh-completion playmesh.app.lan.joinByLink */
+  joinByLink(invitationUrl: string): Promise<void>;
+  /** 扫描二维码并加入；取消扫描会 reject。 @playmesh-completion playmesh.app.lan.scanQrAndJoin */
+  scanQrAndJoin(): Promise<void>;
+  /** 单向公开当前 Authority 房间；严格无参数且本局幂等。 @playmesh-completion playmesh.app.lan.setPublished */
+  setPublished(): Promise<void>;
+  /** 读取统一分享快照中的完整链接和 PNG Data URL；本方法没有副作用。 @playmesh-completion playmesh.app.lan.getShareLinks */
+  getShareLinks(): Promise<readonly PlaymeshAppLanShareLink[]>;
+}
+
+interface PlaymeshAppApi {
+  readonly lan: PlaymeshAppLanApi;
+}

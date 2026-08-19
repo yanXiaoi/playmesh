@@ -54,7 +54,7 @@ globalThis.__rekeyProtocol = protocol;
 const hashJson = value =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const computeEvidence = async project => ({
-  projectJsonHash: hashJson(JSON.parse(project.projectJson)),
+  projectFilesHash: hashJson(project.projectFiles),
   resourceManifestHash: hashJson(
     await Promise.all(
       project.resources.map(async resource => ({
@@ -114,7 +114,14 @@ const sourceProject = {
   id: fileIdentifier,
   name: 'Source',
   gameId: oldGameId,
-  projectJson: JSON.stringify({ properties: { packageName: oldGameId } }),
+  projectFiles: [
+    {
+      path: 'game.json',
+      content: {
+        properties: { packageName: oldGameId, folderProject: true },
+      },
+    },
+  ],
   resources: [
     {
       logicalUrl: 'playmesh://hero.png',
@@ -127,7 +134,14 @@ const targetProject = {
   ...sourceProject,
   name: 'Target',
   gameId: newGameId,
-  projectJson: JSON.stringify({ properties: { packageName: newGameId } }),
+  projectFiles: [
+    {
+      path: 'game.json',
+      content: {
+        properties: { packageName: newGameId, folderProject: true },
+      },
+    },
+  ],
   savedAt: 2,
 };
 await storeModule.putStoredProject(sourceProject);
@@ -156,7 +170,7 @@ const backendEvidence = gameId => ({
   history: {
     revision: 1,
     currentContentHash: hash('d'),
-    projectJsonHash: sourceEvidence.projectJsonHash,
+    projectFilesHash: sourceEvidence.projectFilesHash,
     resourceManifestHash: sourceEvidence.resourceManifestHash,
   },
   config: configEvidence(gameId),
@@ -169,8 +183,14 @@ const transaction = {
   newGameId,
   phase: 'PREPARED',
   clientId: null,
-  browserSource: { fileIdentifier, projectJsonHash: sourceEvidence.projectJsonHash },
-  browserTarget: { fileIdentifier, projectJsonHash: targetEvidence.projectJsonHash },
+  browserSource: {
+    fileIdentifier,
+    projectFilesHash: sourceEvidence.projectFilesHash,
+  },
+  browserTarget: {
+    fileIdentifier,
+    projectFilesHash: targetEvidence.projectFilesHash,
+  },
   oldEvidence: backendEvidence(oldGameId),
   targetEvidence: backendEvidence(newGameId),
   createdAt: timestamp,

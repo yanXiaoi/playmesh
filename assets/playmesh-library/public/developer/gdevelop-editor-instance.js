@@ -121,9 +121,16 @@
         ? input
         : input.url;
       const url = new URL(value, global.location.href);
-      return url.origin === global.location.origin &&
+      const isGDevelopApi =
         url.pathname.startsWith('/dev/api/gdevelop/') &&
         !url.pathname.startsWith(`${apiRoot}/`);
+      const isSharedApprovalApi =
+        url.pathname === '/dev/api/ai-approvals' ||
+        url.pathname.startsWith('/dev/api/ai-approvals/') ||
+        url.pathname === '/dev/api/ai-approval-grants' ||
+        url.pathname.startsWith('/dev/api/ai-approval-grants/');
+      return url.origin === global.location.origin &&
+        (isGDevelopApi || isSharedApprovalApi);
     } catch (_) {
       return false;
     }

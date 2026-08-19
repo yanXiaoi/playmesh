@@ -31,7 +31,15 @@ Go Server（可选外部服务）
 
 ## 当前实现边界
 
-第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前工作树实现版本为 Playmesh App `4.0.0+26`，完整组件矩阵和发布状态见 `docs/version/README.md` 与 `docs/version/4.0.0.md`，本地实现基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能继续作为当前项目、SDK 或 Catalog 的生成基线。
+第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前正式
+App 为 `4.1.0+27`，当前工作树目标为 Playmesh App `4.2.0+28`、Game SDK `4.1.0`、
+App Bridge SDK `3.3.0` 与 Developer API / OpenAPI `4.2.0`；完整组件矩阵和发布状态见
+`docs/version/README.md`、`docs/version/4.1.0.md` 与 `docs/version/NEXT.md`，本地实现
+基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能
+继续作为当前项目、SDK 或 Catalog 的生成基线。
+LAN 发现与 App SDK 已完成开发和自动化验证；Android、Windows、macOS、Linux 的跨设备
+实机验收仍未完成，不能据此标记为已发布。iOS 自动发现/发布明确为 `unsupported`，扫码、
+手工邀请和分享链接仍可使用。
 
 ```text
 已经完成：
@@ -491,6 +499,11 @@ window.playmesh.app.performance
 
 `playmesh-main.js` 是所有平台一致的公共 Game SDK，负责 `playmesh.main.*` 下的游戏声明、会话、玩家、消息、生命周期和 Authority 主机存储。`playmesh-app.js` 是当前终端 SDK，负责 `playmesh.app.*` 下的 Windows/Android/浏览器环境、App 身份、本机性能、本机设备能力、权限、输入、Console 日志和平台覆盖层。两者都由平台成对注入；`main.ready` 内部先等待 `app.ready`，根 `playmesh.ready` 只复用 `main.ready` 初始化链并返回 `{main, app}`。不提供旧根级游戏 API 或旧 `playmesh.js` 文件兼容。普通浏览器的 App 原生能力不可用，但网页覆盖层仍由 App SDK 渲染，Game SDK 不创建性能 panel。App SDK 只能引用 Game SDK 公共数据用于展示，不能从 bootstrap 或页面配置复制游戏状态。当前完整接口见 `docs/game/sdk-v1.md`。
 
+App SDK 的 Escape/Menu/Back 自动菜单触发默认绑定；
+`playmesh.app.ui.disableSystemMenuTriggers()` 只能在 `app.ready` 后无参数、单向且幂等地
+解绑当前文档的自动监听，不影响 `showGameSidebar()`、关闭覆盖层或原生返回关闭已显示
+菜单。配置刷新不能重新绑定，WebView 文档刷新则按新文档恢复默认行为。
+
 禁止 HTML 游戏直接接触：
 
 - 原生相机对象
@@ -732,6 +745,41 @@ Catalog API 当前为 `3.0.0`。`GET /apps/list` 对每个 `gameId` 只返回当
 App 自带游戏库分享服务器固定声明不支持中转。完整协议见
 `docs/remote-game-relay.md`。
 
+运行中游戏的分享状态由 `GameShareCoordinator` 独占写入。它把“分享通道已建立”与
+“UDP multicast 已公开”作为正交状态，并统一持有 Core/standalone 访问授权、
+`GameWebGateway`、Relay session、publication lease、generation 和不可变
+`GameShareLinkSnapshot`。分享面板、App SDK、开发预览和 Relay 只调用协调器，不再
+维护网关、LAN URL、WAN URL、二维码或清理流程的同义状态。App 级
+`LanGameDiscoveryService` 独占平台 multicast publication lease 与发现缓存，但不替代
+当前房间协调器的公开意图。
+
+游戏启动或开发预览建立了分享网关也不会自动公开。用户打开分享面板或本机房主调用无参
+`playmesh.app.lan.setPublished()` 时，协调器先复用/建立分享通道，再申请 UDP multicast
+publication lease；并发入口等待同一个 Future，成功后本局幂等。公开失败只把 publication
+留在 unpublished，已建立的复制/扫码链接和网关继续可用，后续调用只重试公开。关闭面板
+不撤销；退出游戏、页面销毁或进程结束按 publication、Relay、网关、分享授权顺序
+best-effort 清理，generation 阻止晚到结果复活。
+
+唯一生产发现链是自定义 IPv4 UDP multicast：`239.255.80.77:53584`、wire v1、每秒公告、
+4 秒本地记录 TTL、单包最多 1200 字节。每个有效非 loopback IPv4 物理网卡及支持组播的
+虚拟网卡都独立 join/send，不依赖默认路由；接口每秒重整，单接口失败隔离，所有接口失败
+才报告不可用。发现地址只取数据报真实 source IP，payload 不允许自报地址。链路不提供
+DNS-SD/TXT 兼容、第二发现栈或已知节点单播探测，也不承诺穿透 AP 隔离、VLAN、防火墙、
+禁用组播或 VPN 策略。Android、Windows、macOS、Linux 支持；iOS 自动发现/发布不支持。
+
+接收端存在明确的平台 API 限制：Dart `Datagram` 只提供 source，不提供目标地址或入站
+interface index；socket 绑定 `anyIPv4:53584` 并加入组播组后，应用层无法证明合法 v1 包的
+目标确为组播地址，恶意局域网节点可直接单播投递到该固定端口。生产发送与主动发现仍只有
+multicast，不因此增加单播探测；Schema、source IP、revision、TTL 和后续邀请预检继续
+执行，但不能把它们描述为“拒绝所有单播注入”或发布者身份证明。
+
+`GameShareLinkSnapshot` 是面板与 App SDK 的唯一链接/二维码来源：LAN 只取网关首次
+解析到的非 loopback、非 unspecified 唯一 IPv4，可包含仅用于游戏分享的 `169.254/16`
+link-local 地址，不提供 `127.0.0.1`
+fallback；WAN 只取当前未关闭 Relay session 的 `joinUri`。LAN 在前、WAN 在后，按完整
+URL 去重。共享编码器按精确 URL 生成并缓存同一 PNG bytes，面板直接渲染，SDK 只序列化
+为 Data URL，不重新访问网卡、Relay 或二维码实现。
+
 游戏源 Host 只负责访问 Catalog 声明及游戏目录；真正的中转 Origin 由 Go
 Server 在 `relay.publicBaseUrl` 中明确返回。主机 App 使用该 Origin 建立隧道并
 生成二维码，客户端 App 也从邀请中的同一 Host 前缀连接，不能依据游戏源 Host、
@@ -755,6 +803,25 @@ App 生成并封装 Authority 加入入口、邀请凭据、Join Capability 和�
 只放在 fragment；fragment 不随 HTTP 或 Upgrade 请求发送，因此 Go Server 即使
 完全不受信任也拿不到邀请凭据与密钥。
 TLS 只作为可选外层保护，不代替端点间强制内容加密。
+
+手工链接、扫码、附近对局和 SDK `joinByLink`/`scanQrAndJoin`/发现项 `join()` 都进入
+同一 `GameJoinCoordinator`。它复用 `GameInvitationInspector` 对邀请入口执行预检，
+校验 `gameId`、拒绝当前主机自己的邀请，并在 Bridge 成功回包后才导航到既有
+`RemoteGamePage`；SDK 不创建专用 WebView、Tunnel、Relay 或第二套加入协议。
+`/playmesh/join` 的 POST 响应在原 `entry` 外兼容增加 `gameId` 与 `gameName`，不修改
+Core 或 Relay wire 版本。
+
+App 附近列表以纯文本展示游戏名、主机昵称、数据报真实 source IP，以及多人在线/最大
+人数或“单机”；公告与房间 presence 驱动自动更新，同时保留手动刷新。用户点击后，页面
+不得先释放发现 lease 或清空候选，必须等统一预检与短期候选复查结束后再结束浏览生命周期。
+
+App Bridge SDK `3.3.0` 新增 `playmesh.app.lan`。发现结果仍是不含 token 的当前 gameId
+`instanceId/gameId/name/host` 投影；内部昵称、人数、单机标记不进入 SDK，也不增加图标
+字段或端点。加入动作要求真实用户操作。`getShareLinks()` 则是明确的新 App-only 房主授权：
+仅当前本机 Authority/standalone host 可读取统一快照中的完整 bearer URL 与 PNG Data
+URL，不新增 capability、确认弹窗或 user activation。普通浏览器、远程加入页和失效
+上下文拒绝。游戏取得凭据后能够复制或外传，这是产品授权边界，不得再以“游戏永远不能
+读取分享 URL/二维码”描述；平台仍禁止自动记录、持久化或在异常中回显这些值。
 
 ### 分享 Authority 最小公开面
 
@@ -944,7 +1011,8 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
   两者缺失时不阻断扫描；缺失发布者在数据层保持空字符串，仅由 App 固定外壳显示
   本地化“未知发布者”，缺失时间由固定外壳显示本地化“无”。任何非空发布者和
   API 返回值均逐字显示，不作为国际化键。
-- `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。`max: 1` 表示游戏不需要多人会话。
+- `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。Go Core Session 的
+  `players.max` 运行时上限为 32；`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
 - `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。单屏多人还必须声明 `controllerOrientation`，其他显示模式禁止声明。App 必须在创建游戏 WebView 前按当前角色应用方向，并在退出游戏后恢复系统方向。
 - `sdkVersion` 和 `appSdkVersion` 都是必填字段，声明游戏要求的两套平台 SDK；当前 Game SDK 只允许 `4.1.0`，App SDK 允许 `3.2.0` 或 `3.3.0`。版本使用 `MAJOR.MINOR.PATCH`；CLI 新建和更新项目写入当前版本。运行时通过注册表按兼容区间解析，App SDK `3.2.0` 请求使用向后兼容的 `3.3.0` 运行包；缺失、低于兼容下限、未知值或格式错误值拒绝启动。

@@ -14,6 +14,18 @@ const source = await readFile(
 const controllerModule = await import(`data:text/javascript;base64,${Buffer.from(
   source
 ).toString('base64')}`);
+const commitFactorySource = await readFile(
+  path.resolve(
+    testDirectory,
+    '../overlays/newIDE/app/src/ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshAuthoritativeProjectCommit.js'
+  ),
+  'utf8'
+);
+const commitFactoryModule = await import(
+  `data:text/javascript;base64,${Buffer.from(
+    commitFactorySource.replace(/^\/\/ @flow\s*/, '')
+  ).toString('base64')}`
+);
 
 const createHarness = ({
   listFailure = false,
@@ -38,7 +50,10 @@ const createHarness = ({
   };
   const prepared = {
     fileMetadata: { fileIdentifier: 'remote', gameId: 'com.example.a' },
-    snapshot: { project: {}, resources: [] },
+    snapshot: {
+      projectFiles: [{ path: 'game.json', content: {} }],
+      resources: [],
+    },
     storedProject: { id: 'remote' },
   };
   const controller = controllerModule.createPlaymeshManagedProjectStorageController(
@@ -126,10 +141,143 @@ assert.equal(
 }
 
 {
+  const calls = [];
+  let openCalls = 0;
+  const opened = { source: 'authoritative-current' };
+  const result = await controllerModule.openPlaymeshProjectWithPreparedRestoreRecovery(
+    {
+      openProject: async () => {
+        calls.push('open');
+        openCalls++;
+        if (openCalls === 1) {
+          throw Object.assign(new Error('project locked'), {
+            code: 'gdevelop_project_mutation_locked',
+          });
+        }
+        return opened;
+      },
+      recoverPreparedRestore: async () => {
+        calls.push('recover:PREPARED');
+        calls.push('abort:ABORTED');
+        return true;
+      },
+    }
+  );
+  assert.equal(result, opened);
+  assert.deepEqual(calls, [
+    'open',
+    'recover:PREPARED',
+    'abort:ABORTED',
+    'open',
+  ]);
+}
+
+{
+  const calls = [];
+  const locked = Object.assign(new Error('commit already requested'), {
+    code: 'gdevelop_project_mutation_locked',
+  });
+  await assert.rejects(
+    controllerModule.openPlaymeshProjectWithPreparedRestoreRecovery({
+      openProject: async () => {
+        calls.push('open');
+        throw locked;
+      },
+      recoverPreparedRestore: async () => {
+        calls.push('recover:COMMIT_REQUESTED');
+        return false;
+      },
+    }),
+    error => error === locked
+  );
+  assert.deepEqual(calls, ['open', 'recover:COMMIT_REQUESTED']);
+}
+
+{
+  const calls = [];
+  const unavailable = Object.assign(new Error('gateway unavailable'), {
+    code: 'history_network_error',
+  });
+  await assert.rejects(
+    controllerModule.openPlaymeshProjectWithPreparedRestoreRecovery({
+      openProject: async () => {
+        calls.push('open');
+        throw unavailable;
+      },
+      recoverPreparedRestore: async () => {
+        calls.push('recover');
+        return true;
+      },
+    }),
+    error => error === unavailable
+  );
+  assert.deepEqual(calls, ['open']);
+}
+
+{
   const harness = createHarness();
   const saved = await harness.controller.saveProject({});
   assert.equal(saved.authoritativeResult.revision, 2);
   assert.deepEqual(harness.calls, ['prepare', 'commit-app']);
+}
+
+{
+  const lifecycleCalls = [];
+  const historyResult = {
+    historyCreated: false,
+    deduplicated: false,
+    version: { revision: 7 },
+  };
+  const commitAuthoritativeProject = commitFactoryModule.createPlaymeshAuthoritativeProjectCommit(
+    {
+      createProjectRef: gameId => ({ gameId }),
+      ensureGameId: () => 'com.example.fallback',
+      commitNewProjectAllocation: async () => {
+        throw new Error('open autosave must not allocate');
+      },
+      commitLifecycleAndHistory: async options => {
+        lifecycleCalls.push(options);
+        return historyResult;
+      },
+    }
+  );
+  const prepared = {
+    fileMetadata: {
+      fileIdentifier: 'autosave-file',
+      gameId: 'com.example.autosave',
+    },
+    snapshot: { projectFiles: [], resources: [] },
+  };
+  const controller = controllerModule.createPlaymeshManagedProjectStorageController(
+    {
+      listAuthoritativeProjects: async () => ({
+        activeGameId: null,
+        projects: [],
+        diagnostics: [],
+      }),
+      openAuthoritativeProject: async () => ({}),
+      prepareProject: async () => prepared,
+      commitAuthoritativeProject,
+      reportStatus() {},
+    }
+  );
+  const saved = await controller.saveProject({
+    project: {},
+    fileMetadata: prepared.fileMetadata,
+    origin: 'open',
+    source: 'system',
+    reason: 'autosave',
+    mutationLease: { epoch: 1 },
+    shouldBindFileIdentifier: false,
+  });
+  assert.equal(
+    saved.authoritativeResult,
+    historyResult,
+    'the real provider commit adapter must return historyCreated to the managed controller'
+  );
+  assert.equal(lifecycleCalls.length, 1);
+  assert.equal(lifecycleCalls[0].reason, 'autosave');
+  assert.equal(lifecycleCalls[0].source, 'system');
 }
 
 {

@@ -80,7 +80,6 @@ export type PlaymeshAiToolDefinition = {
   +approvalRequired: boolean,
   +implementation: string,
   +officialImplementationName: string,
-  +officialArguments: PlaymeshAiObject,
   +chatEnabled: boolean,
   +agentEnabled: boolean,
   +timeoutMs: number,

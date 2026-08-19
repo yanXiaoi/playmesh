@@ -592,6 +592,8 @@ export default getIsPlaymeshAiEnabled;
     /--libgd-js-sha256/,
     /--libgd-wasm-sha256/,
     /verifyLibGdFilesAgainstProvenance/,
+    /PLAYMESH_AI_SESSION_PROTOCOL_VERSION/,
+    /playmesh-ai-approval-mode/,
   ]) {
     assert.match(productionAuditSource, provenanceGate);
   }

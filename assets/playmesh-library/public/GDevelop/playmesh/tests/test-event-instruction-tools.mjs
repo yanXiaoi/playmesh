@@ -70,6 +70,14 @@ source = source
     'const playmeshAiRuntimeDebuggerTools = { wrappers: {} };'
   )
   .replace(
+    "import { createPlaymeshAiPiskelToolWrappers } from './PlaymeshAiPiskelTool';",
+    'const createPlaymeshAiPiskelToolWrappers = () => ({});'
+  )
+  .replace(
+    "import { createPlaymeshAiJfxrYarnTools } from './PlaymeshAiJfxrYarnTools';",
+    'const createPlaymeshAiJfxrYarnTools = () => ({});'
+  )
+  .replace(
     "import { playmeshResourceObjectUrlRegistry } from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshResourceObjectUrlRegistry';",
     "const playmeshResourceObjectUrlRegistry = { acquire: () => { throw new Error('resource registry is not used by event instruction tests'); } };"
   );

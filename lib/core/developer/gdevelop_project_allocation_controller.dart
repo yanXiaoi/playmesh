@@ -41,11 +41,12 @@ class GDevelopProjectAllocationController {
     contentLength: contentLength,
   );
 
-  Future<GDevelopProjectReference> uploadWorkspaceProject({
+  Future<GDevelopProjectAllocationProjectFilesUploadReference>
+  uploadWorkspaceProjectFiles({
     required String txId,
     required Stream<List<int>> bytes,
     int? contentLength,
-  }) => coordinator.uploadWorkspaceProject(
+  }) => coordinator.uploadWorkspaceProjectFiles(
     txId: txId,
     bytes: bytes,
     contentLength: contentLength,

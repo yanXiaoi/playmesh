@@ -1,10 +1,10 @@
 {
   "protocolVersion": "1.0.0",
-  "toolsVersion": "2.0.0",
+  "toolsVersion": "4.0.0",
   "gdevelopVersion": "5.6.276",
   "upstreamCommit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361",
   "storeNetworkEnabled": false,
-  "toolCount": 49,
+  "toolCount": 50,
   "discovery": {
     "toolDetailsToolName": "get_gdevelop_tool_details",
     "toolNameArgument": "tool_name"
@@ -22,7 +22,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "list_scenes",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -47,46 +46,66 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "list_project_objects",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
       "executionKind": "editor_function"
     },
     {
-      "name": "list_project_resources",
-      "summary": "List the current project resources by name and kind without exposing files, URLs, or binary contents.",
+      "name": "inspect_project_properties_resources",
+      "summary": "Inspect project properties and list or filter project resources.",
       "argumentsSchema": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "filter_by_resource_name": {
+            "type": "string"
+          },
+          "list_all_resources": {
+            "type": "boolean"
+          }
+        }
       },
       "risk": "low",
       "modifiesProject": false,
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "inspect_project_properties_resources",
-      "officialArguments": {
-        "list_all_resources": true
-      },
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
       "executionKind": "editor_function"
     },
     {
-      "name": "change_project_resources",
-      "summary": "Rename or safely delete existing project resources using the pinned official resource reference updater.",
+      "name": "change_project_properties_resources",
+      "summary": "Change project properties and rename or safely delete project resources.",
       "argumentsSchema": {
         "type": "object",
-        "required": [
-          "changed_resources"
-        ],
         "properties": {
+          "changed_properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "property_name",
+                "new_value"
+              ],
+              "properties": {
+                "property_name": {
+                  "type": "string"
+                },
+                "new_value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "changed_resources": {
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true,
+              "required": [
+                "resource_name"
+              ],
               "properties": {
                 "resource_name": {
                   "type": "string"
@@ -107,11 +126,198 @@
       "approvalRequired": true,
       "implementation": "official_editor_function",
       "officialImplementationName": "change_project_properties_resources",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
       "executionKind": "editor_function"
+    },
+    {
+      "name": "import_sprite_sheet_animation",
+      "summary": "Import an Agent-staged sprite sheet as a new Sprite object animation with the bundled official Piskel 5.5.228 importer; Piskel slices frames by width, height and offsets.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "target_object_scope",
+          "animation_name",
+          "resource_name",
+          "resource_kind",
+          "content_hash",
+          "mime",
+          "size",
+          "frame_width",
+          "frame_height"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "target_object_scope": {
+            "type": "string",
+            "enum": [
+              "scene",
+              "global"
+            ]
+          },
+          "animation_name": {
+            "type": "string"
+          },
+          "resource_name": {
+            "type": "string"
+          },
+          "resource_kind": {
+            "type": "string",
+            "enum": [
+              "image"
+            ]
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "frame_width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "frame_height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "frame_offset_x": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "frame_offset_y": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fps": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "looping": {
+            "type": "boolean"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "pskl.app.importService.newPiskelFromImage",
+      "chatEnabled": false,
+      "agentEnabled": true,
+      "timeoutMs": 60000,
+      "binaryStaging": {
+        "method": "PUT",
+        "path": "/dev/api/gdevelop/projects/{gameId}/ai/editor-sessions/{editorSessionId}/resource-staging/{contentHash}",
+        "body": "raw-binary",
+        "channel": "agent",
+        "loopbackOnly": false,
+        "requiresForegroundView": true,
+        "requiredHeaders": [
+          "Authorization: Bearer <developer-token>",
+          "X-Playmesh-AI-Channel: agent",
+          "Content-Type: <resource-mime>"
+        ]
+      },
+      "executionKind": "agent_resource_cas"
+    },
+    {
+      "name": "import_gif_animation",
+      "summary": "Import every frame of an Agent-staged GIF as a new Sprite object animation with the bundled official Piskel 5.5.228 GIF importer.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "scene_name",
+          "object_name",
+          "target_object_scope",
+          "animation_name",
+          "resource_name",
+          "resource_kind",
+          "content_hash",
+          "mime",
+          "size"
+        ],
+        "properties": {
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "target_object_scope": {
+            "type": "string",
+            "enum": [
+              "scene",
+              "global"
+            ]
+          },
+          "animation_name": {
+            "type": "string"
+          },
+          "resource_name": {
+            "type": "string"
+          },
+          "resource_kind": {
+            "type": "string",
+            "enum": [
+              "image"
+            ]
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fps": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "looping": {
+            "type": "boolean"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "pskl.app.importService.newPiskelFromImage",
+      "chatEnabled": false,
+      "agentEnabled": true,
+      "timeoutMs": 60000,
+      "binaryStaging": {
+        "method": "PUT",
+        "path": "/dev/api/gdevelop/projects/{gameId}/ai/editor-sessions/{editorSessionId}/resource-staging/{contentHash}",
+        "body": "raw-binary",
+        "channel": "agent",
+        "loopbackOnly": false,
+        "requiresForegroundView": true,
+        "requiredHeaders": [
+          "Authorization: Bearer <developer-token>",
+          "X-Playmesh-AI-Channel: agent",
+          "Content-Type: <resource-mime>"
+        ]
+      },
+      "executionKind": "agent_resource_cas"
     },
     {
       "name": "import_project_resource",
@@ -150,7 +356,6 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "import_project_resource",
-      "officialArguments": {},
       "chatEnabled": false,
       "agentEnabled": true,
       "timeoutMs": 60000,
@@ -159,7 +364,7 @@
         "path": "/dev/api/gdevelop/projects/{gameId}/ai/editor-sessions/{editorSessionId}/resource-staging/{contentHash}",
         "body": "raw-binary",
         "channel": "agent",
-        "loopbackOnly": true,
+        "loopbackOnly": false,
         "requiresForegroundView": true,
         "requiredHeaders": [
           "Authorization: Bearer <developer-token>",
@@ -168,6 +373,110 @@
         ]
       },
       "executionKind": "agent_resource_cas"
+    },
+    {
+      "name": "create_or_update_jfxr_sound",
+      "summary": "Create or update an audio resource by parsing a serialized sound and rendering WAV bytes with the bundled Jfxr editor.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource_name",
+          "serialized_sound"
+        ],
+        "properties": {
+          "resource_name": {
+            "type": "string"
+          },
+          "serialized_sound": {
+            "type": "string",
+            "description": "A Jfxr Sound.serialize() JSON string accepted by the bundled Jfxr Sound.parse().",
+            "examples": [
+              "{\"_version\":1,\"_name\":\"Laser\",\"frequency\":880,\"sustain\":0.1,\"decay\":0.2}"
+            ]
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "jfxr-app/Sound.parse+synth.run",
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 60000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "create_or_update_yarn_dialogue",
+      "summary": "Create or update a JSON resource by loading and serializing dialogue data with the bundled Yarn editor.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource_name",
+          "yarn_json"
+        ],
+        "properties": {
+          "resource_name": {
+            "type": "string"
+          },
+          "yarn_json": {
+            "type": "array",
+            "description": "The Yarn JSON node array passed through the bundled loadData/getSaveData JSON path.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "body",
+                "tags",
+                "position",
+                "colorID"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "position": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "colorID": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "medium",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "yarn-app/loadData+getSaveData",
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
     },
     {
       "name": "create_object",
@@ -214,7 +523,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "create_or_replace_object",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -265,15 +573,14 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "create_or_replace_object",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
       "executionKind": "editor_function"
     },
     {
-      "name": "inspect_object_properties",
-      "summary": "Read object properties and behaviors.",
+      "name": "inspect_object_properties_effects",
+      "summary": "Inspect an object's properties, behaviors, animations, and supported effects.",
       "argumentsSchema": {
         "type": "object",
         "required": [
@@ -293,22 +600,20 @@
       "modifiesProject": false,
       "approvalRequired": false,
       "implementation": "official_editor_function",
-      "officialImplementationName": "inspect_object_properties",
-      "officialArguments": {},
+      "officialImplementationName": "inspect_object_properties_effects",
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
       "executionKind": "editor_function"
     },
     {
-      "name": "change_object_property",
-      "summary": "Change one or more existing object properties.",
+      "name": "change_object_properties_effects",
+      "summary": "Change or delete an object, including its properties and supported effects.",
       "argumentsSchema": {
         "type": "object",
         "required": [
           "scene_name",
-          "object_name",
-          "changed_properties"
+          "object_name"
         ],
         "properties": {
           "scene_name": {
@@ -316,6 +621,9 @@
           },
           "object_name": {
             "type": "string"
+          },
+          "delete_this_object": {
+            "type": "boolean"
           },
           "changed_properties": {
             "type": "array",
@@ -334,35 +642,50 @@
                 }
               }
             }
-          }
-        }
-      },
-      "risk": "medium",
-      "modifiesProject": true,
-      "approvalRequired": false,
-      "implementation": "official_editor_function",
-      "officialImplementationName": "change_object_property",
-      "officialArguments": {},
-      "chatEnabled": true,
-      "agentEnabled": true,
-      "timeoutMs": 30000,
-      "executionKind": "editor_function"
-    },
-    {
-      "name": "delete_object",
-      "summary": "Delete a scene or global object using the official object editor function.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": [
-          "scene_name",
-          "object_name"
-        ],
-        "properties": {
-          "scene_name": {
-            "type": "string"
           },
-          "object_name": {
-            "type": "string"
+          "changed_effects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "effect_name"
+              ],
+              "properties": {
+                "effect_name": {
+                  "type": "string"
+                },
+                "effect_type": {
+                  "type": "string"
+                },
+                "new_effect_name": {
+                  "type": "string"
+                },
+                "new_effect_position": {
+                  "type": "number"
+                },
+                "delete_this_effect": {
+                  "type": "boolean"
+                },
+                "changed_properties": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "property_name",
+                      "new_value"
+                    ],
+                    "properties": {
+                      "property_name": {
+                        "type": "string"
+                      },
+                      "new_value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -371,9 +694,6 @@
       "approvalRequired": true,
       "implementation": "official_editor_function",
       "officialImplementationName": "change_object_properties_effects",
-      "officialArguments": {
-        "delete_this_object": true
-      },
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -381,7 +701,7 @@
     },
     {
       "name": "add_behavior",
-      "summary": "Add an installed behavior to an object.",
+      "summary": "Add an installed behavior to an object or object group.",
       "argumentsSchema": {
         "type": "object",
         "required": [
@@ -409,42 +729,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "add_behavior",
-      "officialArguments": {},
-      "chatEnabled": true,
-      "agentEnabled": true,
-      "timeoutMs": 30000,
-      "executionKind": "editor_function"
-    },
-    {
-      "name": "remove_behavior",
-      "summary": "Remove an object behavior.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": [
-          "scene_name",
-          "object_name",
-          "behavior_name"
-        ],
-        "properties": {
-          "scene_name": {
-            "type": "string"
-          },
-          "object_name": {
-            "type": "string"
-          },
-          "behavior_name": {
-            "type": "string"
-          }
-        }
-      },
-      "risk": "high",
-      "modifiesProject": true,
-      "approvalRequired": true,
-      "implementation": "official_editor_function",
-      "officialImplementationName": "change_behavior_property",
-      "officialArguments": {
-        "delete_this_behavior": true
-      },
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -477,7 +761,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "inspect_behavior_properties",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -485,14 +768,13 @@
     },
     {
       "name": "change_behavior_property",
-      "summary": "Change one or more behavior properties.",
+      "summary": "Change or delete a behavior on an object or object group.",
       "argumentsSchema": {
         "type": "object",
         "required": [
           "scene_name",
           "object_name",
-          "behavior_name",
-          "changed_properties"
+          "behavior_name"
         ],
         "properties": {
           "scene_name": {
@@ -503,6 +785,9 @@
           },
           "behavior_name": {
             "type": "string"
+          },
+          "delete_this_behavior": {
+            "type": "boolean"
           },
           "changed_properties": {
             "type": "array",
@@ -524,12 +809,11 @@
           }
         }
       },
-      "risk": "medium",
+      "risk": "high",
       "modifiesProject": true,
-      "approvalRequired": false,
+      "approvalRequired": true,
       "implementation": "official_editor_function",
       "officialImplementationName": "change_behavior_property",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -537,7 +821,7 @@
     },
     {
       "name": "describe_instances",
-      "summary": "Describe scene instances, optionally filtered by object name.",
+      "summary": "Describe scene instances, optionally filtered by one object name or a comma-separated list of object names.",
       "argumentsSchema": {
         "type": "object",
         "required": [
@@ -557,7 +841,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "describe_instances",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -616,6 +899,12 @@
           "column_count": {
             "type": "integer",
             "minimum": 1
+          },
+          "instances_rotation": {
+            "type": "number"
+          },
+          "instances_opacity": {
+            "type": "number"
           }
         }
       },
@@ -624,7 +913,6 @@
       "approvalRequired": true,
       "implementation": "official_editor_function",
       "officialImplementationName": "put_2d_instances",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -683,7 +971,6 @@
       "approvalRequired": true,
       "implementation": "official_editor_function",
       "officialImplementationName": "put_3d_instances",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -708,7 +995,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "read_scene_events",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -733,7 +1019,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "read_scene_events_json",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -779,7 +1064,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "read_events_source",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -797,7 +1081,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "list_event_types",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -822,7 +1105,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "get_event_type_details",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -857,7 +1139,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "list_event_instructions",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -891,7 +1172,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "get_event_instruction_details",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -943,7 +1223,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "format_event_expression",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -986,7 +1265,6 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "add_scene_events",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 90000,
@@ -1214,6 +1492,9 @@
           },
           "background_color": {
             "type": "string"
+          },
+          "is_first_scene": {
+            "type": "boolean"
           }
         }
       },
@@ -1222,34 +1503,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "create_scene",
-      "officialArguments": {},
-      "chatEnabled": true,
-      "agentEnabled": true,
-      "timeoutMs": 30000,
-      "executionKind": "editor_function"
-    },
-    {
-      "name": "delete_scene",
-      "summary": "Delete a scene.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": [
-          "scene_name"
-        ],
-        "properties": {
-          "scene_name": {
-            "type": "string"
-          }
-        }
-      },
-      "risk": "high",
-      "modifiesProject": true,
-      "approvalRequired": true,
-      "implementation": "official_editor_function",
-      "officialImplementationName": "change_scene_properties_layers_effects_groups",
-      "officialArguments": {
-        "delete_this_scene": true
-      },
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1267,7 +1520,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "list_prefabs",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -1296,7 +1548,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "inspect_prefab",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -1304,7 +1555,7 @@
     },
     {
       "name": "inspect_scene_properties_layers_effects",
-      "summary": "Read scene properties, layers, effects, and groups.",
+      "summary": "Read scene properties, layers, and effects. Use list_project_objects to read scene object groups and their members.",
       "argumentsSchema": {
         "type": "object",
         "required": [
@@ -1321,7 +1572,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "inspect_scene_properties_layers_effects",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1329,7 +1579,7 @@
     },
     {
       "name": "change_scene_properties_layers_effects_groups",
-      "summary": "Change scene properties, layers, effects, and groups.",
+      "summary": "Change scene properties, layers, effects, and scene object groups. Use list_project_objects before and after this call to read group membership.",
       "argumentsSchema": {
         "type": "object",
         "required": [
@@ -1380,6 +1630,9 @@
                 },
                 "move_instances_to_layer": {
                   "type": "string"
+                },
+                "new_visibility": {
+                  "type": "boolean"
                 }
               }
             }
@@ -1450,19 +1703,87 @@
                 "delete_this_group": {
                   "type": "boolean"
                 },
-                "objects": {
+                "objects_to_add": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "required": [
-                      "object_name"
-                    ],
-                    "properties": {
-                      "object_name": {
-                        "type": "string"
-                      }
-                    }
+                    "type": "string"
                   }
+                },
+                "objects_to_remove": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "delete_this_scene": {
+            "type": "boolean"
+          }
+        }
+      },
+      "risk": "high",
+      "modifiesProject": true,
+      "approvalRequired": true,
+      "implementation": "official_editor_function",
+      "officialImplementationName": "change_scene_properties_layers_effects_groups",
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 30000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "add_or_edit_variable",
+      "summary": "Create, edit, or delete batches of global, scene, object, or object-group variables.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "variable_scope",
+          "variables"
+        ],
+        "properties": {
+          "variable_scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "scene",
+              "object",
+              "group"
+            ]
+          },
+          "scene_name": {
+            "type": "string"
+          },
+          "object_name": {
+            "type": "string"
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "variable_name_or_path"
+              ],
+              "properties": {
+                "variable_name_or_path": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "variable_type": {
+                  "type": "string",
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "structure",
+                    "array"
+                  ]
+                },
+                "delete_this_variable": {
+                  "type": "boolean"
                 }
               }
             }
@@ -1473,62 +1794,7 @@
       "modifiesProject": true,
       "approvalRequired": true,
       "implementation": "official_editor_function",
-      "officialImplementationName": "change_scene_properties_layers_effects_groups",
-      "officialArguments": {},
-      "chatEnabled": true,
-      "agentEnabled": true,
-      "timeoutMs": 30000,
-      "executionKind": "editor_function"
-    },
-    {
-      "name": "add_or_edit_variable",
-      "summary": "Create or edit a scene, object, or global variable.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": [
-          "variable_name_or_path",
-          "value",
-          "variable_scope"
-        ],
-        "properties": {
-          "variable_name_or_path": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          },
-          "variable_scope": {
-            "type": "string",
-            "enum": [
-              "scene",
-              "object",
-              "global"
-            ]
-          },
-          "variable_type": {
-            "type": "string",
-            "enum": [
-              "string",
-              "number",
-              "boolean",
-              "structure",
-              "array"
-            ]
-          },
-          "scene_name": {
-            "type": "string"
-          },
-          "object_name": {
-            "type": "string"
-          }
-        }
-      },
-      "risk": "medium",
-      "modifiesProject": true,
-      "approvalRequired": false,
-      "implementation": "official_editor_function",
       "officialImplementationName": "add_or_edit_variable",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1575,7 +1841,6 @@
       "approvalRequired": false,
       "implementation": "official_editor_function",
       "officialImplementationName": "inspect_variables",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -1600,7 +1865,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "read_full_docs",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -1648,7 +1912,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "create_or_update_plan",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1692,7 +1955,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "search_gdevelop_capabilities",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -1726,7 +1988,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "get_gdevelop_capability_details",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1760,7 +2021,6 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "install_gdevelop_extension",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 90000,
@@ -1786,7 +2046,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "get_gdevelop_tool_details",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 10000,
@@ -1805,7 +2064,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "getStatus",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1824,7 +2082,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "console.log/game.crashed",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1843,7 +2100,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "refresh/dump",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1862,7 +2118,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "refresh/dump",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1881,7 +2136,6 @@
       "approvalRequired": false,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "refresh/dump",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1900,7 +2154,6 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "pause",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1919,7 +2172,6 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "play",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1951,7 +2203,6 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "set",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
@@ -1986,11 +2237,22 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "call",
-      "officialArguments": {},
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 30000,
       "executionKind": "editor_function"
     }
-  ]
+  ],
+  "officialToolsVersion": "v12",
+  "officialToolsContract": {
+    "kind": "playmesh_source_aligned_snapshot",
+    "schemaPublishedByOfficialSourceArchive": false,
+    "versionSource": "newIDE/app/src/AiGeneration/Utils.js#AI_ORCHESTRATOR_TOOLS_VERSION",
+    "implementationSource": "newIDE/app/src/EditorFunctions/index.js#editorFunctions",
+    "argumentForwarding": "direct"
+  },
+  "implementationKinds": {
+    "official_editor_function": "Exact pinned official function name with call arguments forwarded unchanged.",
+    "playmesh_wrapper": "Playmesh facade or local implementation; not an exact official input contract."
+  }
 }

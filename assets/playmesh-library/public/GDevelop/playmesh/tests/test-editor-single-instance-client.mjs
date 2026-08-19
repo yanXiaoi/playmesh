@@ -33,6 +33,8 @@ class LeaseServer {
     this.lease = null;
     this.tokenIndex = 0;
     this.lastProtectedInput = null;
+    this.lastRequestHeaders = new Headers();
+    this.lastRequestPath = '';
   }
 
   response(status, value = null) {
@@ -44,6 +46,8 @@ class LeaseServer {
 
   async fetch(input, init = {}) {
     const url = new URL(typeof input === 'string' ? input : input.url, 'http://app.test');
+    this.lastRequestHeaders = new Headers(init.headers);
+    this.lastRequestPath = url.pathname;
     if (url.pathname.endsWith('/editor-instance/acquire')) {
       const body = JSON.parse(init.body);
       if (!this.lease) {
@@ -71,7 +75,13 @@ class LeaseServer {
     if (url.pathname.endsWith('/editor-instance/heartbeat')) {
       return this.response(this.matches(JSON.parse(init.body)) ? 200 : 409, {});
     }
-    if (url.pathname.startsWith('/dev/api/gdevelop/')) {
+    const isLeaseProtectedPath =
+      url.pathname.startsWith('/dev/api/gdevelop/') ||
+      url.pathname === '/dev/api/ai-approvals' ||
+      url.pathname.startsWith('/dev/api/ai-approvals/') ||
+      url.pathname === '/dev/api/ai-approval-grants' ||
+      url.pathname.startsWith('/dev/api/ai-approval-grants/');
+    if (isLeaseProtectedPath) {
       this.lastProtectedInput = input;
       const headers = new Headers(init.headers);
       const valid = this.lease &&
@@ -194,6 +204,48 @@ assert.equal(
   (await refreshed.context.fetch('/dev/api/gdevelop/projects/project-b/history')).status,
   200
 );
+const historyPreviewPath =
+  '/dev/api/gdevelop/projects/project-b/history/revisions/15/resources/' +
+  `${'a'.repeat(64)}?logicalId=${encodeURIComponent(
+    'playmesh-local-resource://history/hero.png'
+  )}`;
+assert.equal((await refreshed.context.fetch(historyPreviewPath)).status, 200);
+assert.equal(
+  server.lastRequestHeaders.get('X-Playmesh-GDevelop-Editor-Lease'),
+  refreshedLease.leaseToken,
+  'history preview fetches must carry the current editor lease'
+);
+
+for (const approvalPath of [
+  '/dev/api/ai-approvals',
+  '/dev/api/ai-approvals/approval-1/decide',
+  '/dev/api/ai-approval-grants',
+  '/dev/api/ai-approval-grants/grant-1',
+]) {
+  assert.equal(
+    (await refreshed.context.fetch(approvalPath)).status,
+    200,
+    `${approvalPath} must carry the current GDevelop editor lease`
+  );
+  assert.equal(
+    server.lastRequestHeaders.get('X-Playmesh-GDevelop-Editor-Lease'),
+    refreshedLease.leaseToken
+  );
+}
+
+for (const unprotectedPath of [
+  '/dev/api/ai-approvals-extra',
+  '/dev/api/ai-approval-grants-extra',
+  '/dev/api/unrelated',
+]) {
+  assert.equal((await refreshed.context.fetch(unprotectedPath)).status, 200);
+  assert.equal(server.lastRequestPath, unprotectedPath);
+  assert.equal(
+    server.lastRequestHeaders.get('X-Playmesh-GDevelop-Editor-Lease'),
+    null,
+    `${unprotectedPath} must not broaden the GDevelop editor lease scope`
+  );
+}
 
 const stream = new ReadableStream({
   start(controller) {

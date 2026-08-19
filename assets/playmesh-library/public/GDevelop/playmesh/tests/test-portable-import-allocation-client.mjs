@@ -37,7 +37,7 @@ const target = {
   gameId: 'com.example.imported',
   packageName: 'com.example.imported',
   projectUuid: 'project-uuid-1',
-  projectJsonHash: 'c'.repeat(64),
+  projectFilesHash: 'c'.repeat(64),
   resourceManifestHash: 'd'.repeat(64),
 };
 const portInput = {
@@ -47,8 +47,10 @@ const portInput = {
   name: 'Imported fixture',
   target,
 };
-const projectJson = '{"name":"Fixture"}';
-const projectJsonSize = Buffer.byteLength(projectJson);
+const projectFilesJson = JSON.stringify([
+  { path: 'game.json', content: { name: 'Fixture' } },
+]);
+const projectFilesSize = Buffer.byteLength(projectFilesJson);
 const resourcePlan = [
   {
     logicalId: 'images/player.png',
@@ -69,8 +71,8 @@ const resourcePlan = [
 const workspaceProject = {
   packageName: target.packageName,
   projectUuid: target.projectUuid,
-  projectJsonHash: target.projectJsonHash,
-  projectJsonSize,
+  projectFilesHash: target.projectFilesHash,
+  projectFilesSize,
   resourceReferences: resourcePlan.map(({ logicalId, name }) => ({
     logicalId,
     name,
@@ -79,8 +81,8 @@ const workspaceProject = {
 const workspaceFinalization = {
   packageName: target.packageName,
   projectUuid: target.projectUuid,
-  projectJsonHash: target.projectJsonHash,
-  projectJsonSize,
+  projectFilesHash: target.projectFilesHash,
+  projectFilesSize,
   resourceManifestHash: target.resourceManifestHash,
 };
 const currentHostProjectConfig = {
@@ -235,8 +237,8 @@ const createFetchHarness = responses => {
       payload: {
         requestId: 'request-project',
         project: {
-          contentHash: target.projectJsonHash,
-          size: projectJsonSize,
+          contentHash: target.projectFilesHash,
+          size: projectFilesSize,
         },
       },
     },
@@ -277,10 +279,13 @@ const createFetchHarness = responses => {
     }),
     { hash: resourcePlan[0].contentHash, bytes: 3 }
   );
-  assert.deepEqual(await client.uploadProject(preparedInput, projectJson), {
-    contentHash: target.projectJsonHash,
-    size: projectJsonSize,
-  });
+  assert.deepEqual(
+    await client.uploadProjectFiles(preparedInput, projectFilesJson),
+    {
+      contentHash: target.projectFilesHash,
+      size: projectFilesSize,
+    }
+  );
   assert.deepEqual(
     await client.finalizeWorkspace(preparedInput, workspaceFinalization),
     { phase: 'WORKSPACE_FINALIZED', transactionId: 'allocation-tx-1' }
@@ -334,10 +339,10 @@ const createFetchHarness = responses => {
   assert.equal('Content-Length' in resourceCall.init.headers, false);
   assert.equal(
     projectCall.url,
-    `${baseUrl}/allocation-tx-1/workspace/project`
+    `${baseUrl}/allocation-tx-1/workspace/project-files`
   );
   assert.equal(projectCall.init.method, 'PUT');
-  assert.equal(await projectCall.init.body.text(), projectJson);
+  assert.equal(await projectCall.init.body.text(), projectFilesJson);
   assert.equal(
     finalizeCall.url,
     `${baseUrl}/allocation-tx-1/workspace/finalize`

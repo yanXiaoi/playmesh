@@ -21,6 +21,7 @@ import {
 import UnsavedChangesContext from '../MainFrame/UnsavedChangesContext';
 import { type ObjectWithContext } from '../ObjectsList/EnumerateObjects';
 import { type ResourceSearchAndInstallOptions } from '../EditorFunctions';
+import { type ResourceManagementProps } from '../ResourcesList/ResourceSource';
 import { type FileMetadata } from '../ProjectsStorage';
 import {
   playmeshAiClient,
@@ -55,6 +56,7 @@ import {
   createPlaymeshAiClientId,
   isPlaymeshAiTerminalCall,
   parsePlaymeshManualToolCalls,
+  type PlaymeshAiApprovalMode,
   type PlaymeshAiCall,
   type PlaymeshAiObject,
   type PlaymeshAiSession,
@@ -64,6 +66,7 @@ import { readPlaymeshInstalledExtensionDocs } from './PlaymeshAiInstalledDocumen
 import {
   PlaymeshAiPanel,
   type PlaymeshAiAgentBaseUrlsStatus,
+  type PlaymeshAiApprovalModeStatus,
   type PlaymeshAiChatActionFeedback,
   type PlaymeshAiSessionFeedback,
   type PlaymeshAiSessionOperation,
@@ -110,6 +113,10 @@ type PlaymeshAiEventPayloadValidation =
   | 'required'
   | 'invalid';
 type PlaymeshAiConnectionStatus = 'online' | 'offline';
+type PlaymeshAiChatOperation = {|
+  echo: number,
+  turnId: ?string,
+|};
 type PlaymeshAiApprovalGrantsStatus =
   | 'idle'
   | 'loading'
@@ -138,6 +145,7 @@ type Props = {|
   fileMetadata: ?FileMetadata,
   setToolbar: (?React.Node) => void,
   extraEditorProps: ?EditorContainerExtraProps,
+  resourceManagementProps: ResourceManagementProps,
   onOpenLayout: (
     sceneName: string,
     options?: {|
@@ -324,7 +332,13 @@ const PlaymeshAiEditor: React.ComponentType<{
       approvalGrantsStatus,
       setApprovalGrantsStatus,
     ] = React.useState<PlaymeshAiApprovalGrantsStatus>('idle');
+    const [approvalModeStatus, setApprovalModeStatus] = React.useState<PlaymeshAiApprovalModeStatus>(
+      'idle'
+    );
     const [manualInput, setManualInput] = React.useState('');
+    const [chatOperation, setChatOperation] = React.useState<?PlaymeshAiChatOperation>(
+      null
+    );
     const [busy, setBusy] = React.useState(false);
     const [featureEnabled, setFeatureEnabled] = React.useState(
       getIsPlaymeshAiEnabled()
@@ -404,6 +418,8 @@ const PlaymeshAiEditor: React.ComponentType<{
     const activityAbortRef = React.useRef<?AbortController>(null);
     const agentBaseUrlsAbortRef = React.useRef<?AbortController>(null);
     const agentBaseUrlsGenerationRef = React.useRef(0);
+    const approvalModeOperationRef = React.useRef(false);
+    const approvalModeOperationGenerationRef = React.useRef(0);
     const agentBaseUrlRef = React.useRef(agentBaseUrl);
     const sessionOperationRef = React.useRef<PlaymeshAiSessionOperation>(
       'idle'
@@ -412,6 +428,7 @@ const PlaymeshAiEditor: React.ComponentType<{
     const autoOpenAttemptedIdentityRef = React.useRef('');
     const chatInputGenerationRef = React.useRef(0);
     const manualExecutionCallIdsRef = React.useRef<Set<string>>(new Set());
+    const lastManualEchoRef = React.useRef(0);
     const pasteRunCopyCallIdsRef = React.useRef<?Set<string>>(null);
     const [pasteRunCopyGeneration, setPasteRunCopyGeneration] = React.useState(
       0
@@ -465,8 +482,16 @@ const PlaymeshAiEditor: React.ComponentType<{
         |}) =>
           readPlaymeshInstalledExtensionDocs({ project, extensionNames }),
         onProjectModified: triggerUnsavedChanges,
+        onFetchNewlyAddedResources:
+          props.resourceManagementProps.onFetchNewlyAddedResources,
+        onNewResourcesAdded:
+          props.resourceManagementProps.onNewResourcesAdded,
       })
     );
+    executorRef.current.onFetchNewlyAddedResources =
+      props.resourceManagementProps.onFetchNewlyAddedResources;
+    executorRef.current.onNewResourcesAdded =
+      props.resourceManagementProps.onNewResourcesAdded;
     const runLoopRef = React.useRef<PlaymeshAiAgentRunLoop>(
       new PlaymeshAiAgentRunLoop({
         step: () => runLoopStepRef.current(),
@@ -630,6 +655,101 @@ const PlaymeshAiEditor: React.ComponentType<{
       [recordSessionFailure, refreshApprovalGrants]
     );
 
+    const changeApprovalMode = React.useCallback(
+      async (approvalMode: PlaymeshAiApprovalMode): Promise<void> => {
+        if (!sessionStateRef.current || approvalModeOperationRef.current) return;
+        const operationGeneration =
+          ++approvalModeOperationGenerationRef.current;
+        approvalModeOperationRef.current = true;
+        if (mountedRef.current) setApprovalModeStatus('saving');
+        try {
+          await sessionControllerRef.current.updateApprovalMode(
+            approvalMode,
+            activityAbortRef.current
+              ? activityAbortRef.current.signal
+              : undefined
+          );
+          if (
+            operationGeneration !== approvalModeOperationGenerationRef.current
+          ) {
+            return;
+          }
+          await refreshApprovals();
+          if (
+            mountedRef.current &&
+            operationGeneration === approvalModeOperationGenerationRef.current
+          ) {
+            setApprovalModeStatus('idle');
+          }
+        } catch (error) {
+          if (
+            !mountedRef.current ||
+            operationGeneration !== approvalModeOperationGenerationRef.current ||
+            (error &&
+              (error.code === 'approval_mode_operation_stale' ||
+                error.code === 'approval_mode_operation_aborted'))
+          ) {
+            return;
+          }
+          recordSessionFailure('gdevelop.ai.approval_mode.update', error);
+          setApprovalModeStatus(
+            error && error.code === 'approval_mode_update_not_applied'
+              ? 'save_failed'
+              : 'uncertain'
+          );
+        } finally {
+          if (
+            operationGeneration === approvalModeOperationGenerationRef.current
+          ) {
+            approvalModeOperationRef.current = false;
+          }
+        }
+      },
+      [recordSessionFailure, refreshApprovals]
+    );
+
+    const retryApprovalMode = React.useCallback(async (): Promise<void> => {
+      if (!sessionStateRef.current || approvalModeOperationRef.current) return;
+      const operationGeneration = ++approvalModeOperationGenerationRef.current;
+      approvalModeOperationRef.current = true;
+      if (mountedRef.current) setApprovalModeStatus('saving');
+      try {
+        await sessionControllerRef.current.reconcileApprovalMode(
+          activityAbortRef.current ? activityAbortRef.current.signal : undefined
+        );
+        if (
+          operationGeneration !== approvalModeOperationGenerationRef.current
+        ) {
+          return;
+        }
+        await refreshApprovals();
+        if (
+          mountedRef.current &&
+          operationGeneration === approvalModeOperationGenerationRef.current
+        ) {
+          setApprovalModeStatus('idle');
+        }
+      } catch (error) {
+        if (
+          !mountedRef.current ||
+          operationGeneration !== approvalModeOperationGenerationRef.current ||
+          (error &&
+            (error.code === 'approval_mode_operation_stale' ||
+              error.code === 'approval_mode_operation_aborted'))
+        ) {
+          return;
+        }
+        recordSessionFailure('gdevelop.ai.approval_mode.reconcile', error);
+        setApprovalModeStatus('uncertain');
+      } finally {
+        if (
+          operationGeneration === approvalModeOperationGenerationRef.current
+        ) {
+          approvalModeOperationRef.current = false;
+        }
+      }
+    }, [recordSessionFailure, refreshApprovals]);
+
     const retryPromptTemplates = React.useCallback(
       async () => {
         await promptTemplateControllerRef.current.load(localeId);
@@ -791,17 +911,28 @@ const PlaymeshAiEditor: React.ComponentType<{
           sessionStateRef.current = ready;
           if (mountedRef.current) setSessionState(ready);
           if (!ready) {
+            approvalModeOperationGenerationRef.current++;
+            approvalModeOperationRef.current = false;
+            if (mountedRef.current) setApprovalModeStatus('idle');
             stopCoordinator();
             return;
           }
-          if (
-            previous &&
+          const sessionChanged = !!(
+            !previous ||
             previous.session.editorSessionId !== ready.session.editorSessionId
-          ) {
+          );
+          if (previous && sessionChanged) {
+            approvalModeOperationGenerationRef.current++;
+            approvalModeOperationRef.current = false;
             manualExecutionCallIdsRef.current = new Set();
+            lastManualEchoRef.current = 0;
+            setChatOperation(null);
+            setApprovalModeStatus('idle');
             replaceCalls([]);
           }
-          void startCoordinator(ready).then(() => pumpRef.current());
+          if (sessionChanged || !coordinatorRef.current) {
+            void startCoordinator(ready).then(() => pumpRef.current());
+          }
         }),
       [replaceCalls, startCoordinator, stopCoordinator]
     );
@@ -843,6 +974,9 @@ const PlaymeshAiEditor: React.ComponentType<{
         if (mountedRef.current) setSessionState(refreshed);
         if (refreshed.session.editorSessionId !== previousSessionId) {
           manualExecutionCallIdsRef.current = new Set();
+          lastManualEchoRef.current = 0;
+          setChatOperation(null);
+          setApprovalModeStatus('idle');
           replaceCalls([]);
           if (!pausedRef.current) await startCoordinator(refreshed);
         }
@@ -997,6 +1131,9 @@ const PlaymeshAiEditor: React.ComponentType<{
           if (!mountedRef.current) return;
           setSessionState(opened);
           manualExecutionCallIdsRef.current = new Set();
+          lastManualEchoRef.current = 0;
+          setChatOperation(null);
+          setApprovalModeStatus('idle');
           replaceCalls([]);
           setPlan(null);
           setConnectionStatus('online');
@@ -1218,19 +1355,31 @@ const PlaymeshAiEditor: React.ComponentType<{
       const signal = activityAbortRef.current
         ? activityAbortRef.current.signal
         : undefined;
+      let parsedEcho /*: ?number */ = null;
       try {
         const parsed = parsePlaymeshManualToolCalls(
           inputText,
-          current.tools.tools
+          current.tools.tools,
+          lastManualEchoRef.current
         );
+        parsedEcho = parsed.echo;
+        lastManualEchoRef.current = parsed.echo;
+        setChatOperation({ echo: parsed.echo, turnId: null });
         const turn = await playmeshAiClient.createTurn(
           current.gameId,
           current.session.editorSessionId,
           createPlaymeshAiClientId('message'),
+          parsed.echo,
           signal
         );
+        if (mountedRef.current) {
+          setChatOperation({
+            echo: turn.echo == null ? parsed.echo : turn.echo,
+            turnId: turn.turnId,
+          });
+        }
         const requests = buildPlaymeshAiEnqueueRequests({
-          calls: parsed,
+          calls: parsed.calls,
           turnId: turn.turnId,
           session: current.session,
           tools: current.tools.tools,
@@ -1257,7 +1406,22 @@ const PlaymeshAiEditor: React.ComponentType<{
       } catch (error) {
         if (!mountedRef.current) return [];
         manualExecutionCallIdsRef.current = new Set();
-        recordSessionFailure('gdevelop.ai.turn.execute', error);
+        const failureEcho =
+          parsedEcho != null
+            ? parsedEcho
+            : error && Number.isSafeInteger(error.echo) && error.echo > 0
+            ? Number(error.echo)
+            : null;
+        if (failureEcho != null) {
+          if (failureEcho > lastManualEchoRef.current) {
+            lastManualEchoRef.current = failureEcho;
+          }
+          setChatOperation({ echo: failureEcho, turnId: null });
+        }
+        recordSessionFailure(
+          'gdevelop.ai.turn.execute',
+          error
+        );
         if (error.code === 'event_payload_required') {
           setEventPayloadValidation('required');
         } else if (EVENT_PAYLOAD_VALIDATION_CODES.has(error.code)) {
@@ -1459,9 +1623,14 @@ const PlaymeshAiEditor: React.ComponentType<{
         sessionControllerRef.current.abandon();
         sessionStateRef.current = null;
         manualExecutionCallIdsRef.current = new Set();
+        lastManualEchoRef.current = 0;
+        approvalModeOperationGenerationRef.current++;
+        approvalModeOperationRef.current = false;
         replaceCalls([]);
         if (mountedRef.current) {
           setSessionState(null);
+          setChatOperation(null);
+          setApprovalModeStatus('idle');
           setApprovals([]);
           setPlan(null);
           setApprovalGrants([]);
@@ -1671,6 +1840,7 @@ const PlaymeshAiEditor: React.ComponentType<{
     const returnStatusText = serializePlaymeshAiReturnStatus({
       mode,
       session: sessionState && sessionState.session,
+      chatOperation,
       calls,
       approvals: approvalPresentations,
       failure: sessionFailure,
@@ -1719,6 +1889,12 @@ const PlaymeshAiEditor: React.ComponentType<{
           approvals={approvalPresentations}
           approvalGrants={approvalGrants}
           approvalGrantsStatus={approvalGrantsStatus}
+          approvalMode={
+            sessionState
+              ? sessionState.session.approvalMode
+              : 'request_approval'
+          }
+          approvalModeStatus={approvalModeStatus}
           plan={plan}
           manualInput={manualInput}
           onManualInputChanged={changeManualInput}
@@ -1779,6 +1955,8 @@ const PlaymeshAiEditor: React.ComponentType<{
           onReject={approvalId => decideApproval(approvalId, 'reject')}
           onRefreshApprovalGrants={refreshApprovalGrants}
           onRevokeApprovalGrant={revokeApprovalGrant}
+          onApprovalModeChanged={changeApprovalMode}
+          onRetryApprovalMode={retryApprovalMode}
           onPromptTemplateContentChanged={updatePromptTemplateContent}
           onRetryPromptTemplates={retryPromptTemplates}
           onSavePromptTemplate={savePromptTemplate}
@@ -1828,6 +2006,7 @@ export const renderPlaymeshAiEditorContainer = (
     fileMetadata,
     setToolbar,
     extraEditorProps,
+    resourceManagementProps,
     onOpenLayout,
     onCloseAskAi,
   } = props;
@@ -1842,6 +2021,7 @@ export const renderPlaymeshAiEditorContainer = (
           fileMetadata={fileMetadata}
           setToolbar={setToolbar}
           extraEditorProps={extraEditorProps}
+          resourceManagementProps={resourceManagementProps}
           onOpenLayout={onOpenLayout}
           onSceneEventsModifiedOutsideEditor={
             props.onSceneEventsModifiedOutsideEditor

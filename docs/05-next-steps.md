@@ -12,10 +12,12 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.0.0+26`、Go Core
+归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.1.0+27`、Go Core
 `0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.0.0`、Developer CLI `2.0.0`、Game SDK `4.1.0`、
-App Bridge SDK `3.3.0`。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
+Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`、Game SDK `4.0.0`、
+App Bridge SDK `3.2.0`；当前未发布工作树目标为 App `4.2.0+28`、Developer API /
+OpenAPI `4.2.0`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`。本次 LAN 功能没有再次
+提升这些版本。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在，内部协作使用不可枚举的私有
@@ -111,6 +113,35 @@ Go Core 监听 0.0.0.0:0
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
+## Playmesh 4.2.0 局域网发现功能交接
+
+当前未发布 App 目标 `4.2.0+28` 已完成局域网发现与 App SDK 自动化开发，下一项工作
+不是再造分享或加入通道，而是四个受支持平台的跨设备实机验收：
+
+- Android、macOS、Windows、Linux 分别验证自定义 IPv4 UDP multicast 的发布、发现、
+  更新/丢失、权限拒绝、物理及支持组播的虚拟网卡动态增删、部分接口失败和真实加入；Web
+  与 iOS 只验证明确的 `unsupported` 自动发现/发布。iOS 的扫码、手工邀请和分享链接仍须
+  保持可用。
+- 验证启动和开发预览默认不公开；打开分享面板或无参数 `setPublished()` 后出现，关闭
+  面板仍保持，退出游戏后移除；重复调用不能重复注册。
+- 验证 App 页面显示全部游戏的附近对局，以纯文本展示游戏名、主机昵称、数据报真实来源
+  IP、多人当前/最大人数或“单机”，能随公告/presence 自动更新并支持手动刷新；点击后
+  发现 lease 与候选必须保留到预检和复查结束。游戏 SDK 只显示当前 gameId 的既有
+  `instanceId/gameId/name/host`，不增加内部展示元数据或图标端点；手工链接、扫码、发现项
+  和 SDK 加入都经过统一预检并进入既有 `RemoteGamePage`。
+- 验证固定组播 `239.255.80.77:53584`、wire v1、1 秒公告、4 秒 TTL 与 1200 字节上限；
+  地址必须来自数据报 source IP。没有 DNS-SD/TXT 兼容、第二发现栈或已知节点单播探测，
+  也不能把 AP 隔离、VLAN、防火墙、禁用组播或 VPN 策略下的不可达误报为全 LAN 保证。
+- 验证 `getShareLinks()` 与面板读取同一 LAN/有效 Relay URL 和同一 PNG，且仅本机
+  Authority/standalone host 的 App WebView 可用。该返回包含 bearer 凭据，测试日志、
+  崩溃信息和持久文件不得记录 URL、token 或 PNG。
+- 验证 `disableSystemMenuTriggers()` 在 ready 后单向解绑 Escape/Menu/Back 自动触发，
+  显式菜单仍可打开/关闭，重复调用无副作用，文档刷新后恢复默认绑定。
+
+实现边界见 `docs/implementation/playmesh-4.2.0-lan-game-discovery.md`。App、Game SDK、
+App Bridge SDK、Go Core、Core 与 Relay 版本在该功能中均保持现有值；实机验收完成前
+不得把自动化通过写成四个受支持平台的跨设备完成；iOS 仅验收稳定 unsupported 与保留入口。
+
 ## 后续变更要求
 
 后续所有更改都必须按需升级版本号，并遵循 `docs/06-engineering-standards.md` 当前定义的语义版本与 Flutter 构建号规则。每次变更必须评估 App、Go Core、Game SDK、App Bridge SDK、Developer API、Core 协议和游戏包中哪些组件受影响；只升级受影响组件，但必须同步代码常量、模板、机器契约、编辑器补全、测试与文档。
@@ -165,8 +196,10 @@ Go Core 监听 0.0.0.0:0
 
 ## 明确排除
 
-- 完整房间列表或局域网自动发现。
-- 云端账号和中心化房间大厅。
+- 中心化完整房间大厅；局域网只提供用户显式公开后的 UDP multicast 附近对局，不做后台
+  常驻服务、云端房间索引、旁观者列表或已知节点单播探测。
+- 云端账号。
 - 完整原生键盘、USB、摄像头、音频和 MIDI 方法适配。加速度计、陀螺仪和设备方向由游戏按 WebView 支持情况直接使用标准 Web API；原生震动继续通过 `device.vibration` 插件接入。
-- iOS 发布和云端游戏包分发。
+- iOS 自动发现/发布；扫码、手工邀请和分享链接仍保留。另不包含 iOS 正式发行/商店分发
+  和云端游戏包分发。
 - 创意工坊与生产级签名审核系统。

@@ -19,6 +19,7 @@ type RegistryOptions = {|
 
 export type PlaymeshResourceObjectUrlRegistry = {|
   acquire: StoredResource => string,
+  owns: string => boolean,
   dispose: () => void,
 |};
 
@@ -53,6 +54,8 @@ export const createPlaymeshResourceObjectUrlRegistry = ({
     return objectUrl;
   };
 
+  const owns = (objectUrl: string): boolean => ownedObjectUrls.has(objectUrl);
+
   // Explicit disposal is reserved for document teardown. Project close,
   // save, preview and editor-tab changes cannot prove that Pixi has released
   // every asynchronous consumer, so they intentionally do not call this.
@@ -62,7 +65,7 @@ export const createPlaymeshResourceObjectUrlRegistry = ({
     objectUrlByContent.clear();
   };
 
-  return { acquire, dispose };
+  return { acquire, owns, dispose };
 };
 
 export const playmeshResourceObjectUrlRegistry /*: PlaymeshResourceObjectUrlRegistry */ = createPlaymeshResourceObjectUrlRegistry(

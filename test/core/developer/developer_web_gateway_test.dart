@@ -182,6 +182,7 @@ void main() {
     final browserCookie = browserSetCookie!.split(';').first;
     final browserLease = await GDevelopEditorLeaseTestClient.acquire(
       baseUri: visualLinks.first.uri,
+      workspaceUri: visualLinks.first.uri,
       developerToken: 'custom-dev-token',
     );
     addTearDown(browserLease.release);
@@ -238,7 +239,10 @@ void main() {
       reason: browserCurrent.body,
     );
 
-    final gdevelop = await _openWorkspaceBootstrapLink(visualLinks.first.uri);
+    final currentVisualLink = (await runtime.gdevelopWorkspaceLinks(
+      session,
+    )).first.uri;
+    final gdevelop = await _openWorkspaceBootstrapLink(currentVisualLink);
     expect(gdevelop.statusCode, HttpStatus.ok);
     expect(gdevelop.body, contains('PLAYMESH_GDEVELOP_TEST'));
     expect(gdevelop.headers['content-type'], contains('text/html'));

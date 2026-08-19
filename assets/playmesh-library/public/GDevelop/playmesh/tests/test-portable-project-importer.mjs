@@ -25,8 +25,10 @@ class PlaymeshProjectImportError extends Error {
 
 const importedNames = `
 const openPlaymeshPortableZip = null;
+const openPlaymeshRawProjectJson = null;
 const getPortableResourceMimeType = null;
 const parsePortableProjectJson = null;
+const parsePortableProjectPartialJson = null;
 const planPortableProjectResources = null;
 const resolvePortableImportLimits = null;
 const playmeshPortableImportAllocationClient = null;
@@ -35,6 +37,7 @@ const persistRestoredProject = null;
 const ensureGDevelopGameId = null;
 const generateCopiedGDevelopGameId = null;
 const isUnassignedGDevelopGameId = null;
+const unsplitPlaymeshProject = null;
 const createPlaymeshProjectAllocationEvidence = globalThis.__portableAllocationEvidence;
 const PlaymeshProjectImportError = globalThis.__portableImporterError;
 `;
@@ -42,7 +45,10 @@ const executableSource = `${importedNames}${rawSource
   .replace(/^\/\/ @flow\s*/, '')
   .replace(/import[\s\S]*?from\s+['"][^'"]+['"];\s*/g, '')}`;
 globalThis.__portableImporterError = PlaymeshProjectImportError;
-globalThis.__portableAllocationEvidence = async ({ projectJson, resources }) => {
+globalThis.__portableAllocationEvidence = async ({
+  projectFilesJson,
+  resources,
+}) => {
   const canonicalize = value => {
     if (Array.isArray(value)) return value.map(canonicalize);
     if (value && typeof value === 'object') {
@@ -73,7 +79,7 @@ globalThis.__portableAllocationEvidence = async ({ projectJson, resources }) => 
       )
     ).toString('hex');
   return {
-    projectJsonHash: await digest(projectJson),
+    projectFilesHash: await digest(projectFilesJson),
     resourceManifestHash: await digest(
       JSON.stringify(canonicalize(resourcePlan))
     ),
@@ -97,6 +103,8 @@ const archiveBlob = new Blob(['portable fixture']);
 const createHarness = ({
   sourcePackageName = 'com.example.original',
   sourceProjectName = 'Imported fixture',
+  folderProjectArchive = true,
+  includeLocalResource = true,
   prepareConflict = false,
   workspaceFailure = false,
   commitMode = 'recover',
@@ -107,10 +115,20 @@ const createHarness = ({
   const calls = [];
   const localProjects = new Map();
   const archiveReads = [];
+  const rawProjectJsonBlobs = [];
+  const deserializedProjectObjects = [];
+  const sourceProjectFilePaths = folderProjectArchive
+    ? [
+        'game.json',
+        'layouts/imported-scene.json',
+        'externalEvents/common-events.json',
+      ]
+    : ['game.json'];
   let serverPhase = 'NOT_FOUND';
   let resetCount = 0;
   let projectDeleteCount = 0;
   let archiveCloseCount = 0;
+  let archiveOpenCount = 0;
   let uuidIndex = 0;
 
   const resource = {
@@ -144,10 +162,14 @@ const createHarness = ({
       this.projectUuid = `copied-project-uuid-${resetCount}`;
     },
     getResourcesManager: () => ({
-      getAllResourceNames: () => ({ toJSArray: () => ['Hero'] }),
+      getAllResourceNames: () => ({
+        toJSArray: () => (includeLocalResource ? ['Hero'] : []),
+      }),
       getResource: name => (name === 'Hero' ? resource : null),
     }),
-    unserializeFrom: () => {},
+    unserializeFrom: serializerElement => {
+      deserializedProjectObjects.push(serializerElement.value);
+    },
     delete() {
       projectDeleteCount++;
     },
@@ -187,7 +209,9 @@ const createHarness = ({
       if (workspaceFailure) throw new Error('presence failed');
       return {
         ...state('PREPARED'),
-        missing: [{ hash: resourceHash, bytes: resourceBytes.length }],
+        missing: includeLocalResource
+          ? [{ hash: resourceHash, bytes: resourceBytes.length }]
+          : [],
         available: [],
       };
     },
@@ -200,11 +224,11 @@ const createHarness = ({
       );
       return { hash: resourceHash, bytes: resourceBytes.length };
     },
-    uploadProject: async (input, projectJson) => {
-      record('project-put', input, projectJson);
+    uploadProjectFiles: async (input, projectFilesJson) => {
+      record('project-files-put', input, projectFilesJson);
       return {
-        contentHash: sha256(projectJson),
-        size: Buffer.byteLength(projectJson),
+        contentHash: sha256(projectFilesJson),
+        size: Buffer.byteLength(projectFilesJson),
       };
     },
     finalizeWorkspace: async (input, evidence) => {
@@ -238,38 +262,112 @@ const createHarness = ({
     },
   };
 
-  const portableImporter = importer.createPlaymeshPortableProjectImporter({
-    openArchive: async () => ({
+  const openProjectSource = async () => ({
       inspectedArchive: {},
       readBlob: async ({ path: archivePath }) => {
         archiveReads.push(archivePath);
-        return archivePath === 'game.json'
-          ? new Blob([
-              JSON.stringify({
-                properties: {
-                  name: sourceProjectName,
-                  packageName: sourcePackageName,
-                  projectUuid: 'source-project-uuid',
+        const rootProject = folderProjectArchive
+          ? {
+              gdVersion: { major: 5, minor: 6, build: 276, revision: 0 },
+              properties: {
+                name: sourceProjectName,
+                packageName: sourcePackageName,
+                projectUuid: 'source-project-uuid',
+                folderProject: true,
+              },
+              layouts: [
+                {
+                  __REFERENCE_TO_SPLIT_OBJECT: true,
+                  referenceTo: '/layouts/imported-scene',
                 },
-              }),
-            ])
+              ],
+              externalEvents: [
+                {
+                  __REFERENCE_TO_SPLIT_OBJECT: true,
+                  referenceTo: '/externalEvents/common-events',
+                },
+              ],
+            }
+          : {
+              gdVersion: { major: 5, minor: 6, build: 276, revision: 0 },
+              properties: {
+                name: sourceProjectName,
+                packageName: sourcePackageName,
+                projectUuid: 'source-project-uuid',
+                folderProject: false,
+              },
+              layouts: [{ name: 'Imported scene', objects: [] }],
+              externalEvents: [{ name: 'Common events', events: [] }],
+            };
+        const projectFileContents = {
+          'game.json': rootProject,
+          'layouts/imported-scene.json': {
+            name: 'Imported scene',
+            objects: [],
+          },
+          'externalEvents/common-events.json': {
+            name: 'Common events',
+            events: [],
+          },
+        };
+        return Object.prototype.hasOwnProperty.call(
+          projectFileContents,
+          archivePath
+        )
+          ? new Blob([JSON.stringify(projectFileContents[archivePath])])
           : new Blob([resourceBytes], { type: 'image/png' });
       },
       close: async () => {
         archiveCloseCount++;
       },
-    }),
+    });
+  const portableImporter = importer.createPlaymeshPortableProjectImporter({
+    openArchive: async () => {
+      archiveOpenCount++;
+      return openProjectSource();
+    },
+    openRawProjectJson: async projectJsonBlob => {
+      rawProjectJsonBlobs.push(projectJsonBlob);
+      return openProjectSource();
+    },
     parseProjectJson: bytes => JSON.parse(new TextDecoder().decode(bytes)),
-    planResources: () => ({
-      localFiles: [
-        {
-          path: 'assets/hero.png',
-          resources: [{ name: 'Hero' }],
-        },
-      ],
-    }),
+    parsePartialProjectJson: bytes =>
+      JSON.parse(new TextDecoder().decode(bytes)),
+    unsplitProjectFiles: async projectFiles => {
+      assert.deepEqual(
+        projectFiles.map(file => file.path),
+        sourceProjectFilePaths
+      );
+      const byPath = new Map(projectFiles.map(file => [file.path, file.content]));
+      const expand = value => {
+        if (Array.isArray(value)) return value.map(expand);
+        if (!value || typeof value !== 'object') return value;
+        if (value.__REFERENCE_TO_SPLIT_OBJECT === true) {
+          return expand(
+            byPath.get(`${value.referenceTo.replace(/^\//, '')}.json`)
+          );
+        }
+        return Object.fromEntries(
+          Object.entries(value).map(([key, child]) => [key, expand(child)])
+        );
+      };
+      return expand(byPath.get('game.json'));
+    },
+    planResources: ({ projectFilePaths }) => {
+      assert.deepEqual([...projectFilePaths], sourceProjectFilePaths);
+      return {
+        localFiles: includeLocalResource
+          ? [
+              {
+                path: 'assets/hero.png',
+                resources: [{ name: 'Hero' }],
+              },
+            ]
+          : [],
+      };
+    },
     resolveLimits: () => ({
-      maxProjectJsonBytes: 1024 * 1024,
+      maxProjectFileBytes: 1024 * 1024,
       maxSingleResourceBytes: 1024 * 1024,
     }),
     mimeTypeForPath: () => 'image/png',
@@ -278,30 +376,50 @@ const createHarness = ({
       if (snapshotFailure) throw new Error('snapshot failed');
       const logicalUrl = 'playmesh-local-resource://fixture/hero.png';
       return {
-        project: {
-          properties: {
-            name: currentProject.getName(),
-            packageName: currentProject.getPackageName(),
-            projectUuid: currentProject.getProjectUuid(),
-          },
-          resources: {
-            resources: [{ name: 'Hero', file: logicalUrl }],
-          },
-        },
-        resources: [
+        projectFiles: [
           {
-            logicalUrl,
-            name: 'Hero',
-            blob: new Blob([resourceBytes], { type: 'image/png' }),
-            contentHash: resourceHash,
-            metadata: { z: 1, a: true },
+            path: 'game.json',
+            content: {
+              properties: {
+                name: currentProject.getName(),
+                packageName: currentProject.getPackageName(),
+                projectUuid: currentProject.getProjectUuid(),
+                folderProject: true,
+              },
+              resources: {
+                resources: includeLocalResource
+                  ? [{ name: 'Hero', file: logicalUrl }]
+                  : [],
+              },
+              layouts: [
+                {
+                  __REFERENCE_TO_SPLIT_OBJECT: true,
+                  referenceTo: '/layouts/imported-scene',
+                },
+              ],
+            },
+          },
+          {
+            path: 'layouts/imported-scene.json',
+            content: { name: 'Imported scene', objects: [] },
           },
         ],
+        resources: includeLocalResource
+          ? [
+              {
+                logicalUrl,
+                name: 'Hero',
+                blob: new Blob([resourceBytes], { type: 'image/png' }),
+                contentHash: resourceHash,
+                metadata: { z: 1, a: true },
+              },
+            ]
+          : [],
       };
     },
     persistSnapshot: async ({
       fileMetadata,
-      project: projectObject,
+      projectFiles,
       resources,
     }) => {
       events.push('local-persist');
@@ -309,7 +427,7 @@ const createHarness = ({
       localProjects.set(fileMetadata.fileIdentifier, {
         id: fileMetadata.fileIdentifier,
         gameId: fileMetadata.gameId,
-        projectJson: JSON.stringify(projectObject),
+        projectFiles,
         resources,
       });
     },
@@ -342,6 +460,11 @@ const createHarness = ({
     events,
     localProjects,
     archiveReads,
+    rawProjectJsonBlobs,
+    deserializedProjectObjects,
+    get archiveOpenCount() {
+      return archiveOpenCount;
+    },
     get resetCount() {
       return resetCount;
     },
@@ -366,7 +489,12 @@ const createHarness = ({
   assert.equal(result.packageName, 'com.example.original');
   assert.equal(result.projectUuid, 'source-project-uuid');
   assert.equal(harness.localProjects.size, 1);
-  assert.deepEqual(harness.archiveReads, ['game.json', 'assets/hero.png']);
+  assert.deepEqual(harness.archiveReads, [
+    'game.json',
+    'layouts/imported-scene.json',
+    'externalEvents/common-events.json',
+    'assets/hero.png',
+  ]);
   assert.equal(harness.projectDeleteCount, 1);
   assert.equal(harness.archiveCloseCount, 1);
   assert.ok(
@@ -378,7 +506,7 @@ const createHarness = ({
     'prepare',
     'presence',
     'resource-put',
-    'project-put',
+    'project-files-put',
     'finalize',
     'commit',
     'recover',
@@ -388,7 +516,7 @@ const createHarness = ({
     'fileIdentifier',
     'gameId',
     'packageName',
-    'projectJsonHash',
+    'projectFilesHash',
     'projectUuid',
     'resourceManifestHash',
   ]);
@@ -404,6 +532,83 @@ const createHarness = ({
     'mime',
     'size',
     'metadata',
+  ]);
+}
+
+{
+  const harness = createHarness({ folderProjectArchive: false });
+  const result = await harness.portableImporter.importProject({
+    archiveBlob,
+    allocationClient: harness.allocationClient,
+  });
+  assert.equal(result.status, 'imported');
+  assert.deepEqual(harness.archiveReads, ['game.json', 'assets/hero.png']);
+  assert.equal(harness.deserializedProjectObjects.length, 1);
+  assert.equal(
+    harness.deserializedProjectObjects[0].properties.folderProject,
+    false
+  );
+  assert.deepEqual(harness.deserializedProjectObjects[0].layouts, [
+    { name: 'Imported scene', objects: [] },
+  ]);
+  const uploadedProjectFiles = JSON.parse(
+    harness.calls.find(call => call.method === 'project-files-put').extra
+  );
+  assert.deepEqual(
+    uploadedProjectFiles.map(file => file.path),
+    ['game.json', 'layouts/imported-scene.json']
+  );
+  assert.equal(
+    uploadedProjectFiles[0].content.properties.folderProject,
+    true
+  );
+  assert.deepEqual(uploadedProjectFiles[0].content.layouts, [
+    {
+      __REFERENCE_TO_SPLIT_OBJECT: true,
+      referenceTo: '/layouts/imported-scene',
+    },
+  ]);
+}
+
+{
+  const projectJsonBlob = new Blob([
+    JSON.stringify({
+      properties: { folderProject: false },
+      layouts: [{ name: 'Imported scene', objects: [] }],
+    }),
+  ]);
+  const harness = createHarness({
+    folderProjectArchive: false,
+    includeLocalResource: false,
+  });
+  const result = await harness.portableImporter.importProject({
+    projectJsonBlob,
+    allocationClient: harness.allocationClient,
+  });
+  assert.equal(result.status, 'imported');
+  assert.equal(harness.archiveOpenCount, 0);
+  assert.deepEqual(harness.rawProjectJsonBlobs, [projectJsonBlob]);
+  assert.deepEqual(harness.archiveReads, ['game.json']);
+  assert.deepEqual(harness.calls.map(call => call.method), [
+    'prepare',
+    'presence',
+    'project-files-put',
+    'finalize',
+    'commit',
+    'recover',
+  ]);
+  const uploadedProjectFiles = JSON.parse(
+    harness.calls.find(call => call.method === 'project-files-put').extra
+  );
+  assert.deepEqual(
+    uploadedProjectFiles.map(file => file.path),
+    ['game.json', 'layouts/imported-scene.json']
+  );
+  assert.deepEqual(uploadedProjectFiles[0].content.layouts, [
+    {
+      __REFERENCE_TO_SPLIT_OBJECT: true,
+      referenceTo: '/layouts/imported-scene',
+    },
   ]);
 }
 

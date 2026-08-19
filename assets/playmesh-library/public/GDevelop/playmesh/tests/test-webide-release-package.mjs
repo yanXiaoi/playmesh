@@ -329,6 +329,63 @@ try {
     ['playmesh/host-policy.css', 'body{}\n'],
     ['playmesh/host-policy.js', 'void 0;\n'],
     ['playmesh/ai/tools.json', canonicalAiToolsBytes],
+    [
+      'external/playmesh-i18n/playmesh-external-editor-i18n.js',
+      'globalThis.PlaymeshExternalEditorI18n = {};\n',
+    ],
+    [
+      'external/utils/parent-editor-interface.js',
+      'globalThis.PlaymeshParentEditorInterface = {};\n',
+    ],
+    ['external/piskel/piskel-index.html', '<!doctype html>\n'],
+    ['external/piskel/piskel-main.js', 'void 0;\n'],
+    ['external/piskel/piskel-editor/index.html', '<!doctype html>\n'],
+    [
+      'external/piskel/piskel-editor/js/lib/gif/gif.ie.worker.js',
+      'self.onmessage = function () {};\n',
+    ],
+    [
+      'external/piskel/piskel-editor/playmesh-i18n/piskel-i18n.js',
+      'globalThis.PlaymeshPiskelI18n = {};\n',
+    ],
+    [
+      'external/piskel/piskel-editor/playmesh-i18n/locales/en.js',
+      'void 0;\n',
+    ],
+    [
+      'external/piskel/piskel-editor/playmesh-i18n/locales/zh-CN.js',
+      'void 0;\n',
+    ],
+    ['external/jfxr/jfxr-index.html', '<!doctype html>\n'],
+    ['external/jfxr/jfxr-main.js', 'void 0;\n'],
+    ['external/jfxr/jfxr-editor/index.html', '<!doctype html>\n'],
+    [
+      'external/jfxr/jfxr-editor/playmesh-i18n/install.js',
+      'globalThis.PlaymeshJfxrI18n = {};\n',
+    ],
+    [
+      'external/jfxr/jfxr-editor/playmesh-i18n/locales/en.js',
+      'void 0;\n',
+    ],
+    [
+      'external/jfxr/jfxr-editor/playmesh-i18n/locales/zh-CN.js',
+      'void 0;\n',
+    ],
+    ['external/yarn/yarn-index.html', '<!doctype html>\n'],
+    ['external/yarn/yarn-main.js', 'void 0;\n'],
+    ['external/yarn/yarn-editor/index.html', '<!doctype html>\n'],
+    [
+      'external/yarn/yarn-editor/playmesh-i18n/install.js',
+      'globalThis.PlaymeshYarnI18n = {};\n',
+    ],
+    [
+      'external/yarn/yarn-editor/playmesh-i18n/locales/en.js',
+      'void 0;\n',
+    ],
+    [
+      'external/yarn/yarn-editor/playmesh-i18n/locales/zh-CN.js',
+      'void 0;\n',
+    ],
     ['GDJS/Runtime/index.html', '<!doctype html>\n'],
     ['GDJS/Runtime/libs/jshashtable.js', 'class Hashtable {}\n'],
     ['static/js/main.js', 'console.log("release");\n'],
@@ -936,6 +993,22 @@ try {
   );
   assert.ok(entries.some(entry => entry.name === 'index.html'));
   assert.ok(entries.some(entry => entry.name === 'GDJS/Runtime/index.html'));
+  const packagedEntryNames = new Set(entries.map(entry => entry.name));
+  for (const externalEditorRuntimeEntry of [
+    'external/utils/parent-editor-interface.js',
+    'external/piskel/piskel-index.html',
+    'external/piskel/piskel-main.js',
+    'external/piskel/piskel-editor/js/lib/gif/gif.ie.worker.js',
+    'external/jfxr/jfxr-index.html',
+    'external/jfxr/jfxr-main.js',
+    'external/yarn/yarn-index.html',
+    'external/yarn/yarn-main.js',
+  ]) {
+    assert.ok(
+      packagedEntryNames.has(externalEditorRuntimeEntry),
+      `release ZIP must retain ${externalEditorRuntimeEntry}`
+    );
+  }
   assert.equal(
     entries.filter(entry => entry.name === 'playmesh/ai/tools.json').length,
     1,
@@ -1001,7 +1074,7 @@ try {
   });
   assert.equal(verified.sha256, packaged.sha256);
   assert.equal(verified.size, packaged.size);
-  assert.equal(verified.fileCount, 16);
+  assert.equal(verified.fileCount, 37);
   assert.equal(verified.downloads.length, 2);
 
   const missingDisclaimerReleaseDirectory = path.join(

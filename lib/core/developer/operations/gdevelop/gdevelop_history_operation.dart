@@ -57,34 +57,49 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
     },
   };
 
+  static const _projectFileSchema = <String, Object?>{
+    'type': 'object',
+    'required': ['path', 'content'],
+    'properties': {
+      'path': {'type': 'string'},
+      'content': {'type': 'object'},
+    },
+  };
+
   static const _projectSchema = <String, Object?>{
     'type': 'object',
-    'required': ['baseRevision', 'source', 'project', 'resources'],
+    'required': ['baseRevision', 'source', 'projectFiles', 'resources'],
     'properties': {
       'baseRevision': {'type': 'integer', 'minimum': 0},
       'source': {
         'type': 'string',
         'enum': ['user', 'system'],
       },
-      'project': {'type': 'object'},
+      'projectFiles': {'type': 'array', 'items': _projectFileSchema},
       'resources': {'type': 'array', 'items': _resourceSchema},
     },
   };
 
   static const _snapshotSchema = <String, Object?>{
     'type': 'object',
-    'required': ['baseRevision', 'reason', 'source', 'project', 'resources'],
+    'required': [
+      'baseRevision',
+      'reason',
+      'source',
+      'projectFiles',
+      'resources',
+    ],
     'properties': {
       'baseRevision': {'type': 'integer', 'minimum': 0},
       'source': {
         'type': 'string',
         'enum': ['user', 'system'],
       },
-      'project': {'type': 'object'},
+      'projectFiles': {'type': 'array', 'items': _projectFileSchema},
       'resources': {'type': 'array', 'items': _resourceSchema},
       'reason': {
         'type': 'string',
-        'enum': ['explicit_save', 'important_change'],
+        'enum': ['explicit_save', 'important_change', 'autosave'],
       },
     },
   };
@@ -97,7 +112,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
       'baseRevision',
       'targetRevision',
       'source',
-      'currentProject',
+      'currentProjectFiles',
       'currentResources',
     ],
     'properties': {
@@ -111,7 +126,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
         'type': 'string',
         'enum': ['user', 'system'],
       },
-      'currentProject': {'type': 'object'},
+      'currentProjectFiles': {'type': 'array', 'items': _projectFileSchema},
       'currentResources': {'type': 'array', 'items': _resourceSchema},
       'clientId': {'type': 'string', 'minLength': 1, 'maxLength': 128},
     },
@@ -120,9 +135,9 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
   static const _restoreAckSchema = <String, Object?>{
     'type': 'object',
     'additionalProperties': false,
-    'required': ['projectJsonHash', 'resourceManifestHash'],
+    'required': ['projectFilesHash', 'resourceManifestHash'],
     'properties': {
-      'projectJsonHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
+      'projectFilesHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
       'resourceManifestHash': {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
     },
   };
@@ -616,7 +631,9 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
           'capability': GDevelopProjectHistoryAdapter.capability,
           'gameId': gameId,
           'retention': _retentionJson(gateway.gdevelopHistory.retentionPolicy),
-          'versions': versions.map((version) => version.toJson()).toList(),
+          'versions': versions
+              .map((version) => version.toJson(includeChangeSummary: true))
+              .toList(),
         });
         return;
       case 'gdevelop.history.clear':
@@ -645,7 +662,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
       case 'gdevelop.history.current.put':
         final body = await _jsonBodyWithLimit(
           request,
-          GDevelopProjectHistoryAdapter.maxProjectBytes + 1024 * 1024,
+          GDevelopProjectHistoryAdapter.maxProjectFilesBytes + 1024 * 1024,
         );
         final input = _projectInput(body);
         final result = await gateway.gdevelopRestoreTransactions
@@ -656,7 +673,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
                 projectId: gameId,
                 baseRevision: input.baseRevision,
                 source: input.source,
-                project: input.project,
+                projectFiles: input.projectFiles,
                 resources: input.resources,
                 projectConfigSnapshot: configSnapshot,
               );
@@ -788,7 +805,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
       case 'gdevelop.history.snapshot':
         final body = await _jsonBodyWithLimit(
           request,
-          GDevelopProjectHistoryAdapter.maxProjectBytes + 1024 * 1024,
+          GDevelopProjectHistoryAdapter.maxProjectFilesBytes + 1024 * 1024,
         );
         final input = _projectInput(body);
         final reasonValue = body['reason'];
@@ -811,7 +828,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
                 baseRevision: input.baseRevision,
                 reason: reason,
                 source: input.source,
-                project: input.project,
+                projectFiles: input.projectFiles,
                 resources: input.resources,
                 projectConfigSnapshot: configSnapshot,
               );
@@ -827,13 +844,13 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
       case 'gdevelop.history.restore.prepare':
         final body = await _jsonBodyWithLimit(
           request,
-          GDevelopProjectHistoryAdapter.maxProjectBytes + 1024 * 1024,
+          GDevelopProjectHistoryAdapter.maxProjectFilesBytes + 1024 * 1024,
         );
         final idempotencyKey = body['idempotencyKey'];
         final baseRevision = body['baseRevision'];
         final targetRevision = body['targetRevision'];
         final source = body['source'];
-        final currentProject = body['currentProject'];
+        final currentProjectFiles = body['currentProjectFiles'];
         final currentResources = body['currentResources'];
         if (body.keys.any(
               (key) => !const {
@@ -841,7 +858,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
                 'baseRevision',
                 'targetRevision',
                 'source',
-                'currentProject',
+                'currentProjectFiles',
                 'currentResources',
                 'clientId',
               }.contains(key),
@@ -850,7 +867,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
             baseRevision is! int ||
             targetRevision is! int ||
             source is! String ||
-            currentProject is! Map ||
+            currentProjectFiles is! List ||
             currentResources is! List ||
             (body['clientId'] != null && body['clientId'] is! String)) {
           throw const FormatException('GDevelop restore 请求格式无效');
@@ -861,7 +878,9 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
           baseRevision: baseRevision,
           targetRevision: targetRevision,
           source: GDevelopHistorySource.parse(source),
-          currentProject: Map<String, Object?>.from(currentProject),
+          currentProjectFiles: gdevelopProjectFilesFromJson(
+            currentProjectFiles,
+          ),
           currentResources: _resources(currentResources),
           clientId: body['clientId'] as String?,
         );
@@ -912,9 +931,9 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
         final body = await _jsonBodyWithLimit(request, 8 * 1024);
         if (body.length != 2 ||
             !body.keys.every(
-              const {'projectJsonHash', 'resourceManifestHash'}.contains,
+              const {'projectFilesHash', 'resourceManifestHash'}.contains,
             ) ||
-            body['projectJsonHash'] is! String ||
+            body['projectFilesHash'] is! String ||
             body['resourceManifestHash'] is! String) {
           throw const FormatException('GDevelop restore ACK 请求无效');
         }
@@ -923,7 +942,7 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
               gameId: gameId,
               txId: pathParameters['txId']!,
               browserEvidence: GDevelopRestoreBrowserEvidence(
-                projectJsonHash: body['projectJsonHash']! as String,
+                projectFilesHash: body['projectFilesHash']! as String,
                 resourceManifestHash: body['resourceManifestHash']! as String,
               ),
             );
@@ -978,13 +997,13 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
 ({
   int baseRevision,
   GDevelopHistorySource source,
-  Map<String, Object?> project,
+  List<GDevelopProjectFile> projectFiles,
   List<GDevelopProjectResource> resources,
 })
 _projectInput(Map<String, Object?> body) {
   final baseRevision = body['baseRevision'];
   final source = body['source'];
-  final project = body['project'];
+  final projectFiles = body['projectFiles'];
   final resources = body['resources'];
   if (baseRevision is! int || baseRevision < 0) {
     throw const FormatException('GDevelop 工程 baseRevision 无效');
@@ -992,8 +1011,8 @@ _projectInput(Map<String, Object?> body) {
   if (source is! String) {
     throw const FormatException('GDevelop 工程 source 无效');
   }
-  if (project is! Map || project.keys.any((key) => key is! String)) {
-    throw const FormatException('GDevelop 工程 project 必须是 JSON 对象');
+  if (projectFiles is! List) {
+    throw const FormatException('GDevelop 工程 projectFiles 必须是数组');
   }
   if (resources is! List) {
     throw const FormatException('GDevelop 工程 resources 必须是数组');
@@ -1001,7 +1020,7 @@ _projectInput(Map<String, Object?> body) {
   return (
     baseRevision: baseRevision,
     source: GDevelopHistorySource.parse(source),
-    project: Map<String, Object?>.from(project),
+    projectFiles: gdevelopProjectFilesFromJson(projectFiles),
     resources: _resources(resources),
   );
 }
@@ -1029,7 +1048,7 @@ Map<String, Object?> _retentionJson(LocalVersionRetentionPolicy policy) => {
   'maxUniqueBytesPerProject': policy.maxUniqueBytesPerNamespace,
   'maxObjectBytes': policy.maxObjectBytes,
   'stagingTtlSeconds': policy.stagingTtl.inSeconds,
-  'maxProjectJsonBytes': GDevelopProjectHistoryAdapter.maxProjectBytes,
+  'maxProjectFilesBytes': GDevelopProjectHistoryAdapter.maxProjectFilesBytes,
 };
 
 Map<String, Object?> _presenceReferenceJson(

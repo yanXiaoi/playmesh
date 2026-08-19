@@ -5,9 +5,49 @@
     "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
   },
   "overlay": {
-    "treeSha256": "59605948ad63b5d1cfe08e1960700d92de0087897f368ce6530450bbe2213b57"
+    "treeSha256": "01507a0fa804f811f18bfc4d011d453c92483b553bc52c09a819b5e7e4cdef41"
   },
   "generatedFiles": [
+    {
+      "relativePath": "newIDE/app/public/external/playmesh-i18n/playmesh-external-editor-i18n.js",
+      "postPatchSha256": "5c4967fb473e55b7b87b05e4f6c8a4653fc964a3cf9dc442187f61c68593d103"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/jfxr/jfxr-editor/playmesh-i18n/install.js",
+      "postPatchSha256": "c48676c771af7f8e576aed1e5525fd60d59c727d9b3327a450f558bc0227e80b"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/jfxr/jfxr-editor/playmesh-i18n/locales/en.js",
+      "postPatchSha256": "fc3058ccb607f8addeca966037c3dadd97ff745c914d9832f6883539b9ecba15"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/jfxr/jfxr-editor/playmesh-i18n/locales/zh-CN.js",
+      "postPatchSha256": "702f7ca2efd80bdd35213f786073920cd30f1bc60c030eb99b00f36e5a384654"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/piskel/piskel-editor/playmesh-i18n/locales/en.js",
+      "postPatchSha256": "a371b721f49c7815481879b9665bf998a4d697bcb6b99164f5e5887ea3c98e52"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/piskel/piskel-editor/playmesh-i18n/locales/zh-CN.js",
+      "postPatchSha256": "273690a0c33b8ccbf40908f2d9f71d9e8a818d5ccf0d7bc0270cff8728b1051d"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/piskel/piskel-editor/playmesh-i18n/piskel-i18n.js",
+      "postPatchSha256": "55d566c030e9bbcee6cbbd5aaeef1094e8c7412aeb0c24e2c34888e3c7c3c0d3"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/yarn/yarn-editor/playmesh-i18n/install.js",
+      "postPatchSha256": "3a9701fd2fb2caf938065a40df1e1897596a6aaefc7ed5c6416469816a6806f5"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/yarn/yarn-editor/playmesh-i18n/locales/en.js",
+      "postPatchSha256": "e83cc54ffadb994040dc7845974a35c80a103c408d1c5afbb0d1faf203c9e99d"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/yarn/yarn-editor/playmesh-i18n/locales/zh-CN.js",
+      "postPatchSha256": "86fa4cce7cc5246eb39ce58b1e7545dd36abab7b8532cdf25c0e00fb71b73faa"
+    },
     {
       "relativePath": "newIDE/app/src/PlaymeshShared/GameManifest.js",
       "postPatchSha256": "c2a6665d3442f9c5379c8aac4c86713285a61d2a24c39b1277f51f965bbb2975"
@@ -62,7 +102,7 @@
     {
       "relativePath": "GDJS/Runtime/events-tools/storagetools.ts",
       "upstreamGitBlobSha": "d61394d79c78e787f488ae63e4185ffff5c9dee3",
-      "postPatchSha256": "edece060b1984f84421ee420288d6916b602c1e4d2503b30866cf82a63d86e8a"
+      "postPatchSha256": "137a46e0707e46a6a021200a0b8e56935701a5d5ac310d0c39eff315567d54ec"
     },
     {
       "relativePath": "newIDE/app/package.json",
@@ -157,7 +197,42 @@
     {
       "relativePath": "newIDE/app/src/BrowserApp.js",
       "upstreamGitBlobSha": "6619110b08ff0e12e7d3ee74db77fefa626307da",
-      "postPatchSha256": "9855441c3c1c13e2b2e4c0f577e9e5278f0a5947aa41ab63e0507d2e02a376e1"
+      "postPatchSha256": "2a3cd6f6381711211e3837f3ee9d7c1cadc2b278ff3d918ea713b04646be2332"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/piskel/piskel-editor/index.html",
+      "upstreamGitBlobSha": "2b8e5f760e3ca9ff8aa1475bc2ca89898ff11002",
+      "postPatchSha256": "f0034ca176caf9d6a8358795a6416aea32b29a5d050ff448316a2bbd2019536f"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/piskel/piskel-main.js",
+      "upstreamGitBlobSha": "8c2fbd09864ec599ca7d0288eedb39d2ec72db3b",
+      "postPatchSha256": "56ed8f1b1ecc6661bf5ac534ea8406fb4b0081ec794d631a50f26f911340f086"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/jfxr/jfxr-editor/index.html",
+      "upstreamGitBlobSha": "ed02d1bfd80f442144e1b18bfbe784e757132afa",
+      "postPatchSha256": "d26ba436aec757c23c7db85d853c48505bb1989ffe9545c2ec4e98276e528a85"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/jfxr/jfxr-main.js",
+      "upstreamGitBlobSha": "d2f2bce80847c4feeedf3e6fddbaf24fbd0040cc",
+      "postPatchSha256": "534d5540b937a6e322d22019810f4bbc0251fcc5df79bd123647aa2eb2a5dffd"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/yarn/yarn-editor/index.html",
+      "upstreamGitBlobSha": "53eba3edf0dec877f635d2ccf14b1c453356d2cd",
+      "postPatchSha256": "d63bfbeb48935a6e27c1e55eda08856b6db228b45ac2ead052b4a95d40853bdc"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/yarn/yarn-editor/js/main.80b352588636fbc67c02.js",
+      "upstreamGitBlobSha": "32c47bb56c28a1b81ffdb4b22df77c9dec7e3267",
+      "postPatchSha256": "4cbcd84236d8e72e84190915c80169462a6971c65ea30f7a2db349e223a6fff6"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/yarn/yarn-main.js",
+      "upstreamGitBlobSha": "17fdf2fb283556af02b35bf731febd447e25c1f1",
+      "postPatchSha256": "7372fe81f3067f7b4d1c722f9896fa00b4b7acada95d3ac9c967d00916f032f9"
     },
     {
       "relativePath": "newIDE/app/src/Course/CourseStoreContext.js",
@@ -217,12 +292,17 @@
     {
       "relativePath": "newIDE/app/src/MainFrame/index.js",
       "upstreamGitBlobSha": "0268fc9b7862c026ce99c756d896e28526aa809f",
-      "postPatchSha256": "e9732fb0c1f04a9ae2d5a9154f8984d36857bce252999603422889801c8313db"
+      "postPatchSha256": "64ddb76e4815bfec57e6b4dbf8c72e4a42b7a4445c56b846d07270dbea1107ed"
     },
     {
       "relativePath": "newIDE/app/src/MainFrame/MainMenu.js",
       "upstreamGitBlobSha": "b0e701e77a9c8b21f4b4331cc3e8fb34f9fcff72",
       "postPatchSha256": "d03527c6193c934eaf2ae7d263a53cfd97278986ad3712141ba2eabec40c1bc2"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js",
+      "upstreamGitBlobSha": "a7ab698b33db3e124e51a863ec236bd268c82415",
+      "postPatchSha256": "a977cf3daf0059e7b67e1c3be66eccfd76ae69b3374ec72e5df8154e1807ac32"
     },
     {
       "relativePath": "newIDE/app/src/MainFrame/Preferences/PreferencesProvider.js",
@@ -248,6 +328,11 @@
       "relativePath": "newIDE/app/src/MainFrame/Toolbar/PreviewAndShareButtons.js",
       "upstreamGitBlobSha": "6c61b28e5c217895db23efdec125b690c4b1c853",
       "postPatchSha256": "5a945fb6d210416b92c69eaab2d8b3b7705b38395d00ef1b3120d9cfa4458c44"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/UnsavedChangesContext.js",
+      "upstreamGitBlobSha": "d34a95dacfb55817d2989d0a5271a157786e4b27",
+      "postPatchSha256": "2481f56ddcefb988f977e649b4964a6ba7b71ea1cf5e2c0745d45e9dab9b028f"
     },
     {
       "relativePath": "newIDE/app/src/MainFrame/UseCapturesManager.js",
@@ -287,12 +372,17 @@
     {
       "relativePath": "newIDE/app/src/ProjectManager/ProjectPropertiesDialog.js",
       "upstreamGitBlobSha": "66d7d54557e3bc1e669cfb6210a292a847bb2a39",
-      "postPatchSha256": "0e4c592d75ce4e91a2ada42a82a3e743667ffb716a88202b27639926a9e4527e"
+      "postPatchSha256": "2017fc417adf3e3c5c5df6fddbffdf737302b8e32c43de2893f0e6c71a81a490"
     },
     {
       "relativePath": "newIDE/app/src/ProjectsStorage/DownloadFileStorageProvider/DownloadFileSaveAsDialog.js",
       "upstreamGitBlobSha": "ed12f40520acb711c1243a8ce0663c22f1698a1e",
       "postPatchSha256": "5398680d5d9976ee4caa32b82e79e5a78316477cb5ff3b41617c868cce1f7697"
+    },
+    {
+      "relativePath": "newIDE/app/src/ProjectsStorage/index.js",
+      "upstreamGitBlobSha": "002175089bdfff742655ee6e8e3e89d76c21cb9a",
+      "postPatchSha256": "05392a3dec79eef40e9a700e90e75dd3470469aebde79e4043c458a5d048721e"
     },
     {
       "relativePath": "newIDE/app/src/ProjectsStorage/OpenFromStorageProviderDialog.js",
@@ -302,7 +392,7 @@
     {
       "relativePath": "newIDE/app/src/ProjectsStorage/ResourceFetcher/BrowserResourceFetcher.js",
       "upstreamGitBlobSha": "d58dd58489a06afbe844dc74391219ca8fb9087b",
-      "postPatchSha256": "201005140a45a8d5e2b41bf96b1ef76f36bed7ffeeada457ba3b0dee731e1a2f"
+      "postPatchSha256": "45f826458746f3a7d80bb665a6148958e2321935e45db9de58a4dc8abdf7a2b2"
     },
     {
       "relativePath": "newIDE/app/src/ProjectsStorage/ResourceMover/BrowserResourceMover.js",
@@ -318,6 +408,16 @@
       "relativePath": "newIDE/app/src/ResourcesList/BrowserResourceSources.js",
       "upstreamGitBlobSha": "16a9cee0e12e099a7a94d65401ea59dc95f82829",
       "postPatchSha256": "961b542850440be19e1118d3d6d4705dc38f8881942af69d03e1b45d9832c5ef"
+    },
+    {
+      "relativePath": "newIDE/app/src/ResourcesList/BrowserResourceExternalEditors.js",
+      "upstreamGitBlobSha": "05df70f29ffec1b3ac38f712b9b7b5fc49bb5e1e",
+      "postPatchSha256": "c250cdb86db3474d9c0ecb5cf5d48c678d9c4d47b15d62c229fd066c77dc68f3"
+    },
+    {
+      "relativePath": "newIDE/app/public/external/utils/parent-editor-interface.js",
+      "upstreamGitBlobSha": "64d7474a3b654d9e87b8326836d13a474a0f4632",
+      "postPatchSha256": "a85aa8cbaf6cec9bcf006c862c1e144a8b1b2f24b5306eda4f7850f56a84fc0d"
     },
     {
       "relativePath": "newIDE/app/src/ResourcesList/index.js",
@@ -378,6 +478,11 @@
       "relativePath": "newIDE/app/src/UI/SelectField.js",
       "upstreamGitBlobSha": "6af569d80edd52f67f84965f2cdb219a35c67c0a",
       "postPatchSha256": "8e19bd0ee8dd6b04304e4654521f5bf0e6fe3d5fb11c22783bf0360ab535867a"
+    },
+    {
+      "relativePath": "newIDE/app/src/UI/ExternalEditorOpenedDialog.js",
+      "upstreamGitBlobSha": "c09d9d0744ca4cbc6cfbe4316fd7a28cea18ef98",
+      "postPatchSha256": "3c9832d916be62db51d77ca9c74110c2e622025a57a66efabc56909710bcd823"
     },
     {
       "relativePath": "newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js",

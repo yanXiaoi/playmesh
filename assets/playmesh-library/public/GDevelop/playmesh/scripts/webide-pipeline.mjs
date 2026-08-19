@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  DEVELOPMENT_PACKAGE_CHAIN,
   PIPELINE_PREREQUISITES,
   PIPELINE_STEPS,
   acquireProjectLock,
@@ -36,7 +37,7 @@ import {
   dependencyNodeSearchPath,
   digestRecord,
   ensureWithin,
-  explainReceipt,
+  evaluateReceiptStatus,
   extractZipSafely,
   lstatOrNull,
   nodeOptionsWithHeapLimit,
@@ -60,6 +61,7 @@ const execFile = promisify(execFileCallback);
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDirectory = path.dirname(scriptPath);
 const playmeshDirectory = path.resolve(scriptDirectory, "..");
+const gdevelopDirectory = path.resolve(playmeshDirectory, "..");
 const repositoryRoot = path.resolve(scriptDirectory, "../../../../../..");
 const repositoryWorkRoot = path.join(repositoryRoot, "work");
 const defaultWorkRoot = path.join(
@@ -72,6 +74,20 @@ const manifestPath = path.join(
   "source-policy-output-manifest.json"
 );
 const overlayPath = path.join(playmeshDirectory, "overlays");
+const lockedExternalEditorsManifestPath = path.join(
+  gdevelopDirectory,
+  "official",
+  "external-editors.json"
+);
+const lockedExternalEditorsPath = path.join(
+  gdevelopDirectory,
+  "official",
+  "external-editors"
+);
+const localExternalEditorDerivativesPath = path.join(
+  playmeshDirectory,
+  "external-editors"
+);
 const applyPolicyPath = path.join(scriptDirectory, "apply-source-policy.mjs");
 const preparePath = path.join(scriptDirectory, "prepare-webide.mjs");
 const prepareDevelopmentPath = path.join(
@@ -79,6 +95,12 @@ const prepareDevelopmentPath = path.join(
   "prepare-dev-webide.mjs"
 );
 const packagePath = path.join(scriptDirectory, "package-webide-release.mjs");
+const canonicalAiToolsPath = path.join(
+  playmeshDirectory,
+  "runtime",
+  "ai",
+  "tools.json"
+);
 const auditPath = path.join(
   playmeshDirectory,
   "tests",
@@ -97,6 +119,9 @@ const sourceTreeExclusions = new Set([
 const sourceContractTests = Object.freeze([
   ["test-source-policy-output.mjs", ["--source", "{source}"]],
   ["test-source-policy-module-contracts.mjs", ["--source", "{source}"]],
+  ["test-external-resource-editors.mjs", ["--source", "{source}"]],
+  ["test-yarn-external-editor-cold-start.mjs", ["--source", "{source}"]],
+  ["test-external-editor-iframe-lifecycle.mjs", ["--source", "{source}"]],
   ["test-multiplayer-runtime-seams.mjs", ["--source", "{source}"]],
   ["test-zero-cloud-resource-source.mjs", ["--source", "{source}"]],
   ["test-browser-persistence-boundary.mjs", ["--source", "{source}"]],
@@ -117,9 +142,16 @@ const sourceContractTests = Object.freeze([
 const localContractTests = Object.freeze([
   ["test-gdevelop-fps-probe.mjs", []],
   ["test-runtime-injection-boundary.mjs", []],
+  ["test-embedded-external-editor-window.mjs", []],
   ["test-ai-client.mjs", []],
   ["test-ai-ui-boundaries.mjs", []],
   ["test-ai-live-wrapper-callbacks.mjs", []],
+  ["test-ai-piskel-tools.mjs", []],
+  ["test-piskel-localization.mjs", []],
+  ["test-external-editor-i18n-derivatives.mjs", []],
+  ["test-ai-official-local-editor-runners.mjs", []],
+  ["test-ai-return-status.mjs", []],
+  ["test-ai-runtime-debugger-tools.mjs", []],
   ["test-event-instruction-tools.mjs", []],
   ["test-project-symbol-tools.mjs", []],
   ["test-catalog-generator.mjs", []],
@@ -131,8 +163,10 @@ const localContractTests = Object.freeze([
   ["test-gateway-preview.mjs", []],
   ["test-lan-sha256-fallback.mjs", []],
   ["test-local-browser-sw-preview.mjs", []],
+  ["test-autosave-controller.mjs", []],
   ["test-history-client.mjs", []],
   ["test-history-diff-summary.mjs", []],
+  ["test-history-request-coordinator.mjs", []],
   ["test-history-restore-client.mjs", []],
   ["test-history-restore-coordinator.mjs", []],
   ["test-history-restore-journal.mjs", []],
@@ -146,7 +180,9 @@ const localContractTests = Object.freeze([
   ["test-portable-project-import-controller.mjs", []],
   ["test-portable-project-importer.mjs", []],
   ["test-pixi-blob-resource-asset.mjs", []],
+  ["test-project-allocation-coordinator.mjs", []],
   ["test-project-config.mjs", []],
+  ["test-project-files.mjs", []],
   ["test-project-lifecycle.mjs", []],
   ["test-project-rekey-client.mjs", []],
   ["test-project-rekey-controller.mjs", []],
@@ -588,6 +624,17 @@ const main = async () => {
               root: overlayPath,
               rejectSymlinks: true
             })).sha256,
+            lockedExternalEditorsManifestSha256: await sha256File(
+              lockedExternalEditorsManifestPath
+            ),
+            lockedExternalEditorsTreeSha256: (await computeTreeDigest({
+              root: lockedExternalEditorsPath,
+              rejectSymlinks: true
+            })).sha256,
+            localExternalEditorDerivativesTreeSha256: (await computeTreeDigest({
+              root: localExternalEditorDerivativesPath,
+              rejectSymlinks: true
+            })).sha256,
             canonicalBrowserSourcesSha256: await hashManyFiles([
               path.join(
                 repositoryRoot,
@@ -633,6 +680,7 @@ const main = async () => {
           return {
             ...common,
             ...(await receiptInputs("test")),
+            canonicalAiToolsSha256: await sha256File(canonicalAiToolsPath),
             contractsSha256: await hashManyFiles(
               contractTests.map(([scope, name]) =>
                 scope === "repository"
@@ -646,6 +694,7 @@ const main = async () => {
           return {
             ...common,
             ...(await receiptInputs("build")),
+            canonicalAiToolsSha256: await sha256File(canonicalAiToolsPath),
             nodeHeapMb: buildNodeHeapMb,
             developmentPreparationSha256: await hashManyFiles([
               prepareDevelopmentPath,
@@ -672,6 +721,7 @@ const main = async () => {
           return {
             ...common,
             ...(await receiptInputs("prepare")),
+            canonicalAiToolsSha256: await sha256File(canonicalAiToolsPath),
             prepareToolsSha256: await hashManyFiles([
               preparePath,
               path.join(scriptDirectory, "webide-provenance.mjs")
@@ -832,12 +882,16 @@ const main = async () => {
       }
       const inputDigest = digestRecord(input);
       const receipt = await receiptFor(step);
-      const outputDigest = await outputFor(step);
+      const receiptStatus = await evaluateReceiptStatus({
+        receipt,
+        step,
+        inputDigest,
+        readOutputDigest: () => outputFor(step)
+      });
       return {
         step,
-        ...explainReceipt({ receipt, step, inputDigest, outputDigest }),
+        ...receiptStatus,
         inputDigest,
-        outputTreeDigest: outputDigest,
         completedAt: receipt?.completedAt || null
       };
     };
@@ -1537,7 +1591,12 @@ const main = async () => {
       // and provenance preparation so the ZIP contains the schema 3 source
       // marker and can be installed through the same atomic installer as a
       // release package.
-      await ensureStep("prepare", true);
+      // Validate every fast-chain receipt against the current inputs. Checking
+      // only prepare would let an old, otherwise self-consistent prepare
+      // receipt hide a changed overlay or an invalidated build receipt.
+      for (const step of DEVELOPMENT_PACKAGE_CHAIN) {
+        await ensureStep(step, true);
+      }
       await runProcess({
         command: process.execPath,
         args: [

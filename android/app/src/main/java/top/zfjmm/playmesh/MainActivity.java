@@ -45,6 +45,7 @@ public class MainActivity extends FlutterActivity {
     private MethodChannel.Result pendingWebPermissionResult;
     private Pose6dNativeHost pose6dNativeHost;
     private WebRtcAppMediaNativeHost webRtcAppMediaNativeHost;
+    private LanMulticastLockHost lanMulticastLockHost;
     private static volatile boolean activityAttached;
     private static volatile boolean activityResumed;
     private static volatile boolean windowFocused;
@@ -76,6 +77,10 @@ public class MainActivity extends FlutterActivity {
                 pose6dNativeHost
         );
         pose6dNativeHost.setCameraFrameConsumer(webRtcAppMediaNativeHost);
+        lanMulticastLockHost = new LanMulticastLockHost(
+                getApplicationContext(),
+                flutterEngine.getDartExecutor().getBinaryMessenger()
+        );
 
         new MethodChannel(
                 flutterEngine.getDartExecutor().getBinaryMessenger(),
@@ -424,6 +429,10 @@ public class MainActivity extends FlutterActivity {
         if (webRtcAppMediaNativeHost != null) {
             webRtcAppMediaNativeHost.dispose();
             webRtcAppMediaNativeHost = null;
+        }
+        if (lanMulticastLockHost != null) {
+            lanMulticastLockHost.dispose(!DeveloperForegroundService.isRunning());
+            lanMulticastLockHost = null;
         }
         if (pose6dNativeHost != null) {
             pose6dNativeHost.dispose();

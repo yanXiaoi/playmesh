@@ -21,7 +21,7 @@
 所有编辑器接入还必须遵守“切片优先、最小 seam”约束：协作业务放在 App facade、操作
 middleware、Adapter、既有事件钩子和构建期 overlay 中，不把协作条件散落到编辑器源码。
 功能粒度必须服从侵入预算：如果 GDevelop 没有对象/事件级稳定钩子，就使用既有保存事件
-触发 canonical project 文件级同步，不得为了保留细粒度能力而扩大 Core 修改。极小的中立
+触发 canonical folder-project tree 同步，不得为了保留细粒度能力而扩大 Core 修改。极小的中立
 序列化 seam 也只能作为单独评审的例外，不是默认实施路径。
 
 推荐按以下可交付层次推进：
@@ -31,7 +31,7 @@ middleware、Adapter、既有事件钩子和构建期 overlay 中，不把协作
 | A | 专用 Relay、Go Core 房间、成员认证、单活动线路、在线状态 | 可行，协议和安全工程量较大 |
 | B | Source Workspace 文件级协作 | 可行，现有 revision/批量文件接口可作为基础 |
 | C | dev-cli 文件级协作 | 可行，但只能提供文件级 `last-accepted-save`，不能识别 IDE 打开文档或编辑意图 |
-| D | GDevelop 正常保存统一 Authority 的全项目在线同步 | 可行，现有持久 revision、CAS、历史和保存边界可复用；AI v2 只修改 live WebIDE，不是 Authority producer；仍需持久事件流与远端应用 Controller |
+| D | GDevelop 正常保存统一 Authority 的全项目在线同步 | 可行，现有持久 revision、CAS、历史和保存边界可复用；AI v4 只修改 live WebIDE，不是 Authority producer；仍需持久事件流与远端应用 Controller |
 | E | GDevelop 保存驱动的 schema-aware 聚合协作 | 条件可行；不需要逐动作 hook，但必须证明聚合投影、引用闭包、原子多聚合提交和远端刷新安全；失败即保留 D |
 | F | GDevelop 同场景、同事件表的细粒度语义并发 | 条件可行；仅在既有 hook/overlay 和获批最小 seam 的预算内完成，超出即保留 D/E |
 
@@ -67,7 +67,7 @@ AI 不与人工保存合并成第二种协作 producer。AI 只修改当前 live
   presence、光标和 XPath 标记等易失提示不属于权威状态。
 - Source Workspace 使用持久 file/tree revision 和比较并交换。
 - dev-cli 只观察磁盘保存；主机按短 `CommitLease` 排序，结果直接覆盖各端受管项目文件。
-- GDevelop 默认使用保存事件触发 canonical project 文件级 revision CAS；聚合投影门禁通过后
+- GDevelop 默认使用保存事件触发 canonical folder-project tree revision CAS；聚合投影门禁通过后
   可升级到保存驱动的 `aggregate_save`，只有在编辑器最小侵入门禁内取得稳定 ID 和语义操作
   时才启用 `semantic`。
 - 主机离线立即撤销在线工作会话；恢复副本永不自动上传。
@@ -75,7 +75,7 @@ AI 不与人工保存合并成第二种协作 producer。AI 只修改当前 live
 ## 2. 评估依据与当前实现事实
 
 本评估以 2026-08-08 的全仓只读盘点为基础，并于 2026-08-13 重新核对 GDevelop 工程历史、
-AI v2 会话和 WebIDE live-project 执行链，2026-08-14 又核对 GDevelop 官方仓库公开协作实现。
+AI v3 会话和 WebIDE live-project 执行链，2026-08-14 又核对 GDevelop 官方仓库公开协作实现。
 工作区包含尚未提交的开发内容，因此下表是“当前工作区事实”，
 不是某个已发布 Git 提交的保证；进入实施前应在选定基线提交上重新
 运行一次同样的审计。
@@ -96,7 +96,7 @@ AI v2 会话和 WebIDE live-project 执行链，2026-08-14 又核对 GDevelop �
 | GDevelop 官方协作基线 | 官方 `master@1a0661d` 的公开客户端采用云项目 ACL、完整 project ZIP 版本、`previousVersion` 和保存前版本比较；冲突时询问保存者是否整体覆盖 | 官方公开实现不是可复用的对象/事件实时操作通道；可借鉴快照、版本链和历史，但 Playmesh 聚合实时显示与主机裁决必须自研 |
 | GDevelop 历史 | 已有持久 revision、CAS、`saveCurrent(baseRevision)` 和权威变更流 | 是 GDevelop 协作主线最有价值的现有基础 |
 | GDevelop 权威变更信号 | `authoritativeChanges` 已发布 gameId、revision、项目/资源 hash 和 sequence，但 sequence 来自进程内 Map | 可作为唤醒源，不能作为跨进程持久操作日志或恢复游标 |
-| GDevelop AI 会话 | v2 只保存内存 session/turn/call、审批、结果和 writer lease；当前 WebIDE 直接在 live `gdProject` 上调用官方函数，不读写 history/current/revision/evidence | AI 不接入协作 Authority；用户正常保存才进入工程协作流 |
+| GDevelop AI 会话 | v4（editor-session `4.0.0`）只保存内存 session/turn/call、审批、结果、writer lease 和 session-scoped `approvalMode`；同 session reattach 保留模式，close/Developer Mode 重启恢复 `request_approval`，不写项目或历史；Chat 使用根 `{echo,calls}` 和根 echo 的 return-status v3，Agent 返回状态保持 v1 且无 echo；当前 WebIDE 直接在 live `gdProject` 上调用官方函数，不读写 history/current/revision/evidence | AI 不接入协作 Authority；`approvalMode` 不是协作状态，不广播或持久化，外部 Agent 也无权修改；用户正常保存才进入工程协作流 |
 | WebIDE AI 调用状态 | `PlaymeshAiCallCoordinator` 使用 SSE 唤醒、按 sequence 轮询调用列表；该状态不是工程日志 | 工程协作可复用“实时通知非事实源”的原则，但不能复用 AI call 状态作为恢复事实 |
 | GDevelop mutation | 当前 `PlaymeshProjectMutationCoordinator` 仅是页面内队列 | 不能承担跨设备主机权威或分布式一致性 |
 | GDevelop 事件 | 当前 overlay 中没有通用 `playmeshCollaborationId` | 同事件表并发插入不能直接可靠实现 |
@@ -181,7 +181,8 @@ Source tree journal；不要把 `DeveloperProjectCatalog._revisions` 直接改�
 
 因此 GDevelop 分三级实施，后两级分别受聚合正确性与侵入预算门禁约束：
 
-1. 文件级 CAS：复用既有保存事件，把 canonical project JSON 作为一个权威文件/聚合；
+1. 工程树 CAS：复用既有保存事件，把官方 folder-project 的 `game.json` 与分片文件树作为一个
+   原子权威聚合；物理多文件不构成独立冲突域；
    基础过期即拒绝，引用资源仍按项目内容描述和 CAS 单独传输。
 2. 聚合级保存：使用冻结的 schema-aware projector 比较保存前后 canonical 状态，只对对象、
    场景属性、场景实例集合、整张事件表、外部事件、变量、设置和资源等白名单聚合产生
@@ -251,7 +252,7 @@ memberRootKey` 的正确绑定；否则长期邀请和自动重连无法成立�
 1. 复用已有公开接口、保存边界和事件流。
 2. 使用 facade、middleware、decorator 或 Adapter 包裹现有业务服务。
 3. 使用构建期 overlay 增加独立模块和单一 bootstrap。
-4. 前三项无法提供对象/事件级数据时，先降低到保存事件驱动的 `project_file`；只有独立的
+4. 前三项无法提供对象/事件级数据时，先降低到保存事件驱动的 `project_tree`；只有独立的
    schema-aware projector 门禁通过后才升级为 `aggregate_save`。
 5. 只有中立序列化能力无法从外部获得、补丁保持局部且经过单独架构评审时，才允许增加
    最小 Core seam；不得用这个例外新增单对象动作捕获链。
@@ -812,7 +813,7 @@ Git 合并、实时共同编辑或意图冲突检测。
 
 ### 11.1 正常保存的统一 Authority 基础
 
-Authority 只处理 GDevelop 正常保存和系统维护事务。Playmesh AI v2 只调用当前 WebIDE 的
+Authority 只处理 GDevelop 正常保存和系统维护事务。Playmesh AI v4 只调用当前 WebIDE 的
 官方编辑函数并形成普通 dirty 状态，不保存工程，也不生成 before/after、revision、历史或
 提交证据。AI 辅助后的内容只有在用户按正常流程保存时才进入 Authority。
 
@@ -850,23 +851,23 @@ GD0 是规定内的默认实现，不依赖对象级修改钩子：
 
 ```text
 人工手动/自动保存（包括用户决定保存的 AI 辅助修改）
-→ 转换为统一 project_file GDevelopOperationTransaction
+→ 转换为统一 project_tree GDevelopOperationTransaction
 → 以 project revision + content hash 提交主机 Authority
 → journal/CAS/current/mainSeq 持久化，或返回 stale_base
 → 持久 eventSequence 唤醒其他 Controller
 → 干净 WebIDE 加载权威 current；脏 WebIDE 保存 recovery 并阻止覆盖
 ```
 
-主机开启协作时记录 `gdevelopSyncMode=project_file` 并在认证后下发；它不是客户端自报的
+主机开启协作时记录 `gdevelopSyncMode=project_tree` 并在认证后下发；它不是客户端自报的
 加入条件。相同 `effectiveBundleSha256` 已保证实现一致，客户端直接遵循主机会话状态。
 
-这里的“整个文件”仅指 `ProjectContentDescriptor` 纳管的 GDevelop 项目 JSON；引用资源按 CAS
+这里的“整个聚合”仅指 `ProjectContentDescriptor` 纳管的 GDevelop folder-project 文件树；引用资源按 CAS
 清单同步，编辑器安装文件、缓存、外部绝对路径和其他非项目内容均不进入同步。
 
 先复用已有 `GDevelopProjectHistoryAdapter.saveCurrent(baseRevision)`、LocalVersionStore、CAS
 和 `authoritativeChanges`：
 
-- 整个 canonical project JSON 是一个聚合。
+- 整个 canonical project tree 是一个聚合；`game.json` 与所有引用分片必须同一事务提交。
 - 资源按现有 contentHash/CAS 传输。
 - 保存携带项目 baseRevision。
 - 基础过期返回 `stale_base`。
@@ -898,7 +899,7 @@ canonical before/after
 首期白名单只包含场景属性、场景实例、单个对象、完整场景事件表、外部事件表、变量、项目
 设置和资源清单。事件表在 GD1 中仍是一个整体聚合，不能把快照差异解释成用户对单条事件的
 语义意图。投影结果出现未知字段、跨聚合引用闭包不完整、序列化无法确定性 round-trip 或
-应用后 hash 不一致时，整个提交必须回退为 GD0 `project_file`，不能部分采用差异。
+应用后 hash 不一致时，整个提交必须回退为 GD0 `project_tree`，不能部分采用差异。
 
 GD1 允许不同聚合基于各自 revision 并行提交；同一聚合仍执行 CAS。相同 GDevelop SHA-256
 只是必要的实现兼容条件，不能替代相同 baseMainSeq、baseAggregateRevision 和 baseHash。
@@ -926,7 +927,7 @@ GD1 优先复用项目中已经存在的稳定场景、对象和实例身份；�
 ### 11.4 阶段 GD2：语义操作捕获与验证重放
 
 GD2 不得通过新增横跨 Core 的单对象捕获链实现。若现有 hook/overlay 不能稳定给出下列动作，
-则关闭 GD2，继续使用已通过门禁的 GD0 `project_file` 或 GD1 `aggregate_save`：
+则关闭 GD2，继续使用已通过门禁的 GD0 `project_tree` 或 GD1 `aggregate_save`：
 
 在既有命令、保存和 mutation 边界安装 Collaboration Interceptor，由 overlay 直接产生操作。
 以下任一必要动作没有稳定边界时，GD2 即不可启用，不增加 Core 动作事件 seam：
@@ -1104,7 +1105,7 @@ rendezvousId 和全套成员根密钥，不复活旧密钥。旧客户端必须�
 编辑器只调用统一 App facade。关闭状态显示“开启协作”；开启后显示：
 
 - 协作状态、Adapter 和兼容标识。
-- GDevelop 同步模式（`project_file`/`aggregate_save`/`semantic`，适用时）。
+- GDevelop 同步模式（`project_tree`/`aggregate_save`/`semantic`，适用时）。
 - LAN/Relay 可用线路、当前主机登记和连接状态。
 - 随机 rendezvous 路径（不能单独加入）。
 - 每位成员独立的专属邀请和 AES 根密钥轮换。
@@ -1243,8 +1244,8 @@ Service middleware 和最终发布、导出、上传、正式安装服务调用�
 - final WebIDE `effectiveBundleSha256`。
 - 以 overlay 方式新增独立 `ProjectCollaborationController`：WebSocket 推送为主、SSE 只唤醒、
   REST 按 `eventSequence` 补拉为权威恢复；自己的提交只确认，其他成员提交才应用。
-- 既有保存事件驱动的 canonical project 文件级 CAS、资源增量、在线覆盖、预览允许和发布
-  拒绝；冻结 `gdevelopSyncMode=project_file`，不要求新增对象级 Core hook。项目级模式下任何
+- 既有保存事件驱动的 canonical folder-project tree CAS、资源增量、在线覆盖、预览允许和发布
+  拒绝；冻结 `gdevelopSyncMode=project_tree`，不要求新增对象级 Core hook。项目级模式下任何
   本地未提交修改都视为全项目 dirty：干净端自动加载，dirty 端禁止静默覆盖并进入恢复流程。
 
 出口：主机唯一 WebIDE 与远端协作者 WebIDE 能在进程重启、SSE 丢失和
@@ -1259,7 +1260,7 @@ Service middleware 和最终发布、导出、上传、正式安装服务调用�
 - 实现 schema-aware aggregate projector：从 canonical before/after 投影白名单聚合、规范化
   序列化噪声、计算引用闭包，并以 baseMainSeq/baseAggregateRevision/baseHash 做 CAS。
 - 多聚合替换必须在主机端全成或全败，应用后验证 canonical afterHash；未知字段、引用闭包
-  不完整、round-trip 不确定或 hash 不一致时整笔回退 GD0 `project_file`。
+  不完整、round-trip 不确定或 hash 不一致时整笔回退 GD0 `project_tree`。
 - `ProjectCollaborationController` 支持 canonical 聚合刷新、聚合级 dirty 防覆盖、operationId
   回声抑制和 eventSequence 缺口恢复；同一完整事件表仍作为一个聚合处理。
 - 在线 `stale_base` 候选进入有界 owner 冲突审阅；候选不分配 mainSeq、不广播，只有持久化
@@ -1367,7 +1368,7 @@ dev-cli/internal/collaboration/
 | `lib/core/services/go_core_runtime.dart` | 管理 boot token、Channel 生命周期和能力探测 |
 | `developer_project_catalog.dart` | 保留普通工作区职责，不再承担协作权威 revision |
 | Developer Operation Registry | 增加项目级协作会话和角色执行中间件 |
-| GDevelop history/AI service | 普通历史提交接入统一 Authority；AI v2 保持 live-project 调用协调，不接 history/current/revision，也不新增 AI 保存入口 |
+| GDevelop history/AI service | 普通历史提交接入统一 Authority；AI v4 保持 live-project 调用协调，不接 history/current/revision，也不新增 AI 保存入口 |
 | GDevelop WebIDE pipeline | 生成最终有效分发 SHA-256；叠加独立协作 Controller 和保存事件 interceptor，细粒度 applier/overlay/seam 受 Gate G7 约束 |
 | dev-cli Adapter Registry | 只提供工程根/内容描述，不复制同步协议 |
 
@@ -1435,7 +1436,7 @@ aggregate_save 可选项：
 - 不同白名单聚合的并发保存都保留；同一完整事件表/同一聚合的旧 revision/hash 被拒绝，
   相同 bundle SHA 不会绕过 base state 校验。
 - 多聚合替换全成或全败；未知字段、引用闭包不完整、round-trip 不确定和应用后 hash 不一致
-  均整笔回退 `project_file`。
+  均整笔回退 `project_tree`。
 - 远端 canonical 聚合只在本地对应 scope 干净时应用；dirty 聚合不被静默覆盖。
 - 在线过期候选只有持久化为有界 `PendingConflictProposal` 后可供 owner 审阅；未裁决候选无
   mainSeq、无已提交广播，owner 最终裁决先持久化后广播；离线 recovery 不进入该队列。
@@ -1489,7 +1490,7 @@ GD0 必需项失败会阻断 GDevelop 协作发布。aggregate_save 任一项失
 - 协作业务只能出现在登记的 facade/middleware/Adapter/overlay 目录，不在编辑器组件中散落。
 - 每个不可避免的 GDevelop Core seam 都存在 patch manifest 条目和针对性契约测试。
 - 不存在为对象/事件级捕获新增的跨模块 Core 调用链；无法用既有 hook 捕获时，测试确认
-  功能开关退化到已通过门禁的保存事件 `aggregate_save` 或 `project_file`。
+  功能开关退化到已通过门禁的保存事件 `aggregate_save` 或 `project_tree`。
 - 从锁定 upstream commit 开始执行 clean build，自动应用 overlays/patches 后得到相同
   `effectiveBundleSha256`。
 - patch 上下文、导出符号或序列化契约变化时构建明确失败，不允许静默跳过。
@@ -1539,7 +1540,7 @@ Source/dev-cli、GDevelop aggregate-save 和 GDevelop semantic 应分开开关�
 - Go Server：关闭独立开关并重启，只移除协作路由。
 - App：停止创建新 generation，允许当前主机导出 checkpoint 后关闭。
 - Go Core：旧 Session API 保持不变，可回退到无 collaboration capability 的版本。
-- GDevelop：保留项目 canonical JSON/资源；稳定 ID 字段必须设计成旧版可忽略，或提供迁移
+- GDevelop：保留 canonical folder-project tree/资源；稳定 ID 字段必须设计成旧版可忽略，或提供迁移
   验证，不能因为关闭协作破坏项目可打开性。
 
 ## 19. 工程量估算
@@ -1611,7 +1612,7 @@ Source + dev-cli 可审阅 Beta 约为 30-45 人周；包含 GD1 聚合级保存
   客户端—主机 AES-256-GCM 数据加密。
 - 为根密钥项目绑定、持久 journal、blob 分块恢复和协议测试投入独立工程量。
 - 接受编辑器接入以切片/overlay 为主；必要 Core 变更只能是另行批准并通过 Gate G7 的最小
-  中立 seam；缺少单对象 hook 时接受停留在 `project_file`，或在独立 projector 门禁通过后
+  中立 seam；缺少单对象 hook 时接受停留在 `project_tree`，或在独立 projector 门禁通过后
   使用 `aggregate_save`，不以扩大源码修改换取粒度。
 - 接受 GDevelop 人工保存和 system 修改共享主机 App 内同一 Authority 与持久操作日志；AI
   只在当前 WebIDE 修改 live 工程，用户正常保存后才作为普通 human transaction 进入。
@@ -1660,7 +1661,7 @@ G4/G7；任一层不满足就保留上一层能力，不拖垮底层通道和源
 10. 为 GDevelop 建立最小持久 operation/event log，并用主机唯一 WebIDE 和远端模拟成员验证
    “SSE 唤醒 + sequence 补拉”、回声抑制、进程重启恢复和 dirty 项目不被静默覆盖；另验证
    AI call sequence 不混入工程日志。
-11. GDevelop 用既有保存事件验证 canonical project 文件级 CAS、`stale_base`、资源清单和
+11. GDevelop 用既有保存事件验证 canonical folder-project tree CAS、`stale_base`、资源清单和
    全端覆盖，不修改对象级 Core 动作链。
 12. 用固定 GDevelop 样本验证 aggregate projector：不同白名单聚合、同一完整事件表、跨聚合
    引用、未知字段、规范化噪声、round-trip 和 afterHash；任何不确定结果都必须回退 GD0。
@@ -1690,8 +1691,8 @@ G4/G7；任一层不满足就保留上一层能力，不拖垮底层通道和源
 | B6 | dev-cli 可恢复物化 | 尚无 collaboration watcher、回声抑制、apply journal；整目录原子替换在 Windows 不成立 | 当前目录保护、Y/N 零写入点、逐文件原子替换、崩溃恢复、`apply_pending` 和旧 IDE 缓冲区测试通过 | dev-cli Beta |
 | B7 | 编辑器兼容收据 | 当前 GDevelop lock 没有最终有效分发 SHA-256；源码以 App 完整版本判断的前提是同版本构建内容不可变 | 构建/安装产出并校验 `effectiveBundleSha256`；发布流程保证相同 App 完整版本对应相同 Source 协作实现，不允许同版本漂移 | GDevelop/Source 加入门禁 |
 | B8 | 主机权威备份与恢复验证 | 唯一真源放在主机后，主机状态损坏会使所有成员副本失去可确认的权威；当前只有概念性 checkpoint | 定义 host checkpoint/backup、校验、恢复和失败回退；恢复不会创建第二主机或回退 mainSeq | 正式发布，不阻断早期单机 PoC |
-| B9 | GDevelop 持久统一提交与远端应用闭环 | 当前 `authoritativeChanges` 和 sequence 只在 Dart 进程内，尚未接入统一持久 operation/event log，也没有独立远端操作 Controller；AI v2 刻意不产生工程 commit | Gate G4 的 GD0 必需项通过：正常保存统一 Authority，AI call 与工程日志隔离，持久 sequence 可补拉，Controller 回声抑制、重启恢复、dirty 防覆盖和隐私扫描完成 | GDevelop GD0 协作预览及其后续能力；不阻断 Source/dev-cli |
-| B10 | GDevelop 聚合投影与应用门禁 | 尚未证明 canonical before/after 可稳定排除序列化噪声、形成完整引用闭包、原子提交多聚合并在远端应用后得到相同 hash | Gate G4 aggregate_save 项全通过；未知差异和验证失败确定回退 `project_file`，owner 冲突候选有界且仅裁决后广播 | 仅阻断 GD1 聚合级保存；失败保留 GD0 |
+| B9 | GDevelop 持久统一提交与远端应用闭环 | 当前 `authoritativeChanges` 和 sequence 只在 Dart 进程内，尚未接入统一持久 operation/event log，也没有独立远端操作 Controller；AI v4 刻意不产生工程 commit | Gate G4 的 GD0 必需项通过：正常保存统一 Authority，AI call 与工程日志隔离，持久 sequence 可补拉，Controller 回声抑制、重启恢复、dirty 防覆盖和隐私扫描完成 | GDevelop GD0 协作预览及其后续能力；不阻断 Source/dev-cli |
+| B10 | GDevelop 聚合投影与应用门禁 | 尚未证明 canonical before/after 可稳定排除序列化噪声、形成完整引用闭包、原子提交多聚合并在远端应用后得到相同 hash | Gate G4 aggregate_save 项全通过；未知差异和验证失败确定回退 `project_tree`，owner 冲突候选有界且仅裁决后广播 | 仅阻断 GD1 聚合级保存；失败保留 GD0 |
 | B11 | 本机唯一开发入口的真实执行边界 | 当前 `lib/main.dart` 只有 `window_manager` 初始化，未找到 App 单实例机制，也没有 Source Workspace/GDevelop/dev-cli 共用的入口 Registry；页面级布尔值无法覆盖 CLI、崩溃和第二进程 | Gate G5 通过：facade 签发唯一入口句柄，重复打开不创建会话，失联有界回收；多进程以单实例或唯一 broker 拦截 | “主机无需考虑多个受管协作会话”这一简化前提；同时影响 Source、GDevelop、dev-cli 产品入口，但不承诺外部 IDE 窗口唯一 |
 | B12 | GDevelop 语义钩子与验证重放门禁 | 普通事件缺少通用稳定 ID，现有 mutation coordinator 只是页面内队列；尚未证明官方 API 或现有 AI 函数执行层能在固定契约、前后 hash 和副作用白名单下确定性重放全部目标操作 | Gate G4 semantic 项与 Gate G7 全通过且不超出最小 seam 预算；AI 会话/SSE 不进入协作协议；否则明确停留在已通过的 GD0/GD1 | 仅阻断“同场景/同事件表细粒度并发”承诺 |
 

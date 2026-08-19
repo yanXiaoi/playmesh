@@ -89,11 +89,17 @@ assert.equal(
   'function',
   'Windows WebView must receive the host hook at document creation'
 );
-context.__playmeshSaveBlobDownload({
+const nativeSaveCompletion = context.__playmeshSaveBlobDownload({
   url: 'blob:playmesh-native-save-fixture',
   filename: 'game.zip',
 });
+assert.equal(
+  typeof nativeSaveCompletion?.then,
+  'function',
+  'the native hook must expose when it has finished consuming the Blob URL'
+);
 const readyEnvelope = JSON.parse(await messageReceived);
+await nativeSaveCompletion;
 assert.equal(readyEnvelope.__playmeshNativeFileSave.kind, 'ready');
 assert.match(
   readyEnvelope.__playmeshNativeFileSave.requestId,
@@ -130,9 +136,12 @@ assert.equal(
 
 assert.match(
   workspaceDart,
-  /additionalDocumentCreatedScripts:\s*const \[playmeshNativeFileSaveScript\]/
+  /additionalDocumentCreatedScripts:\s*const \[[\s\S]*?playmeshNativeFileSaveScript,[\s\S]*?\]/
 );
-assert.match(workspaceDart, /onWebMessage:\s*_handleNativeFileSaveWebMessage/);
+assert.match(
+  workspaceDart,
+  /onWebMessage:[\s\S]*?_handleNativeFileSaveWebMessage\(message\)/
+);
 assert.ok(
   windowsWebViewDart.indexOf('addScriptToExecuteOnDocumentCreated(script)') <
     windowsWebViewDart.indexOf('_controller.loadUrl('),

@@ -2,6 +2,7 @@
 
 import { playmeshPortableImportAllocationClient } from '../PlaymeshProjectImport/PlaymeshPortableImportAllocationClient';
 import { sha256Hex as computeSha256Hex } from '../PlaymeshCrypto/PlaymeshSha256';
+import { unsplitPlaymeshProject } from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
 
 /*::
 type AllocationSnapshotResource = {|
@@ -13,7 +14,7 @@ type AllocationSnapshotResource = {|
 |};
 
 type AllocationSnapshot = {|
-  project: Object,
+  projectFiles: Array<Object>,
   resources: Array<AllocationSnapshotResource>,
 |};
 
@@ -126,13 +127,13 @@ const canonicalizeJson = (value /*: any */) /*: any */ => {
   return value;
 };
 
-const orderResourcePlanByProjectReferences = (
-  projectJson /*: string */,
+const orderResourcePlanByProjectReferences = async (
+  projectFilesJson /*: string */,
   resourcePlan /*: Array<Object> */
-) /*: Array<Object> */ => {
+) /*: Promise<Array<Object>> */ => {
   let project /*: any */ = null;
   try {
-    project = JSON.parse(projectJson);
+    project = await unsplitPlaymeshProject(JSON.parse(projectFilesJson));
   } catch (error) {
     fail('invalid_allocation_snapshot', 'GDevelop 工程必须是有效的 JSON。');
   }
@@ -199,11 +200,15 @@ const orderResourcePlanByProjectReferences = (
 };
 
 export const createPlaymeshProjectAllocationEvidence = async ({
-  projectJson,
+  projectFilesJson,
   resources,
   cryptoImplementation = typeof window === 'undefined' ? null : window.crypto,
 } /*: Object */) /*: Promise<Object> */ => {
-  if (typeof projectJson !== 'string' || !projectJson || !Array.isArray(resources)) {
+  if (
+    typeof projectFilesJson !== 'string' ||
+    !projectFilesJson ||
+    !Array.isArray(resources)
+  ) {
     fail('invalid_allocation_snapshot', 'GDevelop 工程分配快照无效。');
   }
   const logicalIds /*: Set<string> */ = new Set();
@@ -241,12 +246,15 @@ export const createPlaymeshProjectAllocationEvidence = async ({
   resourcePlan.sort((left, right) =>
     left.logicalId.localeCompare(right.logicalId)
   );
-  const resourceManifest = orderResourcePlanByProjectReferences(
-    projectJson,
+  const resourceManifest = await orderResourcePlanByProjectReferences(
+    projectFilesJson,
     resourcePlan
   );
   return {
-    projectJsonHash: await sha256Hex(projectJson, cryptoImplementation),
+    projectFilesHash: await sha256Hex(
+      projectFilesJson,
+      cryptoImplementation
+    ),
     resourceManifestHash: await sha256Hex(
       JSON.stringify(canonicalizeJson(resourceManifest)),
       cryptoImplementation
@@ -324,9 +332,9 @@ export const allocatePlaymeshProjectSnapshot = async ({
   snapshot,
   allocationClient = playmeshPortableImportAllocationClient,
 } /*: Object */) /*: Promise<Object> */ => {
-  const projectJson = JSON.stringify(snapshot.project);
+  const projectFilesJson = JSON.stringify(snapshot.projectFiles);
   const evidence = await createPlaymeshProjectAllocationEvidence({
-    projectJson,
+    projectFilesJson,
     resources: snapshot.resources,
   });
   const target = {
@@ -334,10 +342,10 @@ export const allocatePlaymeshProjectSnapshot = async ({
     gameId,
     packageName: gameId,
     projectUuid,
-    projectJsonHash: evidence.projectJsonHash,
+    projectFilesHash: evidence.projectFilesHash,
     resourceManifestHash: evidence.resourceManifestHash,
   };
-  const pendingKey = `${gameId}\n${fileIdentifier}\n${evidence.projectJsonHash}\n${evidence.resourceManifestHash}`;
+  const pendingKey = `${gameId}\n${fileIdentifier}\n${evidence.projectFilesHash}\n${evidence.resourceManifestHash}`;
   const pending = pendingTransactions.get(pendingKey);
   const prepareInput = {
     idempotencyKey: (pending && pending.idempotencyKey) || createId(),
@@ -414,13 +422,14 @@ export const allocatePlaymeshProjectSnapshot = async ({
           });
         }
       }
-      await allocationClient.uploadProject(input, projectJson);
+      await allocationClient.uploadProjectFiles(input, projectFilesJson);
       state = requireState(
         await allocationClient.finalizeWorkspace(input, {
           packageName: gameId,
           projectUuid,
-          projectJsonHash: evidence.projectJsonHash,
-          projectJsonSize: new TextEncoder().encode(projectJson).byteLength,
+          projectFilesHash: evidence.projectFilesHash,
+          projectFilesSize: new TextEncoder().encode(projectFilesJson)
+            .byteLength,
           resourceManifestHash: evidence.resourceManifestHash,
         })
       );

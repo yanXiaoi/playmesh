@@ -59,7 +59,7 @@ function loadDartSdkSources() {
     );
     const dart = fs.readFileSync(filePath, "utf8");
     const match = dart.match(
-      /const\s+([A-Za-z][A-Za-z0-9]*SdkSource)\s*=\s*SdkSourceFragment\(\s*id:\s*'([^']+)',\s*target:\s*SdkSourceTarget\.(game|app),\s*order:\s*(\d+),\s*typeScript:\s*r'''([\s\S]*?)''',\s*\);/,
+      /const\s+([A-Za-z][A-Za-z0-9]*SdkSource)\s*=\s*SdkSourceFragment\(\s*id:\s*'([^']+)',\s*target:\s*SdkSourceTarget\.(game|app),\s*order:\s*(\d+),\s*typeScript:\s*r'''([\s\S]*?)''',\s*(?:declaration:\s*r'''([\s\S]*?)''',\s*)?\);/,
     );
     if (!match) {
       throw new Error(`${relativePartPath} 缺少合法的 SdkSourceFragment`);
@@ -70,6 +70,7 @@ function loadDartSdkSources() {
       target: match[3],
       order: Number(match[4]),
       source: match[5],
+      declaration: match[6] ?? "",
       dart,
     });
   }
@@ -111,6 +112,15 @@ function loadDartSdkSources() {
   return {
     game: assemble("game"),
     app: assemble("app"),
+    declarations: selectedFragments
+      .filter((fragment) => fragment.declaration.trim())
+      .sort((left, right) => {
+        const targetComparison =
+          (left.target === "game" ? 0 : 1) -
+          (right.target === "game" ? 0 : 1);
+        return targetComparison || left.order - right.order;
+      })
+      .map((fragment) => fragment.declaration),
     fragments,
   };
 }
@@ -417,6 +427,7 @@ function generate({
   versionName,
   placeholder,
   replacements = {},
+  declarationFragments = [],
 }) {
   let resolvedSource = source;
   for (const [from, to] of Object.entries(replacements)) {
@@ -442,9 +453,18 @@ function generate({
   }
   const version = versionMatch[1];
   const javascript = resolvedSource.replace(declarationPattern, "");
-  const declaration = declarationMatch[1]
-    .replaceAll(placeholder, version)
-    .trimStart();
+  const declaration = [
+    declarationMatch[1].replaceAll(placeholder, version).trim(),
+    ...declarationFragments
+      .map((fragment) => {
+        let resolvedFragment = fragment.replaceAll(placeholder, version);
+        for (const [from, to] of Object.entries(replacements)) {
+          resolvedFragment = resolvedFragment.replaceAll(from, to);
+        }
+        return resolvedFragment.trim();
+      })
+      .filter(Boolean),
+  ].join("\n\n") + "\n";
   fs.mkdirSync(sourceDirectory, { recursive: true });
   fs.writeFileSync(sourcePath, resolvedSource, "utf8");
   fs.mkdirSync(outputDirectory, { recursive: true });
@@ -484,6 +504,7 @@ const gameSdkVersion = generate({
   replacements: {
     __PLAYMESH_APP_SDK_VERSION__: appSdkVersion,
   },
+  declarationFragments: dartSdkSources.declarations,
 });
 fs.rmSync(path.join(outputDirectory, "playmesh.js"), { force: true });
 fs.rmSync(path.join(outputDirectory, "playmesh.d.ts"), { force: true });

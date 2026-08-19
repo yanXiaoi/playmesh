@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 class LocalVersionRetentionPolicy {
   const LocalVersionRetentionPolicy({
@@ -184,6 +185,7 @@ class LocalVersionStore {
     required this.root,
     this.retentionPolicy = const LocalVersionRetentionPolicy(),
     DateTime Function()? clock,
+    @visibleForTesting this.onGarbageCollection,
   }) : clock = clock ?? DateTime.now;
 
   static const schemaVersion = 1;
@@ -191,11 +193,41 @@ class LocalVersionStore {
   final Directory root;
   final LocalVersionRetentionPolicy retentionPolicy;
   final DateTime Function() clock;
+  @visibleForTesting
+  final void Function()? onGarbageCollection;
   static final Map<String, Future<void>> _projectTails = {};
   Future<void> _tail = Future<void>.value();
 
-  Future<LocalCasObjectReference> stageObject(Uint8List content) =>
-      stageStream(Stream.value(content), expectedBytes: content.length);
+  Future<LocalCasObjectReference> stageObject(Uint8List content) async =>
+      (await stageObjects([content])).single;
+
+  /// 将一批内存对象写入 CAS，并在整批结束后只执行一次 GC。
+  ///
+  /// 返回值与 [contents] 顺序一致；已经存在的 hash 只复用目标对象，不创建
+  /// 临时文件。整批与同一项目的其他 stage/commit/delete 操作串行执行。
+  Future<List<LocalCasObjectReference>> stageObjects(
+    Iterable<Uint8List> contents,
+  ) {
+    final batch = contents.toList(growable: false);
+    if (batch.isEmpty) {
+      return Future.value(const <LocalCasObjectReference>[]);
+    }
+    return _serialize(
+      () => _serializeProject(
+        () => _withStoreLock(() async {
+          final references = <LocalCasObjectReference>[];
+          for (final content in batch) {
+            references.add(await _stageObjectUnlocked(content));
+          }
+          await _deleteUnpinnedObjects(
+            await _readState(),
+            protectedHashes: references.map((reference) => reference.hash),
+          );
+          return List<LocalCasObjectReference>.unmodifiable(references);
+        }),
+      ),
+    );
+  }
 
   /// 以临时文件流式写入 CAS；`timeout` 是相邻数据块的空闲超时。
   ///
@@ -207,6 +239,26 @@ class LocalVersionStore {
     String? expectedHash,
     int? maxBytes,
     Duration timeout = const Duration(seconds: 30),
+  }) => _serialize(
+    () => _serializeProject(
+      () => _withStoreLock(
+        () => _stageStreamUnlocked(
+          source,
+          expectedBytes: expectedBytes,
+          expectedHash: expectedHash,
+          maxBytes: maxBytes,
+          timeout: timeout,
+        ),
+      ),
+    ),
+  );
+
+  Future<LocalCasObjectReference> _stageStreamUnlocked(
+    Stream<List<int>> source, {
+    int? expectedBytes,
+    String? expectedHash,
+    int? maxBytes,
+    required Duration timeout,
   }) async {
     if (maxBytes != null && maxBytes < 1) {
       throw const FormatException('CAS 上传上限无效');
@@ -229,13 +281,20 @@ class LocalVersionStore {
       );
     }
     await root.create(recursive: true);
-    final staging = Directory('${root.path}${Platform.pathSeparator}staging');
-    await staging.create(recursive: true);
-    final temporary = File(
-      '${staging.path}${Platform.pathSeparator}'
-      'upload-${clock().microsecondsSinceEpoch}-${ProcessInfo.currentRss}.tmp',
-    );
-    final output = temporary.openWrite();
+    File? temporary;
+    IOSink? output;
+    if (expectedHash == null ||
+        !await File(
+          '${_objects.path}${Platform.pathSeparator}$expectedHash.blob',
+        ).exists()) {
+      final staging = Directory('${root.path}${Platform.pathSeparator}staging');
+      await staging.create(recursive: true);
+      temporary = File(
+        '${staging.path}${Platform.pathSeparator}'
+        'upload-${clock().microsecondsSinceEpoch}-${ProcessInfo.currentRss}.tmp',
+      );
+      output = temporary.openWrite();
+    }
     final hashSink = Sha256().toSync().newHashSink();
     var received = 0;
     var outputClosed = false;
@@ -253,15 +312,17 @@ class LocalVersionStore {
           throw const FormatException('CAS 上传实际字节数与预期不一致');
         }
         hashSink.add(chunk);
-        output.add(chunk);
+        output?.add(chunk);
       }
       if (received < 1) throw const FormatException('CAS 对象不能为空');
       if (expectedBytes != null && received != expectedBytes) {
         throw const FormatException('CAS 上传实际字节数与预期不一致');
       }
-      await output.flush();
-      await output.close();
-      outputClosed = true;
+      if (output != null) {
+        await output.flush();
+        await output.close();
+        outputClosed = true;
+      }
       hashSink.close();
       hashClosed = true;
       final digest = await hashSink.hash();
@@ -269,23 +330,25 @@ class LocalVersionStore {
       if (expectedHash != null && hash != expectedHash) {
         throw const FormatException('CAS 上传内容 hash 与预期不一致');
       }
-      await _objects.create(recursive: true);
       final target = File(
         '${_objects.path}${Platform.pathSeparator}$hash.blob',
       );
-      if (await target.exists()) {
-        await temporary.delete();
-      } else {
-        await temporary.rename(target.path);
+      if (temporary != null) {
+        await _objects.create(recursive: true);
+        if (await target.exists()) {
+          await temporary.delete();
+        } else {
+          await temporary.rename(target.path);
+        }
       }
-      await _serialize(() async {
-        await _deleteUnpinnedObjects(await _readState());
-      });
+      await _deleteUnpinnedObjects(await _readState(), protectedHashes: [hash]);
       return LocalCasObjectReference(hash: hash, bytes: received);
     } on Object {
-      if (!outputClosed) await output.close();
+      if (output != null && !outputClosed) await output.close();
       if (!hashClosed) hashSink.close();
-      if (await temporary.exists()) await temporary.delete();
+      if (temporary != null && await temporary.exists()) {
+        await temporary.delete();
+      }
       rethrow;
     }
   }
@@ -673,10 +736,12 @@ class LocalVersionStore {
   }
 
   Future<void> _deleteUnpinnedObjects(
-    Map<String, _LocalVersionNamespaceState> state,
-  ) async {
+    Map<String, _LocalVersionNamespaceState> state, {
+    Iterable<String> protectedHashes = const <String>[],
+  }) async {
+    onGarbageCollection?.call();
     if (!await _objects.exists()) return;
-    final pinned = <String>{};
+    final pinned = <String>{...protectedHashes};
     for (final namespace in state.values) {
       for (final record in [
         if (namespace.current != null) namespace.current!,

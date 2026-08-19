@@ -1,9 +1,11 @@
 // @flow
 
 import { openPlaymeshPortableZip } from './PlaymeshPortableZipReader';
+import { openPlaymeshRawProjectJson } from './PlaymeshRawProjectJsonReader';
 import {
   getPortableResourceMimeType,
   parsePortableProjectJson,
+  parsePortableProjectPartialJson,
   planPortableProjectResources,
   PlaymeshProjectImportError,
   resolvePortableImportLimits,
@@ -14,6 +16,7 @@ import {
   createProjectSnapshot,
   persistRestoredProject,
 } from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectSerializer';
+import { unsplitPlaymeshProject } from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
 import {
   ensureGDevelopGameId,
   generateCopiedGDevelopGameId,
@@ -64,7 +67,7 @@ const assertAllocationClient = (client /*: mixed */) /*: any */ => {
     'getStatus',
     'resourcePresence',
     'uploadResource',
-    'uploadProject',
+    'uploadProjectFiles',
     'finalizeWorkspace',
     'commit',
     'recover',
@@ -170,14 +173,14 @@ const createId = (cryptoImplementation /*: any */) /*: string */ => {
 
 export const createPortableImportEvidence = async (
   {
-    projectJson,
+    projectFilesJson,
     resources,
     cryptoImplementation = typeof window === 'undefined' ? null : window.crypto,
   } /*: Object */
 ) /*: Promise<Object> */ => {
   try {
     return await createPlaymeshProjectAllocationEvidence({
-      projectJson,
+      projectFilesJson,
       resources,
       cryptoImplementation,
     });
@@ -333,13 +336,16 @@ const uploadWorkspace = async (
       });
       uploaded.add(missing.hash);
     }
-    await allocationClient.uploadProject(input, prepared.projectJson);
+    await allocationClient.uploadProjectFiles(
+      input,
+      prepared.projectFilesJson
+    );
     return assertPortableImportAllocationState(
       await allocationClient.finalizeWorkspace(input, {
         packageName: prepared.target.packageName,
         projectUuid: prepared.target.projectUuid,
-        projectJsonHash: prepared.target.projectJsonHash,
-        projectJsonSize: new TextEncoder().encode(prepared.projectJson)
+        projectFilesHash: prepared.target.projectFilesHash,
+        projectFilesSize: new TextEncoder().encode(prepared.projectFilesJson)
           .byteLength,
         resourceManifestHash: prepared.target.resourceManifestHash,
       })
@@ -450,7 +456,10 @@ export const createPlaymeshPortableProjectImporter = (
   const defaultCrypto = typeof window === 'undefined' ? null : window.crypto;
   const dependencies /*: any */ = {
     openArchive: openPlaymeshPortableZip,
+    openRawProjectJson: openPlaymeshRawProjectJson,
     parseProjectJson: parsePortableProjectJson,
+    parsePartialProjectJson: parsePortableProjectPartialJson,
+    unsplitProjectFiles: unsplitPlaymeshProject,
     planResources: planPortableProjectResources,
     resolveLimits: resolvePortableImportLimits,
     mimeTypeForPath: getPortableResourceMimeType,
@@ -601,6 +610,7 @@ export const createPlaymeshPortableProjectImporter = (
   const prepareArchiveSnapshot = async (
     {
       archiveBlob,
+      projectJsonBlob,
       packageName,
       identityMode,
       limits: limitOverrides,
@@ -608,21 +618,73 @@ export const createPlaymeshPortableProjectImporter = (
     } /*: Object */
   ) /*: Promise<Object> */ => {
     const limits = dependencies.resolveLimits(limitOverrides);
-    const archive = await dependencies.openArchive(archiveBlob, {
-      limits,
-      zipJs,
-    });
+    const archive = projectJsonBlob
+      ? await dependencies.openRawProjectJson(projectJsonBlob, { limits })
+      : await dependencies.openArchive(archiveBlob, {
+          limits,
+          zipJs,
+        });
     let project = null;
     const objectUrls = [];
     try {
       const projectBlob = await archive.readBlob({
         path: 'game.json',
         contentType: 'application/json',
-        maxBytes: limits.maxProjectJsonBytes,
+        maxBytes: limits.maxProjectFileBytes,
       });
-      const projectObject = dependencies.parseProjectJson(
+      const rootProjectObject = dependencies.parseProjectJson(
         new Uint8Array(await projectBlob.arrayBuffer()),
         limits
+      );
+      const projectFiles = [
+        { path: 'game.json', content: rootProjectObject },
+      ];
+      const projectFilesByPath = new Map([
+        ['game.json', rootProjectObject],
+      ]);
+      const preloadReferencedProjectFiles = async (
+        currentObject /*: mixed */,
+        depth /*: number */
+      ) /*: Promise<void> */ => {
+        if (
+          depth >= 3 ||
+          currentObject === null ||
+          typeof currentObject !== 'object'
+        ) {
+          return;
+        }
+        for (const key of Object.keys(currentObject)) {
+          const child = currentObject[key];
+          if (
+            child &&
+            typeof child === 'object' &&
+            child.__REFERENCE_TO_SPLIT_OBJECT === true
+          ) {
+            const referencePath = child.referenceTo;
+            const filePath = `${String(referencePath).replace(/^\//, '')}.json`;
+            let partial = projectFilesByPath.get(filePath);
+            if (!partial) {
+              const partialBlob = await archive.readBlob({
+                path: filePath,
+                contentType: 'application/json',
+                maxBytes: limits.maxProjectFileBytes,
+              });
+              partial = dependencies.parsePartialProjectJson(
+                new Uint8Array(await partialBlob.arrayBuffer()),
+                limits
+              );
+              projectFilesByPath.set(filePath, partial);
+              projectFiles.push({ path: filePath, content: partial });
+            }
+            await preloadReferencedProjectFiles(partial, depth + 1);
+          } else {
+            await preloadReferencedProjectFiles(child, depth + 1);
+          }
+        }
+      };
+      await preloadReferencedProjectFiles(rootProjectObject, 0);
+      const projectObject = await dependencies.unsplitProjectFiles(
+        projectFiles
       );
       project = deserializeProject(projectObject);
       let sourceProjectUuid = String(project.getProjectUuid() || '').trim();
@@ -638,6 +700,7 @@ export const createPlaymeshPortableProjectImporter = (
       const archivePlan = dependencies.planResources({
         inspectedArchive: archive.inspectedArchive,
         projectResources: projectResources.descriptions,
+        projectFilePaths: new Set(projectFilesByPath.keys()),
         limits,
       });
       const identity = resolveIdentity({
@@ -674,9 +737,9 @@ export const createPlaymeshPortableProjectImporter = (
         }
       }
       const snapshot = await dependencies.createSnapshot(project, fileMetadata);
-      const projectJson = JSON.stringify(snapshot.project);
+      const projectFilesJson = JSON.stringify(snapshot.projectFiles);
       const evidence = await createPortableImportEvidence({
-        projectJson,
+        projectFilesJson,
         resources: snapshot.resources,
         cryptoImplementation: dependencies.cryptoImplementation,
       });
@@ -685,14 +748,14 @@ export const createPlaymeshPortableProjectImporter = (
         gameId: identity.packageName,
         packageName: identity.packageName,
         projectUuid: identity.projectUuid,
-        projectJsonHash: evidence.projectJsonHash,
+        projectFilesHash: evidence.projectFilesHash,
         resourceManifestHash: evidence.resourceManifestHash,
       };
       return {
         status: 'ready',
         fileMetadata,
         snapshot,
-        projectJson,
+        projectFilesJson,
         evidence,
         target,
         name: allocationDisplayName(project.getName(), identity.packageName),
@@ -769,7 +832,7 @@ export const createPlaymeshPortableProjectImporter = (
     try {
       await dependencies.persistSnapshot({
         fileMetadata: prepared.fileMetadata,
-        project: prepared.snapshot.project,
+        projectFiles: prepared.snapshot.projectFiles,
         resources: prepared.snapshot.resources,
       });
     } catch (_) {

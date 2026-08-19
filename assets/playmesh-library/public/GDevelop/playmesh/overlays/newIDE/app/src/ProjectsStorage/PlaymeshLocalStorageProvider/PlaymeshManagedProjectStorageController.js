@@ -1,15 +1,25 @@
 // @flow
 
 /*::
+import type { FileMetadata } from '..';
+import type { PreparedPlaymeshProjectPersistence } from './PlaymeshProjectSerializer';
+import type {
+  PlaymeshAuthoritativeHistoryResult,
+  PlaymeshAuthoritativeProjectCommit,
+  PlaymeshManagedSaveInput,
+} from './PlaymeshAuthoritativeProjectCommit';
+
 type PlaymeshManagedProjectStorageDependencies = {|
   listAuthoritativeProjects: () => Promise<{|
     activeGameId: ?string,
     projects: Array<Object>,
     diagnostics: Array<Object>,
   |}>,
-  openAuthoritativeProject: (fileMetadata: Object) => Promise<Object>,
-  prepareProject: (input: Object) => Promise<Object>,
-  commitAuthoritativeProject: (prepared: Object, input: Object) => Promise<mixed>,
+  openAuthoritativeProject: (fileMetadata: FileMetadata) => Promise<Object>,
+  prepareProject: (
+    input: PlaymeshManagedSaveInput
+  ) => Promise<PreparedPlaymeshProjectPersistence>,
+  commitAuthoritativeProject: PlaymeshAuthoritativeProjectCommit,
   reportStatus?: (status: Object) => void,
 |};
 
@@ -18,6 +28,23 @@ export type PlaymeshManagedProjectStorageList = {|
   projects: Array<Object>,
   diagnostics: Array<Object>,
   source: 'authoritative',
+|};
+type PlaymeshRecoverableProjectOpenOptions = {|
+  openProject: () => Promise<Object>,
+  recoverPreparedRestore: () => Promise<boolean>,
+|};
+
+type PlaymeshManagedProjectSaveResult = {|
+  prepared: PreparedPlaymeshProjectPersistence,
+  authoritativeResult: void | PlaymeshAuthoritativeHistoryResult,
+|};
+
+type PlaymeshManagedProjectStorageController = {|
+  listProjects: () => Promise<PlaymeshManagedProjectStorageList>,
+  openProject: (fileMetadata: FileMetadata) => Promise<Object>,
+  saveProject: (
+    input: PlaymeshManagedSaveInput
+  ) => Promise<PlaymeshManagedProjectSaveResult>,
 |};
 */
 
@@ -36,9 +63,23 @@ const dispatchStatus = (status /*: Object */) /*: void */ => {
   );
 };
 
+export const openPlaymeshProjectWithPreparedRestoreRecovery = async ({
+  openProject,
+  recoverPreparedRestore,
+} /*: PlaymeshRecoverableProjectOpenOptions */) /*: Promise<Object> */ => {
+  try {
+    return await openProject();
+  } catch (error) {
+    const candidate /*: any */ = error;
+    if (candidate?.code !== 'gdevelop_project_mutation_locked') throw error;
+    if (!(await recoverPreparedRestore())) throw error;
+    return openProject();
+  }
+};
+
 export const createPlaymeshManagedProjectStorageController = (
   dependencies /*: PlaymeshManagedProjectStorageDependencies */
-) /*: Object */ => {
+) /*: PlaymeshManagedProjectStorageController */ => {
   if (
     !dependencies ||
     typeof dependencies.listAuthoritativeProjects !== 'function' ||
@@ -78,7 +119,7 @@ export const createPlaymeshManagedProjectStorageController = (
   };
 
   const openProject = async (
-    fileMetadata /*: Object */
+    fileMetadata /*: FileMetadata */
   ) /*: Promise<Object> */ => {
     const gameId =
       fileMetadata && typeof fileMetadata.gameId === 'string'
@@ -89,9 +130,11 @@ export const createPlaymeshManagedProjectStorageController = (
     return project;
   };
 
-  const saveProject = async (input /*: Object */) /*: Promise<Object> */ => {
+  const saveProject = async (
+    input /*: PlaymeshManagedSaveInput */
+  ) /*: Promise<PlaymeshManagedProjectSaveResult> */ => {
     const prepared = await dependencies.prepareProject(input);
-    const fileMetadata = prepared && prepared.fileMetadata;
+    const fileMetadata = prepared.fileMetadata;
     const gameId =
       fileMetadata && typeof fileMetadata.gameId === 'string'
         ? fileMetadata.gameId

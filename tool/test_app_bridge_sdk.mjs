@@ -164,6 +164,23 @@ const window = {
             declaredCapabilities: ["device.vibration"],
           },
         };
+      } else if (command.command === "app.lan.discover") {
+        result = [{
+          instanceId: "discovered-instance-0001",
+          gameId: "game.example.lan",
+          name: "LAN Game",
+          host: "Living room",
+        }];
+      } else if (command.command === "app.lan.getShareLinks") {
+        result = [{
+          url: "http://192.168.0.6:42317/playmesh/join#inviteToken=secret",
+          type: "lan",
+          img: "data:image/png;base64,aW1hZ2U=",
+        }, {
+          url: "https://relay.example/j/tunnel#inviteToken=secret",
+          type: "wan",
+          img: "data:image/png;base64,aW1hZ2Uy",
+        }];
       } else if (command.command === "app.capability.create") {
         result = {
           instanceId: "capability-1",
@@ -381,7 +398,13 @@ assert.deepEqual(
   JSON.parse(JSON.stringify(app.ui.configure({ fallbackUi: false }))),
   { fallbackUi: false, floatingButton: true },
 );
+const commandCountBeforeDisablingSystemMenuTriggers = commands.length;
+assert.equal(app.ui.disableSystemMenuTriggers(), undefined);
+assert.equal(app.ui.disableSystemMenuTriggers(), undefined);
+assert.equal(commands.length, commandCountBeforeDisablingSystemMenuTriggers);
+assert.equal(app.ui.setSystemMenuTriggersEnabled, undefined);
 for (const methodName of [
+  "disableSystemMenuTriggers",
   "configure",
   "initializeBrowser",
   "showGameSidebar",
@@ -401,6 +424,97 @@ for (const methodName of [
   assert.equal(typeof app.ui[methodName], "function");
 }
 assert.equal(app.ui.initializeBrowser(), false);
+
+const discoveredGames = await app.lan.discoverGames();
+assert.equal(Object.isFrozen(discoveredGames), true);
+assert.equal(Object.isFrozen(discoveredGames[0]), true);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(discoveredGames.map(({ join, ...game }) => game))),
+  [{
+    instanceId: "discovered-instance-0001",
+    gameId: "game.example.lan",
+    name: "LAN Game",
+    host: "Living room",
+  }],
+);
+assert.equal("url" in discoveredGames[0], false);
+assert.equal("inviteToken" in discoveredGames[0], false);
+await discoveredGames[0].join();
+assert.deepEqual(
+  commands.findLast((item) => item.command === "app.lan.joinDiscovered").payload,
+  {
+    instanceId: "discovered-instance-0001",
+    userActivation: true,
+  },
+);
+await app.lan.joinByLink("https://relay.example/j/invitation");
+assert.deepEqual(
+  commands.findLast((item) => item.command === "app.lan.joinByLink").payload,
+  {
+    invitationUrl: "https://relay.example/j/invitation",
+    userActivation: true,
+  },
+);
+await app.lan.scanQrAndJoin();
+assert.deepEqual(
+  commands.findLast((item) => item.command === "app.lan.scanQr").payload,
+  { userActivation: true },
+);
+await app.lan.setPublished();
+assert.deepEqual(
+  commands.findLast((item) => item.command === "app.lan.setPublished").payload,
+  {},
+);
+const shareLinks = await app.lan.getShareLinks();
+assert.equal(Object.isFrozen(shareLinks), true);
+assert.equal(shareLinks.every(Object.isFrozen), true);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(shareLinks.map(({ type }) => type))),
+  ["lan", "wan"],
+);
+const lanCommandCountBeforeInvalidArguments = commands.filter(
+  (item) => item.command.startsWith("app.lan."),
+).length;
+for (const operation of [
+  () => app.lan.discoverGames(true),
+  () => discoveredGames[0].join(false),
+  () => app.lan.joinByLink(),
+  () => app.lan.joinByLink(""),
+  () => app.lan.scanQrAndJoin(false),
+  () => app.lan.setPublished(true),
+  () => app.lan.setPublished(false),
+  () => app.lan.getShareLinks(null),
+]) {
+  await assert.rejects(operation(), (error) => error?.code === "invalid_argument");
+}
+assert.equal(
+  commands.filter((item) => item.command.startsWith("app.lan.")).length,
+  lanCommandCountBeforeInvalidArguments,
+);
+window.navigator.userActivation.isActive = false;
+for (const operation of [
+  () => discoveredGames[0].join(),
+  () => app.lan.joinByLink("https://relay.example/j/invitation"),
+  () => app.lan.scanQrAndJoin(),
+]) {
+  await assert.rejects(
+    operation(),
+    (error) => error?.code === "user_activation_required",
+  );
+}
+window.navigator.userActivation.isActive = true;
+for (const methodName of [
+  "discoverGames",
+  "joinByLink",
+  "scanQrAndJoin",
+  "setPublished",
+  "getShareLinks",
+]) {
+  assert.equal(app[methodName], undefined);
+  assert.equal(typeof app.lan[methodName], "function");
+}
+assert.equal(app.lan.setPublishedState, undefined);
+assert.equal(app.lan.unpublish, undefined);
 
 await app.ui.exitGame();
 assert.equal(commands.some((item) => item.command === "app.game.exit"), true);
@@ -452,6 +566,44 @@ assert.equal(browserWindow.playmesh, undefined);
 assert.equal(browserBootstrap.available, false);
 assert.equal(browserBootstrap.sdkVersion, "3.3.0");
 assert.equal(browserBootstrap.identity, null);
+await assert.rejects(
+  browserApp.lan.discoverGames(),
+  (error) => error?.code === "app_unavailable",
+);
+
+let pendingReadyCommand = null;
+const pendingReadyWindow = createBootstrapContractWindow((_, command) => {
+  if (command.command === "app.bootstrap") {
+    pendingReadyCommand = command;
+    return;
+  }
+  queueMicrotask(() => pendingReadyWindow[appInternalKey].receive({
+    type: "app.command.result",
+    requestId: command.requestId,
+    result: null,
+  }));
+});
+await assert.rejects(
+  pendingReadyWindow[appInternalKey].publicApi.lan.discoverGames(),
+  (error) => error?.code === "app_not_ready",
+);
+pendingReadyWindow[appInternalKey].receive({
+  type: "app.command.result",
+  requestId: pendingReadyCommand.requestId,
+  result: {
+    available: true,
+    sdkVersion: "3.3.0",
+    identity: null,
+    runtime: null,
+    capabilityRegistry: [],
+    device: {
+      platform: "test",
+      capabilities: [],
+      declaredCapabilities: [],
+    },
+  },
+});
+await pendingReadyWindow[appInternalKey].publicApi.ready;
 
 const failedBridgeWindow = createBootstrapContractWindow(
   (isolated, command) => {
@@ -468,6 +620,15 @@ await assert.rejects(
   (error) =>
     error?.code === "bootstrap_failed" &&
     error.message === "原生 bootstrap 失败",
+);
+assert.throws(
+  () => failedBridgeWindow[appInternalKey]
+    .publicApi.ui.disableSystemMenuTriggers(),
+  (error) => error?.code === "app_not_ready",
+);
+await assert.rejects(
+  failedBridgeWindow[appInternalKey].publicApi.lan.discoverGames(),
+  (error) => error?.code === "app_not_ready",
 );
 assert.equal(failedBridgeWindow.playmesh, undefined);
 

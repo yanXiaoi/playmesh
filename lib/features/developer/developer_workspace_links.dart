@@ -134,6 +134,7 @@ class _DeveloperWorkspaceLinksState extends State<DeveloperWorkspaceLinks> {
   String _addressTypeLabel(BuildContext context, LanAddressType type) =>
       context.tr(switch (type) {
         LanAddressType.privateIpv4 => 'creator.lan_type_private_ipv4',
+        LanAddressType.linkLocalIpv4 => 'creator.lan_type_link_local_ipv4',
         LanAddressType.carrierGradeNatIpv4 =>
           'creator.lan_type_carrier_nat_ipv4',
         LanAddressType.benchmarkIpv4 => 'creator.lan_type_benchmark_ipv4',

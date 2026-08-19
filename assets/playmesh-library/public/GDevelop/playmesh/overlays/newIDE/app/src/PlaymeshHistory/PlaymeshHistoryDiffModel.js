@@ -4,6 +4,56 @@ export const HISTORY_DIFF_INITIAL_ENTRY_LIMIT = 80;
 export const HISTORY_DIFF_ENTRY_PAGE_SIZE = 80;
 export const HISTORY_DIFF_INITIAL_FIELD_LIMIT = 60;
 export const HISTORY_DIFF_FIELD_PAGE_SIZE = 60;
+export const HISTORY_RAW_JSON_PAGE_SIZE = 32 * 1024;
+
+export type PlaymeshHistoryRawJsonPage = {|
+  page: number,
+  pageCount: number,
+  start: number,
+  end: number,
+  totalCharacters: number,
+  text: string,
+|};
+
+export const getPlaymeshHistoryRawJsonPage = (
+  source: string,
+  requestedPage: number,
+  requestedPageSize: number = HISTORY_RAW_JSON_PAGE_SIZE
+): PlaymeshHistoryRawJsonPage => {
+  const pageSize =
+    Number.isSafeInteger(requestedPageSize) && requestedPageSize > 0
+      ? requestedPageSize
+      : HISTORY_RAW_JSON_PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(source.length / pageSize));
+  const page = Math.max(
+    0,
+    Math.min(
+      pageCount - 1,
+      Number.isSafeInteger(requestedPage) ? requestedPage : 0
+    )
+  );
+  const nominalStart = page * pageSize;
+  const nominalEnd = Math.min(source.length, nominalStart + pageSize);
+  const startsWithLowSurrogate =
+    nominalStart > 0 &&
+    nominalStart < source.length &&
+    source.charCodeAt(nominalStart) >= 0xdc00 &&
+    source.charCodeAt(nominalStart) <= 0xdfff;
+  const endsBeforeLowSurrogate =
+    nominalEnd < source.length &&
+    source.charCodeAt(nominalEnd) >= 0xdc00 &&
+    source.charCodeAt(nominalEnd) <= 0xdfff;
+  const start = startsWithLowSurrogate ? nominalStart + 1 : nominalStart;
+  const end = endsBeforeLowSurrogate ? nominalEnd + 1 : nominalEnd;
+  return {
+    page,
+    pageCount,
+    start,
+    end,
+    totalCharacters: source.length,
+    text: source.slice(start, end),
+  };
+};
 
 export type PlaymeshHistoryDiffCategory =
   | "scenes"

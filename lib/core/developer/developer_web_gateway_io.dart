@@ -37,6 +37,7 @@ import 'gdevelop_ai_tool_registry.dart';
 import 'gdevelop_event_payload.dart';
 import 'gdevelop_project_config.dart';
 import 'gdevelop_project_config_controller.dart';
+import 'gdevelop_project_files.dart';
 import 'gdevelop_project_history.dart';
 import 'gdevelop_project_allocation.dart';
 import 'gdevelop_project_allocation_controller.dart';
@@ -547,7 +548,29 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         request.uri.queryParameters['token'] ?? '',
         token,
       )) {
+        final queryCapability =
+            request
+                .uri
+                .queryParameters[gdevelopEditorBootstrapQueryParameter] ??
+            '';
+        final validQueryCapability = gdevelopEditorInstances
+            .validatesAcquireCapability(queryCapability);
+        if (!validQueryCapability) {
+          await _error(
+            request.response,
+            HttpStatus.forbidden,
+            requestId,
+            'gdevelop_editor_bootstrap_capability_invalid',
+            'GDevelop 编辑器 bootstrap capability 无效或已轮换',
+          );
+          return;
+        }
         request.response.cookies.add(_developerSessionCookie());
+        if (validQueryCapability) {
+          request.response.cookies.add(
+            _gdevelopEditorAcquireCapabilityCookie(queryCapability),
+          );
+        }
         request.response.statusCode = HttpStatus.seeOther;
         request.response.headers
           ..set(HttpHeaders.locationHeader, gdevelopPath)
@@ -568,7 +591,29 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
         request.uri.queryParameters['token'] ?? '',
         token,
       )) {
+        final queryCapability =
+            request
+                .uri
+                .queryParameters[gdevelopEditorBootstrapQueryParameter] ??
+            '';
+        final validQueryCapability = gdevelopEditorInstances
+            .validatesAcquireCapability(queryCapability);
+        if (!validQueryCapability) {
+          await _error(
+            request.response,
+            HttpStatus.forbidden,
+            requestId,
+            'gdevelop_editor_bootstrap_capability_invalid',
+            'GDevelop 编辑器 bootstrap capability 无效或已轮换',
+          );
+          return;
+        }
         request.response.cookies.add(_developerSessionCookie());
+        if (validQueryCapability) {
+          request.response.cookies.add(
+            _gdevelopEditorAcquireCapabilityCookie(queryCapability),
+          );
+        }
         request.response.statusCode = HttpStatus.seeOther;
         request.response.headers
           ..set(HttpHeaders.locationHeader, request.uri.path)
@@ -739,12 +784,16 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   Future<List<LanEndpointCandidate>> gdevelopWorkspaceEndpoints() async {
     if (!await gdevelopWebIdeSource.isAvailable()) return const [];
     final endpoints = await resolveLanEndpointCandidates(server.port);
+    final editorBootstrap = gdevelopEditorInstances.issueAcquireCapability();
     return endpoints
         .map(
           (endpoint) => endpoint.withUri(
             endpoint.uri.replace(
               path: session.gdevelopWorkspacePath!,
-              queryParameters: {'token': token},
+              queryParameters: {
+                'token': token,
+                gdevelopEditorBootstrapQueryParameter: editorBootstrap,
+              },
             ),
           ),
         )

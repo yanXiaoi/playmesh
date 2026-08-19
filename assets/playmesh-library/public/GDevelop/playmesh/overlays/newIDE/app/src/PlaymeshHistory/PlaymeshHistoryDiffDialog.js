@@ -12,7 +12,8 @@ import {
   HISTORY_DIFF_ENTRY_PAGE_SIZE,
   HISTORY_DIFF_FIELD_PAGE_SIZE,
   HISTORY_DIFF_INITIAL_ENTRY_LIMIT,
-  HISTORY_DIFF_INITIAL_FIELD_LIMIT
+  HISTORY_DIFF_INITIAL_FIELD_LIMIT,
+  getPlaymeshHistoryRawJsonPage
 } from "./PlaymeshHistoryDiffModel";
 import type {
   PlaymeshHistoryDiffCategory,
@@ -20,7 +21,10 @@ import type {
   PlaymeshHistoryDiffModel,
   PlaymeshHistoryDiffStatus
 } from "./PlaymeshHistoryDiffModel";
-import { getPlaymeshHistoryResourcePreview } from "./PlaymeshHistoryClient";
+import {
+  getPlaymeshHistoryResourcePreview,
+  loadPlaymeshHistoryResourcePreview
+} from "./PlaymeshHistoryClient";
 import type {
   PlaymeshHistoryDiff,
   PlaymeshHistoryResourceDto,
@@ -56,16 +60,25 @@ const statusColor = (
   return theme.statusIndicator.warning;
 };
 
-const safePrettyJson = (source: string): string => {
-  try {
-    return JSON.stringify(JSON.parse(source), null, 2);
-  } catch (error) {
-    return source;
-  }
-};
+const RAW_JSON_SIDES: Array<"before" | "after"> = ["before", "after"];
 
-const RawJsonDetails = ({ diff, translate, theme, isMobile }: any) => {
+const RawJsonDetails = ({ diff, translate, theme }: any) => {
   const [open, setOpen] = React.useState<boolean>(false);
+  const [side, setSide] = React.useState<"before" | "after">("before");
+  const [page, setPage] = React.useState<number>(0);
+  const source = side === "before" ? diff.before : diff.after;
+  const pageWindow = React.useMemo(
+    () => getPlaymeshHistoryRawJsonPage(open ? source : "", page),
+    [open, page, source]
+  );
+
+  React.useEffect(
+    () => {
+      setPage(0);
+    },
+    [diff.fromRevision, diff.toRevision, side]
+  );
+
   return (
     <details
       className={diffStyles.rawDetails}
@@ -76,32 +89,77 @@ const RawJsonDetails = ({ diff, translate, theme, isMobile }: any) => {
         {translate(playmeshMessages.historyRawJson)}
       </summary>
       {open && (
-        <div
-          className={diffStyles.rawGrid}
-          data-mobile-stacked={isMobile ? "true" : "false"}
-        >
-          <section>
-            <Text noMargin size="sub-title">
-              {translate(playmeshMessages.historyBefore)}
-            </Text>
-            <pre
-              className={diffStyles.rawJson}
-              style={{ backgroundColor: theme.paper.backgroundColor.dark }}
+        <div className={diffStyles.rawViewer}>
+          <div className={diffStyles.rawToolbar}>
+            <div
+              className={diffStyles.rawSideSelector}
+              role="group"
+              aria-label={translate(playmeshMessages.historyRawJson)}
             >
-              {safePrettyJson(diff.before)}
-            </pre>
-          </section>
-          <section>
-            <Text noMargin size="sub-title">
-              {translate(playmeshMessages.historyAfter)}
-            </Text>
-            <pre
-              className={diffStyles.rawJson}
-              style={{ backgroundColor: theme.paper.backgroundColor.dark }}
-            >
-              {safePrettyJson(diff.after)}
-            </pre>
-          </section>
+              {RAW_JSON_SIDES.map(candidate => {
+                const selected = side === candidate;
+                const label = translate(
+                  candidate === "before"
+                    ? playmeshMessages.historyBefore
+                    : playmeshMessages.historyAfter
+                );
+                return (
+                  <button
+                    key={candidate}
+                    type="button"
+                    className={diffStyles.rawSideButton}
+                    aria-pressed={selected}
+                    onClick={() => {
+                      setSide(candidate);
+                      setPage(0);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className={diffStyles.rawPagination}>
+              <button
+                type="button"
+                className={diffStyles.rawPageButton}
+                aria-label={translate(playmeshMessages.historyPreviousPage)}
+                title={translate(playmeshMessages.historyPreviousPage)}
+                disabled={pageWindow.page === 0}
+                onClick={() => setPage(pageWindow.page - 1)}
+              >
+                ←
+              </button>
+              <span
+                className={diffStyles.rawPagePosition}
+                aria-live="polite"
+              >
+                {pageWindow.page + 1} / {pageWindow.pageCount}
+              </span>
+              <button
+                type="button"
+                className={diffStyles.rawPageButton}
+                aria-label={translate(playmeshMessages.historyNextPage)}
+                title={translate(playmeshMessages.historyNextPage)}
+                disabled={pageWindow.page + 1 >= pageWindow.pageCount}
+                onClick={() => setPage(pageWindow.page + 1)}
+              >
+                →
+              </button>
+            </div>
+          </div>
+          <div className={diffStyles.rawRange}>
+            {pageWindow.totalCharacters === 0 ? 0 : pageWindow.start + 1}–
+            {pageWindow.end} / {pageWindow.totalCharacters}
+          </div>
+          <pre
+            className={diffStyles.rawJson}
+            style={{ backgroundColor: theme.paper.backgroundColor.dark }}
+            data-history-raw-json-side={side}
+            data-history-raw-json-page={pageWindow.page}
+          >
+            {pageWindow.text}
+          </pre>
         </div>
       )}
     </details>
@@ -113,10 +171,12 @@ const formatResourceSize = (size: number): string =>
 
 const ResourcePreviewMedia = ({
   preview,
+  objectUrl,
   label,
   onError
 }: {
   preview: PlaymeshHistoryResourcePreview,
+  objectUrl: string,
   label: string,
   onError: () => void
 }): React.Node => {
@@ -124,7 +184,7 @@ const ResourcePreviewMedia = ({
     return (
       <img
         className={diffStyles.previewMedia}
-        src={preview.url}
+        src={objectUrl}
         alt={label}
         loading="lazy"
         decoding="async"
@@ -136,7 +196,7 @@ const ResourcePreviewMedia = ({
     return (
       <audio
         className={diffStyles.previewAudio}
-        src={preview.url}
+        src={objectUrl}
         controls
         preload="metadata"
         aria-label={label}
@@ -147,7 +207,7 @@ const ResourcePreviewMedia = ({
   return (
     <video
       className={diffStyles.previewMedia}
-      src={preview.url}
+      src={objectUrl}
       controls
       preload="metadata"
       aria-label={label}
@@ -169,7 +229,15 @@ const ResourceEvidenceCard = ({
   translate: (key: any, argumentsMap?: any) => string,
   theme: any
 }): React.Node => {
-  const [failed, setFailed] = React.useState<boolean>(false);
+  const [loadedPreview, setLoadedPreview] = React.useState<?{
+    key: string,
+    objectUrl: string
+  }>(null);
+  const [failedPreviewKey, setFailedPreviewKey] = React.useState<?string>(
+    null
+  );
+  const previewRequestControllerRef = React.useRef<?AbortController>(null);
+  const previewObjectUrlRef = React.useRef<?string>(null);
   const revision = side === "before" ? diff.fromRevision : diff.toRevision;
   const sideLabel = translate(
     side === "before"
@@ -184,7 +252,65 @@ const ResourceEvidenceCard = ({
   const resource: ?PlaymeshHistoryResourceDto = logicalId
     ? resources.find(item => item.logicalId === logicalId) || null
     : null;
-  const preview = getPlaymeshHistoryResourcePreview(diff, side, logicalId);
+  const preview = React.useMemo(
+    () => getPlaymeshHistoryResourcePreview(diff, side, logicalId),
+    [diff, side, logicalId]
+  );
+  const previewKey = preview
+    ? `${preview.gameId}:${preview.revision}:${preview.contentHash}:${preview.logicalId}`
+    : null;
+  const objectUrl =
+    previewKey && loadedPreview && loadedPreview.key === previewKey
+      ? loadedPreview.objectUrl
+      : null;
+  const failed = !!(
+    previewKey && failedPreviewKey === previewKey
+  );
+
+  React.useEffect(
+    () => {
+      if (!preview || !previewKey) return undefined;
+      const controller = new AbortController();
+      previewRequestControllerRef.current = controller;
+      let active = true;
+      let createdObjectUrl: ?string = null;
+      setFailedPreviewKey(null);
+      setLoadedPreview(null);
+      loadPlaymeshHistoryResourcePreview(preview, controller.signal)
+        .then((blob: Blob) => {
+          if (!active) return;
+          createdObjectUrl = URL.createObjectURL(blob);
+          previewObjectUrlRef.current = createdObjectUrl;
+          setLoadedPreview({ key: previewKey, objectUrl: createdObjectUrl });
+        })
+        .catch((error: any) => {
+          if (
+            !active ||
+            controller.signal.aborted ||
+            (error && error.code === "cancelled")
+          ) {
+            return;
+          }
+          controller.abort();
+          setFailedPreviewKey(previewKey);
+        });
+      return () => {
+        active = false;
+        controller.abort();
+        if (previewRequestControllerRef.current === controller) {
+          previewRequestControllerRef.current = null;
+        }
+        if (
+          createdObjectUrl &&
+          previewObjectUrlRef.current === createdObjectUrl
+        ) {
+          previewObjectUrlRef.current = null;
+          URL.revokeObjectURL(createdObjectUrl);
+        }
+      };
+    },
+    [preview, previewKey]
+  );
 
   return (
     <section
@@ -219,11 +345,27 @@ const ResourceEvidenceCard = ({
           <span className={diffStyles.previewEmpty} role="status">
             {translate(playmeshMessages.historyResourceLoadFailed)}
           </span>
+        ) : !objectUrl ? (
+          <PlaceholderLoader />
         ) : (
           <ResourcePreviewMedia
             preview={preview}
+            objectUrl={objectUrl}
             label={`${label} · ${resource.name || resource.logicalId}`}
-            onError={() => setFailed(true)}
+            onError={() => {
+              if (previewRequestControllerRef.current) {
+                previewRequestControllerRef.current.abort();
+                previewRequestControllerRef.current = null;
+              }
+              if (
+                previewObjectUrlRef.current === objectUrl
+              ) {
+                previewObjectUrlRef.current = null;
+                URL.revokeObjectURL(objectUrl);
+              }
+              setLoadedPreview(null);
+              setFailedPreviewKey(previewKey);
+            }}
           />
         )}
       </div>
@@ -431,7 +573,7 @@ const PlaymeshHistoryDiffDialog = ({
       onRequestClose={onClose}
       maxWidth="xl"
       fullHeight
-      flexColumnBody
+      flexBody
     >
       {loading ? (
         <PlaceholderLoader />
@@ -855,7 +997,6 @@ const PlaymeshHistoryDiffDialog = ({
                       diff={diff}
                       translate={translate}
                       theme={theme}
-                      isMobile={isMobile}
                     />
                   </React.Fragment>
                 )}

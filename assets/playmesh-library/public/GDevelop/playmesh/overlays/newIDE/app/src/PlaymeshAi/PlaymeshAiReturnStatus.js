@@ -17,6 +17,10 @@ type PlaymeshAiApprovalStatus = {
 type PlaymeshAiReturnStatusOptions = {|
   mode: 'chat' | 'agent',
   session: ?PlaymeshAiSession,
+  chatOperation?: ?{|
+    echo: number,
+    turnId: ?string,
+  |},
   calls: $ReadOnlyArray<PlaymeshAiCall>,
   approvals: $ReadOnlyArray<PlaymeshAiApprovalStatus>,
   failure: ?PlaymeshAiFailureDiagnostic,
@@ -78,6 +82,9 @@ const copyToolOutputValue = (
 const safeInteger = (value /*: mixed */) /*: ?number */ =>
   Number.isSafeInteger(value) && value >= 0 ? Number(value) : null;
 
+const safeEcho = (value /*: mixed */) /*: ?number */ =>
+  Number.isSafeInteger(value) && value > 0 ? Number(value) : null;
+
 const safeField = (value /*: mixed */, fallback /*: string */) /*: string */ => {
   const sanitized = sanitizeString(value);
   return sanitized.trim() ? sanitized : fallback;
@@ -117,8 +124,14 @@ const summarizeOutput = (call /*: PlaymeshAiCall */) /*: mixed */ => {
 };
 
 const latestTurnCalls = (
-  calls /*: $ReadOnlyArray<PlaymeshAiCall> */
+  calls /*: $ReadOnlyArray<PlaymeshAiCall> */,
+  turnId /*: ?string */ = null
 ) /*: Array<PlaymeshAiCall> */ => {
+  if (turnId) {
+    return calls
+      .filter(call => call.turnId === turnId)
+      .sort((left, right) => left.sequence - right.sequence);
+  }
   if (!calls.length) return [];
   const latest = [...calls].sort(
     (left, right) => right.sequence - left.sequence
@@ -163,12 +176,19 @@ const workflowDecision = ({
 export const buildPlaymeshAiReturnStatus = ({
   mode,
   session,
+  chatOperation,
   calls,
   approvals,
   failure,
   connectionStatus,
 } /*: PlaymeshAiReturnStatusOptions */) /*: Object */ => {
-  const turnCalls = latestTurnCalls(calls);
+  const chatEcho = safeEcho(chatOperation && chatOperation.echo);
+  const turnCalls =
+    mode === 'chat' && chatEcho != null
+      ? chatOperation && chatOperation.turnId
+        ? latestTurnCalls(calls, chatOperation.turnId)
+        : []
+      : latestTurnCalls(calls);
   const decision = workflowDecision({
     calls: turnCalls,
     approvals,
@@ -212,7 +232,8 @@ export const buildPlaymeshAiReturnStatus = ({
 
   if (mode === 'chat') {
     return {
-      schemaVersion: 'playmesh.gdevelop.ai.return-status.v1',
+      schemaVersion: 'playmesh.gdevelop.ai.return-status.v3',
+      echo: chatEcho,
       connectionStatus: safeField(connectionStatus, 'unknown'),
       latestTurn:
         summarizedCalls.length > 0

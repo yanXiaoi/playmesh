@@ -3,6 +3,8 @@
 // 工程事实只存在 App 的 playmesh-library/GDevelop/packages。这里的 Map
 // 仅保存当前 WebIDE 页面正在处理的快照，页面关闭后可直接丢弃。
 
+import type { PlaymeshProjectFile } from './PlaymeshProjectFiles';
+
 export type StoredProjectResource = {|
   logicalUrl: string,
   name?: string,
@@ -15,7 +17,7 @@ export type StoredProject = {|
   id: string,
   name: string,
   gameId?: string,
-  projectJson: string,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
   savedAt: number,
 |};
@@ -56,15 +58,29 @@ const requireStoredProjectResource = (value: mixed): StoredProjectResource => {
   return storedResource;
 };
 
+const requireProjectFile = (value: mixed): PlaymeshProjectFile => {
+  const file = mixedRecord(value);
+  const content = file && mixedRecord(file.content);
+  if (!file || typeof file.path !== 'string' || !content) {
+    throw new Error('The Playmesh session project contains an invalid file.');
+  }
+  return {
+    path: file.path,
+    content: JSON.parse(JSON.stringify(content)),
+  };
+};
+
 export const assertStoredProject = (value: mixed): StoredProject => {
   const project = mixedRecord(value);
+  const projectFiles = project && project.projectFiles;
+  const resources = project && project.resources;
   if (
     !project ||
     typeof project.id !== 'string' ||
     typeof project.name !== 'string' ||
     (project.gameId !== undefined && typeof project.gameId !== 'string') ||
-    typeof project.projectJson !== 'string' ||
-    !Array.isArray(project.resources) ||
+    !Array.isArray(projectFiles) ||
+    !Array.isArray(resources) ||
     typeof project.savedAt !== 'number' ||
     !Number.isFinite(project.savedAt)
   ) {
@@ -78,8 +94,8 @@ export const assertStoredProject = (value: mixed): StoredProject => {
     id: project.id,
     name: project.name,
     ...(project.gameId !== undefined ? { gameId: project.gameId } : {}),
-    projectJson: project.projectJson,
-    resources: project.resources.map(requireStoredProjectResource),
+    projectFiles: projectFiles.map(requireProjectFile),
+    resources: resources.map(requireStoredProjectResource),
     savedAt,
   };
 };

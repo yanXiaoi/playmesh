@@ -29,12 +29,14 @@ const PlaymeshPortableProjectImportButton = ({
   const [importing, setImporting] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<?string>(null);
 
-  const importArchive = async (archiveBlob: Blob): Promise<void> => {
+  const importSourceFile = async (sourceFile: File): Promise<void> => {
     setErrorMessage(null);
     setImporting(true);
     try {
       const result = await importPortableProjectWithCopyDecision({
-        archiveBlob,
+        ...(sourceFile.name.toLowerCase().endsWith('.json')
+          ? { projectJsonBlob: sourceFile }
+          : { archiveBlob: sourceFile }),
         confirmCopy: ({ sourcePackageName, suggestedPackageName }) =>
           window.confirm(
             playmeshT(playmeshMessages.projectImportCopyConfirm, {
@@ -90,13 +92,13 @@ const PlaymeshPortableProjectImportButton = ({
       <input
         ref={inputRef}
         type="file"
-        accept=".zip,application/zip,application/x-zip-compressed"
+        accept=".zip,application/zip,application/x-zip-compressed,.json,application/json"
         style={{ display: 'none' }}
         onChange={event => {
           const file =
             event.currentTarget.files && event.currentTarget.files[0];
           event.currentTarget.value = '';
-          if (file) importArchive(file);
+          if (file) importSourceFile(file);
         }}
       />
       <Dialog

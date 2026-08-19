@@ -20,6 +20,7 @@ import {
   createReceipt,
   dependencyNodeSearchPath,
   digestRecord,
+  evaluateReceiptStatus,
   explainReceipt,
   extractZipSafely,
   libGdCacheKey,
@@ -162,6 +163,10 @@ test('concurrent requests for one pipeline step share one in-flight operation', 
     pipelineSource,
     /Promise\.all\(\[ensureStep\("flow", true\), ensureStep\("test", true\)\]\)/
   );
+  assert.match(
+    pipelineSource,
+    /for \(const step of DEVELOPMENT_PACKAGE_CHAIN\) \{\s*await ensureStep\(step, true\);\s*\}/
+  );
 });
 
 test('in-flight step sharing preserves parallel keys and evicts failures', async () => {
@@ -265,6 +270,77 @@ test('all package-producing commands target repository resources, not work', () 
     /names: \["release-check", "release-output", "release-update\.json"\]/
   );
   assert.doesNotMatch(pipelineSource, /cleanupPipelineEntriesExcept/);
+});
+
+test('local contract gate includes every standalone AI contract test', () => {
+  for (const testFile of [
+    'test-ai-client.mjs',
+    'test-ai-ui-boundaries.mjs',
+    'test-ai-live-wrapper-callbacks.mjs',
+    'test-ai-piskel-tools.mjs',
+    'test-ai-official-local-editor-runners.mjs',
+    'test-ai-return-status.mjs',
+    'test-ai-runtime-debugger-tools.mjs',
+  ]) {
+    const entry = `["${testFile}", []]`;
+    assert.equal(
+      pipelineSource.split(entry).length - 1,
+      1,
+      `${testFile} must be wired into localContractTests exactly once`
+    );
+  }
+});
+
+test('local contract gate includes the embedded external-editor window contract', () => {
+  const entry = '["test-embedded-external-editor-window.mjs", []]';
+  assert.equal(
+    pipelineSource.split(entry).length - 1,
+    1,
+    'the embedded external-editor window contract must run exactly once'
+  );
+});
+
+test('local contract gate includes the history request race contract', () => {
+  const entry = '["test-history-request-coordinator.mjs", []]';
+  assert.equal(
+    pipelineSource.split(entry).length - 1,
+    1,
+    'the history request race contract must run exactly once'
+  );
+});
+
+test('local contract gate includes every external-editor localization contract', () => {
+  for (const testFile of [
+    'test-piskel-localization.mjs',
+    'test-external-editor-i18n-derivatives.mjs',
+  ]) {
+    const entry = `["${testFile}", []]`;
+    assert.equal(
+      pipelineSource.split(entry).length - 1,
+      1,
+      `${testFile} must be wired into localContractTests exactly once`
+    );
+  }
+});
+
+test('source contract gate includes the compiled iframe lifecycle contract', () => {
+  const entry =
+    '["test-external-editor-iframe-lifecycle.mjs", ["--source", "{source}"]]';
+  assert.equal(
+    pipelineSource.split(entry).length - 1,
+    1,
+    'the compiled external-editor iframe lifecycle contract must run exactly once'
+  );
+});
+
+test('source contract gate includes the Yarn cold-start contract', () => {
+  const entry =
+    '["test-yarn-external-editor-cold-start.mjs", ["--source", "{source}"]]';
+  assert.equal(
+    pipelineSource.split(entry).length - 1,
+    1,
+    'the Yarn syntax and cold-start readiness contract must run exactly once'
+  );
 });
 
 test('CLI requires a subcommand and absolute official ZIP', () => {
@@ -499,6 +575,74 @@ test('receipt reports exact invalidation reason', () => {
   );
 });
 
+test('receipt status hashes output only after receipt metadata and input match', async () => {
+  const receipt = createReceipt({
+    step: 'prepare',
+    inputDigest: 'input-a',
+    input: { source: 'a' },
+    toolVersions: { node: 'v1' },
+    outputTreeDigest: 'tree-a',
+  });
+  let outputReads = 0;
+  const readOutputDigest = async () => {
+    outputReads += 1;
+    return 'tree-a';
+  };
+
+  for (const [candidate, step, inputDigest, reason] of [
+    [null, 'prepare', 'input-a', 'missing receipt'],
+    [{ malformed: true }, 'prepare', 'input-a', 'malformed receipt'],
+    [
+      { ...receipt, schemaVersion: 2 },
+      'prepare',
+      'input-a',
+      'unsupported receipt schema',
+    ],
+    [{ ...receipt, step: 'build' }, 'prepare', 'input-a', 'step mismatch'],
+    [receipt, 'prepare', 'input-b', 'input digest changed'],
+  ]) {
+    assert.deepEqual(
+      await evaluateReceiptStatus({
+        receipt: candidate,
+        step,
+        inputDigest,
+        readOutputDigest,
+      }),
+      { valid: false, reason, outputTreeDigest: null }
+    );
+  }
+  assert.equal(outputReads, 0);
+
+  assert.deepEqual(
+    await evaluateReceiptStatus({
+      receipt,
+      step: 'prepare',
+      inputDigest: 'input-a',
+      readOutputDigest: async () => {
+        outputReads += 1;
+        return 'tree-b';
+      },
+    }),
+    {
+      valid: false,
+      reason: 'output tree digest changed',
+      outputTreeDigest: 'tree-b',
+    }
+  );
+  assert.equal(outputReads, 1);
+
+  assert.deepEqual(
+    await evaluateReceiptStatus({
+      receipt,
+      step: 'prepare',
+      inputDigest: 'input-a',
+      readOutputDigest,
+    }),
+    { valid: true, reason: 'receipt hit', outputTreeDigest: 'tree-a' }
+  );
+  assert.equal(outputReads, 2);
+});
+
 test('development build receipts bind the fast chain and invalidate on patch change', async () => {
   const output = value => value.repeat(64);
   const makeReceipt = (step, outputTreeDigest) =>
@@ -611,6 +755,22 @@ test('development build receipts bind the fast chain and invalidate on patch cha
   );
 });
 
+test('patch receipts bind the locked offline external editor inputs', () => {
+  assert.match(
+    pipelineSource,
+    /lockedExternalEditorsManifestSha256:\s*await sha256File\(/
+  );
+  assert.match(
+    pipelineSource,
+    /lockedExternalEditorsTreeSha256:\s*\(await computeTreeDigest\(\{[\s\S]*?root: lockedExternalEditorsPath,[\s\S]*?rejectSymlinks: true/
+  );
+  assert.match(
+    pipelineSource,
+    /localExternalEditorDerivativesTreeSha256:\s*\(await computeTreeDigest\(\{[\s\S]*?root: localExternalEditorDerivativesPath,[\s\S]*?rejectSymlinks: true/,
+    'changing a local external-editor derivative must invalidate the patch receipt'
+  );
+});
+
 test('development package source uses receipt-bound build, audit and prepare inputs', () => {
   assert.match(
     pipelineSource,
@@ -624,6 +784,22 @@ test('development package source uses receipt-bound build, audit and prepare inp
     pipelineSource,
     /case "prepare":[\s\S]*?receiptInputs\("prepare"\)/
   );
+});
+
+test('test, build and prepare receipts bind the canonical AI tool contract', () => {
+  assert.match(
+    pipelineSource,
+    /const canonicalAiToolsPath = path\.join\([\s\S]*?playmeshDirectory,[\s\S]*?"runtime",[\s\S]*?"ai",[\s\S]*?"tools\.json"/
+  );
+  for (const step of ['test', 'build', 'prepare']) {
+    assert.match(
+      pipelineSource,
+      new RegExp(
+        `case "${step}":[\\s\\S]*?canonicalAiToolsSha256: await sha256File\\(canonicalAiToolsPath\\)`
+      ),
+      `${step} receipt must invalidate when the canonical AI tool contract changes`
+    );
+  }
 });
 
 test('dependency and libGD cache identities are stable records, not version guesses', () => {

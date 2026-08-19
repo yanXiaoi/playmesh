@@ -3,6 +3,7 @@ import { copyFile, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  computeDirectoryTreeDigest,
   parseExpectedAiState,
   verifyExpectedAiFeatureState,
 } from '../scripts/source-policy-verifier-lib.mjs';
@@ -178,6 +179,111 @@ for (const requiredFile of [
   assert.ok((await stat(path.join(buildRoot, requiredFile))).isFile());
 }
 
+const externalEditorsManifest = JSON.parse(
+  await readFile(
+    path.resolve(
+      playmeshRoot,
+      '..',
+      'official',
+      'external-editors.json'
+    ),
+    'utf8'
+  )
+);
+const localExternalEditorsManifest = JSON.parse(
+  await readFile(
+    path.resolve(playmeshRoot, 'external-editors', 'manifest.json'),
+    'utf8'
+  )
+);
+assert.equal(externalEditorsManifest.schemaVersion, 1);
+assert.equal(externalEditorsManifest.gdevelopVersion, lock.upstream.tag.slice(1));
+assert.deepEqual(
+  externalEditorsManifest.editors.map(editor => editor.name).sort(),
+  ['jfxr', 'piskel', 'yarn']
+);
+assert.equal(localExternalEditorsManifest.schemaVersion, 1);
+assert.equal(
+  localExternalEditorsManifest.gdevelopVersion,
+  lock.upstream.tag.slice(1)
+);
+assert.deepEqual(
+  localExternalEditorsManifest.packages.map(item => item.name).sort(),
+  ['jfxr', 'piskel', 'yarn']
+);
+const localExternalEditorPackages = new Map(
+  await Promise.all(
+    localExternalEditorsManifest.packages.map(async item => [
+      item.name,
+      JSON.parse(
+        await readFile(
+          path.resolve(
+            playmeshRoot,
+            'external-editors',
+            ...item.manifest.split('/')
+          ),
+          'utf8'
+        )
+      ),
+    ])
+  )
+);
+for (const editor of externalEditorsManifest.editors) {
+  assert.match(editor.version, /^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/);
+  assert.match(editor.officialArchiveSha256, /^[a-f0-9]{64}$/);
+  assert.match(editor.treeSha256, /^[a-f0-9]{64}$/);
+  assert.ok(Number.isSafeInteger(editor.fileCount) && editor.fileCount > 0);
+  const localPackage = localExternalEditorPackages.get(editor.name);
+  assert.ok(localPackage, `missing local ${editor.name} derivative manifest`);
+  assert.equal(localPackage.name, editor.name);
+  assert.equal(localPackage.base.gdevelopExternalEditorVersion, editor.version);
+  assert.equal(
+    localPackage.base.officialArchiveSha256,
+    editor.officialArchiveSha256
+  );
+  assert.equal(localPackage.base.officialTreeSha256, editor.treeSha256);
+  assert.ok(
+    Number.isSafeInteger(localPackage.overlay.fileCount) &&
+      localPackage.overlay.fileCount > 0
+  );
+  const expectedPatchedFileCount =
+    editor.fileCount + localPackage.overlay.fileCount;
+  const builtEditorRoot = path.join(
+    buildRoot,
+    'external',
+    editor.name,
+    `${editor.name}-editor`
+  );
+  const patchedSourceEditorRoot = path.join(
+    sourceRoot,
+    'newIDE',
+    'app',
+    'public',
+    'external',
+    editor.name,
+    `${editor.name}-editor`
+  );
+  const patchedSourceTree = await computeDirectoryTreeDigest(
+    patchedSourceEditorRoot
+  );
+  const builtTree = await computeDirectoryTreeDigest(builtEditorRoot);
+  assert.equal(
+    builtTree.sha256,
+    patchedSourceTree.sha256,
+    `production build changed the locked ${editor.name} editor tree`
+  );
+  assert.equal(
+    builtTree.files.length,
+    expectedPatchedFileCount,
+    `production build has an incomplete ${editor.name} editor tree`
+  );
+  assert.equal(
+    patchedSourceTree.files.length,
+    expectedPatchedFileCount,
+    `source policy did not materialize the complete ${editor.name} derivative tree`
+  );
+}
+
 const staticJsRoot = path.join(buildRoot, 'static/js');
 const javascriptFiles = (await readdir(staticJsRoot)).filter(name =>
   name.endsWith('.js')
@@ -288,10 +394,13 @@ const sessionController = sourceContent(
   'PlaymeshAi/PlaymeshAiSessionController.js'
 );
 const aiClient = sourceContent('PlaymeshAi/PlaymeshAiClient.js');
+const aiProtocol = sourceContent('PlaymeshAi/PlaymeshAiProtocol.js');
+const aiPanel = sourceContent('PlaymeshAi/PlaymeshAiPanel.js');
+const aiEditorContainer = sourceContent(
+  'PlaymeshAi/PlaymeshAiEditorContainer.js'
+);
 for (const component of [
-  'PlaymeshAi/PlaymeshAiPanel.js',
   'PlaymeshAi/PlaymeshAiApprovalDialog.js',
-  'PlaymeshAi/PlaymeshAiEditorContainer.js',
   'PlaymeshAi/PlaymeshAiAgentRunLoop.js',
 ]) {
   sourceContent(component);
@@ -361,6 +470,26 @@ assert.doesNotMatch(
 assert.doesNotMatch(
   integrationFacade,
   /registerPlaymeshAiToolContract|PlaymeshAiToolRegistration/
+);
+
+// The production chunk must carry the editor-session 4 approval setting all
+// the way from the wire contract through the WebIDE-owned client and UI.
+assert.match(
+  aiProtocol,
+  /PLAYMESH_AI_SESSION_PROTOCOL_VERSION\s*=\s*['"]4\.0\.0['"]/
+);
+assert.match(
+  aiProtocol,
+  /value === ['"]request_approval['"] \|\| value === ['"]always_allow['"]/
+);
+assert.match(aiClient, /editor-settings[\s\S]*approval-mode/);
+assert.match(aiClient, /async updateApprovalMode\s*\(/);
+assert.match(sessionController, /updateApprovalMode\s*\(/);
+assert.match(aiPanel, /id=['"]playmesh-ai-approval-mode['"]/);
+assert.match(aiPanel, /toggled=\{approvalMode === ['"]always_allow['"]\}/);
+assert.match(
+  aiEditorContainer,
+  /onApprovalModeChanged=\{changeApprovalMode\}/
 );
 const toolContractPath = path.join(
   playmeshRoot,

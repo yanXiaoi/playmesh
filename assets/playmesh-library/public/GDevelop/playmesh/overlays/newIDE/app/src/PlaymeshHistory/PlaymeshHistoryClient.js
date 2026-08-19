@@ -10,6 +10,12 @@ import {
   encodePlaymeshHistoryCanonicalJson,
   hashPlaymeshHistoryBlob,
 } from './PlaymeshHistoryEvidence';
+import {
+  unsplitPlaymeshProject,
+  type PlaymeshProjectFile,
+  type PlaymeshProjectJsonObject,
+  type PlaymeshProjectJsonValue,
+} from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
 
 type PlaymeshProjectMutationLease = $ReadOnly<{|
   gameId: string,
@@ -20,6 +26,7 @@ type PlaymeshProjectMutationLease = $ReadOnly<{|
 export type PlaymeshHistoryReason =
   | 'explicit_save'
   | 'important_change'
+  | 'autosave'
   | 'before_restore'
   | 'restore';
 
@@ -27,24 +34,17 @@ export type PlaymeshHistorySource = 'user' | 'system';
 
 type PlaymeshHistorySnapshotReason =
   | 'explicit_save'
-  | 'important_change';
+  | 'important_change'
+  | 'autosave';
 
-export type PlaymeshHistoryJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | Array<PlaymeshHistoryJsonValue>
-  | PlaymeshHistoryJsonObject;
+export type PlaymeshHistoryJsonValue = PlaymeshProjectJsonValue;
 
-export type PlaymeshHistoryJsonObject = {
-  [string]: PlaymeshHistoryJsonValue,
-};
+export type PlaymeshHistoryJsonObject = PlaymeshProjectJsonObject;
 
 type MixedRecord = { +[string]: mixed };
 
 export type PlaymeshHistorySnapshotInput = $ReadOnly<{|
-  +project: mixed,
+  +projectFiles: mixed,
   +resources: $ReadOnlyArray<mixed>,
 |}>;
 
@@ -57,6 +57,13 @@ export type PlaymeshHistoryVersion = {|
   contentHash: string,
   source: PlaymeshHistorySource,
   contentBytes: number,
+  changeSummary?: PlaymeshHistoryChangeSummary,
+|};
+
+export type PlaymeshHistoryChangeSummary = {|
+  added: number,
+  modified: number,
+  deleted: number,
 |};
 
 export type PlaymeshHistoryResourceDto = {|
@@ -70,7 +77,7 @@ export type PlaymeshHistoryResourceDto = {|
 
 export type PlaymeshHistorySnapshot = {|
   version: PlaymeshHistoryVersion,
-  project: PlaymeshHistoryJsonObject,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<PlaymeshHistoryResourceDto>,
 |};
 
@@ -79,25 +86,25 @@ export type PlaymeshHistoryRetention = {|
   maxUniqueBytesPerProject: number,
   maxObjectBytes: number,
   stagingTtlSeconds: number,
-  maxProjectJsonBytes: number,
+  maxProjectFilesBytes: number,
 |};
 
 export type PlaymeshHistoryListResponse = {|
-  capability: 'gdevelop.history.v2',
+  capability: 'gdevelop.history.v3',
   gameId: string,
   retention: PlaymeshHistoryRetention,
   versions: Array<PlaymeshHistoryVersion>,
 |};
 
 export type PlaymeshHistoryCurrentResponse = {|
-  capability: 'gdevelop.history.v2',
+  capability: 'gdevelop.history.v3',
   gameId: string,
   current: ?PlaymeshHistorySnapshot,
 |};
 
 export type PlaymeshHistoryMaterializedSnapshot = {|
   version: PlaymeshHistoryVersion,
-  project: PlaymeshHistoryJsonObject,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
 |};
 
@@ -134,6 +141,7 @@ export type PlaymeshHistoryDiff = {|
 export type PlaymeshHistoryResourcePreviewKind = 'image' | 'audio' | 'video';
 
 export type PlaymeshHistoryResourcePreview = {|
+  gameId: string,
   side: 'before' | 'after',
   revision: number,
   logicalId: string,
@@ -142,12 +150,11 @@ export type PlaymeshHistoryResourcePreview = {|
   mime: string,
   size: number,
   kind: PlaymeshHistoryResourcePreviewKind,
-  url: string,
 |};
 
 export type PlaymeshHistoryRestoreResult = {|
   version: PlaymeshHistoryVersion,
-  project: PlaymeshHistoryJsonObject,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<StoredProjectResource>,
   backupVersion: ?PlaymeshHistoryVersion,
 |};
@@ -158,7 +165,7 @@ export type PreparedPlaymeshHistoryResource = {|
 |};
 
 export type PreparedPlaymeshHistorySnapshot = {|
-  project: PlaymeshHistoryJsonObject,
+  projectFiles: Array<PlaymeshProjectFile>,
   resources: Array<PreparedPlaymeshHistoryResource>,
 |};
 
@@ -225,7 +232,7 @@ type ExecutePlaymeshHistoryRestoreOptions = {|
   signal?: AbortSignal,
 |};
 
-const CAPABILITY = 'gdevelop.history.v2';
+const CAPABILITY = 'gdevelop.history.v3';
 const REQUEST_TIMEOUT_MS = 30000;
 const PRESENCE_BATCH_SIZE = 2048;
 const RESOURCE_DOWNLOAD_CONCURRENCY = 4;
@@ -316,6 +323,7 @@ const assertHistoryReason = (value: mixed): PlaymeshHistoryReason => {
   if (
     value !== 'explicit_save' &&
     value !== 'important_change' &&
+    value !== 'autosave' &&
     value !== 'before_restore' &&
     value !== 'restore'
   ) {
@@ -350,7 +358,8 @@ const validateSnapshotReason = (
   if (value == null || value === '') return null;
   if (
     value !== 'explicit_save' &&
-    value !== 'important_change'
+    value !== 'important_change' &&
+    value !== 'autosave'
   ) {
     throw new PlaymeshHistoryError(
       'invalid_history_reason',
@@ -408,7 +417,7 @@ const assertHistoryVersion = (value: mixed): PlaymeshHistoryVersion => {
   if (!id || !gameId || !timestamp || !/^[a-f0-9]{64}$/.test(contentHash)) {
     throw invalidResponse();
   }
-  return {
+  const result: PlaymeshHistoryVersion = {
     id,
     gameId,
     revision: requireSafeInteger(version.revision),
@@ -418,6 +427,16 @@ const assertHistoryVersion = (value: mixed): PlaymeshHistoryVersion => {
     source: assertHistorySource(version.source),
     contentBytes: requireSafeInteger(version.contentBytes),
   };
+  if (version.changeSummary !== undefined) {
+    const summary = asMixedRecord(version.changeSummary);
+    if (!summary) throw invalidResponse();
+    const added = requireSafeInteger(summary.added);
+    const modified = requireSafeInteger(summary.modified);
+    const deleted = requireSafeInteger(summary.deleted);
+    if (added < 0 || modified < 0 || deleted < 0) throw invalidResponse();
+    result.changeSummary = { added, modified, deleted };
+  }
+  return result;
 };
 
 const assertResourceDto = (value: mixed): PlaymeshHistoryResourceDto => {
@@ -451,13 +470,28 @@ const assertResourceDto = (value: mixed): PlaymeshHistoryResourceDto => {
   return result;
 };
 
+const assertProjectFile = (value: mixed): PlaymeshProjectFile => {
+  const file = asMixedRecord(value);
+  if (!file || typeof file.path !== 'string') throw invalidResponse();
+  return {
+    path: file.path,
+    content: assertJsonObject(file.content),
+  };
+};
+
 const assertSnapshot = (value: mixed): PlaymeshHistorySnapshot => {
   const snapshot = asMixedRecord(value);
   const resourcesValue = snapshot ? snapshot.resources : null;
-  if (!snapshot || !Array.isArray(resourcesValue)) throw invalidResponse();
+  const projectFilesValue = snapshot ? snapshot.projectFiles : null;
+  if (
+    !snapshot ||
+    !Array.isArray(projectFilesValue) ||
+    !Array.isArray(resourcesValue)
+  )
+    throw invalidResponse();
   return {
     version: assertHistoryVersion(snapshot.version),
-    project: assertJsonObject(snapshot.project),
+    projectFiles: projectFilesValue.map(assertProjectFile),
     resources: resourcesValue.map((resource: mixed) =>
       assertResourceDto(resource)
     ),
@@ -531,10 +565,11 @@ const dispatchStatus = (
   );
 };
 
-const request = async (
+const requestWithConsumer = async (
   url: string,
-  options: PlaymeshHistoryRequestOptions = {}
-): Promise<Response> => {
+  options: PlaymeshHistoryRequestOptions = {},
+  consumeResponse: any = null
+): Promise<any> => {
   const operation = `${options.method || 'GET'} ${url}`;
   const controller = new AbortController();
   const timeoutId = window.setTimeout(
@@ -561,7 +596,9 @@ const request = async (
       let details: mixed = null;
       try {
         details = (await response.json(): mixed);
-      } catch (_) {}
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+      }
       const detailsRecord = asMixedRecord(details);
       const errorEnvelope = asMixedRecord(
         detailsRecord ? detailsRecord.error : null
@@ -618,7 +655,9 @@ const request = async (
         }
       );
     }
-    return response;
+    return consumeResponse
+      ? await consumeResponse(response, controller.signal)
+      : response;
   } catch (error) {
     if (error instanceof PlaymeshHistoryError) throw error;
     if (externalSignal && externalSignal.aborted) {
@@ -648,22 +687,33 @@ const request = async (
   }
 };
 
+const requestBlob = async (
+  url: string,
+  options: PlaymeshHistoryRequestOptions = {}
+): Promise<Blob> =>
+  requestWithConsumer(url, options, (response: Response) => response.blob());
+
 const requestJson = async (
   url: string,
   options: PlaymeshHistoryRequestOptions = {}
-): Promise<mixed> => {
-  const response = await request(url, options);
-  try {
-    return (await response.json(): mixed);
-  } catch (_) {
-    throw new PlaymeshHistoryError(
-      'invalid_response',
-      '本地历史响应不是 JSON。',
-      null,
-      { operation: `${options.method || 'GET'} ${url}` }
-    );
-  }
-};
+): Promise<mixed> =>
+  requestWithConsumer(
+    url,
+    options,
+    async (response: Response, requestSignal: AbortSignal): Promise<mixed> => {
+      try {
+        return (await response.json(): mixed);
+      } catch (error) {
+        if (requestSignal.aborted) throw error;
+        throw new PlaymeshHistoryError(
+          'invalid_response',
+          '本地历史响应不是 JSON。',
+          null,
+          { operation: `${options.method || 'GET'} ${url}` }
+        );
+      }
+    }
+  );
 
 const jsonRequest = (
   method: string,
@@ -738,16 +788,19 @@ export const preparePlaymeshHistorySnapshot = async (
   snapshot: mixed
 ): Promise<PreparedPlaymeshHistorySnapshot> => {
   const snapshotRecord = asMixedRecord(snapshot);
-  if (!snapshotRecord || !Array.isArray(snapshotRecord.resources)) {
+  if (
+    !snapshotRecord ||
+    !Array.isArray(snapshotRecord.projectFiles) ||
+    !Array.isArray(snapshotRecord.resources)
+  ) {
     throw new PlaymeshHistoryError('invalid_snapshot', '本地项目快照无效。');
   }
   const snapshotResources = snapshotRecord.resources;
-  let project: PlaymeshHistoryJsonObject;
-  try {
-    project = assertJsonObject(snapshotRecord.project);
-  } catch (_) {
-    throw new PlaymeshHistoryError('invalid_snapshot', '本地项目快照无效。');
-  }
+  // The serializer has just produced this tree with GDevelop's ObjectSplitter.
+  // Keep the exact file objects: recomposing or recursively normalizing them
+  // here duplicates the full project traversal without adding an upstream
+  // GDevelop check.
+  const projectFiles: any = snapshotRecord.projectFiles;
   const resources: Array<PreparedPlaymeshHistoryResource> = [];
   for (const resourceValue of snapshotResources) {
     const resource = asMixedRecord(resourceValue);
@@ -785,7 +838,10 @@ export const preparePlaymeshHistorySnapshot = async (
       blob: blobValue,
     });
   }
-  return { project, resources: canonicalizePreparedResources(resources) };
+  return {
+    projectFiles,
+    resources: canonicalizePreparedResources(resources),
+  };
 };
 
 export const toPlaymeshHistoryResourceDto = (
@@ -864,18 +920,19 @@ export const uploadMissingPlaymeshHistoryResources = async (
   let uploaded = 0;
   for (const resource of resources) {
     if (!missing.has(resource.contentHash)) continue;
-    const response = await request(
-      `${historyBase(projectId)}/resources/${resource.contentHash}`,
-      {
-        method: 'PUT',
-        // The browser derives Content-Length from the Blob body. Setting this
-        // forbidden request header manually would make the upload non-portable.
-        headers: { 'Content-Type': resource.mime },
-        body: resource.blob,
-        signal,
-      }
+    const result = asMixedRecord(
+      await requestJson(
+        `${historyBase(projectId)}/resources/${resource.contentHash}`,
+        {
+          method: 'PUT',
+          // The browser derives Content-Length from the Blob body. Setting this
+          // forbidden request header manually would make the upload non-portable.
+          headers: { 'Content-Type': resource.mime },
+          body: resource.blob,
+          signal,
+        }
+      )
     );
-    const result = asMixedRecord((await response.json(): mixed));
     if (
       !result ||
       result.contentHash !== resource.contentHash ||
@@ -918,7 +975,7 @@ const assertRetention = (value: mixed): PlaymeshHistoryRetention => {
     ),
     maxObjectBytes: requireSafeInteger(retention.maxObjectBytes),
     stagingTtlSeconds: requireSafeInteger(retention.stagingTtlSeconds),
-    maxProjectJsonBytes: requireSafeInteger(retention.maxProjectJsonBytes),
+    maxProjectFilesBytes: requireSafeInteger(retention.maxProjectFilesBytes),
   };
 };
 
@@ -983,10 +1040,10 @@ export const listPlaymeshHistory = async (
     const response = assertListResponse(
       await requestJson(historyBase(projectId), { signal })
     );
-    const newest = response.versions[0];
-    if (newest && Number.isSafeInteger(newest.revision)) {
-      knownRevisions.set(projectId, newest.revision);
-    }
+    // History revisions and the authoritative current revision are different
+    // counters: deduplicated saves can advance current without creating a new
+    // history version. A history list must therefore never overwrite the CAS
+    // base revision used by the next save.
     unsupportedProjects.delete(projectId);
     return response;
   } catch (error) {
@@ -1058,7 +1115,7 @@ const executeSync = async ({
     baseRevision,
     source,
     ...(reason ? { reason } : {}),
-    project: prepared.project,
+    projectFiles: prepared.projectFiles,
     resources: prepared.resources.map(toPlaymeshHistoryResourceDto),
   });
   const baseRevision = await ensureKnownPlaymeshHistoryRevision(
@@ -1193,13 +1250,12 @@ const downloadRestoredResources = async (
             '恢复资源描述无效。'
           );
         }
-        const response = await request(
+        const blob = await requestBlob(
           `${historyBase(projectId)}/resources/${encodeURIComponent(
             String(dto.contentHash)
           )}`,
           { signal }
         );
-        const blob = await response.blob();
         if (
           validateResources &&
           (blob.size !== dto.size ||
@@ -1284,10 +1340,15 @@ export const materializePlaymeshHistorySnapshot = async (
     signal,
     validateResources
   );
-  if (validateProject) validateRestoredProject(normalized.project, resources);
+  if (validateProject) {
+    validateRestoredProject(
+      await unsplitPlaymeshProject(normalized.projectFiles),
+      resources
+    );
+  }
   return {
     version: normalized.version,
-    project: normalized.project,
+    projectFiles: normalized.projectFiles,
     resources,
   };
 };
@@ -1317,7 +1378,7 @@ export const loadPlaymeshHistoryCurrentProject = async (
   // semantics, resource size/hash, or a duplicate temporary unserialization.
   return {
     version: current.version,
-    project: current.project,
+    projectFiles: current.projectFiles,
     resources,
   };
 };
@@ -1376,7 +1437,7 @@ const executeRestorePlaymeshHistory = async ({
           baseRevision,
           targetRevision,
           source,
-          currentProject: preparedCurrent.project,
+          currentProjectFiles: preparedCurrent.projectFiles,
           currentResources: preparedCurrent.resources.map(
             toPlaymeshHistoryResourceDto
           ),
@@ -1392,11 +1453,14 @@ const executeRestorePlaymeshHistory = async ({
     restored.resources,
     signal
   );
-  validateRestoredProject(restored.project, resources);
+  validateRestoredProject(
+    await unsplitPlaymeshProject(restored.projectFiles),
+    resources
+  );
   knownRevisions.set(gameId, restored.version.revision);
   return {
     version: restored.version,
-    project: restored.project,
+    projectFiles: restored.projectFiles,
     resources,
     backupVersion: response.backupVersion,
   };
@@ -1493,6 +1557,7 @@ export const getPlaymeshHistoryResourcePreview = (
   const kind = previewKindForMime(resource.mime);
   if (!kind) return null;
   return {
+    gameId: diff.gameId,
     side,
     revision,
     logicalId: resource.logicalId,
@@ -1501,12 +1566,21 @@ export const getPlaymeshHistoryResourcePreview = (
     mime: resource.mime,
     size: resource.size,
     kind,
-    url: `${historyBase(diff.gameId)}/revisions/${encodeURIComponent(
-      String(revision)
-    )}/resources/${resource.contentHash}?logicalId=${encodeURIComponent(
-      resource.logicalId
-    )}`,
   };
+};
+
+export const loadPlaymeshHistoryResourcePreview = async (
+  preview: PlaymeshHistoryResourcePreview,
+  signal?: AbortSignal
+): Promise<Blob> => {
+  return requestBlob(
+    `${historyBase(preview.gameId)}/revisions/${encodeURIComponent(
+      String(preview.revision)
+    )}/resources/${encodeURIComponent(
+      preview.contentHash
+    )}?logicalId=${encodeURIComponent(preview.logicalId)}`,
+    { signal }
+  );
 };
 
 export const getPlaymeshHistoryDiff = async (

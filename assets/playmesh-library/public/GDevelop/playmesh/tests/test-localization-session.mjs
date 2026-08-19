@@ -212,8 +212,6 @@ const expectedAiMessageMappings = {
   aiPlanInProgress: 'workspace.gdevelop_ai.plan.in_progress',
   aiPlanCompleted: 'workspace.gdevelop_ai.plan.completed',
   aiApprovalGrantsTitle: 'workspace.gdevelop_ai.approval_grants.title',
-  aiApprovalGrantsDescription:
-    'workspace.gdevelop_ai.approval_grants.description',
   aiApprovalGrantsEmpty: 'workspace.gdevelop_ai.approval_grants.empty',
   aiApprovalGrantRevoke: 'workspace.gdevelop_ai.approval_grants.revoke',
   aiApprovalGrantsRefresh: 'workspace.gdevelop_ai.approval_grants.refresh',
@@ -221,6 +219,14 @@ const expectedAiMessageMappings = {
     'workspace.gdevelop_ai.approval_grants.load_failed',
   aiApprovalGrantRevokeFailed:
     'workspace.gdevelop_ai.approval_grants.revoke_failed',
+  aiApprovalModeTitle: 'workspace.gdevelop_ai.approval_mode.title',
+  aiApprovalModeRequest: 'workspace.gdevelop_ai.approval_mode.request',
+  aiApprovalModeAlways: 'workspace.gdevelop_ai.approval_mode.always',
+  aiApprovalModeSaving: 'workspace.gdevelop_ai.approval_mode.saving',
+  aiApprovalModeSaveFailed:
+    'workspace.gdevelop_ai.approval_mode.save_failed',
+  aiApprovalModeUncertain: 'workspace.gdevelop_ai.approval_mode.uncertain',
+  aiApprovalModeRetry: 'workspace.gdevelop_ai.approval_mode.retry',
   aiEventPayloadRequired: 'workspace.gdevelop_ai.event_payload.required',
   aiEventPayloadInvalid: 'workspace.gdevelop_ai.event_payload.invalid',
   aiSessionClipboardError: 'workspace.gdevelop_ai.session.clipboard_error',
@@ -255,6 +261,41 @@ for (const [name, key] of Object.entries({
     messageKeysSource,
     new RegExp(`${name}:\\s*['\"]${key.replaceAll('.', '\\.')}['\"]`),
     `${name} must stay bound to ${key}`
+  );
+}
+
+const localeDirectory = path.resolve(
+  testDirectory,
+  '../../../../../playmesh-localization/locales'
+);
+const [zhMessages, enMessages] = await Promise.all([
+  readFile(path.join(localeDirectory, 'zh-CN/app.json'), 'utf8').then(JSON.parse),
+  readFile(path.join(localeDirectory, 'en-US/app.json'), 'utf8').then(JSON.parse),
+]);
+assert.equal(
+  zhMessages['workspace.gdevelop_ai.approval_mode.always'],
+  '始终允许'
+);
+assert.equal(
+  enMessages['workspace.gdevelop_ai.approval_mode.always'],
+  'Always allow'
+);
+for (const messages of [zhMessages, enMessages]) {
+  assert.equal(
+    messages['workspace.gdevelop_ai.approval_mode.request_description'],
+    undefined
+  );
+  assert.equal(
+    messages['workspace.gdevelop_ai.approval_mode.always_description'],
+    undefined
+  );
+  assert.equal(
+    messages['workspace.gdevelop_ai.approval_mode.grants_unaffected'],
+    undefined
+  );
+  assert.equal(
+    messages['workspace.gdevelop_ai.approval_grants.description'],
+    undefined
   );
 }
 

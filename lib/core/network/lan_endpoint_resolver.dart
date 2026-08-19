@@ -3,11 +3,20 @@ import 'lan_endpoint_resolver_stub.dart'
     as implementation;
 import 'lan_endpoint.dart';
 
-Future<List<LanEndpointCandidate>> resolveLanEndpointCandidates(int port) {
-  return implementation.resolveLanEndpointCandidates(port);
+Future<List<LanEndpointCandidate>> resolveLanEndpointCandidates(
+  int port, {
+  bool includeLinkLocal = false,
+}) {
+  return implementation.resolveLanEndpointCandidates(
+    port,
+    includeLinkLocal: includeLinkLocal,
+  );
 }
 
-Future<List<Uri>> resolveLanEndpoints(int port) async =>
-    (await resolveLanEndpointCandidates(
-      port,
-    )).map((candidate) => candidate.uri).toList(growable: false);
+Future<List<Uri>> resolveLanEndpoints(
+  int port, {
+  bool includeLinkLocal = false,
+}) async => (await resolveLanEndpointCandidates(
+  port,
+  includeLinkLocal: includeLinkLocal,
+)).map((candidate) => candidate.uri).toList(growable: false);

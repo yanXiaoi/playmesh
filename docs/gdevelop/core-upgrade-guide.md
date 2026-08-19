@@ -220,7 +220,9 @@ manifest 派生检查项；源码重放验证还会双向比较 Playmesh-owned �
    浏览器 IndexedDB 不参与工程持久化。
 4. 本地资源选择器可处理图片、音频、字体和 3D 资源，内置对象图标不丢失。
 5. 官方扩展/行为与精确 commit 示例目录加载失败时不阻塞编辑主流程。
-6. GDevelop Cloud、资产商店、课程、登录、Ask AI、Piskel 等禁用入口没有回流。
+6. GDevelop Cloud、资产商店、课程、登录、Ask AI 等在线服务入口没有回流；官方
+   Piskel、Jfxr、Yarn 本地编辑器仍从原入口打开，资源按官方生命周期写回 PlaymeshLocal，
+   且编辑器包内的分析、账号、公共发布和其他联网入口保持移除。
 7. PropertiesDialog 中 Playmesh 项目配置可读取、保存、冲突提示并刷新 revision。
 8. `single/online/legacy/unknown` 运行计划严格遵守 bundlePresence、runtimeActivation、
    presentation 与 connectCore 四维矩阵，且不存在旧 `injection/injectionFileCount` 字段。
@@ -230,9 +232,10 @@ manifest 派生检查项；源码重放验证还会双向比较 Playmesh-owned �
 12. 连接中断后的未知提交状态不自动重复发布。
 13. 普通官方 HTML 导出为零 Playmesh 注入。
 14. 迁移到官方 GDevelop 的工程 JSON 不包含 Playmesh 专属事件或对象。
-15. `storagetools.ts` 仍只在官方两个 localStorage seam 惰性切换同步 Bucket；无 Playmesh、
-    完整 SDK、残缺 SDK 三态分别保持官方、使用同步存储、明确失败关闭，且没有新 Symbol、
-    预载快照或 Bootstrap gate。
+15. `storagetools.ts` 仍只在官方两个 localStorage seam 惰性切换同步 Bucket；无 Playmesh 时
+    保持官方存储，玩家使用 `GDJS/users/<username>/...`，公共 Authority 使用 `GDJS/auth/...`，
+    纯浏览器 solo 保持本地存储；多人身份未就绪或 SDK 残缺时明确失败关闭。页面首次解析后
+    冻结 scope，且没有新 Symbol、预载快照或异步 Bootstrap gate。
 16. 官方 Multiplayer 项目 API、事件名、事件数据格式和 message manager 调用形状不变；
     Playmesh 私有兼容层的大厅展示和 backend 映射按下一项单独验收。
 17. 一个 Playmesh Session 只映射一个虚拟 lobby；玩家自动加入，Authority direct start，guest
@@ -375,11 +378,12 @@ Release、不调用 GitHub/Gitee API，也不执行 stage、commit、push。不�
 - `index.html`、service worker、GDJS Runtime、libGD、图标及 Playmesh policy 文件存在；
 - ZIP 解压不会越界，且布局验证通过。
 
-`assets/app/GdevelopWebIDE.json` 每次 App 打包都必须存在，内容为按名称列出的远端版本清单
-URL；App 先探测这些清单线路，再读取其中的 `downloads` 并探测实际 ZIP 线路。该文件不是
-ZIP 下载清单本身，不能把两级 URL 混写。GDevelop 本地发布脚本只验证最终 ZIP 与
-`update.json` 的 `version/sha256/size` 完全一致，并证明 `downloads` 未被改动。完成后把
-ZIP 与清单交给用户正常 Git 流程；不在该脚本中验证或改变远端状态。
+`assets/app/App.json` 每次 App 打包都必须存在。App 只投影其中带 `gdevelop` 字段的渠道，
+按名称展示并探测这些远端版本清单 URL；缺少该字段的渠道跳过，其他资源键不在此处校验。
+选定清单后再读取其中的 `downloads` 并探测实际 ZIP 线路。`App.json` 中的 `gdevelop` 值不是
+ZIP 下载地址，不能把两级 URL 混写。GDevelop 本地发布脚本只验证最终 ZIP 与 `update.json`
+的 `version/sha256/size` 完全一致，并证明 `downloads` 未被改动。完成后把 ZIP 与清单交给
+用户正常 Git 流程；不在该脚本中验证或改变远端状态。
 
 用户端“安装”“升级”和“修复”必须复用同一下载、测速、精确大小、SHA-256、安全解压与
 原子覆盖流程。更新判断只比较完整 SHA-256：未安装即下载，摘要相同即为当前版本并允许

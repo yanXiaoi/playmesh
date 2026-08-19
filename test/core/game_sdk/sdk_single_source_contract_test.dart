@@ -46,7 +46,6 @@ void main() {
       'lib/core/game_sdk/features/game/game_core_feature.dart':
           '_resolveCommandSdkVersion',
       'lib/features/game/game_launcher.dart': 'game.sdkVersion.isEmpty',
-      'lib/features/game/game_page.dart': 'game.sdkVersion.isEmpty',
     };
     for (final entry in requiredConsumers.entries) {
       expect(
@@ -80,6 +79,30 @@ void main() {
         source,
         contains('List<SdkVersionRange> get supportedVersions'),
         reason: '${feature.path} 的命令执行器必须自行声明支持的 SDK 版本',
+      );
+    }
+  });
+
+  test('App LAN feature 只依赖窄宿主接口而不复制发现、邀请或二维码实现', () {
+    final source = File(
+      'lib/core/game_sdk/features/app/app_lan_feature.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('abstract interface class AppLanHost'));
+    expect(source, contains('Future<GameShareLinkSnapshot> getShareLinks()'));
+    expect(source, contains('prepareDiscoveredJoin(String instanceId)'));
+    for (final forbidden in const [
+      'NetworkInterface',
+      'GameWebGateway',
+      'RelayHostSession',
+      'ShareQrCodeEncoder',
+      'invitationCandidates',
+      'LanGameDiscoveryService',
+    ]) {
+      expect(
+        source,
+        isNot(contains(forbidden)),
+        reason: 'App LAN feature 不得依赖 $forbidden',
       );
     }
   });

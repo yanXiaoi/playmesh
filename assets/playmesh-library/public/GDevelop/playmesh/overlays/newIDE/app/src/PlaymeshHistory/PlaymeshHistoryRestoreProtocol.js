@@ -1,14 +1,20 @@
 // @flow
 
 import {
+  assertPlaymeshProjectConfig,
   validatePlaymeshProjectConfigGameId,
-  validatePlaymeshProjectGameType,
 } from '../PlaymeshProjectConfig/PlaymeshProjectConfigProtocol';
 
-export const PLAYMESH_HISTORY_RESTORE_PROTOCOL = 'gdevelop.restore.v2';
+export const PLAYMESH_HISTORY_RESTORE_PROTOCOL = 'gdevelop.restore.v3';
 export const PLAYMESH_HISTORY_RESTORE_MAX_JSON_BYTES = 1024 * 1024 * 1024;
 
 /*::
+import type {
+  PlaymeshProjectFile,
+  PlaymeshProjectJsonObject,
+  PlaymeshProjectJsonValue,
+} from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
+
 export type PlaymeshHistoryRestorePhase =
   | 'PREPARED'
   | 'COMMIT_REQUESTED'
@@ -21,18 +27,11 @@ export type PlaymeshHistoryRestoreSource = 'user' | 'system';
 export type PlaymeshHistoryRestoreReason =
   | 'explicit_save'
   | 'important_change'
+  | 'autosave'
   | 'before_restore'
   | 'restore';
-export type PlaymeshHistoryRestoreJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | Array<PlaymeshHistoryRestoreJsonValue>
-  | PlaymeshHistoryRestoreJsonObject;
-export type PlaymeshHistoryRestoreJsonObject = {
-  [string]: PlaymeshHistoryRestoreJsonValue,
-};
+export type PlaymeshHistoryRestoreJsonValue = PlaymeshProjectJsonValue;
+export type PlaymeshHistoryRestoreJsonObject = PlaymeshProjectJsonObject;
 export type PlaymeshHistoryRestoreResource = {|
   logicalId: string,
   name?: string,
@@ -42,16 +41,19 @@ export type PlaymeshHistoryRestoreResource = {|
   metadata?: PlaymeshHistoryRestoreJsonObject,
 |};
 export type PlaymeshHistoryRestoreConfig = {|
-  schemaVersion: 1,
+  schemaVersion: 2,
   gameId: string,
   revision: number,
   gameType: 'single' | 'online',
+  minPlayers: number,
+  maxPlayers: number,
+  tags: Array<string>,
   updatedAt: string,
 |};
 export type PlaymeshHistoryRestoreHistoryEvidence = {|
   revision: number,
   currentContentHash: string,
-  projectJsonHash: string,
+  projectFilesHash: string,
   resourceManifestHash: string,
 |};
 export type PlaymeshHistoryRestoreConfigEvidence =
@@ -71,7 +73,7 @@ export type PlaymeshHistoryRestoreProjectEvidence = {|
   config: PlaymeshHistoryRestoreConfigEvidence,
 |};
 export type PlaymeshHistoryRestoreBrowserEvidence = {|
-  projectJsonHash: string,
+  projectFilesHash: string,
   resourceManifestHash: string,
 |};
 export type PlaymeshHistoryRestoreVersion = {|
@@ -85,19 +87,21 @@ export type PlaymeshHistoryRestoreVersion = {|
   contentBytes: number,
 |};
 export type PlaymeshHistoryRestoreProjectReference = {|
+  path: string,
   contentHash: string,
   size: number,
 |};
+export type PlaymeshHistoryRestoreProjectFile = PlaymeshProjectFile;
 export type PlaymeshHistoryRestoreTargetSnapshot = {|
   sourceVersion: PlaymeshHistoryRestoreVersion,
-  projectReference: PlaymeshHistoryRestoreProjectReference,
-  project: PlaymeshHistoryRestoreJsonObject,
+  projectFilesReference: Array<PlaymeshHistoryRestoreProjectReference>,
+  projectFiles: Array<PlaymeshHistoryRestoreProjectFile>,
   resources: Array<PlaymeshHistoryRestoreResource>,
   playmeshProjectConfig?: ?PlaymeshHistoryRestoreConfig,
 |};
 export type PlaymeshHistoryRestoredSnapshot = {|
   version: PlaymeshHistoryRestoreVersion,
-  project: PlaymeshHistoryRestoreJsonObject,
+  projectFiles: Array<PlaymeshHistoryRestoreProjectFile>,
   resources: Array<PlaymeshHistoryRestoreResource>,
   playmeshProjectConfig?: ?PlaymeshHistoryRestoreConfig,
 |};
@@ -136,7 +140,7 @@ export type PlaymeshHistoryRestorePrepareBody = {|
   baseRevision: number,
   targetRevision: number,
   source: PlaymeshHistoryRestoreSource,
-  currentProject: PlaymeshHistoryRestoreJsonObject,
+  currentProjectFiles: Array<PlaymeshHistoryRestoreProjectFile>,
   currentResources: Array<PlaymeshHistoryRestoreResource>,
   clientId?: string,
 |};
@@ -278,6 +282,7 @@ const assertPlaymeshHistoryRestoreReason = (
   if (
     reason !== 'explicit_save' &&
     reason !== 'important_change' &&
+    reason !== 'autosave' &&
     reason !== 'before_restore' &&
     reason !== 'restore'
   ) {
@@ -372,28 +377,11 @@ export const assertPlaymeshHistoryRestoreConfig = (
   value /*: mixed */,
   gameId /*: string */
 ) /*: PlaymeshHistoryRestoreConfig */ => {
-  const config = asRecord(value);
-  if (
-    !config ||
-    !hasExactKeys(config, [
-      'schemaVersion',
-      'gameId',
-      'revision',
-      'gameType',
-      'updatedAt',
-    ]) ||
-    config.schemaVersion !== 1 ||
-    config.gameId !== gameId
-  ) {
+  try {
+    return assertPlaymeshProjectConfig(value, gameId);
+  } catch (_) {
     return fail();
   }
-  return {
-    schemaVersion: 1,
-    gameId,
-    revision: requirePositiveInteger(config.revision),
-    gameType: validatePlaymeshProjectGameType(config.gameType),
-    updatedAt: requireTimestamp(config.updatedAt),
-  };
 };
 
 const assertHistoryEvidence = (
@@ -405,7 +393,7 @@ const assertHistoryEvidence = (
     !hasExactKeys(evidence, [
       'revision',
       'currentContentHash',
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     ])
   ) {
@@ -414,7 +402,7 @@ const assertHistoryEvidence = (
   return {
     revision: requirePositiveInteger(evidence.revision),
     currentContentHash: requireHash(evidence.currentContentHash),
-    projectJsonHash: requireHash(evidence.projectJsonHash),
+    projectFilesHash: requireHash(evidence.projectFilesHash),
     resourceManifestHash: requireHash(evidence.resourceManifestHash),
   };
 };
@@ -486,12 +474,12 @@ export const assertPlaymeshHistoryRestoreBrowserEvidence = (
   const evidence = asRecord(value);
   if (
     !evidence ||
-    !hasExactKeys(evidence, ['projectJsonHash', 'resourceManifestHash'])
+    !hasExactKeys(evidence, ['projectFilesHash', 'resourceManifestHash'])
   ) {
     return fail();
   }
   return {
-    projectJsonHash: requireHash(evidence.projectJsonHash),
+    projectFilesHash: requireHash(evidence.projectFilesHash),
     resourceManifestHash: requireHash(evidence.resourceManifestHash),
   };
 };
@@ -555,12 +543,27 @@ const assertProjectReference = (
   value /*: mixed */
 ) /*: PlaymeshHistoryRestoreProjectReference */ => {
   const reference = asRecord(value);
-  if (!reference || !hasExactKeys(reference, ['contentHash', 'size'])) {
+  if (
+    !reference ||
+    !hasExactKeys(reference, ['path', 'contentHash', 'size'])
+  ) {
     return fail();
   }
   return {
+    path: requireString(reference.path),
     contentHash: requireHash(reference.contentHash),
     size: requirePositiveInteger(reference.size),
+  };
+};
+
+const assertProjectFile = (
+  value /*: mixed */
+) /*: PlaymeshHistoryRestoreProjectFile */ => {
+  const file = asRecord(value);
+  if (!file || !hasExactKeys(file, ['path', 'content'])) return fail();
+  return {
+    path: requireString(file.path),
+    content: assertJsonObject(file.content),
   };
 };
 
@@ -572,13 +575,24 @@ const assertTargetSnapshot = (
 ) /*: PlaymeshHistoryRestoreTargetSnapshot */ => {
   const snapshot = asRecord(value);
   const resourcesValue = snapshot ? snapshot.resources : null;
+  const projectFilesValue = snapshot ? snapshot.projectFiles : null;
+  const projectFilesReferenceValue = snapshot
+    ? snapshot.projectFilesReference
+    : null;
   if (
     !snapshot ||
     !hasAllowedKeys(
       snapshot,
-      ['sourceVersion', 'projectReference', 'project', 'resources'],
+      [
+        'sourceVersion',
+        'projectFilesReference',
+        'projectFiles',
+        'resources',
+      ],
       ['playmeshProjectConfig']
     ) ||
+    !Array.isArray(projectFilesReferenceValue) ||
+    !Array.isArray(projectFilesValue) ||
     !Array.isArray(resourcesValue)
   ) {
     return fail();
@@ -587,8 +601,10 @@ const assertTargetSnapshot = (
   if (sourceVersion.revision !== targetRevision) return fail();
   const result /*: PlaymeshHistoryRestoreTargetSnapshot */ = {
     sourceVersion,
-    projectReference: assertProjectReference(snapshot.projectReference),
-    project: assertJsonObject(snapshot.project),
+    projectFilesReference: projectFilesReferenceValue.map(
+      assertProjectReference
+    ),
+    projectFiles: projectFilesValue.map(assertProjectFile),
     resources: resourcesValue.map(assertPlaymeshHistoryRestoreResource),
   };
   if (hasOwn(snapshot, 'playmeshProjectConfig')) {
@@ -622,20 +638,22 @@ const assertRestoredSnapshot = (
 ) /*: PlaymeshHistoryRestoredSnapshot */ => {
   const restored = asRecord(value);
   const resourcesValue = restored ? restored.resources : null;
+  const projectFilesValue = restored ? restored.projectFiles : null;
   if (
     !restored ||
     !hasAllowedKeys(
       restored,
-      ['version', 'project', 'resources'],
+      ['version', 'projectFiles', 'resources'],
       ['playmeshProjectConfig']
     ) ||
+    !Array.isArray(projectFilesValue) ||
     !Array.isArray(resourcesValue)
   ) {
     return fail();
   }
   const result /*: PlaymeshHistoryRestoredSnapshot */ = {
     version: assertVersion(restored.version, gameId),
-    project: assertJsonObject(restored.project),
+    projectFiles: projectFilesValue.map(assertProjectFile),
     resources: resourcesValue.map(assertPlaymeshHistoryRestoreResource),
   };
   if (hasOwn(restored, 'playmeshProjectConfig')) {
@@ -870,7 +888,7 @@ export const createPlaymeshHistoryRestorePrepareBody = (
     baseRevision,
     targetRevision,
     source,
-    currentProject,
+    currentProjectFiles,
     currentResources,
     clientId,
   } /*: {|
@@ -878,12 +896,15 @@ export const createPlaymeshHistoryRestorePrepareBody = (
     +baseRevision: mixed,
     +targetRevision: mixed,
     +source: mixed,
-    +currentProject: mixed,
+    +currentProjectFiles: mixed,
     +currentResources: mixed,
     +clientId?: mixed,
   |} */
 ) /*: PlaymeshHistoryRestorePrepareBody */ => {
-  if (!Array.isArray(currentResources)) {
+  if (
+    !Array.isArray(currentProjectFiles) ||
+    !Array.isArray(currentResources)
+  ) {
     return fail('invalid_snapshot', 'Playmesh 当前项目资源无效。');
   }
   const body /*: PlaymeshHistoryRestorePrepareBody */ = {
@@ -893,7 +914,7 @@ export const createPlaymeshHistoryRestorePrepareBody = (
     baseRevision: validatePlaymeshHistoryRestoreRevision(baseRevision),
     targetRevision: validatePlaymeshHistoryRestoreRevision(targetRevision),
     source: validatePlaymeshHistoryRestoreSource(source),
-    currentProject: assertJsonObject(currentProject),
+    currentProjectFiles: currentProjectFiles.map(assertProjectFile),
     currentResources: currentResources.map(
       assertPlaymeshHistoryRestoreResource
     ),

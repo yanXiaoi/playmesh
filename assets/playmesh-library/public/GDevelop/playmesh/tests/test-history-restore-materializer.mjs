@@ -40,10 +40,7 @@ protocolSource = protocolSource.replace(
   if (typeof value !== 'string' || !value) throw new Error('invalid game id');
   return value;
 };
-const validatePlaymeshProjectGameType = value => {
-  if (value !== 'single' && value !== 'online') throw new Error('invalid game type');
-  return value;
-};`
+const assertPlaymeshProjectConfig = value => value;`
 );
 const protocol = await importSource(transformFlow(protocolSource));
 globalThis.__historyRestoreProtocol = protocol;
@@ -63,8 +60,8 @@ evidenceSource = evidenceSource.replace(
 } = globalThis.__historyRestoreProtocol;`
 );
 evidenceSource = evidenceSource.replace(
-  /import \{ sha256Hex \} from '\.\.\/PlaymeshCrypto\/PlaymeshSha256';/,
-  'const { sha256Hex } = globalThis.__playmeshSha256;'
+  /import \{[\s\S]*?\} from '\.\.\/PlaymeshCrypto\/PlaymeshSha256';/,
+  'const { sha256Blob, sha256Hex } = globalThis.__playmeshSha256;'
 );
 const evidence = await importSource(transformFlow(evidenceSource));
 globalThis.__historyEvidence = evidence;
@@ -91,6 +88,13 @@ materializerSource = materializerSource
   hashPlaymeshHistoryBlob,
   hashPlaymeshHistoryBytes,
 } = globalThis.__historyEvidence;`
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\.\/ProjectsStorage\/PlaymeshLocalStorageProvider\/PlaymeshProjectFiles';/,
+    `const formatPlaymeshProjectFile = content =>
+  \`${'${JSON.stringify(content, null, 2)}'}\\n\`;
+const unsplitPlaymeshProject = async projectFiles =>
+  projectFiles.find(file => file.path === 'game.json').content;`
   );
 const materializer = await importSource(transformFlow(materializerSource));
 
@@ -103,13 +107,17 @@ const project = {
     file: logicalId,
   },
 };
+const projectFiles = [{ path: 'game.json', content: project }];
 const canonicalBytes = evidence.encodePlaymeshHistoryCanonicalJson(project);
 assert.equal(
   new TextDecoder().decode(canonicalBytes),
   `{"a":{"file":"${logicalId}","label":"目标 ✓"},"z":1}`
 );
+const projectFileBytes = new TextEncoder().encode(
+  `${JSON.stringify(project, null, 2)}\n`
+);
 const projectHash = await evidence.hashPlaymeshHistoryBytes(
-  canonicalBytes.buffer
+  projectFileBytes.buffer
 );
 const resourceBytes = new Uint8Array([1, 2, 3, 4, 5]);
 const resourceHash = await evidence.hashPlaymeshHistoryBytes(
@@ -135,11 +143,14 @@ const targetSnapshot = {
     source: 'user',
     contentBytes: canonicalBytes.byteLength,
   },
-  projectReference: {
-    contentHash: projectHash,
-    size: canonicalBytes.byteLength,
-  },
-  project,
+  projectFilesReference: [
+    {
+      path: 'game.json',
+      contentHash: projectHash,
+      size: projectFileBytes.byteLength,
+    },
+  ],
+  projectFiles,
   resources: [resourceDto],
   playmeshProjectConfig: null,
 };
@@ -212,8 +223,8 @@ assert.equal(
   `/dev/api/gdevelop/projects/${gameId}/history/resources/${resourceHash}`
 );
 assert.equal(fetchCalls[0].options.signal, signal);
-assert.equal(result.project, project);
-assert.equal(result.project.a.file, logicalId);
+assert.deepEqual(result.projectFiles, projectFiles);
+assert.equal(result.projectFiles[0].content.a.file, logicalId);
 assert.equal(result.resources.length, 1);
 assert.equal(result.resources[0].logicalUrl, logicalId);
 assert.equal(result.resources[0].name, 'sprite.png');
@@ -233,10 +244,12 @@ await assert.rejects(
     targetRevision: 4,
     targetSnapshot: {
       ...targetSnapshot,
-      projectReference: {
-        ...targetSnapshot.projectReference,
-        contentHash: 'b'.repeat(64),
-      },
+      projectFilesReference: [
+        {
+          ...targetSnapshot.projectFilesReference[0],
+          contentHash: 'b'.repeat(64),
+        },
+      ],
     },
     fetchImpl: async () => {
       wrongProjectFetches++;

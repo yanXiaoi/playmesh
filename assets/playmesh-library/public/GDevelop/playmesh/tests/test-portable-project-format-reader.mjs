@@ -214,17 +214,35 @@ expectCode(
     ),
   'extension_document'
 );
-expectCode(
-  () =>
-    format.parsePortableProjectJson(
-      encoder.encode(
-        JSON.stringify({
-          gdVersion: {},
-          external: { __REFERENCE_TO_SPLIT_OBJECT: 'file.json' },
-        })
-      )
-    ),
-  'split_project_not_supported'
+assert.deepEqual(
+  format.parsePortableProjectJson(
+    encoder.encode(
+      JSON.stringify({
+        gdVersion: {},
+        layouts: [
+          {
+            __REFERENCE_TO_SPLIT_OBJECT: true,
+            referenceTo: '/layouts/scene',
+          },
+        ],
+      })
+    )
+  ),
+  {
+    gdVersion: {},
+    layouts: [
+      {
+        __REFERENCE_TO_SPLIT_OBJECT: true,
+        referenceTo: '/layouts/scene',
+      },
+    ],
+  }
+);
+assert.deepEqual(
+  format.parsePortableProjectPartialJson(
+    encoder.encode(JSON.stringify({ name: 'Scene' }))
+  ),
+  { name: 'Scene' }
 );
 expectCode(
   () =>
@@ -237,6 +255,7 @@ expectCode(
 
 const resourcePlan = format.planPortableProjectResources({
   inspectedArchive: inspected,
+  projectFilePaths: new Set(['game.json']),
   projectResources: [
     { name: 'A', file: 'assets/a.png' },
     { name: 'A-copy', file: 'assets/a.png' },
@@ -253,6 +272,7 @@ expectCode(
   () =>
     format.planPortableProjectResources({
       inspectedArchive: inspected,
+      projectFilePaths: new Set(['game.json']),
       projectResources: [{ name: 'Missing', file: 'assets/missing.png' }],
     }),
   'missing_resource'
@@ -261,6 +281,7 @@ expectCode(
   () =>
     format.planPortableProjectResources({
       inspectedArchive: inspected,
+      projectFilePaths: new Set(['game.json']),
       projectResources: [{ name: 'Session', file: 'blob:fixture' }],
     }),
   'session_resource_url'
@@ -269,6 +290,7 @@ expectCode(
   () =>
     format.planPortableProjectResources({
       inspectedArchive: inspected,
+      projectFilePaths: new Set(['game.json']),
       projectResources: [],
     }),
   'unexpected_archive_file'
@@ -432,6 +454,38 @@ await assert.rejects(
   }),
   error => error.code === 'invalid_zip'
 );
+
+let rawReaderSource = await readFile(
+  path.join(sourceDirectory, 'PlaymeshRawProjectJsonReader.js'),
+  'utf8'
+);
+rawReaderSource = rawReaderSource.replace(
+  /import \{[\s\S]*?\} from ['"]\.\/PlaymeshPortableProjectFormat['"];/,
+  `const {
+  PlaymeshProjectImportError,
+  resolvePortableImportLimits,
+} = globalThis.__portableFormatForReaderTest;`
+);
+const rawReader = await importSource(rawReaderSource);
+const rawProjectBlob = new Blob([
+  JSON.stringify({
+    gdVersion: { major: 5 },
+    properties: { folderProject: false },
+    layouts: [{ name: 'Scene', objects: [] }],
+  }),
+], { type: 'application/json' });
+const rawArchive = await rawReader.openPlaymeshRawProjectJson(rawProjectBlob);
+assert.deepEqual([...rawArchive.inspectedArchive.files.keys()], ['game.json']);
+const rawExtracted = await rawArchive.readBlob({
+  path: 'game.json',
+  contentType: 'application/json',
+  maxBytes: rawProjectBlob.size,
+});
+assert.deepEqual(
+  new Uint8Array(await rawExtracted.arrayBuffer()),
+  new Uint8Array(await rawProjectBlob.arrayBuffer())
+);
+await rawArchive.close();
 
 delete globalThis.__portableFormatForReaderTest;
 process.stdout.write('GDevelop portable project format/reader tests passed.\n');

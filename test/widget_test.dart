@@ -101,7 +101,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('加入对局').first);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.byType(JoinGamePage), findsOneWidget);
     expect(find.text('加入主机对局'), findsWidgets);

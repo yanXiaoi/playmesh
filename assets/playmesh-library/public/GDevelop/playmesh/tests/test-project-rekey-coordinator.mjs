@@ -52,14 +52,16 @@ const hashJson = value =>
     .digest('hex');
 const sourceJson = { properties: { name: 'Source', packageName: oldGameId } };
 const targetJson = { properties: { name: 'Target', packageName: newGameId } };
-const sourceHash = hashJson(sourceJson);
-const targetHash = hashJson(targetJson);
+const sourceProjectFiles = [{ path: 'game.json', content: sourceJson }];
+const targetProjectFiles = [{ path: 'game.json', content: targetJson }];
+const sourceHash = hashJson(sourceProjectFiles);
+const targetHash = hashJson(targetProjectFiles);
 const resourceHash = hashJson([]);
 const sourceStored = {
   id: fileIdentifier,
   name: 'Source',
   gameId: oldGameId,
-  projectJson: JSON.stringify(sourceJson),
+  projectFiles: sourceProjectFiles,
   resources: [],
   savedAt: 1,
 };
@@ -67,7 +69,7 @@ const targetStored = {
   id: fileIdentifier,
   name: 'Target',
   gameId: newGameId,
-  projectJson: JSON.stringify(targetJson),
+  projectFiles: targetProjectFiles,
   resources: [],
   savedAt: 2,
 };
@@ -78,7 +80,7 @@ const sourcePrepared = {
     gameId: oldGameId,
     lastModifiedDate: 1,
   },
-  snapshot: { project: sourceJson, resources: [] },
+  snapshot: { projectFiles: sourceProjectFiles, resources: [] },
   storedProject: sourceStored,
 };
 const targetPrepared = {
@@ -88,13 +90,13 @@ const targetPrepared = {
     gameId: newGameId,
     lastModifiedDate: 2,
   },
-  snapshot: { project: targetJson, resources: [] },
+  snapshot: { projectFiles: targetProjectFiles, resources: [] },
   storedProject: targetStored,
 };
 const historyEvidence = marker => ({
   revision: 1,
   currentContentHash: marker.repeat(64),
-  projectJsonHash: sourceHash,
+  projectFilesHash: sourceHash,
   resourceManifestHash: resourceHash,
 });
 const configEvidence = gameId => ({
@@ -127,8 +129,8 @@ const makeTransaction = (phase, overrides = {}) => ({
   newGameId,
   phase,
   clientId: 'client-fixed',
-  browserSource: { fileIdentifier, projectJsonHash: sourceHash },
-  browserTarget: { fileIdentifier, projectJsonHash: targetHash },
+  browserSource: { fileIdentifier, projectFilesHash: sourceHash },
+  browserTarget: { fileIdentifier, projectFilesHash: targetHash },
   oldEvidence: backendEvidence(oldGameId, 'd'),
   targetEvidence: backendEvidence(newGameId, 'e'),
   createdAt: timestamp,
@@ -171,7 +173,7 @@ const makeHarness = ({
           ? {
               fileMetadata: { fileIdentifier, gameId: newGameId },
               packageName: newGameId,
-              projectJsonHash: targetHash,
+              projectFilesHash: targetHash,
             }
           : null,
       rollbackBrowserEvidence:
@@ -179,7 +181,7 @@ const makeHarness = ({
           ? {
               fileMetadata: { fileIdentifier, gameId: oldGameId },
               packageName: oldGameId,
-              projectJsonHash: sourceHash,
+              projectFilesHash: sourceHash,
             }
           : null,
     });
@@ -253,7 +255,7 @@ const makeHarness = ({
             revision: 1,
             contentHash: 'd'.repeat(64),
           },
-          project: sourceJson,
+          projectFiles: sourceProjectFiles,
           resources: [],
         },
       };
@@ -287,11 +289,11 @@ const makeHarness = ({
         browserSource: transaction.browserSource,
         browserTarget: transaction.browserTarget,
         sourceEvidence: {
-          projectJsonHash: sourceHash,
+          projectFilesHash: sourceHash,
           resourceManifestHash: resourceHash,
         },
         targetEvidence: {
-          projectJsonHash: targetHash,
+          projectFilesHash: targetHash,
           resourceManifestHash: resourceHash,
         },
         sourceProject: structuredClone(sourceProject),
@@ -331,16 +333,16 @@ const makeHarness = ({
       };
     },
     async classifyBrowserState(project, journal) {
-      const projectHash = hashJson(JSON.parse(project.projectJson));
+      const projectHash = hashJson(project.projectFiles);
       if (
         project.gameId === oldGameId &&
-        projectHash === journal.sourceEvidence.projectJsonHash
+        projectHash === journal.sourceEvidence.projectFilesHash
       ) {
         return 'source';
       }
       if (
         project.gameId === newGameId &&
-        projectHash === journal.targetEvidence.projectJsonHash
+        projectHash === journal.targetEvidence.projectFilesHash
       ) {
         return 'target';
       }
@@ -352,9 +354,9 @@ const makeHarness = ({
       return {
         fileMetadata: { fileIdentifier, gameId },
         packageName: gameId,
-        projectJsonHash: source
-          ? journal.sourceEvidence.projectJsonHash
-          : journal.targetEvidence.projectJsonHash,
+        projectFilesHash: source
+          ? journal.sourceEvidence.projectFilesHash
+          : journal.targetEvidence.projectFilesHash,
       };
     },
     async clearJournal() {
@@ -471,14 +473,14 @@ const journalFor = phase => ({
   oldGameId,
   newGameId,
   phase,
-  browserSource: { fileIdentifier, projectJsonHash: sourceHash },
-  browserTarget: { fileIdentifier, projectJsonHash: targetHash },
+  browserSource: { fileIdentifier, projectFilesHash: sourceHash },
+  browserTarget: { fileIdentifier, projectFilesHash: targetHash },
   sourceEvidence: {
-    projectJsonHash: sourceHash,
+    projectFilesHash: sourceHash,
     resourceManifestHash: resourceHash,
   },
   targetEvidence: {
-    projectJsonHash: targetHash,
+    projectFilesHash: targetHash,
     resourceManifestHash: resourceHash,
   },
   sourceProject: sourceStored,
@@ -594,7 +596,12 @@ for (const phase of [
 {
   const thirdProject = {
     ...targetStored,
-    projectJson: JSON.stringify({ properties: { name: 'Third' } }),
+    projectFiles: [
+      {
+        path: 'game.json',
+        content: { properties: { name: 'Third' } },
+      },
+    ],
   };
   const harness = makeHarness({
     initialTransaction: makeTransaction('ROLLBACK_REQUESTED'),

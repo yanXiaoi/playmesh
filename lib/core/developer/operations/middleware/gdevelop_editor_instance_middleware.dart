@@ -5,6 +5,8 @@ class _GDevelopEditorInstanceMiddleware implements _DeveloperRequestMiddleware {
 
   static const _apiPrefix = '/dev/api/gdevelop/';
   static const _leasePrefix = '/dev/api/gdevelop/editor-instance/';
+  static const _nativeFileSaveTransferPrefix =
+      '/dev/api/gdevelop/native-file-saves/';
   static final _aiSessionPath = RegExp(
     r'^/dev/api/gdevelop/projects/[^/]+/ai/editor-sessions/([^/]+)(?:/|$)',
   );
@@ -17,7 +19,9 @@ class _GDevelopEditorInstanceMiddleware implements _DeveloperRequestMiddleware {
     _DeveloperRequestNext next,
   ) async {
     final route = request.uri.path;
-    if (!route.startsWith(_apiPrefix) || route.startsWith(_leasePrefix)) {
+    if (!route.startsWith(_apiPrefix) ||
+        route.startsWith(_leasePrefix) ||
+        _isNativeFileSaveHostTransfer(request, route)) {
       await next();
       return;
     }
@@ -53,5 +57,16 @@ class _GDevelopEditorInstanceMiddleware implements _DeveloperRequestMiddleware {
       return;
     }
     await next();
+  }
+
+  /// A successful, lease-bound POST hands the staged transfer to the native
+  /// App host. Its HttpClient is outside the WebView lease wrapper, so the
+  /// authenticated GET/DELETE continuation must not require page lease
+  /// headers. Authentication middleware still runs before this middleware.
+  static bool _isNativeFileSaveHostTransfer(HttpRequest request, String route) {
+    if (request.method != 'GET' && request.method != 'DELETE') return false;
+    if (!route.startsWith(_nativeFileSaveTransferPrefix)) return false;
+    final transferId = route.substring(_nativeFileSaveTransferPrefix.length);
+    return transferId.isNotEmpty && !transferId.contains('/');
   }
 }

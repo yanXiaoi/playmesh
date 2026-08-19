@@ -194,7 +194,7 @@ const requireUtcTimestamp = (value /*: mixed */) /*: string */ => {
   return value;
 };
 
-const assertConfig = (
+export const assertPlaymeshProjectConfig = (
   value /*: mixed */,
   expectedGameId /*: string */
 ) /*: PlaymeshProjectConfig */ => {
@@ -256,7 +256,7 @@ export const assertPlaymeshProjectConfigReadResponse = (
     return {
       requestId,
       status: 'ready',
-      config: assertConfig(response.config, expectedGameId),
+      config: assertPlaymeshProjectConfig(response.config, expectedGameId),
     };
   }
   if (response.status === 'missing') {

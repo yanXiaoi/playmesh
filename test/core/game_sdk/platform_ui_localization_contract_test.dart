@@ -79,6 +79,16 @@ void main() {
         appSource,
         contains('setAppUiControlLabel(ui.restart, "sidebar.restart")'),
       );
+      expect(
+        appSource,
+        contains('disableAppUiSystemMenuTriggers.apply(null, arguments)'),
+      );
+      expect(
+        appSource,
+        contains('global.removeEventListener?.("keydown", handler, true)'),
+      );
+      expect(appSource, contains('appUiSystemMenuTriggersDisabled'));
+      expect(appSource, isNot(contains('setSystemMenuTriggersEnabled')));
       expect(source, contains('platformText("nickname.invalid")'));
       expect(source, contains('platformText("nickname.update_failed")'));
       expect(source, contains('platformText("capability.denied")'));
@@ -89,6 +99,8 @@ void main() {
       expect(appSource, contains('getLocale()'));
       expect(declaration, contains('readonly runtime:'));
       expect(declaration, contains('getLocale(): string'));
+      expect(declaration, contains('disableSystemMenuTriggers(): void'));
+      expect(declaration, isNot(contains('setSystemMenuTriggersEnabled')));
       expect(declaration, isNot(contains('platform.ui.configure')));
       expect(declaration, isNot(contains('platformUiMessages')));
       expect(declaration, isNot(contains('_playmeshPlatformUi')));

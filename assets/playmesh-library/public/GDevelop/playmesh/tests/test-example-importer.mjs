@@ -35,6 +35,8 @@ const allocationCoordinatorSource = await readFile(
 const allocationCoordinator = await import(
   `data:text/javascript;base64,${Buffer.from(`
 const playmeshPortableImportAllocationClient = null;
+const unsplitPlaymeshProject = async projectFiles =>
+  projectFiles.find(file => file.path === 'game.json').content;
 const computeSha256Hex = async (bytes, cryptoImplementation) =>
   Array.from(
     new Uint8Array(await cryptoImplementation.subtle.digest('SHA-256', bytes))
@@ -194,6 +196,7 @@ const state = {
   maximumActiveDownloads: 0,
   clearCount: 0,
   projectAllocations: [],
+  splitCalls: 0,
   staging: new Map(),
   failStagingArtifactKey: null,
   failGDevelopValidation: false,
@@ -208,11 +211,52 @@ const mocks = {
   allocatePlaymeshProjectSnapshot: async input => {
     if (state.allocationError) throw state.allocationError;
     await allocationCoordinator.createPlaymeshProjectAllocationEvidence({
-      projectJson: JSON.stringify(input.snapshot.project),
+      projectFilesJson: JSON.stringify(input.snapshot.projectFiles),
       resources: input.snapshot.resources,
       cryptoImplementation: webcrypto,
     });
     state.projectAllocations.push(input);
+  },
+  splitPlaymeshProject: project => {
+    state.splitCalls++;
+    const projectFiles = [];
+    const splitRootProperties = [
+      ['layouts', 'layouts'],
+      ['externalLayouts', 'externalLayouts'],
+      ['externalEvents', 'externalEvents'],
+      ['eventsFunctionsExtensions', 'eventsFunctionsExtensions'],
+    ];
+    const usedPaths = new Set();
+    const rootProject = { ...project };
+    for (const [propertyName, directory] of splitRootProperties) {
+      if (!Array.isArray(project[propertyName])) continue;
+      rootProject[propertyName] = project[propertyName].map(
+        (partialProject, index) => {
+          const baseName = String(partialProject.name || `${index + 1}`)
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '') || `${index + 1}`;
+          let uniqueName = baseName;
+          let suffix = 2;
+          while (usedPaths.has(`${directory}/${uniqueName}`)) {
+            uniqueName = `${baseName}-${suffix++}`;
+          }
+          const referenceTo = `/${directory}/${uniqueName}`;
+          usedPaths.add(referenceTo.slice(1));
+          projectFiles.push({
+            path: `${referenceTo.slice(1)}.json`,
+            content: partialProject,
+          });
+          return {
+            __REFERENCE_TO_SPLIT_OBJECT: true,
+            referenceTo,
+          };
+        }
+      );
+    }
+    return [{ path: 'game.json', content: rootProject }, ...projectFiles];
   },
   beginCatalogStaging: async () => {},
   cleanupExpiredCatalogStaging: async () => {},
@@ -316,6 +360,10 @@ source = source
   .replace(
     /import \{ sanitizePlaymeshExternalUrl \} from '[^']+';/,
     `const { sanitizePlaymeshExternalUrl } = globalThis.__playmeshExampleImporterMocks;`
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\.\/ProjectsStorage\/PlaymeshLocalStorageProvider\/PlaymeshProjectFiles';/,
+    `const { splitPlaymeshProject } = globalThis.__playmeshExampleImporterMocks;`
   );
 
 const importer = await import(`data:text/javascript;base64,${Buffer.from(
@@ -367,6 +415,7 @@ const resetState = () => {
   state.maximumActiveDownloads = 0;
   state.clearCount = 0;
   state.projectAllocations = [];
+  state.splitCalls = 0;
   state.staging.clear();
   state.failStagingArtifactKey = null;
   state.failGDevelopValidation = false;
@@ -380,6 +429,7 @@ const installFixture = async () => {
   const projectView = new TextEncoder().encode(
     JSON.stringify({
       properties: { name: 'Original' },
+      layouts: [{ name: 'Example Scene', objects: [] }],
       resources: {
         resources: resourcePaths.map((file, index) => ({
           name: `Resource${index}`,
@@ -583,7 +633,27 @@ const allocation = state.projectAllocations[0];
 assert.equal(allocation.snapshot.resources.length, 3);
 assert.equal(allocation.gameId, 'com.playmesh.game.gimport00001');
 assert.equal(allocation.origin, 'create');
-const storedJson = allocation.snapshot.project;
+assert.equal(state.splitCalls, 1);
+assert.deepEqual(
+  allocation.snapshot.projectFiles.map(file => file.path),
+  ['game.json', 'layouts/example-scene.json']
+);
+const storedJson = allocation.snapshot.projectFiles.find(
+  file => file.path === 'game.json'
+).content;
+assert.equal(storedJson.properties.folderProject, true);
+assert.deepEqual(storedJson.layouts, [
+  {
+    __REFERENCE_TO_SPLIT_OBJECT: true,
+    referenceTo: '/layouts/example-scene',
+  },
+]);
+assert.deepEqual(
+  allocation.snapshot.projectFiles.find(
+    file => file.path === 'layouts/example-scene.json'
+  ).content,
+  { name: 'Example Scene', objects: [] }
+);
 assert.equal(
   storedJson.properties.packageName,
   'com.playmesh.game.gimport00001'
@@ -647,7 +717,9 @@ await importer.importPlaymeshExample({
 });
 assert.equal(state.projectAllocations.length, 1);
 const aliasedSnapshot = state.projectAllocations[0].snapshot;
-const aliasedEntries = aliasedSnapshot.project.resources.resources;
+const aliasedEntries = aliasedSnapshot.projectFiles.find(
+  file => file.path === 'game.json'
+).content.resources.resources;
 assert.equal(aliasedSnapshot.resources.length, 2);
 assert.equal(new Set(aliasedEntries.map(entry => entry.file)).size, 2);
 assert.deepEqual(
@@ -783,11 +855,13 @@ if (pinnedSourceArgumentIndex >= 0) {
     );
   }
   const pinnedSnapshot = state.projectAllocations[0].snapshot;
-  const pinnedEntries = pinnedSnapshot.project.resources.resources.filter(
-    resource =>
-      typeof resource.file === 'string' &&
-      resource.file.startsWith('playmesh-local-resource://')
-  );
+  const pinnedEntries = pinnedSnapshot.projectFiles
+    .find(file => file.path === 'game.json')
+    .content.resources.resources.filter(
+      resource =>
+        typeof resource.file === 'string' &&
+        resource.file.startsWith('playmesh-local-resource://')
+    );
   assert.equal(pinnedSnapshot.resources.length, pinned.localReferenceCount);
   assert.equal(new Set(pinnedEntries.map(entry => entry.file)).size, pinnedEntries.length);
   assert.equal(

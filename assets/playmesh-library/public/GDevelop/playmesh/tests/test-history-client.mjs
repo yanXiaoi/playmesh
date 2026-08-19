@@ -29,14 +29,17 @@ const stripHistoryClientFlowTypes = value =>
       'diagnostics = {}'
     )
     .replace(/\(value: MixedRecord\)/g, 'value')
-    .replace(/\blet project:\s*PlaymeshHistoryJsonObject;/, 'let project;')
+    .replace(
+      /\blet projectFiles:\s*Array<PlaymeshProjectFile>;/,
+      'let projectFiles;'
+    )
     .replace(/\blet rawResponse:\s*mixed;/, 'let rawResponse;')
     .replace(
       /([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*'(?:[^']+)'(?:\s*\|\s*'[^']+')+/g,
       '$1'
     )
     .replace(
-      /\b(const|let) ([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(?:any|mixed|PlaymeshHistoryJsonObject|Map<string, string>|Map<string, number>|Map<string, PreparedPlaymeshHistoryResource>|Set<string>|Array<string>|Array<PreparedPlaymeshHistoryResource>|Array<StoredProjectResource>)\s*=/g,
+      /\b(const|let) ([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(?:any|mixed|PlaymeshHistoryJsonObject|Map<string, string>|Map<string, number>|Map<string, PreparedPlaymeshHistoryResource>|Set<string>|Array<string>|Array<PlaymeshProjectFile>|Array<PreparedPlaymeshHistoryResource>|Array<StoredProjectResource>)\s*=/g,
       '$1 $2 ='
     )
     .replace(
@@ -92,6 +95,13 @@ const createPlaymeshHistoryResourceDto = async resource => {
 };
 const encodePlaymeshHistoryCanonicalJson = value =>
   new TextEncoder().encode(JSON.stringify(value, Object.keys(value || {}).sort()));`
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\.\/ProjectsStorage\/PlaymeshLocalStorageProvider\/PlaymeshProjectFiles';/,
+    `const unsplitPlaymeshProject = async projectFiles => {
+  globalThis.__playmeshHistoryUnsplitCount++;
+  return projectFiles.find(file => file.path === 'game.json').content;
+};`
   );
 const remainingFlowType = source.match(
   /import type|export type|:\s*(?:mixed|string|number|boolean|Blob|AbortSignal|Promise<|Map<|Array<|\$ReadOnlyArray<|PlaymeshHistory)/
@@ -106,7 +116,11 @@ if (remainingFlowType) {
 }
 const gameId = 'com.playmesh.game.ghistory001';
 const base = `/dev/api/gdevelop/projects/${gameId}/history`;
-const historyVersion = (revision, reason = 'explicit_save') => ({
+const historyVersion = (
+  revision,
+  reason = 'explicit_save',
+  changeSummary = undefined
+) => ({
   id: `${gameId}-${revision}`,
   gameId,
   revision,
@@ -115,13 +129,30 @@ const historyVersion = (revision, reason = 'explicit_save') => ({
   contentHash: revision.toString(16).padStart(64, '0'),
   source: 'user',
   contentBytes: 128 + revision,
+  ...(changeSummary === undefined ? {} : { changeSummary }),
 });
+const projectFilesFor = project => [
+  {
+    path: 'game.json',
+    content: {
+      ...project,
+      properties: { ...(project.properties || {}), folderProject: true },
+    },
+  },
+];
 const events = [];
 const calls = [];
 let presenceCalls = 0;
 let phase = 'sync';
 let validationCount = 0;
+let previewBodySignal = null;
+let previewBodyAbortCount = 0;
+let previewBodyStarted = false;
+let diffJsonBodySignal = null;
+let diffJsonBodyAbortCount = 0;
+let diffJsonBodyStarted = false;
 globalThis.__playmeshHistoryHashCount = 0;
+globalThis.__playmeshHistoryUnsplitCount = 0;
 
 globalThis.CustomEvent = class CustomEvent {
   constructor(type, options) {
@@ -206,7 +237,7 @@ globalThis.fetch = async (url, options = {}) => {
     return jsonResponse(200, {
       capability: uncheckedManifest
         ? 'unvalidated-current-capability'
-        : 'gdevelop.history.v2',
+        : 'gdevelop.history.v3',
       gameId: uncheckedManifest ? 42 : gameId,
       current:
         phase === 'materialize-current' ||
@@ -222,14 +253,14 @@ globalThis.fetch = async (url, options = {}) => {
                     contentBytes: 'unvalidated-size',
                   }
                 : historyVersion(3),
-              project: uncheckedManifest
+              projectFiles: uncheckedManifest
                 ? ['official-gdevelop-will-validate-this-project']
-                : {
+                : projectFilesFor({
                     properties: { packageName: gameId },
                     resources: currentResourceFixtures.map(resource => ({
                       file: resource.logicalId,
                     })),
-                  },
+                  }),
               resources: currentResourceFixtures.map(
                 ({ bytes, ...resource }, index) =>
                   uncheckedManifest && index === 0
@@ -242,6 +273,28 @@ globalThis.fetch = async (url, options = {}) => {
               ),
             }
           : null,
+    });
+  }
+  if (url === base && method === 'GET') {
+    return jsonResponse(200, {
+      capability: 'gdevelop.history.v3',
+      gameId,
+      retention: {
+        maxVersionsPerProject: 100,
+        maxUniqueBytesPerProject: 1024 * 1024 * 1024,
+        maxObjectBytes: 128 * 1024 * 1024,
+        stagingTtlSeconds: 24 * 60 * 60,
+        maxProjectFilesBytes: 32 * 1024 * 1024,
+      },
+      // A deduplicated history head can legitimately lag authoritative
+      // current. Listing it must not downgrade the next save's baseRevision.
+      versions: [
+        historyVersion(1, 'explicit_save', {
+          added: 4,
+          modified: 2,
+          deleted: 1,
+        }),
+      ],
     });
   }
   if (url === `${base}/resources/presence`) {
@@ -260,6 +313,48 @@ globalThis.fetch = async (url, options = {}) => {
       size: options.body.size,
       staged: true,
     });
+  }
+  if (
+    url ===
+      `${base}/revisions/1/resources/${'1'.repeat(
+        64
+      )}?logicalId=playmesh-local-resource%3A%2F%2Fhistory%2Fhero-v1.png` &&
+    method === 'GET'
+  ) {
+    if (
+      phase === 'preview-body-abort' ||
+      phase === 'preview-body-timeout'
+    ) {
+      previewBodySignal = options.signal;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        blob: async () => {
+          previewBodyStarted = true;
+          return new Promise((resolve, reject) => {
+            const rejectAborted = () => {
+              previewBodyAbortCount++;
+              reject(new DOMException('aborted', 'AbortError'));
+            };
+            if (options.signal.aborted) rejectAborted();
+            else
+              options.signal.addEventListener('abort', rejectAborted, {
+                once: true,
+              });
+          });
+        },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      blob: async () =>
+        new Blob([new Uint8Array([137, 80, 78, 71])], {
+          type: 'image/png',
+        }),
+    };
   }
   if (url === `${base}/current` && method === 'PUT') {
     const request = JSON.parse(options.body);
@@ -283,6 +378,41 @@ globalThis.fetch = async (url, options = {}) => {
     });
   }
   if (url.startsWith(`${base}/diff?`)) {
+    if (
+      phase === 'diff-json-body-abort' ||
+      phase === 'diff-json-body-timeout'
+    ) {
+      diffJsonBodySignal = options.signal;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => {
+          diffJsonBodyStarted = true;
+          return new Promise((resolve, reject) => {
+            const rejectAborted = () => {
+              diffJsonBodyAbortCount++;
+              reject(new DOMException('aborted', 'AbortError'));
+            };
+            if (options.signal.aborted) rejectAborted();
+            else
+              options.signal.addEventListener('abort', rejectAborted, {
+                once: true,
+              });
+          });
+        },
+      };
+    }
+    if (phase === 'diff-json-invalid-syntax') {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => {
+          throw new SyntaxError('invalid json');
+        },
+      };
+    }
     const beforeHash = '1'.repeat(64);
     const afterHash = '2'.repeat(64);
     const response = {
@@ -335,10 +465,10 @@ globalThis.fetch = async (url, options = {}) => {
       gameId,
       restored: {
         version: historyVersion(3, 'restore'),
-        project: {
+        projectFiles: projectFilesFor({
           properties: { packageName: gameId },
           resources: [{ file: 'playmesh-local-resource://restored' }],
-        },
+        }),
         resources: [
           {
             logicalId: 'playmesh-local-resource://restored',
@@ -406,7 +536,7 @@ assert.throws(
     history.syncPlaymeshHistory({
       gameId,
       snapshot: {
-        project: { properties: { packageName: gameId } },
+        projectFiles: projectFilesFor({ properties: { packageName: gameId } }),
         resources: [],
       },
       source: 'ai',
@@ -420,7 +550,7 @@ assert.throws(
     history.syncPlaymeshHistory({
       gameId,
       snapshot: {
-        project: { properties: { packageName: gameId } },
+        projectFiles: projectFilesFor({ properties: { packageName: gameId } }),
         resources: [],
       },
       source: 'user',
@@ -434,14 +564,16 @@ const sharedLogicalUrl = 'playmesh-local-resource://shared/sprite.png';
 const sharedBlob = new Blob([new Uint8Array([9, 8, 7])], {
   type: 'image/png',
 });
+const preparedProjectFiles = projectFilesFor({
+  properties: { packageName: gameId },
+  resources: [
+    { name: 'Primary', file: sharedLogicalUrl },
+    { name: 'Alias', file: sharedLogicalUrl },
+  ],
+});
+const prepareUnsplitCount = globalThis.__playmeshHistoryUnsplitCount;
 const canonicalAliases = await history.preparePlaymeshHistorySnapshot({
-  project: {
-    properties: { packageName: gameId },
-    resources: [
-      { name: 'Primary', file: sharedLogicalUrl },
-      { name: 'Alias', file: sharedLogicalUrl },
-    ],
-  },
+  projectFiles: preparedProjectFiles,
   resources: [
     { logicalUrl: sharedLogicalUrl, name: 'Primary', blob: sharedBlob },
     {
@@ -452,6 +584,16 @@ const canonicalAliases = await history.preparePlaymeshHistorySnapshot({
   ],
 });
 assert.equal(
+  canonicalAliases.projectFiles,
+  preparedProjectFiles,
+  'history prepare must pass through the serializer split tree without a recursive clone'
+);
+assert.equal(
+  globalThis.__playmeshHistoryUnsplitCount,
+  prepareUnsplitCount,
+  'history prepare must not recompose the serializer split tree'
+);
+assert.equal(
   canonicalAliases.resources.length,
   1,
   'byte-identical aliases sharing one logicalId must produce one manifest pin'
@@ -459,7 +601,7 @@ assert.equal(
 assert.equal(canonicalAliases.resources[0].name, 'Alias');
 await assert.rejects(
   history.preparePlaymeshHistorySnapshot({
-    project: { properties: { packageName: gameId } },
+    projectFiles: projectFilesFor({ properties: { packageName: gameId } }),
     resources: [
       { logicalUrl: sharedLogicalUrl, blob: sharedBlob },
       {
@@ -491,7 +633,10 @@ const resources = await Promise.all(
 
 const currentResult = await history.syncPlaymeshHistory({
   gameId,
-  snapshot: { project: { properties: { packageName: gameId } }, resources },
+  snapshot: {
+    projectFiles: projectFilesFor({ properties: { packageName: gameId } }),
+    resources,
+  },
   source: 'user',
   reason: null,
 });
@@ -507,9 +652,18 @@ assert.equal(
 
 await history.syncPlaymeshHistory({
   gameId,
-  snapshot: { project: { properties: { packageName: gameId } }, resources: [] },
+  snapshot: {
+    projectFiles: projectFilesFor({ properties: { packageName: gameId } }),
+    resources: [],
+  },
   source: 'user',
   reason: 'explicit_save',
+});
+const listedHistory = await history.listPlaymeshHistory(gameId);
+assert.deepEqual(listedHistory.versions[0].changeSummary, {
+  added: 4,
+  modified: 2,
+  deleted: 1,
 });
 const diff = await history.getPlaymeshHistoryDiff(gameId, 1, 2);
 assert.equal(diff.changed, true);
@@ -520,22 +674,95 @@ const beforePreview = history.getPlaymeshHistoryResourcePreview(
 );
 assert.deepEqual(
   {
+    gameId: beforePreview.gameId,
     side: beforePreview.side,
     revision: beforePreview.revision,
     kind: beforePreview.kind,
     mime: beforePreview.mime,
   },
-  { side: 'before', revision: 1, kind: 'image', mime: 'image/png' }
+  {
+    gameId,
+    side: 'before',
+    revision: 1,
+    kind: 'image',
+    mime: 'image/png',
+  }
 );
 assert.equal(
-  beforePreview.url,
+  Object.prototype.hasOwnProperty.call(beforePreview, 'url'),
+  false,
+  'preview evidence must not expose a protected endpoint as a media src'
+);
+const previewCallOffset = calls.length;
+const previewBlob = await history.loadPlaymeshHistoryResourcePreview(
+  beforePreview
+);
+assert.equal(previewBlob.type, 'image/png');
+assert.equal(previewBlob.size, 4);
+assert.equal(calls.length, previewCallOffset + 1);
+assert.equal(
+  calls[previewCallOffset].url,
   `${base}/revisions/1/resources/${'1'.repeat(
     64
   )}?logicalId=playmesh-local-resource%3A%2F%2Fhistory%2Fhero-v1.png`
 );
-assert.equal(beforePreview.url.startsWith('/dev/api/'), true);
-assert.equal(beforePreview.url.includes('blob:'), false);
-assert.equal(beforePreview.url.includes('http://'), false);
+assert.equal(
+  calls[previewCallOffset].options.credentials,
+  'same-origin',
+  'preview bytes must use the authenticated history fetch seam'
+);
+assert.equal(calls[previewCallOffset].options.cache, 'no-store');
+
+phase = 'preview-body-abort';
+previewBodySignal = null;
+previewBodyAbortCount = 0;
+previewBodyStarted = false;
+const previewAbortController = new AbortController();
+const abortedPreviewPromise = history.loadPlaymeshHistoryResourcePreview(
+  beforePreview,
+  previewAbortController.signal
+);
+while (!previewBodyStarted) await Promise.resolve();
+previewAbortController.abort();
+await assert.rejects(
+  abortedPreviewPromise,
+  error => error.code === 'cancelled',
+  'external cancellation after response headers must cancel the pending Blob body'
+);
+assert.equal(previewBodySignal.aborted, true);
+assert.equal(previewBodyAbortCount, 1);
+
+phase = 'preview-body-timeout';
+previewBodySignal = null;
+previewBodyAbortCount = 0;
+previewBodyStarted = false;
+let previewTimeoutCallback = null;
+const realWindowSetTimeout = window.setTimeout;
+const realWindowClearTimeout = window.clearTimeout;
+window.setTimeout = callback => {
+  previewTimeoutCallback = callback;
+  return 1234;
+};
+window.clearTimeout = () => {};
+try {
+  const timedOutPreviewPromise = history.loadPlaymeshHistoryResourcePreview(
+    beforePreview
+  );
+  while (!previewBodyStarted) await Promise.resolve();
+  assert.equal(typeof previewTimeoutCallback, 'function');
+  previewTimeoutCallback();
+  await assert.rejects(
+    timedOutPreviewPromise,
+    error => error.code === 'upload_timeout',
+    'the history timeout must cover a Blob body still pending after headers'
+  );
+  assert.equal(previewBodySignal.aborted, true);
+  assert.equal(previewBodyAbortCount, 1);
+} finally {
+  window.setTimeout = realWindowSetTimeout;
+  window.clearTimeout = realWindowClearTimeout;
+}
+phase = 'sync';
 assert.equal(
   history.getPlaymeshHistoryResourcePreview(
     diff,
@@ -554,6 +781,61 @@ assert.equal(
   null,
   'a resource from the other revision must not be reused as current evidence'
 );
+
+phase = 'diff-json-body-abort';
+diffJsonBodySignal = null;
+diffJsonBodyAbortCount = 0;
+diffJsonBodyStarted = false;
+const diffAbortController = new AbortController();
+const abortedDiffPromise = history.getPlaymeshHistoryDiff(
+  gameId,
+  1,
+  2,
+  diffAbortController.signal
+);
+while (!diffJsonBodyStarted) await Promise.resolve();
+diffAbortController.abort();
+await assert.rejects(
+  abortedDiffPromise,
+  error => error.code === 'cancelled',
+  'external cancellation after diff headers must cancel its pending JSON body'
+);
+assert.equal(diffJsonBodySignal.aborted, true);
+assert.equal(diffJsonBodyAbortCount, 1);
+
+phase = 'diff-json-body-timeout';
+diffJsonBodySignal = null;
+diffJsonBodyAbortCount = 0;
+diffJsonBodyStarted = false;
+let diffTimeoutCallback = null;
+window.setTimeout = callback => {
+  diffTimeoutCallback = callback;
+  return 5678;
+};
+window.clearTimeout = () => {};
+try {
+  const timedOutDiffPromise = history.getPlaymeshHistoryDiff(gameId, 1, 2);
+  while (!diffJsonBodyStarted) await Promise.resolve();
+  assert.equal(typeof diffTimeoutCallback, 'function');
+  diffTimeoutCallback();
+  await assert.rejects(
+    timedOutDiffPromise,
+    error => error.code === 'upload_timeout',
+    'the history timeout must cover a diff JSON body pending after headers'
+  );
+  assert.equal(diffJsonBodySignal.aborted, true);
+  assert.equal(diffJsonBodyAbortCount, 1);
+} finally {
+  window.setTimeout = realWindowSetTimeout;
+  window.clearTimeout = realWindowClearTimeout;
+}
+
+phase = 'diff-json-invalid-syntax';
+await assert.rejects(
+  history.getPlaymeshHistoryDiff(gameId, 1, 2),
+  error => error.code === 'invalid_response',
+  'malformed JSON must remain an invalid_response rather than an abort error'
+);
 phase = 'invalid-diff';
 await assert.rejects(
   history.getPlaymeshHistoryDiff(gameId, 1, 2),
@@ -567,7 +849,7 @@ const restored = await history.restorePlaymeshHistory({
   targetRevision: 1,
   source: 'user',
   currentSnapshot: {
-    project: { properties: { packageName: gameId } },
+    projectFiles: projectFilesFor({ properties: { packageName: gameId } }),
     resources: [],
   },
 });
@@ -641,7 +923,7 @@ assert.equal(
   'normal current open must not gate on history version semantics'
 );
 assert.equal(
-  Array.isArray(uncheckedManifestCurrent.project),
+  Array.isArray(uncheckedManifestCurrent.projectFiles),
   true,
   'normal current open must pass project schema handling to official GDevelop'
 );
@@ -677,10 +959,10 @@ await assert.rejects(
     gameId,
     snapshot: {
       version: historyVersion(4, 'restore'),
-      project: {
+      projectFiles: projectFilesFor({
         properties: { packageName: gameId },
         resources: [{ file: 'playmesh-local-resource://restored' }],
-      },
+      }),
       resources: [
         {
           logicalId: 'playmesh-local-resource://restored',

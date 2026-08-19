@@ -21,6 +21,18 @@ type Props = {|
 |};
 
 const styles = {
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '100%',
+    minWidth: 0,
+  },
+  rejectAction: {
+    marginRight: 'auto',
+  },
   summary: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
@@ -153,34 +165,37 @@ export const PlaymeshAiApprovalDialog = ({
       dangerLevel={approval.risk === 'high' ? 'danger' : 'warning'}
       cannotBeDismissed
       actionsFullWidthOnMobile
-      secondaryActions={[
-        <FlatButton
-          key="reject"
-          label={t(playmeshMessages.aiReject)}
-          onClick={() => decide(onReject)}
-          disabled={decisionDisabled}
-        />,
-      ]}
       actions={[
-        <FlatButton
-          key="approve-always"
-          label={t(playmeshMessages.aiApproveAlways)}
-          onClick={() => decide(onApproveAlways)}
-          disabled={decisionDisabled}
-        />,
-        <FlatButton
-          key="approve-project"
-          label={t(playmeshMessages.aiApproveProject)}
-          onClick={() => decide(onApproveProject)}
-          disabled={decisionDisabled}
-        />,
-        <RaisedButton
-          key="approve-once"
-          primary
-          label={t(playmeshMessages.aiApprove)}
-          onClick={() => decide(onApproveOnce)}
-          disabled={decisionDisabled}
-        />,
+        <div
+          key="approval-actions"
+          role="group"
+          aria-label={t(playmeshMessages.aiApprovalDetailsTitle)}
+          style={styles.actions}
+        >
+          <div style={styles.rejectAction}>
+            <FlatButton
+              label={t(playmeshMessages.aiReject)}
+              onClick={() => decide(onReject)}
+              disabled={decisionDisabled}
+            />
+          </div>
+          <FlatButton
+            label={t(playmeshMessages.aiApproveAlways)}
+            onClick={() => decide(onApproveAlways)}
+            disabled={decisionDisabled}
+          />
+          <FlatButton
+            label={t(playmeshMessages.aiApproveProject)}
+            onClick={() => decide(onApproveProject)}
+            disabled={decisionDisabled}
+          />
+          <RaisedButton
+            primary
+            label={t(playmeshMessages.aiApprove)}
+            onClick={() => decide(onApproveOnce)}
+            disabled={decisionDisabled}
+          />
+        </div>,
       ]}
     >
       <ColumnStackLayout noMargin useLargeSpacer>

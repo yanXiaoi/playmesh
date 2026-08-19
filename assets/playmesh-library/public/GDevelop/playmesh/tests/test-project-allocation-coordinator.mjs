@@ -16,6 +16,8 @@ const source = await readFile(
 globalThis.window = { crypto: webcrypto };
 const executable = `
 const playmeshPortableImportAllocationClient = null;
+const unsplitPlaymeshProject = async projectFiles =>
+  projectFiles.find(file => file.path === 'game.json').content;
 const computeSha256Hex = async (bytes, cryptoImplementation) =>
   Array.from(
     new Uint8Array(await cryptoImplementation.subtle.digest('SHA-256', bytes))
@@ -49,7 +51,15 @@ const canonicalizeJson = value => {
   return value;
 };
 
-const snapshot = { project: { properties: { name: 'Blank project' } }, resources: [] };
+const snapshot = {
+  projectFiles: [
+    {
+      path: 'game.json',
+      content: { properties: { name: 'Blank project', folderProject: true } },
+    },
+  ],
+  resources: [],
+};
 const input = {
   fileIdentifier: 'blank-file',
   gameId: 'com.playmesh.blank',
@@ -77,7 +87,7 @@ const input = {
     },
   ];
   const projectWithResources = {
-    ...snapshot.project,
+    ...snapshot.projectFiles[0].content,
     resources: {
       resources: [
         {
@@ -91,13 +101,14 @@ const input = {
       ],
     },
   };
+  const projectFiles = [{ path: 'game.json', content: projectWithResources }];
   const forward = await coordinator.createPlaymeshProjectAllocationEvidence({
-    projectJson: JSON.stringify(projectWithResources),
+    projectFilesJson: JSON.stringify(projectFiles),
     resources,
     cryptoImplementation: webcrypto,
   });
   const reverse = await coordinator.createPlaymeshProjectAllocationEvidence({
-    projectJson: JSON.stringify(projectWithResources),
+    projectFilesJson: JSON.stringify(projectFiles),
     resources: [...resources].reverse(),
     cryptoImplementation: webcrypto,
   });
@@ -172,7 +183,7 @@ const createClient = ({
         return { ...state('PREPARED'), missing: [], available: [] };
       },
       uploadResource: async () => calls.push(['resource']),
-      uploadProject: async () => calls.push(['project']),
+      uploadProjectFiles: async () => calls.push(['project-files']),
       finalizeWorkspace: async () => {
         calls.push(['finalize']);
         if (finalizeError) throw finalizeError;
@@ -211,7 +222,7 @@ const createClient = ({
   assert.equal(result.phase, 'COMMITTED');
   assert.deepEqual(
     harness.calls.map(call => call[0]),
-    ['prepare', 'project', 'finalize', 'commit']
+    ['prepare', 'project-files', 'finalize', 'commit']
   );
 }
 

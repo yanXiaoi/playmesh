@@ -224,7 +224,7 @@ const buildPlaymeshProjectRekeyExpectedOldEvidenceWithDependencies = async (
     history: {
       revision: current.version.revision,
       currentContentHash: current.version.contentHash,
-      projectJsonHash: await dependencies.hashJson(current.project),
+      projectFilesHash: await dependencies.hashJson(current.projectFiles),
       resourceManifestHash: await dependencies.hashJson(current.resources),
     },
     config: configEvidence,
@@ -277,10 +277,10 @@ const assertTransactionIdentity = (
     transaction.newGameId !== journal.newGameId ||
     transaction.browserSource.fileIdentifier !== journal.fileIdentifier ||
     transaction.browserTarget.fileIdentifier !== journal.fileIdentifier ||
-    transaction.browserSource.projectJsonHash !==
-      journal.sourceEvidence.projectJsonHash ||
-    transaction.browserTarget.projectJsonHash !==
-      journal.targetEvidence.projectJsonHash
+    transaction.browserSource.projectFilesHash !==
+      journal.sourceEvidence.projectFilesHash ||
+    transaction.browserTarget.projectFilesHash !==
+      journal.targetEvidence.projectFilesHash
   ) {
     return fail(
       'transaction_identity_mismatch',
@@ -551,8 +551,8 @@ export const rekeyPlaymeshProjectLocalIdentity = async (
       await dependencies.mirrorSource(source);
       dependencies.notify('preparing');
       const [sourceHash, targetHash, expectedOldEvidence] = await Promise.all([
-        dependencies.hashJson(JSON.parse(source.storedProject.projectJson)),
-        dependencies.hashJson(JSON.parse(target.storedProject.projectJson)),
+        dependencies.hashJson(source.storedProject.projectFiles),
+        dependencies.hashJson(target.storedProject.projectFiles),
         buildPlaymeshProjectRekeyExpectedOldEvidenceWithDependencies({
           oldGameId,
           signal,
@@ -564,8 +564,8 @@ export const rekeyPlaymeshProjectLocalIdentity = async (
         newGameId,
         idempotencyKey: dependencies.idempotencyKeyFactory(),
         expectedOldEvidence,
-        browserSource: { fileIdentifier, projectJsonHash: sourceHash },
-        browserTarget: { fileIdentifier, projectJsonHash: targetHash },
+        browserSource: { fileIdentifier, projectFilesHash: sourceHash },
+        browserTarget: { fileIdentifier, projectFilesHash: targetHash },
         clientId: dependencies.clientIdFactory(),
         signal,
       };

@@ -10,7 +10,8 @@ const appUiSdkSource = SdkSourceFragment(
   let appFallbackUi = null;
   let appUiConfiguration = null;
   let appUiRuntimeAdapter = null;
-  let appUiKeyboardInstalled = false;
+  let appUiSystemMenuTriggerDisposer = null;
+  let appUiSystemMenuTriggersDisabled = false;
   let appUiTogglePending = false;
   let appUiConsoleCaptureInstalled = false;
   let appUiPerformanceVisible = false;
@@ -965,16 +966,23 @@ const appUiSdkSource = SdkSourceFragment(
   }
 
   function handleAppUiNativeBack() {
-    if (!appUiOptions.fallbackUi) return false;
     const ui = appFallbackUi;
-    if (!ui) {
-      void showAppGameSidebar();
+    if (ui && !ui.logsLayer.hidden) {
+      ui.logsClose.onclick();
       return true;
     }
-    if (!ui.logsLayer.hidden) ui.logsClose.onclick();
-    else if (!ui.infoLayer.hidden) ui.infoClose.onclick();
-    else if (!ui.layer.hidden) void hideAppGameSidebar();
-    else void showAppGameSidebar();
+    if (ui && !ui.infoLayer.hidden) {
+      ui.infoClose.onclick();
+      return true;
+    }
+    if (ui && !ui.layer.hidden) {
+      void hideAppGameSidebar();
+      return true;
+    }
+    if (!appUiOptions.fallbackUi || appUiSystemMenuTriggersDisabled) {
+      return false;
+    }
+    void showAppGameSidebar();
     return true;
   }
 
@@ -1053,9 +1061,12 @@ const appUiSdkSource = SdkSourceFragment(
   }
 
   function installAppUiKeyboardInterception() {
-    if (appUiKeyboardInstalled || !global.addEventListener) return;
-    appUiKeyboardInstalled = true;
-    global.addEventListener("keydown", (event) => {
+    if (appUiSystemMenuTriggersDisabled ||
+        appUiSystemMenuTriggerDisposer ||
+        !global.addEventListener) {
+      return;
+    }
+    const handler = (event) => {
       if (event?.defaultPrevented ||
           event?.repeat ||
           isAppUiOwnedKeyboardEvent(event) ||
@@ -1093,7 +1104,34 @@ const appUiSdkSource = SdkSourceFragment(
         return;
       }
       void toggleAppGameSidebar();
-    }, true);
+    };
+    global.addEventListener("keydown", handler, true);
+    const dispose = () => {
+      global.removeEventListener?.("keydown", handler, true);
+      if (appUiSystemMenuTriggerDisposer === dispose) {
+        appUiSystemMenuTriggerDisposer = null;
+      }
+    };
+    appUiSystemMenuTriggerDisposer = dispose;
+  }
+
+  function disableAppUiSystemMenuTriggers() {
+    if (!appReadyCompleted) {
+      throw appUiError(
+        "app_not_ready",
+        "请先等待 playmesh.app.ready",
+      );
+    }
+    if (arguments.length !== 0) {
+      throw appUiError(
+        "invalid_argument",
+        "disableSystemMenuTriggers 不接受参数",
+      );
+    }
+    if (appUiSystemMenuTriggersDisabled) return;
+    appUiSystemMenuTriggersDisabled = true;
+    appUiTogglePending = false;
+    appUiSystemMenuTriggerDisposer?.();
   }
 
   function initializeAppPlatformUi(configuration) {
@@ -1109,6 +1147,15 @@ const appUiSdkSource = SdkSourceFragment(
     }
   }
 
+''',
+  declaration: r'''
+interface PlaymeshAppUiApi {
+  /**
+   * 解除当前文档用于自动打开系统游戏菜单的按键与返回触发；只能在 `playmesh.app.ready` 完成后调用。
+   * 本操作单向且幂等，不影响显式打开的平台覆盖层。 @playmesh-completion playmesh.app.ui.disableSystemMenuTriggers
+   */
+  disableSystemMenuTriggers(): void;
+}
 ''',
 );
 
@@ -1136,7 +1183,8 @@ final class _AppUiFeature implements _AppSdkCommandFeature {
       case 'app.input.takeover':
         return Future<Object?>.value(context.takeOverInput());
       case 'app.ui.openSharePanel':
-        if (command.payload['userActivation'] != true) {
+        if (command.payload['userActivation'] != true ||
+            !context.consumeUserActivation()) {
           throw const SdkCommandException(
             'user_activation_required',
             '打开分享界面需要当前用户操作',

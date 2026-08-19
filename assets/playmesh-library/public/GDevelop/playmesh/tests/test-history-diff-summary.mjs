@@ -286,6 +286,39 @@ assert.equal(modelModule.HISTORY_DIFF_INITIAL_ENTRY_LIMIT, 80);
 assert.equal(modelModule.HISTORY_DIFF_ENTRY_PAGE_SIZE, 80);
 assert.equal(modelModule.HISTORY_DIFF_INITIAL_FIELD_LIMIT, 60);
 assert.equal(modelModule.HISTORY_DIFF_FIELD_PAGE_SIZE, 60);
+assert.equal(modelModule.HISTORY_RAW_JSON_PAGE_SIZE, 32 * 1024);
+const rawJsonFixture = Array.from(
+  { length: modelModule.HISTORY_RAW_JSON_PAGE_SIZE * 2 + 17 },
+  (_, index) => String(index % 10)
+).join("");
+const firstRawPage = modelModule.getPlaymeshHistoryRawJsonPage(
+  rawJsonFixture,
+  0
+);
+assert.equal(firstRawPage.text.length, modelModule.HISTORY_RAW_JSON_PAGE_SIZE);
+assert.equal(firstRawPage.pageCount, 3);
+assert.equal(firstRawPage.start, 0);
+assert.equal(firstRawPage.end, modelModule.HISTORY_RAW_JSON_PAGE_SIZE);
+const finalRawPage = modelModule.getPlaymeshHistoryRawJsonPage(
+  rawJsonFixture,
+  99
+);
+assert.equal(finalRawPage.page, 2, "raw JSON page selection must clamp");
+assert.equal(finalRawPage.text.length, 17);
+assert.equal(
+  firstRawPage.text +
+    modelModule.getPlaymeshHistoryRawJsonPage(rawJsonFixture, 1).text +
+    finalRawPage.text,
+  rawJsonFixture,
+  "every raw JSON character must remain reachable without mounting it all"
+);
+const surrogateFixture = "a😀b";
+assert.equal(
+  modelModule.getPlaymeshHistoryRawJsonPage(surrogateFixture, 0, 2).text +
+    modelModule.getPlaymeshHistoryRawJsonPage(surrogateFixture, 1, 2).text,
+  surrogateFixture,
+  "raw JSON page boundaries must not split a Unicode surrogate pair"
+);
 
 const contentOnlyLogicalId =
   "playmesh-local-resource://history/content-only.png";
@@ -461,11 +494,26 @@ assert.doesNotMatch(
 assert.match(historyUiSource, /buildPlaymeshHistoryDiffSummary/);
 assert.match(historyUiSource, /buildPlaymeshHistoryDiffModel/);
 assert.match(historyUiSource, /nextDiff\.resourceEvidence/);
+assert.match(historyUiSource, /version\.changeSummary/);
+assert.match(historyUiSource, /letter: ["']A["']/);
+assert.match(historyUiSource, /letter: ["']M["']/);
+assert.match(historyUiSource, /letter: ["']D["']/);
+assert.equal(
+  (historyUiSource.match(/: ["']—["']/g) || []).length,
+  3,
+  "legacy revisions without summaries must show A/M/D placeholders"
+);
 
 assert.match(diffDialogSource, /import Dialog from ["']\.\.\/UI\/Dialog["'];/);
 assert.match(diffDialogSource, /id="playmesh-history-diff-dialog"/);
 assert.match(diffDialogSource, /maxWidth="xl"/);
 assert.match(diffDialogSource, /fullHeight/);
+assert.match(diffDialogSource, /flexBody/);
+assert.doesNotMatch(
+  diffDialogSource,
+  /flexColumnBody/,
+  "the diff owns its vertical layout, so DialogContent must stretch it instead of measuring its expanded content"
+);
 assert.match(diffDialogSource, /onRequestClose=\{onClose\}/);
 assert.doesNotMatch(
   diffDialogSource,
@@ -484,6 +532,20 @@ assert.match(diffDialogSource, /HISTORY_DIFF_INITIAL_ENTRY_LIMIT/);
 assert.match(diffDialogSource, /HISTORY_DIFF_INITIAL_FIELD_LIMIT/);
 assert.match(diffDialogSource, /mobilePane === ["']detail["']/);
 assert.match(diffDialogSource, /<details/);
+assert.match(diffDialogSource, /getPlaymeshHistoryRawJsonPage/);
+assert.match(diffDialogSource, /data-history-raw-json-side=/);
+assert.match(diffDialogSource, /data-history-raw-json-page=/);
+assert.match(diffDialogSource, /aria-pressed=/);
+assert.equal(
+  (diffDialogSource.match(/<pre\b/g) || []).length,
+  1,
+  "raw JSON must mount only the selected side and selected page"
+);
+assert.doesNotMatch(
+  diffDialogSource,
+  /safePrettyJson|JSON\.parse\(source\)|JSON\.stringify\(JSON\.parse/,
+  "opening raw JSON must not parse and format both complete snapshots"
+);
 assert.match(diffDialogSource, /ResourceEvidenceComparison/);
 assert.match(diffDialogSource, /side="before"/);
 assert.match(diffDialogSource, /side="after"/);
@@ -504,15 +566,43 @@ assert.equal(
   2,
   "history value controls must be immutable while remaining selectable"
 );
-assert.doesNotMatch(diffDialogSource, /createObjectURL|blob:|https?:\/\//);
+assert.match(diffDialogSource, /loadPlaymeshHistoryResourcePreview/);
+assert.match(diffDialogSource, /new AbortController\(\)/);
+assert.match(diffDialogSource, /controller\.abort\(\)/);
+assert.match(diffDialogSource, /if \(!active\) return;/);
+assert.match(diffDialogSource, /URL\.createObjectURL\(blob\)/);
+assert.match(diffDialogSource, /URL\.revokeObjectURL\(createdObjectUrl\)/);
+assert.match(diffDialogSource, /URL\.revokeObjectURL\(objectUrl\)/);
+assert.match(diffDialogSource, /setFailedPreviewKey\(previewKey\)/);
+assert.doesNotMatch(
+  diffDialogSource,
+  /src=\{preview\.url\}|https?:\/\//,
+  "protected history endpoints must never be assigned directly to media src"
+);
 assert.match(diffCssSource, /grid-template-columns:\s*minmax\(270px, 34%\)/);
+assert.match(
+  diffCssSource,
+  /\.root\s*\{[\s\S]*?flex:\s*1 1 0;/,
+  "the dialog root must use a definite zero flex basis instead of content-driven 0%"
+);
+assert.match(
+  diffCssSource,
+  /\.workspace\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0, 1fr\);[\s\S]*?flex:\s*1 1 0;/,
+  "expanded diff entries must remain inside one bounded grid row"
+);
+assert.match(
+  diffCssSource,
+  /\.treePane,\s*\n\s*\.detailPane\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;/,
+  "the tree and detail panes must own vertical scrolling"
+);
 assert.match(diffCssSource, /@media \(max-width: 700px\)/);
 assert.match(diffCssSource, /@media \(max-width: 430px\)/);
 assert.match(
   diffCssSource,
-  /\.fieldValues,\s*\n\s*\.rawGrid,\s*\n\s*\.evidenceGrid\s*\{\s*\n\s*grid-template-columns: minmax\(0, 1fr\)/,
-  "before/after values must stack on mobile"
+  /\.fieldValues,\s*\n\s*\.evidenceGrid\s*\{\s*\n\s*grid-template-columns: minmax\(0, 1fr\)/,
+  "before/after values and resource evidence must stack on mobile"
 );
+assert.match(diffCssSource, /\.rawToolbar\s*\{[\s\S]*?flex-direction:\s*column/);
 assert.match(diffCssSource, /\.evidenceGrid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
 assert.match(diffCssSource, /\.previewViewport\s*\{[\s\S]*?max-height:\s*240px/);
 assert.match(diffCssSource, /\.previewMedia\s*\{[\s\S]*?object-fit:\s*contain/);

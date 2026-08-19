@@ -8,12 +8,14 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'foundation/local_version_store.dart';
 import 'gdevelop_project_config.dart';
+import 'gdevelop_project_files.dart';
 import 'gdevelop_project_root_resolver.dart';
 import 'project_provisioning_service.dart';
 
 enum GDevelopHistoryReason {
   explicitSave('explicit_save'),
   importantChange('important_change'),
+  autosave('autosave'),
   beforeRestore('before_restore'),
   restore('restore');
 
@@ -124,6 +126,44 @@ class GDevelopProjectResource {
   }
 }
 
+class GDevelopHistoryChangeSummary {
+  const GDevelopHistoryChangeSummary({
+    required this.added,
+    required this.modified,
+    required this.deleted,
+  });
+
+  final int added;
+  final int modified;
+  final int deleted;
+
+  Map<String, Object?> toJson() => {
+    'added': added,
+    'modified': modified,
+    'deleted': deleted,
+  };
+
+  factory GDevelopHistoryChangeSummary.fromJson(Map<String, Object?> json) {
+    final added = json['added'];
+    final modified = json['modified'];
+    final deleted = json['deleted'];
+    if (json.length != 3 ||
+        added is! int ||
+        added < 0 ||
+        modified is! int ||
+        modified < 0 ||
+        deleted is! int ||
+        deleted < 0) {
+      throw const FormatException('GDevelop 历史变更摘要无效');
+    }
+    return GDevelopHistoryChangeSummary(
+      added: added,
+      modified: modified,
+      deleted: deleted,
+    );
+  }
+}
+
 class GDevelopProjectVersion {
   const GDevelopProjectVersion({
     required this.id,
@@ -134,6 +174,7 @@ class GDevelopProjectVersion {
     required this.contentHash,
     required this.source,
     required this.contentBytes,
+    this.changeSummary,
   });
 
   final String id;
@@ -144,8 +185,9 @@ class GDevelopProjectVersion {
   final String contentHash;
   final GDevelopHistorySource source;
   final int contentBytes;
+  final GDevelopHistoryChangeSummary? changeSummary;
 
-  Map<String, Object?> toJson() => {
+  Map<String, Object?> toJson({bool includeChangeSummary = false}) => {
     'id': id,
     'gameId': projectId,
     'revision': revision,
@@ -154,6 +196,8 @@ class GDevelopProjectVersion {
     'contentHash': contentHash,
     'source': source.wireName,
     'contentBytes': contentBytes,
+    if (includeChangeSummary && changeSummary != null)
+      'changeSummary': changeSummary!.toJson(),
   };
 }
 
@@ -192,20 +236,20 @@ class GDevelopHistoryProjectConfigSnapshot {
 class GDevelopProjectSnapshot {
   const GDevelopProjectSnapshot({
     required this.version,
-    required this.project,
+    required this.projectFiles,
     required this.resources,
     this.projectConfigSnapshot =
         const GDevelopHistoryProjectConfigSnapshot.missing(),
   });
 
   final GDevelopProjectVersion version;
-  final Map<String, Object?> project;
+  final List<GDevelopProjectFile> projectFiles;
   final List<GDevelopProjectResource> resources;
   final GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot;
 
   Map<String, Object?> toJson() => {
     'version': version.toJson(),
-    'project': project,
+    'projectFiles': projectFiles.map((file) => file.toJson()).toList(),
     'resources': resources.map((resource) => resource.toJson()).toList(),
     if (projectConfigSnapshot.semantics !=
         GDevelopHistoryProjectConfigSemantics.legacy)
@@ -225,66 +269,37 @@ class GDevelopSnapshotResult {
   final bool historyCreated;
 }
 
-class GDevelopProjectReference {
-  const GDevelopProjectReference({
-    required this.contentHash,
-    required this.size,
-  });
-
-  final String contentHash;
-  final int size;
-
-  Map<String, Object?> toJson() => {'contentHash': contentHash, 'size': size};
-
-  factory GDevelopProjectReference.fromJson(Map<String, Object?> json) {
-    final reference = LocalCasObjectReference.fromJson({
-      'hash': json['contentHash'],
-      'bytes': json['size'],
-    });
-    if (reference.bytes > GDevelopProjectHistoryAdapter.maxProjectBytes) {
-      throw const FormatException('GDevelop 工程不能超过 1 GiB');
-    }
-    return GDevelopProjectReference(
-      contentHash: reference.hash,
-      size: reference.bytes,
-    );
-  }
-
-  LocalCasObjectReference get casReference =>
-      LocalCasObjectReference(hash: contentHash, bytes: size);
-}
-
 class GDevelopPreparedProjectState {
   const GDevelopPreparedProjectState({
-    required this.project,
-    required this.projectReference,
+    required this.projectFiles,
+    required this.projectFilesReference,
     required this.resources,
   });
 
-  final Map<String, Object?> project;
-  final GDevelopProjectReference projectReference;
+  final List<GDevelopProjectFile> projectFiles;
+  final GDevelopProjectFilesReference projectFilesReference;
   final List<GDevelopProjectResource> resources;
 }
 
 /// Lightweight authoritative current descriptor for recovery/CAS checks.
-/// Unlike [GDevelopProjectSnapshot], this does not read or decode project JSON.
+/// Unlike [GDevelopProjectSnapshot], this does not read or decode project files.
 class GDevelopProjectCurrentReferenceSnapshot {
   const GDevelopProjectCurrentReferenceSnapshot({
     required this.version,
-    required this.project,
+    required this.projectFiles,
     required this.resources,
     this.projectConfigSnapshot =
         const GDevelopHistoryProjectConfigSnapshot.missing(),
   });
 
   final GDevelopProjectVersion version;
-  final GDevelopProjectReference project;
+  final GDevelopProjectFilesReference projectFiles;
   final List<GDevelopProjectResource> resources;
   final GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot;
 
   Map<String, Object?> toJson() => {
     'revision': version.revision,
-    'project': project.toJson(),
+    'projectFiles': projectFiles.toJson(),
     'resources': resources.map((resource) => resource.toJson()).toList(),
     if (projectConfigSnapshot.semantics !=
         GDevelopHistoryProjectConfigSemantics.legacy)
@@ -346,7 +361,7 @@ class GDevelopManagedProjectListResult {
 class GDevelopRestoreResult extends GDevelopProjectSnapshot {
   const GDevelopRestoreResult({
     required super.version,
-    required super.project,
+    required super.projectFiles,
     required super.resources,
     super.projectConfigSnapshot,
     this.backupVersion,
@@ -407,23 +422,22 @@ class GDevelopProjectHistoryDiff {
 
 class _GDevelopRevisionPayload {
   const _GDevelopRevisionPayload({
-    required this.projectReference,
+    required this.projectFilesReference,
     required this.resources,
     required this.projectConfigSnapshot,
   });
 
-  final LocalCasObjectReference projectReference;
+  final GDevelopProjectFilesReference projectFilesReference;
   final List<GDevelopProjectResource> resources;
   final GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot;
 
   Map<String, Object?> toJson() => {
-    'schemaVersion':
-        projectConfigSnapshot.semantics ==
-            GDevelopHistoryProjectConfigSemantics.legacy
-        ? 1
-        : 2,
-    'projectJsonHash': projectReference.hash,
-    'projectJsonBytes': projectReference.bytes,
+    'schemaVersion': 3,
+    'projectFilesHash': projectFilesReference.contentHash,
+    'projectFilesSize': projectFilesReference.size,
+    'projectFiles': projectFilesReference.files
+        .map((file) => file.toJson())
+        .toList(growable: false),
     'resources': resources.map((resource) => resource.toJson()).toList(),
     if (projectConfigSnapshot.semantics !=
         GDevelopHistoryProjectConfigSemantics.legacy)
@@ -442,17 +456,20 @@ class GDevelopProjectHistoryAdapter {
     ),
     DateTime Function()? clock,
     @visibleForTesting this.onCurrentBundleVerification,
+    @visibleForTesting this.onCurrentProjectFileWritten,
   }) : rootResolver = rootResolver ?? FileSystemGDevelopProjectRootResolver(),
        clock = clock ?? DateTime.now;
 
-  static const capability = 'gdevelop.history.v2';
-  static const maxProjectBytes = 1024 * 1024 * 1024;
+  static const capability = 'gdevelop.history.v3';
+  static const maxProjectFilesBytes = 1024 * 1024 * 1024;
 
   final GDevelopProjectRootResolver rootResolver;
   final LocalVersionRetentionPolicy retentionPolicy;
   final DateTime Function() clock;
   @visibleForTesting
   final void Function()? onCurrentBundleVerification;
+  @visibleForTesting
+  final FutureOr<void> Function(File file)? onCurrentProjectFileWritten;
   final Map<String, _GDevelopDirectCurrentStore> _currentStores = {};
   final Map<String, LocalVersionStore> _uploadStores = {};
   final Map<String, LocalVersionStore> _stores = {};
@@ -464,7 +481,7 @@ class GDevelopProjectHistoryAdapter {
   Stream<GDevelopAuthoritativeProjectChange> get authoritativeChanges =>
       _authoritativeChanges.stream;
 
-  /// 聚合 App 托管身份与轻量 current evidence，不读取完整工程 JSON。
+  /// 聚合 App 托管身份与轻量 current evidence，不读取完整工程文件树。
   Future<GDevelopManagedProjectListResult> listManagedProjects() async {
     final roots = await rootResolver.listProjectRoots();
     final projects = <GDevelopManagedProjectSummary>[];
@@ -658,22 +675,34 @@ class GDevelopProjectHistoryAdapter {
     return (await _currentStore(normalized)).read(normalized);
   }
 
+  /// Reads the authoritative current tree from an allocation staging root.
+  ///
+  /// Allocation uses this after the raw upload has been materialized into the
+  /// same multi-file current layout used by normal projects. The upload DTO is
+  /// transport evidence only and is not retained as a second project source.
+  Future<GDevelopProjectSnapshot?> currentAtProjectRoot({
+    required Directory projectRoot,
+    required String projectId,
+  }) async {
+    final normalized = _normalizeProjectId(projectId);
+    return _directCurrentStoreAtProjectRoot(projectRoot).read(normalized);
+  }
+
   /// Returns the current files in the wire shape used by normal WebIDE open.
   ///
   /// This path deliberately does not validate persisted content. JSON decode
-  /// is only required because the existing HTTP response embeds both files as
-  /// JSON values. Mutation, restore and history APIs keep using the typed,
-  /// fully verified methods below.
+  /// is only required because the HTTP response embeds project files as JSON
+  /// values. Mutation, restore and history APIs keep using the typed methods.
   Future<Map<String, Object?>?> openCurrent(String projectId) async {
     final normalized = _normalizeProjectId(projectId);
     return (await _currentStore(normalized)).readOpenCurrent();
   }
 
-  Future<GDevelopProjectReference?> currentProjectReference(
+  Future<GDevelopProjectFilesReference?> currentProjectFilesReference(
     String projectId,
   ) async {
     final normalized = _normalizeProjectId(projectId);
-    return (await _currentStore(normalized)).projectReference(normalized);
+    return (await _currentStore(normalized)).projectFilesReference(normalized);
   }
 
   Future<GDevelopProjectCurrentReferenceSnapshot?> currentReferenceSnapshot(
@@ -710,55 +739,50 @@ class GDevelopProjectHistoryAdapter {
     await _verifyPayloadObjects(store, payload);
     return GDevelopProjectCurrentReferenceSnapshot(
       version: _version(projectId, record),
-      project: GDevelopProjectReference(
-        contentHash: payload.projectReference.hash,
-        size: payload.projectReference.bytes,
-      ),
+      projectFiles: payload.projectFilesReference,
       resources: payload.resources,
       projectConfigSnapshot: payload.projectConfigSnapshot,
     );
   }
 
-  Future<Map<String, Object?>> readHistoryProjectReference({
+  Future<List<GDevelopProjectFile>> readHistoryProjectFilesReference({
     required String projectId,
-    required GDevelopProjectReference reference,
+    required GDevelopProjectFilesReference reference,
   }) async {
     final store = await _store(_normalizeProjectId(projectId));
-    return _validateProjectReference(store, reference);
+    return _readProjectFilesReference(store, reference);
   }
 
   Future<GDevelopPreparedProjectState> prepareProjectState({
     required String projectId,
-    required Map<String, Object?> project,
+    required List<GDevelopProjectFile> projectFiles,
     required List<GDevelopProjectResource> resources,
   }) async {
     final normalized = _normalizeProjectId(projectId);
     final store = await _store(normalized);
-    final canonical = Map<String, Object?>.from(
-      _canonicalizeJson(project)! as Map,
+    final normalizedProjectFiles = _normalizeProjectFiles(projectFiles);
+    final projectFilesReference = await _stageProjectFiles(
+      store,
+      normalizedProjectFiles,
     );
-    final projectReference = await store.stageObject(_encodeProject(canonical));
     final normalizedResources = _validateResources(resources);
     final payload = _GDevelopRevisionPayload(
-      projectReference: projectReference,
+      projectFilesReference: projectFilesReference,
       resources: normalizedResources,
       projectConfigSnapshot:
           const GDevelopHistoryProjectConfigSnapshot.missing(),
     );
     await _verifyPayloadObjects(store, payload);
     return GDevelopPreparedProjectState(
-      project: Map.unmodifiable(canonical),
-      projectReference: GDevelopProjectReference(
-        contentHash: projectReference.hash,
-        size: projectReference.bytes,
-      ),
+      projectFiles: normalizedProjectFiles,
+      projectFilesReference: projectFilesReference,
       resources: normalizedResources,
     );
   }
 
   Future<String> revisionPayloadContentHash({
     required String projectId,
-    required GDevelopProjectReference project,
+    required GDevelopProjectFilesReference projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
   }) async {
@@ -768,7 +792,7 @@ class GDevelopProjectHistoryAdapter {
       projectConfigSnapshot,
     );
     final payload = _GDevelopRevisionPayload(
-      projectReference: project.casReference,
+      projectFilesReference: projectFiles,
       resources: _validateResources(resources),
       projectConfigSnapshot: normalizedConfig,
     );
@@ -780,15 +804,13 @@ class GDevelopProjectHistoryAdapter {
         .join();
   }
 
-  /// Reads the original project JSON bytes without re-encoding them, so the
-  /// advertised SHA-256 remains the exact content-addressed object identity.
-  Future<Uint8List> readProjectBytes({
+  Future<Uint8List> readProjectFileBytes({
     required String projectId,
-    required GDevelopProjectReference reference,
+    required GDevelopProjectFileReference reference,
   }) async {
     final store = await _store(_normalizeProjectId(projectId));
-    await _validateProjectReference(store, reference);
-    return store.readObject(reference.casReference);
+    final casReference = _projectFileCasReference(reference);
+    return store.readObject(casReference);
   }
 
   /// 在 allocation sibling staging 中建立首个权威 current。
@@ -800,7 +822,7 @@ class GDevelopProjectHistoryAdapter {
     required Directory projectRoot,
     required Directory historyRoot,
     required String projectId,
-    required GDevelopProjectReference project,
+    required GDevelopProjectFilesReference projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
   }) async {
@@ -815,20 +837,20 @@ class GDevelopProjectHistoryAdapter {
       normalized,
       projectConfigSnapshot,
     );
-    await _validateProjectReference(store, project);
+    await _readProjectFilesReference(store, projectFiles);
     final currentStore = _directCurrentStoreAtProjectRoot(projectRoot);
     final current = await currentStore.referenceSnapshot(normalized);
     if (current != null) {
       _requireCurrentEvidence(
         current,
-        project: project,
+        projectFiles: projectFiles,
         resources: normalizedResources,
         projectConfigSnapshot: normalizedConfig,
       );
       return current;
     }
     final payload = _GDevelopRevisionPayload(
-      projectReference: project.casReference,
+      projectFilesReference: projectFiles,
       resources: normalizedResources,
       projectConfigSnapshot: normalizedConfig,
     );
@@ -839,9 +861,10 @@ class GDevelopProjectHistoryAdapter {
         projectId: normalized,
         reason: GDevelopHistoryReason.explicitSave,
         source: GDevelopHistorySource.user,
+        changeSummary: _changeSummary(null, payload),
       ),
       references: [
-        project.casReference,
+        ...projectFiles.files.map(_projectFileCasReference),
         for (final resource in normalizedResources)
           LocalCasObjectReference(
             hash: resource.contentHash,
@@ -855,16 +878,17 @@ class GDevelopProjectHistoryAdapter {
       current: draft,
       history: [draft],
     );
-    final projectValue = await _validateProjectReference(store, project);
-    final projectBytes = await store.readObject(project.casReference);
+    final projectFileValues = await _readProjectFilesReference(
+      store,
+      projectFiles,
+    );
     final snapshot = await currentStore.commit(
       projectId: normalized,
       expectedRevision: 0,
       revisionDelta: 1,
       reason: GDevelopHistoryReason.explicitSave,
       source: GDevelopHistorySource.user,
-      project: projectValue,
-      exactProjectBytes: projectBytes,
+      projectFiles: projectFileValues,
       resources: normalizedResources,
       projectConfigSnapshot: normalizedConfig,
       readResource: (reference) => store.readObject(reference),
@@ -879,7 +903,7 @@ class GDevelopProjectHistoryAdapter {
   Future<GDevelopProjectCurrentReferenceSnapshot> verifyCurrentAtProjectRoot({
     required Directory projectRoot,
     required String projectId,
-    required GDevelopProjectReference project,
+    required GDevelopProjectFilesReference projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
   }) async {
@@ -890,7 +914,7 @@ class GDevelopProjectHistoryAdapter {
     if (snapshot == null) throw StateError('GDevelop staging current 不存在');
     _requireCurrentEvidence(
       snapshot,
-      project: project,
+      projectFiles: projectFiles,
       resources: _validateResources(resources),
       projectConfigSnapshot: _validateProjectConfigSnapshot(
         normalized,
@@ -902,12 +926,12 @@ class GDevelopProjectHistoryAdapter {
 
   void _requireCurrentEvidence(
     GDevelopProjectCurrentReferenceSnapshot snapshot, {
-    required GDevelopProjectReference project,
+    required GDevelopProjectFilesReference projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
   }) {
     final actual = {
-      'project': snapshot.project.toJson(),
+      'projectFiles': snapshot.projectFiles.toJson(),
       'resources': snapshot.resources
           .map((resource) => resource.toJson())
           .toList(),
@@ -916,7 +940,7 @@ class GDevelopProjectHistoryAdapter {
           snapshot.projectConfigSnapshot.semantics.wireName,
     };
     final expected = {
-      'project': project.toJson(),
+      'projectFiles': projectFiles.toJson(),
       'resources': resources.map((resource) => resource.toJson()).toList(),
       'playmeshProjectConfig': projectConfigSnapshot.payloadValue,
       'playmeshProjectConfigSemantics':
@@ -931,7 +955,7 @@ class GDevelopProjectHistoryAdapter {
     required String projectId,
     required int baseRevision,
     required GDevelopHistorySource source,
-    required Map<String, Object?> project,
+    required List<GDevelopProjectFile> projectFiles,
     required List<GDevelopProjectResource> resources,
     GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot =
         const GDevelopHistoryProjectConfigSnapshot.missing(),
@@ -940,7 +964,7 @@ class GDevelopProjectHistoryAdapter {
     baseRevision: baseRevision,
     reason: GDevelopHistoryReason.explicitSave,
     source: source,
-    project: project,
+    projectFiles: projectFiles,
     resources: resources,
     projectConfigSnapshot: projectConfigSnapshot,
     createHistory: false,
@@ -951,7 +975,7 @@ class GDevelopProjectHistoryAdapter {
     required int baseRevision,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
-    required Map<String, Object?> project,
+    required List<GDevelopProjectFile> projectFiles,
     required List<GDevelopProjectResource> resources,
     GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot =
         const GDevelopHistoryProjectConfigSnapshot.missing(),
@@ -967,7 +991,7 @@ class GDevelopProjectHistoryAdapter {
       baseRevision: baseRevision,
       reason: reason,
       source: source,
-      project: project,
+      projectFiles: projectFiles,
       resources: resources,
       projectConfigSnapshot: projectConfigSnapshot,
       createHistory: true,
@@ -979,12 +1003,13 @@ class GDevelopProjectHistoryAdapter {
     required int baseRevision,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
-    required Map<String, Object?> project,
+    required List<GDevelopProjectFile> projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
     required bool createHistory,
   }) async {
     final normalized = _normalizeProjectId(projectId);
+    final normalizedProjectFiles = _normalizeProjectFiles(projectFiles);
     final normalizedResources = _validateResources(resources);
     final normalizedConfig = _validateProjectConfigSnapshot(
       normalized,
@@ -1013,7 +1038,7 @@ class GDevelopProjectHistoryAdapter {
         revisionDelta: createHistory || baseRevision == 0 ? 1 : 0,
         reason: reason,
         source: source,
-        project: Map<String, Object?>.from(_canonicalizeJson(project)! as Map),
+        projectFiles: normalizedProjectFiles,
         resources: normalizedResources,
         projectConfigSnapshot: normalizedConfig,
         readResource: uploadStore.readObject,
@@ -1029,6 +1054,9 @@ class GDevelopProjectHistoryAdapter {
           final appended = await _appendCurrentToHistory(
             projectId: normalized,
             current: currentSnapshot,
+            projectFiles: normalizedProjectFiles,
+            resources: normalizedResources,
+            projectConfigSnapshot: normalizedConfig,
             reason: reason,
             source: source,
           );
@@ -1052,24 +1080,17 @@ class GDevelopProjectHistoryAdapter {
   Future<LocalVersionCommitResult> _appendCurrentToHistory({
     required String projectId,
     required GDevelopProjectCurrentReferenceSnapshot current,
+    required List<GDevelopProjectFile> projectFiles,
+    required List<GDevelopProjectResource> resources,
+    required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
     bool deduplicateHistoryHead = true,
   }) async {
     final currentStore = await _currentStore(projectId);
-    final materialized = await currentStore.read(projectId);
-    if (materialized == null ||
-        materialized.version.revision != current.version.revision ||
-        materialized.projectConfigSnapshot.semantics !=
-            current.projectConfigSnapshot.semantics) {
-      throw StateError('GDevelop current 在历史写入前发生变化');
-    }
     final historyStore = await _store(projectId);
-    final projectReference = await historyStore.stageObject(
-      _encodeProject(materialized.project),
-    );
     final resourcesMissingFromHistory = <LocalCasObjectReference>[];
-    for (final resource in materialized.resources) {
+    for (final resource in resources) {
       final reference = LocalCasObjectReference(
         hash: resource.contentHash,
         bytes: resource.size,
@@ -1080,30 +1101,66 @@ class GDevelopProjectHistoryAdapter {
     }
     final currentResourceBytes = await currentStore.readResourceObjects(
       resourcesMissingFromHistory,
+      verifyContentHash: false,
     );
-    for (final reference in resourcesMissingFromHistory) {
-      final staged = await historyStore.stageObject(
+    final projectFileBytes = projectFiles
+        .map((file) => encodeOfficialGDevelopProjectFileBytes(file.content))
+        .toList(growable: false);
+    final stagedObjects = await historyStore.stageObjects([
+      ...projectFileBytes,
+      for (final reference in resourcesMissingFromHistory)
         currentResourceBytes[reference.hash]!,
-      );
+    ]);
+    if (current.projectFiles.files.length != projectFiles.length) {
+      throw StateError('GDevelop current 工程分片证据不一致');
+    }
+    for (var index = 0; index < projectFiles.length; index += 1) {
+      final expected = current.projectFiles.files[index];
+      final staged = stagedObjects[index];
+      if (expected.path != projectFiles[index].path ||
+          expected.contentHash != staged.hash ||
+          expected.size != staged.bytes) {
+        throw StateError('GDevelop current 工程分片证据不一致');
+      }
+    }
+    final projectFilesReference = current.projectFiles;
+    _requireCurrentEvidence(
+      current,
+      projectFiles: projectFilesReference,
+      resources: resources,
+      projectConfigSnapshot: projectConfigSnapshot,
+    );
+    for (
+      var index = 0;
+      index < resourcesMissingFromHistory.length;
+      index += 1
+    ) {
+      final reference = resourcesMissingFromHistory[index];
+      final staged = stagedObjects[projectFileBytes.length + index];
       if (staged.hash != reference.hash || staged.bytes != reference.bytes) {
         throw StateError('GDevelop current 资源写入历史时发生变化');
       }
     }
     final payload = _GDevelopRevisionPayload(
-      projectReference: projectReference,
-      resources: materialized.resources,
-      projectConfigSnapshot: materialized.projectConfigSnapshot,
+      projectFilesReference: projectFilesReference,
+      resources: resources,
+      projectConfigSnapshot: projectConfigSnapshot,
     );
+    final head = await historyStore.current(_namespace);
+    final previousPayload = head == null
+        ? null
+        : await _payload(historyStore, head);
     final draft = LocalVersionDraft(
       content: Uint8List.fromList(utf8.encode(jsonEncode(payload.toJson()))),
       attributes: _attributes(
         projectId: projectId,
         reason: reason,
         source: source,
+        changeSummary: _changeSummary(previousPayload, payload),
       ),
       references: [
-        projectReference,
-        for (final resource in materialized.resources)
+        ...projectFilesReference.files.map(_projectFileCasReference),
+        for (final resource in resources)
           LocalCasObjectReference(
             hash: resource.contentHash,
             bytes: resource.size,
@@ -1111,7 +1168,6 @@ class GDevelopProjectHistoryAdapter {
       ],
       deduplicateHistoryHead: deduplicateHistoryHead,
     );
-    final head = await historyStore.current(_namespace);
     return historyStore.commit(
       namespace: _namespace,
       expectedRevision: head?.revision ?? 0,
@@ -1134,8 +1190,12 @@ class GDevelopProjectHistoryAdapter {
     final to = await store.recordAtRevision(_namespace, toRevision);
     final beforeSnapshot = await _snapshot(normalized, store, from);
     final afterSnapshot = await _snapshot(normalized, store, to);
-    final before = jsonEncode(_canonicalizeJson(beforeSnapshot.project));
-    final after = jsonEncode(_canonicalizeJson(afterSnapshot.project));
+    final before = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(unsplitGDevelopProjectFiles(beforeSnapshot.projectFiles));
+    final after = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(unsplitGDevelopProjectFiles(afterSnapshot.projectFiles));
     final beforeLines = const LineSplitter().convert(before);
     final afterLines = const LineSplitter().convert(after);
     final commonPrefix = _commonPrefixLength(beforeLines, afterLines);
@@ -1188,7 +1248,7 @@ class GDevelopProjectHistoryAdapter {
     required int baseRevision,
     required int targetRevision,
     required GDevelopHistorySource source,
-    required Map<String, Object?> currentProject,
+    required List<GDevelopProjectFile> currentProjectFiles,
     required List<GDevelopProjectResource> currentResources,
     GDevelopHistoryProjectConfigSnapshot currentProjectConfigSnapshot =
         const GDevelopHistoryProjectConfigSnapshot.missing(),
@@ -1199,12 +1259,12 @@ class GDevelopProjectHistoryAdapter {
       throw const FormatException('GDevelop 历史目标修订号无效');
     }
     final store = await _store(normalized);
-    final currentDraft = await _draft(
+    final current = await _draft(
       store: store,
       projectId: normalized,
       reason: GDevelopHistoryReason.beforeRestore,
       source: source,
-      project: currentProject,
+      projectFiles: currentProjectFiles,
       resources: currentResources,
       projectConfigSnapshot: currentProjectConfigSnapshot,
       deduplicateHistoryHead: false,
@@ -1215,18 +1275,19 @@ class GDevelopProjectHistoryAdapter {
       baseRevision: baseRevision,
       targetRevision: targetRevision,
       source: source,
-      currentDraft: currentDraft,
+      currentDraft: current.draft,
+      currentPayload: current.payload,
       restoredProjectConfigSnapshot: restoredProjectConfigSnapshot,
     );
   }
 
-  /// 使用 PREPARE 阶段已校验的 CAS 引用恢复，避免在 durable journal 里复制大型工程 JSON。
+  /// 使用 PREPARE 阶段已校验的 CAS 引用恢复，避免在 durable journal 里复制工程文件树。
   Future<GDevelopRestoreResult> restorePrepared({
     required String projectId,
     required int baseRevision,
     required int targetRevision,
     required GDevelopHistorySource source,
-    required GDevelopProjectReference currentProject,
+    required GDevelopProjectFilesReference currentProjectFiles,
     required List<GDevelopProjectResource> currentResources,
     GDevelopHistoryProjectConfigSnapshot currentProjectConfigSnapshot =
         const GDevelopHistoryProjectConfigSnapshot.missing(),
@@ -1237,13 +1298,13 @@ class GDevelopProjectHistoryAdapter {
       throw const FormatException('GDevelop 历史目标修订号无效');
     }
     final store = await _store(normalized);
-    await _validateProjectReference(store, currentProject);
-    final currentDraft = await _draftPreparedReference(
+    await _readProjectFilesReference(store, currentProjectFiles);
+    final current = await _draftPreparedReference(
       store: store,
       projectId: normalized,
       reason: GDevelopHistoryReason.beforeRestore,
       source: source,
-      projectReference: currentProject,
+      projectFilesReference: currentProjectFiles,
       resources: currentResources,
       projectConfigSnapshot: currentProjectConfigSnapshot,
     );
@@ -1253,7 +1314,8 @@ class GDevelopProjectHistoryAdapter {
       baseRevision: baseRevision,
       targetRevision: targetRevision,
       source: source,
-      currentDraft: currentDraft,
+      currentDraft: current.draft,
+      currentPayload: current.payload,
       restoredProjectConfigSnapshot: restoredProjectConfigSnapshot,
     );
   }
@@ -1265,21 +1327,19 @@ class GDevelopProjectHistoryAdapter {
     required int targetRevision,
     required GDevelopHistorySource source,
     required LocalVersionDraft currentDraft,
+    required _GDevelopRevisionPayload currentPayload,
     required GDevelopHistoryProjectConfigSnapshot?
     restoredProjectConfigSnapshot,
   }) async {
     final target = await store.recordAtRevision(_namespace, targetRevision);
     final targetPayload = await _payload(store, target);
     await _verifyPayloadObjects(store, targetPayload);
-    final targetProjectBytes = await store.readObject(
-      targetPayload.projectReference,
+    final targetProjectFiles = await _readProjectFilesReference(
+      store,
+      targetPayload.projectFilesReference,
     );
-    final targetProjectValue = jsonDecode(utf8.decode(targetProjectBytes));
-    if (targetProjectValue is! Map) {
-      throw StateError('GDevelop 历史目标工程格式无效');
-    }
     final restoredPayload = _GDevelopRevisionPayload(
-      projectReference: targetPayload.projectReference,
+      projectFilesReference: targetPayload.projectFilesReference,
       resources: targetPayload.resources,
       projectConfigSnapshot: _validateProjectConfigSnapshot(
         projectId,
@@ -1305,18 +1365,28 @@ class GDevelopProjectHistoryAdapter {
         revisionDelta: 1,
         reason: GDevelopHistoryReason.restore,
         source: source,
-        project: Map<String, Object?>.from(targetProjectValue),
-        exactProjectBytes: targetProjectBytes,
+        projectFiles: targetProjectFiles,
         resources: targetPayload.resources,
         projectConfigSnapshot: restoredPayload.projectConfigSnapshot,
         readResource: (reference) => store.readObject(reference),
       );
       final historyHead = await store.current(_namespace);
+      final previousPayload = historyHead == null
+          ? null
+          : await _payload(store, historyHead);
+      final summarizedCurrentDraft = _withChangeSummary(
+        currentDraft,
+        _changeSummary(previousPayload, currentPayload),
+      );
+      final summarizedRestoredDraft = _withChangeSummary(
+        restoredDraft,
+        _changeSummary(currentPayload, restoredPayload),
+      );
       final result = await store.commit(
         namespace: _namespace,
         expectedRevision: historyHead?.revision ?? 0,
-        current: restoredDraft,
-        history: [currentDraft, restoredDraft],
+        current: summarizedRestoredDraft,
+        history: [summarizedCurrentDraft, summarizedRestoredDraft],
       );
       final backup = result.created.length > 1 ? result.created.first : null;
       await _emitAuthoritativeChange(
@@ -1326,7 +1396,7 @@ class GDevelopProjectHistoryAdapter {
       return GDevelopRestoreResult(
         version: currentSnapshot.version,
         backupVersion: backup == null ? null : _version(projectId, backup),
-        project: Map<String, Object?>.from(targetProjectValue),
+        projectFiles: targetProjectFiles,
         resources: targetPayload.resources,
         projectConfigSnapshot: restoredPayload.projectConfigSnapshot,
       );
@@ -1435,21 +1505,23 @@ class GDevelopProjectHistoryAdapter {
     return (bytes: await store.readObject(reference), resource: resource);
   }
 
-  Future<LocalVersionDraft> _draft({
+  Future<({LocalVersionDraft draft, _GDevelopRevisionPayload payload})> _draft({
     required LocalVersionStore store,
     required String projectId,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
-    required Map<String, Object?> project,
+    required List<GDevelopProjectFile> projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
     bool deduplicateHistoryHead = true,
   }) async {
-    final projectBytes = _encodeProject(project);
-    final projectReference = await store.stageObject(projectBytes);
+    final projectFilesReference = await _stageProjectFiles(
+      store,
+      _normalizeProjectFiles(projectFiles),
+    );
     final normalizedResources = _validateResources(resources);
     final payload = _GDevelopRevisionPayload(
-      projectReference: projectReference,
+      projectFilesReference: projectFilesReference,
       resources: normalizedResources,
       projectConfigSnapshot: _validateProjectConfigSnapshot(
         projectId,
@@ -1457,37 +1529,41 @@ class GDevelopProjectHistoryAdapter {
       ),
     );
     await _verifyPayloadObjects(store, payload);
-    return LocalVersionDraft(
-      content: Uint8List.fromList(utf8.encode(jsonEncode(payload.toJson()))),
-      attributes: _attributes(
-        projectId: projectId,
-        reason: reason,
-        source: source,
+    return (
+      draft: LocalVersionDraft(
+        content: Uint8List.fromList(utf8.encode(jsonEncode(payload.toJson()))),
+        attributes: _attributes(
+          projectId: projectId,
+          reason: reason,
+          source: source,
+        ),
+        references: [
+          ...projectFilesReference.files.map(_projectFileCasReference),
+          for (final resource in normalizedResources)
+            LocalCasObjectReference(
+              hash: resource.contentHash,
+              bytes: resource.size,
+            ),
+        ],
+        deduplicateHistoryHead: deduplicateHistoryHead,
       ),
-      references: [
-        projectReference,
-        for (final resource in normalizedResources)
-          LocalCasObjectReference(
-            hash: resource.contentHash,
-            bytes: resource.size,
-          ),
-      ],
-      deduplicateHistoryHead: deduplicateHistoryHead,
+      payload: payload,
     );
   }
 
-  Future<LocalVersionDraft> _draftPreparedReference({
+  Future<({LocalVersionDraft draft, _GDevelopRevisionPayload payload})>
+  _draftPreparedReference({
     required LocalVersionStore store,
     required String projectId,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
-    required GDevelopProjectReference projectReference,
+    required GDevelopProjectFilesReference projectFilesReference,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
   }) async {
     final normalizedResources = _validateResources(resources);
     final payload = _GDevelopRevisionPayload(
-      projectReference: projectReference.casReference,
+      projectFilesReference: projectFilesReference,
       resources: normalizedResources,
       projectConfigSnapshot: _validateProjectConfigSnapshot(
         projectId,
@@ -1495,45 +1571,65 @@ class GDevelopProjectHistoryAdapter {
       ),
     );
     await _verifyPayloadObjects(store, payload);
-    return LocalVersionDraft(
-      content: Uint8List.fromList(utf8.encode(jsonEncode(payload.toJson()))),
-      attributes: _attributes(
-        projectId: projectId,
-        reason: reason,
-        source: source,
+    return (
+      draft: LocalVersionDraft(
+        content: Uint8List.fromList(utf8.encode(jsonEncode(payload.toJson()))),
+        attributes: _attributes(
+          projectId: projectId,
+          reason: reason,
+          source: source,
+        ),
+        references: [
+          ...projectFilesReference.files.map(_projectFileCasReference),
+          for (final resource in normalizedResources)
+            LocalCasObjectReference(
+              hash: resource.contentHash,
+              bytes: resource.size,
+            ),
+        ],
+        deduplicateHistoryHead: false,
       ),
-      references: [
-        projectReference.casReference,
-        for (final resource in normalizedResources)
-          LocalCasObjectReference(
-            hash: resource.contentHash,
-            bytes: resource.size,
-          ),
-      ],
-      deduplicateHistoryHead: false,
+      payload: payload,
     );
   }
 
-  Future<Map<String, Object?>> _validateProjectReference(
+  Future<List<GDevelopProjectFile>> _readProjectFilesReference(
     LocalVersionStore store,
-    GDevelopProjectReference reference,
+    GDevelopProjectFilesReference reference,
   ) async {
-    if (reference.size < 1 || reference.size > maxProjectBytes) {
+    if (reference.size < 1 || reference.size > maxProjectFilesBytes) {
       throw const FormatException('GDevelop 工程大小必须在 1 B 至 1 GiB 之间');
     }
-    final bytes = await store.readObject(reference.casReference);
-    late final Object? decoded;
-    try {
-      decoded = jsonDecode(utf8.decode(bytes));
-    } on Object {
-      throw const FormatException('GDevelop 工程必须是 UTF-8 JSON');
+    final files = <GDevelopProjectFile>[];
+    for (final fileReference in reference.files) {
+      final bytes = await store.readObject(
+        _projectFileCasReference(fileReference),
+      );
+      late final Object? decoded;
+      try {
+        decoded = jsonDecode(utf8.decode(bytes));
+      } on Object {
+        throw const FormatException('GDevelop 工程必须是 UTF-8 JSON');
+      }
+      if (decoded is! Map) {
+        throw const FormatException('GDevelop 工程 JSON 根节点必须是对象');
+      }
+      files.add(
+        GDevelopProjectFile(
+          path: fileReference.path,
+          content: Map<String, Object?>.unmodifiable(
+            Map<String, Object?>.from(decoded),
+          ),
+        ),
+      );
     }
-    if (decoded is! Map) {
-      throw const FormatException('GDevelop 工程 JSON 根节点必须是对象');
+    final result = List<GDevelopProjectFile>.unmodifiable(files);
+    final computed = await referenceGDevelopProjectFiles(result);
+    if (computed.contentHash != reference.contentHash ||
+        computed.size != reference.size) {
+      throw StateError('GDevelop 工程文件树与引用不一致');
     }
-    return Map<String, Object?>.unmodifiable(
-      Map<String, Object?>.from(decoded),
-    );
+    return result;
   }
 
   Future<void> _emitAuthoritativeChange(
@@ -1555,7 +1651,7 @@ class GDevelopProjectHistoryAdapter {
     final change = GDevelopAuthoritativeProjectChange(
       gameId: snapshot.version.projectId,
       revision: snapshot.version.revision,
-      projectContentHash: snapshot.project.contentHash,
+      projectContentHash: snapshot.projectFiles.contentHash,
       resourceManifestHash: resourceManifestHash,
       reason: reason,
       sequence: _authoritativeChangeSequences.update(
@@ -1612,7 +1708,9 @@ class GDevelopProjectHistoryAdapter {
     LocalVersionStore store,
     _GDevelopRevisionPayload payload,
   ) async {
-    await store.readObject(payload.projectReference);
+    for (final file in payload.projectFilesReference.files) {
+      await store.readObject(_projectFileCasReference(file));
+    }
     for (final resource in payload.resources) {
       await store.readObject(
         LocalCasObjectReference(
@@ -1630,51 +1728,59 @@ class GDevelopProjectHistoryAdapter {
     final decoded = jsonDecode(
       utf8.decode(await store.readRecordContent(record)),
     );
-    if (decoded is! Map ||
-        (decoded['schemaVersion'] != 1 && decoded['schemaVersion'] != 2)) {
+    if (decoded is! Map || decoded['schemaVersion'] != 3) {
       throw StateError('GDevelop 历史资源清单无效');
     }
-    final projectHash = decoded['projectJsonHash'];
-    final projectBytes = decoded['projectJsonBytes'];
+    final projectFilesHash = decoded['projectFilesHash'];
+    final projectFilesSize = decoded['projectFilesSize'];
+    final projectFiles = decoded['projectFiles'];
     final resources = decoded['resources'];
-    if (projectHash is! String || projectBytes is! int || resources is! List) {
+    if (projectFilesHash is! String ||
+        projectFilesSize is! int ||
+        projectFiles is! List ||
+        resources is! List) {
       throw StateError('GDevelop 历史资源清单无效');
     }
     late final GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot;
-    if (decoded['schemaVersion'] == 1) {
+    if (!decoded.containsKey('playmeshProjectConfig')) {
+      throw StateError('GDevelop 历史资源清单无效');
+    }
+    final rawConfig = decoded['playmeshProjectConfig'];
+    if (rawConfig == null) {
       projectConfigSnapshot =
-          const GDevelopHistoryProjectConfigSnapshot.legacy();
+          const GDevelopHistoryProjectConfigSnapshot.missing();
+    } else if (rawConfig is Map) {
+      final projectId = record.attributes['projectId'];
+      if (projectId is! String) {
+        throw StateError('GDevelop 历史资源清单无效');
+      }
+      try {
+        projectConfigSnapshot = GDevelopHistoryProjectConfigSnapshot.ready(
+          GDevelopProjectConfig.fromJson(
+            Map<String, Object?>.from(rawConfig),
+            expectedGameId: projectId,
+          ),
+        );
+      } on FormatException {
+        throw StateError('GDevelop 历史资源清单无效');
+      }
     } else {
-      if (!decoded.containsKey('playmeshProjectConfig')) {
-        throw StateError('GDevelop 历史资源清单无效');
-      }
-      final rawConfig = decoded['playmeshProjectConfig'];
-      if (rawConfig == null) {
-        projectConfigSnapshot =
-            const GDevelopHistoryProjectConfigSnapshot.missing();
-      } else if (rawConfig is Map) {
-        final projectId = record.attributes['projectId'];
-        if (projectId is! String) {
-          throw StateError('GDevelop 历史资源清单无效');
-        }
-        try {
-          projectConfigSnapshot = GDevelopHistoryProjectConfigSnapshot.ready(
-            GDevelopProjectConfig.fromJson(
-              Map<String, Object?>.from(rawConfig),
-              expectedGameId: projectId,
-            ),
-          );
-        } on FormatException {
-          throw StateError('GDevelop 历史资源清单无效');
-        }
-      } else {
-        throw StateError('GDevelop 历史资源清单无效');
-      }
+      throw StateError('GDevelop 历史资源清单无效');
     }
     return _GDevelopRevisionPayload(
-      projectReference: LocalCasObjectReference(
-        hash: projectHash,
-        bytes: projectBytes,
+      projectFilesReference: GDevelopProjectFilesReference(
+        contentHash: projectFilesHash,
+        size: projectFilesSize,
+        files: List<GDevelopProjectFileReference>.unmodifiable(
+          projectFiles.map((raw) {
+            if (raw is! Map) {
+              throw StateError('GDevelop 历史资源清单无效');
+            }
+            return GDevelopProjectFileReference.fromJson(
+              Map<String, Object?>.from(raw),
+            );
+          }),
+        ),
       ),
       resources: List.unmodifiable(
         resources.map((raw) {
@@ -1695,12 +1801,13 @@ class GDevelopProjectHistoryAdapter {
   ) async {
     final payload = await _payload(store, record);
     await _verifyPayloadObjects(store, payload);
-    final projectBytes = await store.readObject(payload.projectReference);
-    final decoded = jsonDecode(utf8.decode(projectBytes));
-    if (decoded is! Map) throw StateError('GDevelop 历史工程格式无效');
+    final projectFiles = await _readProjectFilesReference(
+      store,
+      payload.projectFilesReference,
+    );
     return GDevelopProjectSnapshot(
       version: _version(projectId, record),
-      project: Map<String, Object?>.from(decoded),
+      projectFiles: projectFiles,
       resources: payload.resources,
       projectConfigSnapshot: payload.projectConfigSnapshot,
     );
@@ -1739,8 +1846,9 @@ class GDevelopProjectHistoryAdapter {
   ) => _GDevelopDirectCurrentStore(
     root: _sourceCurrentRoot(projectRoot),
     clock: clock,
-    maxProjectBytes: maxProjectBytes,
+    maxProjectFilesBytes: maxProjectFilesBytes,
     onBundleVerification: onCurrentBundleVerification,
+    onProjectFileWritten: onCurrentProjectFileWritten,
   );
 
   Directory _sourceCurrentRoot(Directory projectRoot) => Directory(
@@ -1778,32 +1886,152 @@ class GDevelopProjectHistoryAdapter {
     return value;
   }
 
-  static const _namespace = 'gdevelop.history.v2';
+  static const _namespace = 'gdevelop.history.v3';
 
-  Uint8List _encodeProject(Map<String, Object?> project) {
-    final bytes = Uint8List.fromList(
-      utf8.encode(jsonEncode(_canonicalizeJson(project))),
+  List<GDevelopProjectFile> _normalizeProjectFiles(
+    List<GDevelopProjectFile> projectFiles,
+  ) => gdevelopProjectFilesFromJson(
+    projectFiles.map((file) => file.toJson()).toList(growable: false),
+  );
+
+  Future<GDevelopProjectFilesReference> _stageProjectFiles(
+    LocalVersionStore store,
+    List<GDevelopProjectFile> projectFiles,
+  ) async {
+    final staged = await store.stageObjects(
+      projectFiles.map(
+        (file) => encodeOfficialGDevelopProjectFileBytes(file.content),
+      ),
     );
-    if (bytes.length > maxProjectBytes) {
-      throw const FormatException('GDevelop 工程不能超过 1 GiB');
+    return _projectFilesReferenceFromStaged(projectFiles, staged);
+  }
+
+  Future<GDevelopProjectFilesReference> _projectFilesReferenceFromStaged(
+    List<GDevelopProjectFile> projectFiles,
+    List<LocalCasObjectReference> staged,
+  ) async {
+    if (projectFiles.length != staged.length) {
+      throw StateError('GDevelop 工程分片暂存结果不完整');
     }
-    return bytes;
+    final references = <GDevelopProjectFileReference>[];
+    var totalBytes = 0;
+    for (var index = 0; index < projectFiles.length; index += 1) {
+      final file = projectFiles[index];
+      final object = staged[index];
+      totalBytes += object.bytes;
+      references.add(
+        GDevelopProjectFileReference(
+          path: file.path,
+          contentHash: object.hash,
+          size: object.bytes,
+        ),
+      );
+    }
+    if (totalBytes < 1 || totalBytes > maxProjectFilesBytes) {
+      throw const FormatException('GDevelop 工程大小必须在 1 B 至 1 GiB 之间');
+    }
+    return GDevelopProjectFilesReference(
+      contentHash: await hashGDevelopProjectFiles(projectFiles),
+      size: totalBytes,
+      files: List<GDevelopProjectFileReference>.unmodifiable(references),
+    );
   }
 
   Map<String, Object?> _attributes({
     required String projectId,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
+    GDevelopHistoryChangeSummary? changeSummary,
   }) => {
     'projectId': projectId,
     'reason': reason.wireName,
     'source': source.wireName,
+    if (changeSummary != null) 'changeSummary': changeSummary.toJson(),
   };
+
+  GDevelopHistoryChangeSummary _changeSummary(
+    _GDevelopRevisionPayload? before,
+    _GDevelopRevisionPayload after,
+  ) {
+    var added = 0;
+    var modified = 0;
+    var deleted = 0;
+
+    void compare(
+      Map<String, String> beforeHashes,
+      Map<String, String> afterHashes,
+    ) {
+      for (final entry in afterHashes.entries) {
+        final previousHash = beforeHashes[entry.key];
+        if (previousHash == null) {
+          added += 1;
+        } else if (previousHash != entry.value) {
+          modified += 1;
+        }
+      }
+      for (final key in beforeHashes.keys) {
+        if (!afterHashes.containsKey(key)) deleted += 1;
+      }
+    }
+
+    compare(
+      {
+        for (final file
+            in before?.projectFilesReference.files ??
+                const <GDevelopProjectFileReference>[])
+          file.path: file.contentHash,
+      },
+      {
+        for (final file in after.projectFilesReference.files)
+          file.path: file.contentHash,
+      },
+    );
+    compare(
+      {
+        for (final resource
+            in before?.resources ?? const <GDevelopProjectResource>[])
+          resource.logicalId: resource.contentHash,
+      },
+      {
+        for (final resource in after.resources)
+          resource.logicalId: resource.contentHash,
+      },
+    );
+    return GDevelopHistoryChangeSummary(
+      added: added,
+      modified: modified,
+      deleted: deleted,
+    );
+  }
+
+  LocalVersionDraft _withChangeSummary(
+    LocalVersionDraft draft,
+    GDevelopHistoryChangeSummary changeSummary,
+  ) => LocalVersionDraft(
+    content: draft.content,
+    attributes: {...draft.attributes, 'changeSummary': changeSummary.toJson()},
+    references: draft.references,
+    deduplicateHistoryHead: draft.deduplicateHistoryHead,
+  );
 
   GDevelopProjectVersion _version(String projectId, LocalVersionRecord record) {
     final historicalIds = _historicalProjectIds[projectId] ?? {projectId};
     if (!historicalIds.contains(record.attributes['projectId'])) {
       throw StateError('GDevelop 历史命名空间不匹配');
+    }
+    final rawChangeSummary = record.attributes['changeSummary'];
+    if (rawChangeSummary != null && rawChangeSummary is! Map) {
+      throw StateError('GDevelop 历史变更摘要无效');
+    }
+    late final GDevelopHistoryChangeSummary? changeSummary;
+    try {
+      changeSummary = rawChangeSummary == null
+          ? null
+          : GDevelopHistoryChangeSummary.fromJson(
+              Map<String, Object?>.from(rawChangeSummary as Map),
+            );
+    } on FormatException {
+      throw StateError('GDevelop 历史变更摘要无效');
     }
     return GDevelopProjectVersion(
       id: record.id,
@@ -1818,6 +2046,7 @@ class GDevelopProjectHistoryAdapter {
         record.attributes['source'] as String? ?? '',
       ),
       contentBytes: record.contentBytes,
+      changeSummary: changeSummary,
     );
   }
 }
@@ -1832,16 +2061,18 @@ class _GDevelopDirectCurrentStore {
   _GDevelopDirectCurrentStore({
     required this.root,
     required this.clock,
-    required this.maxProjectBytes,
+    required this.maxProjectFilesBytes,
     this.onBundleVerification,
+    this.onProjectFileWritten,
   });
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
 
   final Directory root;
   final DateTime Function() clock;
-  final int maxProjectBytes;
+  final int maxProjectFilesBytes;
   final void Function()? onBundleVerification;
+  final FutureOr<void> Function(File file)? onProjectFileWritten;
   Future<void> _tail = Future<void>.value();
 
   Future<Map<String, Object?>?> readOpenCurrent() => _serialize(() async {
@@ -1852,7 +2083,6 @@ class _GDevelopDirectCurrentStore {
         '${root.path}${Platform.pathSeparator}manifest.json',
       ).readAsString(),
     );
-    final projectValue = jsonDecode(await _projectFile(root).readAsString());
     final manifest = manifestValue is Map
         ? Map<String, Object?>.from(manifestValue)
         : const <String, Object?>{};
@@ -1862,6 +2092,18 @@ class _GDevelopDirectCurrentStore {
     final idSuffix = contentHashText.length <= 12
         ? contentHashText
         : contentHashText.substring(0, 12);
+    final projectFiles = <Object?>[];
+    final rawProjectFiles = manifest['projectFiles'];
+    if (rawProjectFiles is List) {
+      for (final raw in rawProjectFiles) {
+        if (raw is! Map || raw['path'] is! String) continue;
+        final path = raw['path']! as String;
+        projectFiles.add({
+          'path': path,
+          'content': jsonDecode(await _projectFile(root, path).readAsString()),
+        });
+      }
+    }
     return <String, Object?>{
       'version': <String, Object?>{
         'id': 'current-$revision-$idSuffix',
@@ -1873,7 +2115,7 @@ class _GDevelopDirectCurrentStore {
         'source': manifest['source'],
         'contentBytes': manifest['contentBytes'],
       },
-      'project': projectValue,
+      'projectFiles': projectFiles,
       'resources': manifest['resources'],
       if (manifest.containsKey('playmeshProjectConfig'))
         'playmeshProjectConfig': manifest['playmeshProjectConfig'],
@@ -1897,35 +2139,29 @@ class _GDevelopDirectCurrentStore {
         if (bundle == null) return null;
         return GDevelopProjectSnapshot(
           version: bundle.version,
-          project: bundle.project,
+          projectFiles: bundle.projectFiles,
           resources: bundle.payload.resources,
           projectConfigSnapshot: bundle.payload.projectConfigSnapshot,
         );
       });
 
-  Future<GDevelopProjectReference?> projectReference(String projectId) =>
-      _serialize(() async {
-        final bundle = await _readBundle(root, expectedProjectId: projectId);
-        if (bundle == null) return null;
-        return GDevelopProjectReference(
-          contentHash: bundle.payload.projectReference.hash,
-          size: bundle.payload.projectReference.bytes,
-        );
-      });
+  Future<GDevelopProjectFilesReference?> projectFilesReference(
+    String projectId,
+  ) => _serialize(() async {
+    final manifest = await _readManifest(root, expectedProjectId: projectId);
+    return manifest?.payload.projectFilesReference;
+  });
 
   Future<GDevelopProjectCurrentReferenceSnapshot?> referenceSnapshot(
     String projectId,
   ) => _serialize(() async {
-    final bundle = await _readBundle(root, expectedProjectId: projectId);
-    if (bundle == null) return null;
+    final manifest = await _readManifest(root, expectedProjectId: projectId);
+    if (manifest == null) return null;
     return GDevelopProjectCurrentReferenceSnapshot(
-      version: bundle.version,
-      project: GDevelopProjectReference(
-        contentHash: bundle.payload.projectReference.hash,
-        size: bundle.payload.projectReference.bytes,
-      ),
-      resources: bundle.payload.resources,
-      projectConfigSnapshot: bundle.payload.projectConfigSnapshot,
+      version: manifest.version,
+      projectFiles: manifest.payload.projectFilesReference,
+      resources: manifest.payload.resources,
+      projectConfigSnapshot: manifest.payload.projectConfigSnapshot,
     );
   });
 
@@ -1938,10 +2174,10 @@ class _GDevelopDirectCurrentStore {
         )
         .toList(growable: false);
     if (normalized.isEmpty) return const <String>{};
-    final bundle = await _readBundle(root);
-    if (bundle == null) return const <String>{};
+    final manifest = await _readManifest(root);
+    if (manifest == null) return const <String>{};
     final currentResourceSizes = <String, int>{
-      for (final resource in bundle.payload.resources)
+      for (final resource in manifest.payload.resources)
         resource.contentHash: resource.size,
     };
     return Set<String>.unmodifiable(
@@ -1962,8 +2198,9 @@ class _GDevelopDirectCurrentStore {
   }
 
   Future<Map<String, Uint8List>> readResourceObjects(
-    Iterable<LocalCasObjectReference> references,
-  ) => _serialize(() async {
+    Iterable<LocalCasObjectReference> references, {
+    bool verifyContentHash = true,
+  }) => _serialize(() async {
     final normalized = <String, LocalCasObjectReference>{};
     for (final reference in references) {
       final value = LocalCasObjectReference.fromJson(reference.toJson());
@@ -1974,12 +2211,12 @@ class _GDevelopDirectCurrentStore {
       normalized[value.hash] = value;
     }
     if (normalized.isEmpty) return const <String, Uint8List>{};
-    final bundle = await _readBundle(root);
-    if (bundle == null) {
+    final manifest = await _readManifest(root);
+    if (manifest == null) {
       throw StateError('GDevelop current 资源不存在或未被引用');
     }
     final currentResourceSizes = <String, int>{
-      for (final resource in bundle.payload.resources)
+      for (final resource in manifest.payload.resources)
         resource.contentHash: resource.size,
     };
     final result = <String, Uint8List>{};
@@ -1988,8 +2225,9 @@ class _GDevelopDirectCurrentStore {
         throw StateError('GDevelop current 资源不存在或未被引用');
       }
       final bytes = await _resourceFile(root, reference).readAsBytes();
-      if (bytes.length != reference.bytes ||
-          await _sha256Bytes(bytes) != reference.hash) {
+      if (verifyContentHash &&
+          (bytes.length != reference.bytes ||
+              await _sha256Bytes(bytes) != reference.hash)) {
         throw StateError('GDevelop current 对象 hash 不一致');
       }
       result[reference.hash] = bytes;
@@ -2003,8 +2241,7 @@ class _GDevelopDirectCurrentStore {
     required int revisionDelta,
     required GDevelopHistoryReason reason,
     required GDevelopHistorySource source,
-    required Map<String, Object?> project,
-    Uint8List? exactProjectBytes,
+    required List<GDevelopProjectFile> projectFiles,
     required List<GDevelopProjectResource> resources,
     required GDevelopHistoryProjectConfigSnapshot projectConfigSnapshot,
     required Future<Uint8List> Function(LocalCasObjectReference reference)
@@ -2014,31 +2251,20 @@ class _GDevelopDirectCurrentStore {
       throw const FormatException('GDevelop current revision 参数无效');
     }
     await _recoverSwap();
-    final before = await _readBundle(root, expectedProjectId: projectId);
+    final before = await _readManifest(root, expectedProjectId: projectId);
     final currentRevision = before?.version.revision ?? 0;
     if (currentRevision != expectedRevision) {
       throw _GDevelopDirectCurrentRevisionConflict(currentRevision);
     }
-    final projectBytes = exactProjectBytes == null
-        ? Uint8List.fromList(
-            utf8.encode(jsonEncode(_canonicalizeJson(project))),
-          )
-        : Uint8List.fromList(exactProjectBytes);
-    if (projectBytes.isEmpty || projectBytes.length > maxProjectBytes) {
+    final projectFilesReference = await referenceGDevelopProjectFiles(
+      projectFiles,
+    );
+    if (projectFilesReference.size < 1 ||
+        projectFilesReference.size > maxProjectFilesBytes) {
       throw const FormatException('GDevelop current 工程大小无效');
     }
-    final exactDecoded = jsonDecode(utf8.decode(projectBytes));
-    if (exactDecoded is! Map ||
-        jsonEncode(_canonicalizeJson(exactDecoded)) !=
-            jsonEncode(_canonicalizeJson(project))) {
-      throw StateError('GDevelop current 工程字节与解析结果不一致');
-    }
-    final projectReference = LocalCasObjectReference(
-      hash: await _sha256Bytes(projectBytes),
-      bytes: projectBytes.length,
-    );
     final payload = _GDevelopRevisionPayload(
-      projectReference: projectReference,
+      projectFilesReference: projectFilesReference,
       resources: resources,
       projectConfigSnapshot: projectConfigSnapshot,
     );
@@ -2053,13 +2279,31 @@ class _GDevelopDirectCurrentStore {
     );
     if (await next.exists()) await next.delete(recursive: true);
     await Directory(
-      '${next.path}${Platform.pathSeparator}resources',
+      '${next.path}${Platform.pathSeparator}project',
     ).create(recursive: true);
     try {
-      await File(
-        '${next.path}${Platform.pathSeparator}project.json',
-      ).writeAsBytes(projectBytes, flush: true);
+      Future<void> writeProjectFile(GDevelopProjectFile file) async {
+        final destination = _projectFile(next, file.path);
+        await destination.parent.create(recursive: true);
+        final encoded = encodeOfficialGDevelopProjectFile(file.content);
+        await destination.writeAsString(encoded, flush: true);
+        await onProjectFileWritten?.call(destination);
+        if (await destination.readAsString() != encoded) {
+          throw StateError('GDevelop current 工程分片写入失败');
+        }
+      }
+
+      final rootProjectFile = projectFiles.firstWhere(
+        (file) => file.path == 'game.json',
+      );
+      await Future.wait(
+        projectFiles
+            .where((file) => file.path != 'game.json')
+            .map(writeProjectFile),
+      );
+      await writeProjectFile(rootProjectFile);
       final written = <String>{};
+      final reusedResources = <LocalCasObjectReference>[];
       for (final resource in resources) {
         final reference = LocalCasObjectReference(
           hash: resource.contentHash,
@@ -2075,17 +2319,13 @@ class _GDevelopDirectCurrentStore {
                   item.size == reference.bytes,
             );
         if (existedBefore) {
-          final existing = _resourceFile(root, reference);
-          await _verifyFile(existing, reference);
-          bytes = await existing.readAsBytes();
-        } else {
-          bytes = await readResource(reference);
+          reusedResources.add(reference);
+          continue;
         }
-        if (bytes.length != reference.bytes ||
-            await _sha256Bytes(bytes) != reference.hash) {
-          throw StateError('GDevelop current 资源内容与清单不一致');
-        }
-        await _resourceFile(next, reference).writeAsBytes(bytes, flush: true);
+        bytes = await readResource(reference);
+        final destination = _resourceFile(next, reference);
+        await destination.parent.create(recursive: true);
+        await destination.writeAsBytes(bytes, flush: true);
       }
       final manifest = <String, Object?>{
         'schemaVersion': schemaVersion,
@@ -2101,21 +2341,35 @@ class _GDevelopDirectCurrentStore {
       await File(
         '${next.path}${Platform.pathSeparator}manifest.json',
       ).writeAsString(jsonEncode(manifest), flush: true);
-      final verified = await _readBundle(next, expectedProjectId: projectId);
-      if (verified == null ||
-          verified.version.revision != revision ||
-          verified.version.contentHash != contentHash) {
-        throw StateError('GDevelop current staging 验证失败');
-      }
-      await _replaceCurrent(next);
+      String resourceKey(GDevelopProjectResource resource) =>
+          '${resource.contentHash}:${resource.size}';
+      final previousResourceKeys = before == null
+          ? const <String>{}
+          : before.payload.resources.map(resourceKey).toSet();
+      final nextResourceKeys = resources.map(resourceKey).toSet();
+      await _replaceCurrent(
+        next,
+        reusedResources: reusedResources,
+        reuseWholeResourcesDirectory:
+            before != null &&
+            previousResourceKeys.length == nextResourceKeys.length &&
+            previousResourceKeys.containsAll(nextResourceKeys),
+      );
+      final version = GDevelopProjectVersion(
+        id: 'current-$revision-${contentHash.substring(0, 12)}',
+        projectId: projectId,
+        revision: revision,
+        timestamp: timestamp,
+        reason: reason,
+        contentHash: contentHash,
+        source: source,
+        contentBytes: payloadBytes.length,
+      );
       return GDevelopProjectCurrentReferenceSnapshot(
-        version: verified.version,
-        project: GDevelopProjectReference(
-          contentHash: verified.payload.projectReference.hash,
-          size: verified.payload.projectReference.bytes,
-        ),
-        resources: verified.payload.resources,
-        projectConfigSnapshot: verified.payload.projectConfigSnapshot,
+        version: version,
+        projectFiles: projectFilesReference,
+        resources: resources,
+        projectConfigSnapshot: projectConfigSnapshot,
       );
     } on Object {
       if (await next.exists()) await next.delete(recursive: true);
@@ -2123,19 +2377,46 @@ class _GDevelopDirectCurrentStore {
     }
   });
 
-  Future<void> _replaceCurrent(Directory next) async {
+  Future<void> _replaceCurrent(
+    Directory next, {
+    required List<LocalCasObjectReference> reusedResources,
+    required bool reuseWholeResourcesDirectory,
+  }) async {
     await root.parent.create(recursive: true);
     final backup = Directory('${root.path}.backup');
     if (await backup.exists()) await backup.delete(recursive: true);
+    if (reusedResources.isNotEmpty) {
+      await _resourceReuseJournal(next).writeAsString(
+        jsonEncode({
+          'wholeDirectory': reuseWholeResourcesDirectory,
+          'resources': reusedResources
+              .map((reference) => reference.toJson())
+              .toList(growable: false),
+        }),
+        flush: true,
+      );
+    }
     if (await root.exists()) await root.rename(backup.path);
     try {
       await next.rename(root.path);
-      if (await backup.exists()) await backup.delete(recursive: true);
     } on Object {
-      if (!await root.exists() && await backup.exists()) {
+      if (await backup.exists()) {
         await backup.rename(root.path);
       }
       rethrow;
+    }
+    try {
+      await _completeResourceReuse(root, backup);
+    } on Object {
+      await _rollbackActivatedCurrent(root, backup);
+      rethrow;
+    }
+    if (await backup.exists()) {
+      try {
+        await backup.delete(recursive: true);
+      } on FileSystemException {
+        // current 已完整切换；遗留 backup 由下次访问恢复流程清理。
+      }
     }
   }
 
@@ -2147,16 +2428,112 @@ class _GDevelopDirectCurrentStore {
       return;
     }
     if (await root.exists() && await backup.exists()) {
+      await _completeResourceReuse(root, backup);
       await backup.delete(recursive: true);
     }
   }
 
+  Future<void> _completeResourceReuse(
+    Directory activated,
+    Directory backup,
+  ) async {
+    final journal = _resourceReuseJournal(activated);
+    if (!await journal.exists()) return;
+    final decoded = jsonDecode(await journal.readAsString());
+    if (decoded is! Map ||
+        decoded['wholeDirectory'] is! bool ||
+        decoded['resources'] is! List) {
+      throw StateError('GDevelop current 资源复用日志无效');
+    }
+    final wholeDirectory = decoded['wholeDirectory']! as bool;
+    final references = (decoded['resources']! as List)
+        .map((raw) {
+          if (raw is! Map) {
+            throw StateError('GDevelop current 资源复用日志无效');
+          }
+          return LocalCasObjectReference.fromJson(
+            Map<String, Object?>.from(raw),
+          );
+        })
+        .toList(growable: false);
+    final sourceDirectory = Directory(
+      '${backup.path}${Platform.pathSeparator}resources',
+    );
+    final destinationDirectory = Directory(
+      '${activated.path}${Platform.pathSeparator}resources',
+    );
+    if (wholeDirectory) {
+      if (await sourceDirectory.exists()) {
+        if (await destinationDirectory.exists()) {
+          await destinationDirectory.delete(recursive: true);
+        }
+        await sourceDirectory.rename(destinationDirectory.path);
+      } else if (!await destinationDirectory.exists()) {
+        throw StateError('GDevelop current 复用资源目录不存在');
+      }
+    } else {
+      await destinationDirectory.create(recursive: true);
+      for (final reference in references) {
+        final source = _resourceFile(backup, reference);
+        final destination = _resourceFile(activated, reference);
+        if (await destination.exists()) continue;
+        if (!await source.exists()) {
+          throw StateError('GDevelop current 复用资源不存在');
+        }
+        await source.rename(destination.path);
+      }
+    }
+    await journal.delete();
+  }
+
+  Future<void> _rollbackActivatedCurrent(
+    Directory activated,
+    Directory backup,
+  ) async {
+    if (!await backup.exists()) return;
+    final journal = _resourceReuseJournal(activated);
+    if (await journal.exists()) {
+      final decoded = jsonDecode(await journal.readAsString());
+      if (decoded is Map && decoded['resources'] is List) {
+        final wholeDirectory = decoded['wholeDirectory'] == true;
+        if (wholeDirectory) {
+          final sourceDirectory = Directory(
+            '${activated.path}${Platform.pathSeparator}resources',
+          );
+          final destinationDirectory = Directory(
+            '${backup.path}${Platform.pathSeparator}resources',
+          );
+          if (!await destinationDirectory.exists() &&
+              await sourceDirectory.exists()) {
+            await sourceDirectory.rename(destinationDirectory.path);
+          }
+        } else {
+          for (final raw in decoded['resources']! as List) {
+            if (raw is! Map) continue;
+            final reference = LocalCasObjectReference.fromJson(
+              Map<String, Object?>.from(raw),
+            );
+            final source = _resourceFile(activated, reference);
+            final destination = _resourceFile(backup, reference);
+            if (!await destination.exists() && await source.exists()) {
+              await source.rename(destination.path);
+            }
+          }
+        }
+      }
+    }
+    if (await activated.exists()) await activated.delete(recursive: true);
+    await backup.rename(root.path);
+  }
+
+  File _resourceReuseJournal(Directory directory) =>
+      File('${directory.path}${Platform.pathSeparator}resource-reuse.json');
+
   /// Reads only the authoritative manifest metadata.
   ///
-  /// This is the read/open path. It intentionally does not hash project or
-  /// resource contents and does not scan resource files. Normal opening leaves
-  /// the stored bytes to GDevelop; every write/commit path uses [_readBundle]
-  /// below and retains full fail-closed content validation.
+  /// Presence and commit conflict checks intentionally use this metadata-only
+  /// path. Project writes retain GDevelop's write-then-read-string comparison;
+  /// [_readBundle] is reserved for APIs that explicitly materialize a snapshot.
   Future<_GDevelopDirectCurrentManifest?> _readManifest(
     Directory directory, {
     String? expectedProjectId,
@@ -2166,8 +2543,10 @@ class _GDevelopDirectCurrentStore {
     final manifestFile = File(
       '${directory.path}${Platform.pathSeparator}manifest.json',
     );
-    final projectFile = _projectFile(directory);
-    if (!await manifestFile.exists() || !await projectFile.exists()) {
+    final projectDirectory = Directory(
+      '${directory.path}${Platform.pathSeparator}project',
+    );
+    if (!await manifestFile.exists() || !await projectDirectory.exists()) {
       throw StateError('GDevelop current 文件不完整');
     }
     final decoded = jsonDecode(await manifestFile.readAsString());
@@ -2182,8 +2561,9 @@ class _GDevelopDirectCurrentStore {
       'source',
       'contentHash',
       'contentBytes',
-      'projectJsonHash',
-      'projectJsonBytes',
+      'projectFilesHash',
+      'projectFilesSize',
+      'projectFiles',
       'resources',
       'playmeshProjectConfig',
     };
@@ -2198,8 +2578,9 @@ class _GDevelopDirectCurrentStore {
         manifest['source'] is! String ||
         manifest['contentHash'] is! String ||
         manifest['contentBytes'] is! int ||
-        manifest['projectJsonHash'] is! String ||
-        manifest['projectJsonBytes'] is! int ||
+        manifest['projectFilesHash'] is! String ||
+        manifest['projectFilesSize'] is! int ||
+        manifest['projectFiles'] is! List ||
         manifest['resources'] is! List) {
       throw StateError('GDevelop current manifest 无效');
     }
@@ -2207,11 +2588,12 @@ class _GDevelopDirectCurrentStore {
     if (expectedProjectId != null && projectId != expectedProjectId) {
       throw StateError('GDevelop current gameId 不匹配');
     }
-    final projectReference = LocalCasObjectReference.fromJson({
-      'hash': manifest['projectJsonHash'],
-      'bytes': manifest['projectJsonBytes'],
+    final projectFilesReference = GDevelopProjectFilesReference.fromJson({
+      'contentHash': manifest['projectFilesHash'],
+      'size': manifest['projectFilesSize'],
+      'files': manifest['projectFiles'],
     });
-    if (projectReference.bytes > maxProjectBytes) {
+    if (projectFilesReference.size > maxProjectFilesBytes) {
       throw StateError('GDevelop current 工程过大');
     }
     final resources = List<GDevelopProjectResource>.unmodifiable(
@@ -2240,7 +2622,7 @@ class _GDevelopDirectCurrentStore {
           )
         : throw StateError('GDevelop current project config 无效');
     final payload = _GDevelopRevisionPayload(
-      projectReference: projectReference,
+      projectFilesReference: projectFilesReference,
       resources: resources,
       projectConfigSnapshot: configSnapshot,
     );
@@ -2270,7 +2652,7 @@ class _GDevelopDirectCurrentStore {
     );
   }
 
-  /// Full content verification used exclusively by mutation/commit paths.
+  /// Materializes and verifies a typed snapshot for explicit snapshot reads.
   Future<_GDevelopDirectCurrentBundle?> _readBundle(
     Directory directory, {
     String? expectedProjectId,
@@ -2281,12 +2663,34 @@ class _GDevelopDirectCurrentStore {
     );
     if (manifest == null) return null;
     onBundleVerification?.call();
-    final projectFile = _projectFile(directory);
-    await _verifyFile(projectFile, manifest.payload.projectReference);
-    final projectDecoded = jsonDecode(
-      utf8.decode(await projectFile.readAsBytes()),
+    final projectFiles = <GDevelopProjectFile>[];
+    for (final reference in manifest.payload.projectFilesReference.files) {
+      final projectFile = _projectFile(directory, reference.path);
+      await _verifyFile(projectFile, _projectFileCasReference(reference));
+      final projectDecoded = jsonDecode(
+        utf8.decode(await projectFile.readAsBytes()),
+      );
+      if (projectDecoded is! Map) {
+        throw StateError('GDevelop current 工程无效');
+      }
+      projectFiles.add(
+        GDevelopProjectFile(
+          path: reference.path,
+          content: Map<String, Object?>.unmodifiable(
+            Map<String, Object?>.from(projectDecoded),
+          ),
+        ),
+      );
+    }
+    final computedProjectFilesReference = await referenceGDevelopProjectFiles(
+      projectFiles,
     );
-    if (projectDecoded is! Map) throw StateError('GDevelop current 工程无效');
+    if (computedProjectFilesReference.contentHash !=
+            manifest.payload.projectFilesReference.contentHash ||
+        computedProjectFilesReference.size !=
+            manifest.payload.projectFilesReference.size) {
+      throw StateError('GDevelop current 工程文件树与清单不一致');
+    }
     final sorted = [...manifest.payload.resources]
       ..sort((left, right) => left.logicalId.compareTo(right.logicalId));
     if (jsonEncode(
@@ -2312,9 +2716,7 @@ class _GDevelopDirectCurrentStore {
     }
     return _GDevelopDirectCurrentBundle(
       version: manifest.version,
-      project: Map<String, Object?>.unmodifiable(
-        Map<String, Object?>.from(projectDecoded),
-      ),
+      projectFiles: List<GDevelopProjectFile>.unmodifiable(projectFiles),
       payload: manifest.payload,
     );
   }
@@ -2329,8 +2731,10 @@ class _GDevelopDirectCurrentStore {
         '${Platform.pathSeparator}${reference.hash}.blob',
       );
 
-  File _projectFile(Directory directory) =>
-      File('${directory.path}${Platform.pathSeparator}project.json');
+  File _projectFile(Directory directory, String path) => File(
+    '${directory.path}${Platform.pathSeparator}project'
+    '${Platform.pathSeparator}${path.replaceAll('/', Platform.pathSeparator)}',
+  );
 
   Future<void> _verifyFile(File file, LocalCasObjectReference reference) async {
     if (!await file.exists() || await file.length() != reference.bytes) {
@@ -2351,12 +2755,12 @@ class _GDevelopDirectCurrentStore {
 class _GDevelopDirectCurrentBundle {
   const _GDevelopDirectCurrentBundle({
     required this.version,
-    required this.project,
+    required this.projectFiles,
     required this.payload,
   });
 
   final GDevelopProjectVersion version;
-  final Map<String, Object?> project;
+  final List<GDevelopProjectFile> projectFiles;
   final _GDevelopRevisionPayload payload;
 }
 
@@ -2369,6 +2773,11 @@ class _GDevelopDirectCurrentManifest {
   final GDevelopProjectVersion version;
   final _GDevelopRevisionPayload payload;
 }
+
+LocalCasObjectReference _projectFileCasReference(
+  GDevelopProjectFileReference reference,
+) =>
+    LocalCasObjectReference(hash: reference.contentHash, bytes: reference.size);
 
 Future<String> _sha256Bytes(List<int> bytes) async {
   final digest = await Sha256().hash(bytes);

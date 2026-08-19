@@ -22,6 +22,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
     this.appBridge,
     this.appSdkInputTakenOver = true,
     this.onNavigationStarted,
+    this.onReloadReady,
     this.onRunJavaScriptReady,
     this.onEvaluateJavaScriptReady,
     this.onOpenExternalUri,
@@ -36,6 +37,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final AppWebViewBridge? appBridge;
   final bool appSdkInputTakenOver;
   final VoidCallback? onNavigationStarted;
+  final ValueChanged<Future<void> Function()?>? onReloadReady;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;
@@ -179,6 +181,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
 
       if (mounted) {
         setState(() => _ready = true);
+        widget.onReloadReady?.call(_controller.reload);
         _scheduleInitialFocus();
       }
     } on Object catch (error) {
@@ -343,6 +346,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
 
   @override
   void dispose() {
+    widget.onReloadReady?.call(null);
     widget.onEvaluateJavaScriptReady?.call(null);
     _sdkMessages.dispose();
     _initialFocusRetryTimer?.cancel();

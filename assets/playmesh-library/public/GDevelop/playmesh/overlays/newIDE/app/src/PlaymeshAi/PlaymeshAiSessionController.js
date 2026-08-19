@@ -13,6 +13,7 @@ import type {
   PlaymeshAiToolsEnvelope,
 } from './PlaymeshAiClient';
 import type {
+  PlaymeshAiApprovalMode,
   PlaymeshAiObject,
   PlaymeshAiSession,
 } from './PlaymeshAiProtocol';
@@ -49,6 +50,11 @@ type PlaymeshAiSessionStateListener = (
 type PlaymeshAiProjectIdentity = {|
   gameId: string,
   fileIdentifier: string,
+|};
+type PlaymeshAiApprovalModeOperationSnapshot = {|
+  sessionEpoch: number,
+  gameId: string,
+  editorSessionId: string,
 |};
 type PlaymeshAiPrepareOptions = {|
   project: gdProject,
@@ -139,6 +145,13 @@ const assertMode = (mode /*: mixed */) /*: void */ => {
   }
 };
 
+const isApprovalModeOperationTerminationError = (
+  error /*: mixed */
+) /*: boolean */ =>
+  error instanceof PlaymeshAiSessionControllerError &&
+  (error.code === 'approval_mode_operation_stale' ||
+    error.code === 'approval_mode_operation_aborted');
+
 const buildPlaymeshAiSessionProjectContext = (
   options /*: PlaymeshAiBuildProjectContextOptions */
 ) /*: PlaymeshAiObject */ =>
@@ -217,6 +230,28 @@ export class PlaymeshAiSessionController {
       Number.isSafeInteger(epoch) &&
       epoch === this.sessionEpoch
     );
+  }
+
+  _assertApprovalModeOperationCurrent(
+    snapshot /*: PlaymeshAiApprovalModeOperationSnapshot */,
+    signal /*: ?AbortSignal */
+  ) /*: void */ {
+    if (
+      this.disposed ||
+      !this.session ||
+      this.sessionEpoch !== snapshot.sessionEpoch ||
+      this.gameId !== snapshot.gameId ||
+      this.session.editorSessionId !== snapshot.editorSessionId
+    ) {
+      throw new PlaymeshAiSessionControllerError(
+        'approval_mode_operation_stale'
+      );
+    }
+    if (signal && signal.aborted) {
+      throw new PlaymeshAiSessionControllerError(
+        'approval_mode_operation_aborted'
+      );
+    }
   }
 
   _enqueue(
@@ -348,6 +383,115 @@ export class PlaymeshAiSessionController {
       const state = this.getState();
       this._notify();
       return state;
+    });
+  }
+
+  updateApprovalMode(
+    approvalMode /*: PlaymeshAiApprovalMode */,
+    signal /*: ?AbortSignal */
+  ) /*: Promise<PlaymeshAiSessionState> */ {
+    return this._enqueue(async () => {
+      const session = this.session;
+      const gameId = this.gameId;
+      if (!session || !gameId) {
+        throw new PlaymeshAiSessionControllerError('session_not_open');
+      }
+      const operationSnapshot = {
+        sessionEpoch: this.sessionEpoch,
+        gameId,
+        editorSessionId: session.editorSessionId,
+      };
+
+      try {
+        const updated = await this.client.updateApprovalMode(
+          gameId,
+          session.editorSessionId,
+          approvalMode,
+          signal
+        );
+        this._assertApprovalModeOperationCurrent(operationSnapshot, signal);
+        this.session = updated;
+        const state = this.getState();
+        this._notify();
+        if (updated.approvalMode !== approvalMode) {
+          throw new PlaymeshAiSessionControllerError(
+            'approval_mode_update_not_applied'
+          );
+        }
+        return state;
+      } catch (updateError) {
+        if (
+          (updateError instanceof PlaymeshAiSessionControllerError &&
+            updateError.code === 'approval_mode_update_not_applied') ||
+          isApprovalModeOperationTerminationError(updateError)
+        ) {
+          throw updateError;
+        }
+
+        this._assertApprovalModeOperationCurrent(operationSnapshot, signal);
+        try {
+          const reconciled = await this.client.getSession(
+            gameId,
+            session.editorSessionId,
+            signal
+          );
+          this._assertApprovalModeOperationCurrent(operationSnapshot, signal);
+          this.session = reconciled;
+          const state = this.getState();
+          this._notify();
+          if (reconciled.approvalMode === approvalMode) return state;
+          throw new PlaymeshAiSessionControllerError(
+            'approval_mode_update_not_applied'
+          );
+        } catch (reconciliationError) {
+          if (
+            (reconciliationError instanceof
+              PlaymeshAiSessionControllerError &&
+              reconciliationError.code ===
+                'approval_mode_update_not_applied') ||
+            isApprovalModeOperationTerminationError(reconciliationError)
+          ) {
+            throw reconciliationError;
+          }
+          this._assertApprovalModeOperationCurrent(operationSnapshot, signal);
+          throw new PlaymeshAiSessionControllerError(
+            'approval_mode_state_uncertain'
+          );
+        }
+      }
+    });
+  }
+
+  reconcileApprovalMode(
+    signal /*: ?AbortSignal */
+  ) /*: Promise<PlaymeshAiSessionState> */ {
+    return this._enqueue(async () => {
+      const session = this.session;
+      const gameId = this.gameId;
+      if (!session || !gameId) {
+        throw new PlaymeshAiSessionControllerError('session_not_open');
+      }
+      const operationSnapshot = {
+        sessionEpoch: this.sessionEpoch,
+        gameId,
+        editorSessionId: session.editorSessionId,
+      };
+      try {
+        const reconciled = await this.client.getSession(
+          gameId,
+          session.editorSessionId,
+          signal
+        );
+        this._assertApprovalModeOperationCurrent(operationSnapshot, signal);
+        this.session = reconciled;
+        const state = this.getState();
+        this._notify();
+        return state;
+      } catch (error) {
+        if (isApprovalModeOperationTerminationError(error)) throw error;
+        this._assertApprovalModeOperationCurrent(operationSnapshot, signal);
+        throw error;
+      }
     });
   }
 

@@ -295,6 +295,11 @@ function createPage({
       current.push(listener);
       windowListeners.set(type, current);
     },
+    removeEventListener(type, listener) {
+      const current = windowListeners.get(type) || [];
+      const index = current.indexOf(listener);
+      if (index >= 0) current.splice(index, 1);
+    },
   };
   if (app) {
     window.PlaymeshAppBridge = {
@@ -368,6 +373,10 @@ assert.deepEqual(
   Object.keys(browserPage.appSdk).filter((key) =>
     key.startsWith("__")),
   [],
+);
+assert.throws(
+  () => browserPage.appSdk.ui.disableSystemMenuTriggers(),
+  (error) => error?.code === "app_not_ready",
 );
 await browserPage.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -657,6 +666,102 @@ menuEventPage.appSdk.ui.configure({ fallbackUi: false });
 assert.deepEqual(menuEvents, ["open", "close", "open", "close", "close"]);
 stopMenuClose();
 stopMenuClose();
+
+const systemMenuPage = createPage();
+await systemMenuPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+const systemMenuInternal = systemMenuPage.window[appInternalKey];
+const systemMenuUi = systemMenuPage.mounted[0].__elements;
+assert.equal(
+  systemMenuPage.appSdk.ui.setSystemMenuTriggersEnabled,
+  undefined,
+);
+assert.throws(
+  () => systemMenuPage.appSdk.ui.disableSystemMenuTriggers(true),
+  (error) => error?.code === "invalid_argument",
+);
+const escapeAfterInvalidArgument = systemMenuPage.dispatchKey("Escape", 27);
+await Promise.resolve();
+assert.equal(escapeAfterInvalidArgument.defaultPrevented, true);
+assert.equal(systemMenuUi[".layer"].hidden, false);
+systemMenuUi[".continue"].click();
+assert.equal(
+  systemMenuPage.appSdk.ui.disableSystemMenuTriggers(),
+  undefined,
+);
+assert.equal(
+  systemMenuPage.appSdk.ui.disableSystemMenuTriggers(),
+  undefined,
+);
+assert.equal(
+  systemMenuPage.appSdk.ui.configure({}).fallbackUi,
+  true,
+);
+for (const [key, keyCode] of [
+  ["Escape", 27],
+  ["F10", 121],
+  ["ContextMenu", 93],
+  ["Menu", 82],
+  ["BrowserBack", 166],
+]) {
+  assert.equal(
+    systemMenuPage.dispatchKey(key, keyCode).defaultPrevented,
+    false,
+  );
+}
+assert.equal(systemMenuUi[".layer"].hidden, true);
+assert.equal(systemMenuInternal.handleNativeBack(), false);
+
+assert.equal(await systemMenuPage.appSdk.ui.showGameSidebar(), true);
+assert.equal(systemMenuInternal.handleNativeBack(), true);
+await Promise.resolve();
+assert.equal(systemMenuUi[".layer"].hidden, true);
+
+assert.equal(await systemMenuPage.appSdk.ui.openRuntimeLogs(), true);
+assert.equal(systemMenuUi[".logs-layer"].hidden, false);
+assert.equal(systemMenuInternal.handleNativeBack(), true);
+assert.equal(systemMenuUi[".logs-layer"].hidden, true);
+
+systemMenuInternal.registerRuntimeUi({
+  async getInfo() {
+    return {
+      gameId: "com.playmesh.system-menu-test",
+      gameName: "系统菜单测试",
+      tags: [],
+      requiredCapabilities: [],
+      joinCode: null,
+      multiplayer: false,
+      isAuthority: true,
+      playerName: null,
+      playerCount: null,
+      gameSdkVersion: "4.1.0",
+      appSdkVersion: "3.3.0",
+      platform: "browser",
+    };
+  },
+});
+assert.equal(await systemMenuPage.appSdk.ui.openGameInfo(), true);
+assert.equal(systemMenuUi[".info-layer"].hidden, false);
+assert.equal(systemMenuInternal.handleNativeBack(), true);
+assert.equal(systemMenuUi[".info-layer"].hidden, true);
+
+systemMenuInternal.configurePlatformUi({
+  locale: "zh-CN",
+  theme: "dark",
+  messages: platformMessages,
+});
+assert.equal(
+  systemMenuPage.dispatchKey("Escape", 27).defaultPrevented,
+  false,
+);
+
+const freshSystemMenuPage = createPage();
+await freshSystemMenuPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  freshSystemMenuPage.dispatchKey("Escape", 27).defaultPrevented,
+  true,
+);
 
 const disabledPage = createPage({ fallbackUi: false });
 await disabledPage.appSdk.ready;

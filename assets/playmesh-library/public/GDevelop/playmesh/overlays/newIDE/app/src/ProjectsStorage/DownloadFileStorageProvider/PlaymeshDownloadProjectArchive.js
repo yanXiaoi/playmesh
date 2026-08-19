@@ -3,6 +3,10 @@
 import { serializeToJSObject } from '../../Utils/Serializer';
 import { archiveFiles } from '../../Utils/BrowserArchiver';
 import { ensureGDevelopJsPlatformIsRegistered } from '../../PlaymeshShared/PlaymeshGDevelopPlatform';
+import {
+  formatPlaymeshProjectFile,
+  splitPlaymeshProject,
+} from '../PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
 
 /*::
 import type {
@@ -24,7 +28,7 @@ type Options = {|
 */
 
 /**
- * Build the official portable GDevelop project archive.
+ * Build a source archive using the official desktop folder-project layout.
  *
  * Platform registration belongs before the clone/unserialize boundary, not in
  * individual button handlers. Keeping the whole clone/download/archive chain
@@ -59,12 +63,13 @@ export const createPlaymeshDownloadProjectArchive = async ({
         blobFiles.push(blobFile);
       },
     });
-    const textFiles /*: Array<TextFileDescriptor> */ = [
-      {
-        text: JSON.stringify(serializeImplementation(projectCopy)),
-        filePath: 'game.json',
-      },
-    ];
+    projectCopy.setFolderProject(true);
+    const textFiles /*: Array<TextFileDescriptor> */ = splitPlaymeshProject(
+      serializeImplementation(projectCopy)
+    ).map(file => ({
+      text: formatPlaymeshProjectFile(file.content),
+      filePath: file.path,
+    }));
     return await archiveImplementation({
       textFiles,
       blobFiles,

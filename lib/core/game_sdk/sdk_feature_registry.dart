@@ -1,10 +1,14 @@
+import 'dart:convert';
+
 import '../capabilities/capability_runtime.dart';
 import '../app_media/app_media_runtime.dart';
+import '../game_web/game_share_link_snapshot.dart';
 import '../session/go_core_session_client.dart';
 
 part 'features/app/app_capability_feature.dart';
 part 'features/app/app_core_feature.dart';
 part 'features/app/app_device_feature.dart';
+part 'features/app/app_lan_feature.dart';
 part 'features/app/app_media_feature.dart';
 part 'features/app/app_media_webrtc_feature.dart';
 part 'features/app/app_performance_feature.dart';
@@ -68,12 +72,14 @@ class SdkSourceFragment {
     required this.target,
     required this.order,
     required this.typeScript,
+    this.declaration = '',
   });
 
   final String id;
   final SdkSourceTarget target;
   final int order;
   final String typeScript;
+  final String declaration;
 }
 
 /// Dart 执行器支持的 SDK bundle 版本区间。
@@ -144,6 +150,14 @@ class SdkCommandException implements Exception {
   String toString() => message;
 }
 
+/// App 命令的公开结果，以及必须在 Bridge 成功回包后才执行的宿主动作。
+final class AppSdkCommandResponse {
+  const AppSdkCommandResponse({this.result, this.afterResponse});
+
+  final Object? result;
+  final Future<void> Function()? afterResponse;
+}
+
 abstract interface class _GameSdkCommandFeature {
   SdkSourceFragment get source;
 
@@ -197,6 +211,8 @@ class AppSdkCommandContext {
     required this.disposeCapability,
     required this.setFullscreen,
     required this.openSharePanel,
+    required this.consumeUserActivation,
+    required this.lanHost,
     required this.takeOverInput,
     required this.requestExit,
     required this.syncAvatar,
@@ -217,6 +233,8 @@ class AppSdkCommandContext {
   disposeCapability;
   final Future<Object?> Function(Map<String, Object?> payload) setFullscreen;
   final Future<Object?> Function() openSharePanel;
+  final bool Function() consumeUserActivation;
+  final AppLanHost? lanHost;
   final Object? Function() takeOverInput;
   final Object? Function() requestExit;
   final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
@@ -238,6 +256,7 @@ final class SdkFeatureRegistry {
     _AppCapabilityFeature(),
     _AppMediaFeature(),
     _AppUiFeature(),
+    _AppLanFeature(),
     _AppDeviceFeature(),
   ];
 
@@ -272,6 +291,7 @@ final class SdkFeatureRegistry {
     appMediaWebRtcSdkSource,
     appPerformanceSdkSource,
     appUiSdkSource,
+    appLanSdkSource,
     appDeviceSdkSource,
   ];
 
@@ -597,6 +617,19 @@ _SdkRuntimeBundle _assembleRuntimeBundle(
     return ordered.map((fragment) => fragment.typeScript).join();
   }
 
+  final declarationFragments =
+      fragmentList
+          .where((fragment) => fragment.declaration.trim().isNotEmpty)
+          .toList()
+        ..sort((left, right) {
+          final targetComparison = left.target.index.compareTo(
+            right.target.index,
+          );
+          return targetComparison != 0
+              ? targetComparison
+              : left.order.compareTo(right.order);
+        });
+
   final game = _assembleSdkTarget(
     source: sourceFor(SdkSourceTarget.game),
     declarationName: 'PLAYMESH_DECLARATION',
@@ -618,10 +651,13 @@ _SdkRuntimeBundle _assembleRuntimeBundle(
     appVersionPlaceholder,
     app.version,
   );
-  final gameDeclaration = game.declaration.replaceAll(
-    appVersionPlaceholder,
-    app.version,
-  );
+  final gameDeclaration =
+      _appendSdkDeclarationFragments(
+            game.declaration,
+            declarationFragments.map((fragment) => fragment.declaration),
+          )
+          .replaceAll('__PLAYMESH_SDK_VERSION__', game.version)
+          .replaceAll(appVersionPlaceholder, app.version);
   for (final entry in {
     'playmesh.ts': gameTypeScript,
     'playmesh-main.js': gameJavaScript,
@@ -645,6 +681,16 @@ _SdkRuntimeBundle _assembleRuntimeBundle(
       'playmesh-app.d.ts': app.declaration,
     }),
   );
+}
+
+String _appendSdkDeclarationFragments(String base, Iterable<String> fragments) {
+  final sections = <String>[
+    base.trim(),
+    ...fragments
+        .map((fragment) => fragment.trim())
+        .where((fragment) => fragment.isNotEmpty),
+  ];
+  return '${sections.join('\n\n')}\n';
 }
 
 _SdkTargetBundle _assembleSdkTarget({

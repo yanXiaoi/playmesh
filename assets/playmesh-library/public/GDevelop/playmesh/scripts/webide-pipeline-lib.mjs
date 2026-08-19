@@ -650,7 +650,7 @@ export const resolvePipelineReceiptInputs = async ({ step, receiptFor }) => {
   );
 };
 
-export const explainReceipt = ({ receipt, step, inputDigest, outputDigest }) => {
+const explainReceiptMetadata = ({ receipt, step, inputDigest }) => {
   if (!receipt) return { valid: false, reason: 'missing receipt' };
   if (receipt.malformed) return { valid: false, reason: 'malformed receipt' };
   if (receipt.schemaVersion !== 1) {
@@ -660,6 +660,12 @@ export const explainReceipt = ({ receipt, step, inputDigest, outputDigest }) => 
   if (receipt.inputDigest !== inputDigest) {
     return { valid: false, reason: 'input digest changed' };
   }
+  return null;
+};
+
+export const explainReceipt = ({ receipt, step, inputDigest, outputDigest }) => {
+  const metadataFailure = explainReceiptMetadata({ receipt, step, inputDigest });
+  if (metadataFailure) return metadataFailure;
   if (outputDigest === null) {
     return { valid: false, reason: 'output missing or invalid' };
   }
@@ -667,6 +673,31 @@ export const explainReceipt = ({ receipt, step, inputDigest, outputDigest }) => 
     return { valid: false, reason: 'output tree digest changed' };
   }
   return { valid: true, reason: 'receipt hit' };
+};
+
+export const evaluateReceiptStatus = async ({
+  receipt,
+  step,
+  inputDigest,
+  readOutputDigest,
+}) => {
+  const metadataFailure = explainReceiptMetadata({ receipt, step, inputDigest });
+  if (metadataFailure) {
+    return { ...metadataFailure, outputTreeDigest: null };
+  }
+  if (typeof readOutputDigest !== 'function') {
+    throw new TypeError('readOutputDigest must be a function');
+  }
+  const outputTreeDigest = await readOutputDigest();
+  return {
+    ...explainReceipt({
+      receipt,
+      step,
+      inputDigest,
+      outputDigest: outputTreeDigest,
+    }),
+    outputTreeDigest,
+  };
 };
 
 export const createReceipt = ({

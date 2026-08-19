@@ -42,6 +42,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
       widget.nativeFileSaveService ?? createDeveloperNativeFileSaveService();
   Future<void> _nativeFileSaveTail = Future<void>.value();
   Future<void> _fullscreenTail = Future<void>.value();
+  Future<void> Function()? _reloadWindowsWebView;
   Future<void> Function(String)? _runWindowsJavaScript;
   bool _fullscreen = false;
 
@@ -134,7 +135,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
                   actions: [
                     IconButton(
                       tooltip: context.tr('developer.reload_workspace'),
-                      onPressed: _reload,
+                      onPressed: () => unawaited(_reload()),
                       icon: const Icon(Icons.refresh),
                     ),
                   ],
@@ -175,6 +176,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
         onWebMessage: (message) =>
             _handleDeveloperFullscreenWebMessage(message) ||
             _handleNativeFileSaveWebMessage(message),
+        onReloadReady: (reload) => _reloadWindowsWebView = reload,
         onRunJavaScriptReady: (executor) {
           _runWindowsJavaScript = executor;
           unawaited(_synchronizeDeveloperFullscreenState(executor));
@@ -194,23 +196,21 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
     );
   }
 
-  void _reload() {
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      setState(() {
-        _error = null;
-        _windowsReloadKey += 1;
-      });
-      return;
-    }
-    final controller = _controller;
-    if (controller != null) {
-      setState(() => _error = null);
-      unawaited(controller.reload());
-      return;
-    }
-    if (_usesFlutterWebView) {
-      setState(() => _error = null);
-      unawaited(_initialize());
+  Future<void> _reload() async {
+    if (mounted) setState(() => _error = null);
+    try {
+      await reloadDeveloperWorkspaceWebView(
+        usesWindowsWebView:
+            !kIsWeb && defaultTargetPlatform == TargetPlatform.windows,
+        windowsReload: _reloadWindowsWebView,
+        flutterReload: _controller?.reload,
+        restartWindowsWebView: () {
+          if (mounted) setState(() => _windowsReloadKey += 1);
+        },
+        initializeFlutterWebView: _usesFlutterWebView ? _initialize : null,
+      );
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error);
     }
   }
 
@@ -358,10 +358,36 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
         );
       }
     }
+    _reloadWindowsWebView = null;
     _runWindowsJavaScript = null;
     if (_fullscreen) {
       unawaited(widget.deviceService.setFullscreen(false));
     }
     super.dispose();
+  }
+}
+
+@visibleForTesting
+Future<void> reloadDeveloperWorkspaceWebView({
+  required bool usesWindowsWebView,
+  required Future<void> Function()? windowsReload,
+  required Future<void> Function()? flutterReload,
+  required VoidCallback restartWindowsWebView,
+  required Future<void> Function()? initializeFlutterWebView,
+}) async {
+  if (usesWindowsWebView) {
+    final reload = windowsReload;
+    if (reload != null) {
+      await reload();
+    } else {
+      restartWindowsWebView();
+    }
+    return;
+  }
+  final reload = flutterReload;
+  if (reload != null) {
+    await reload();
+  } else {
+    await initializeFlutterWebView?.call();
   }
 }

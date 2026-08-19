@@ -56,10 +56,7 @@ protocolSource = protocolSource.replace(
   if (typeof value !== 'string' || !value) throw new Error('invalid game id');
   return value;
 };
-const validatePlaymeshProjectGameType = value => {
-  if (value !== 'single' && value !== 'online') throw new Error('invalid game type');
-  return value;
-};`
+const assertPlaymeshProjectConfig = value => value;`
 );
 const protocol = await importSource(transformFlow(protocolSource));
 globalThis.__historyRestoreProtocol = protocol;
@@ -101,13 +98,13 @@ const hash = character => character.repeat(64);
 const timestamp = '2026-08-05T01:02:03.000Z';
 const missingConfig = { semantics: 'missing', status: 'missing' };
 const browserEvidence = {
-  projectJsonHash: hash('3'),
+  projectFilesHash: hash('3'),
   resourceManifestHash: hash('4'),
 };
 const historyEvidence = (revision, character) => ({
   revision,
   currentContentHash: hash(character),
-  projectJsonHash: hash(character),
+  projectFilesHash: hash(character),
   resourceManifestHash: hash(character),
 });
 const resource = {
@@ -130,8 +127,10 @@ const sourceVersion = {
 };
 const targetSnapshot = {
   sourceVersion,
-  projectReference: { contentHash: hash('f'), size: 18 },
-  project: { name: 'Target' },
+  projectFilesReference: [
+    { path: 'game.json', contentHash: hash('f'), size: 18 },
+  ],
+  projectFiles: [{ path: 'game.json', content: { name: 'Target' } }],
   resources: [resource],
   playmeshProjectConfig: null,
 };
@@ -165,7 +164,7 @@ const restored = {
     id: 'version-8',
     revision: 8,
   },
-  project: targetSnapshot.project,
+  projectFiles: targetSnapshot.projectFiles,
   resources: targetSnapshot.resources,
   playmeshProjectConfig: null,
 };
@@ -210,7 +209,9 @@ const prepared = await restoreClient.prepare({
   baseRevision: 7,
   targetRevision: 4,
   source: 'user',
-  currentProject: { name: 'Current' },
+  currentProjectFiles: [
+    { path: 'game.json', content: { name: 'Current' } },
+  ],
   currentResources: [resource],
   clientId: ' client-1 ',
 });
@@ -224,7 +225,9 @@ assert.deepEqual(JSON.parse(calls.at(-1).options.body), {
   baseRevision: 7,
   targetRevision: 4,
   source: 'user',
-  currentProject: { name: 'Current' },
+  currentProjectFiles: [
+    { path: 'game.json', content: { name: 'Current' } },
+  ],
   currentResources: [resource],
   clientId: 'client-1',
 });
@@ -263,7 +266,7 @@ assert.equal(acknowledged.transaction.phase, 'BROWSER_PERSISTED');
 assert.equal(calls.at(-1).url, `${transactionUrl}/ack`);
 assert.deepEqual(JSON.parse(calls.at(-1).options.body), browserEvidence);
 assert.deepEqual(Object.keys(JSON.parse(calls.at(-1).options.body)).sort(), [
-  'projectJsonHash',
+  'projectFilesHash',
   'resourceManifestHash',
 ]);
 
@@ -289,6 +292,60 @@ responder = async () =>
 await restoreClient.abort({ gameId, txId });
 assert.equal(calls.at(-1).url, `${transactionUrl}/abort`);
 assert.equal(calls.at(-1).options.body, '{}');
+
+let preparedCleanupCall = 0;
+responder = async () => {
+  preparedCleanupCall++;
+  return preparedCleanupCall === 1
+    ? jsonResponse(200, {
+        requestId: 'request-recover-prepared',
+        transaction: preparedTransaction,
+        replayedEventTxIds: [],
+      })
+    : jsonResponse(200, {
+        requestId: 'request-abort-prepared',
+        transaction: { ...preparedTransaction, phase: 'ABORTED' },
+      });
+};
+assert.equal(
+  await clientModule.abortPreparedPlaymeshHistoryRestore({
+    gameId,
+    client: restoreClient,
+  }),
+  true
+);
+assert.equal(calls.at(-2).url, `${baseUrl}/recover`);
+assert.equal(calls.at(-1).url, `${transactionUrl}/abort`);
+
+responder = async () =>
+  jsonResponse(200, {
+    requestId: 'request-recover-commit-requested',
+    transaction: { ...preparedTransaction, phase: 'COMMIT_REQUESTED' },
+    replayedEventTxIds: [],
+  });
+const callsBeforeCommitRequestedCleanup = calls.length;
+assert.equal(
+  await clientModule.abortPreparedPlaymeshHistoryRestore({
+    gameId,
+    client: restoreClient,
+  }),
+  false
+);
+assert.equal(calls.length, callsBeforeCommitRequestedCleanup + 1);
+
+responder = async () =>
+  jsonResponse(200, {
+    requestId: 'request-recover-idle',
+    transaction: null,
+    replayedEventTxIds: [],
+  });
+assert.equal(
+  await clientModule.abortPreparedPlaymeshHistoryRestore({
+    gameId,
+    client: restoreClient,
+  }),
+  true
+);
 
 responder = async () =>
   jsonResponse(409, {

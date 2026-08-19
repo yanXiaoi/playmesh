@@ -126,12 +126,8 @@ export const createPlaymeshHistoryResourceDto = async (
 export const computePlaymeshHistoryBrowserEvidence = async (
   project /*: StoredProject */
 ) /*: Promise<PlaymeshHistoryRestoreBrowserEvidence> */ => {
-  let projectJson /*: mixed */;
-  try {
-    projectJson = JSON.parse(project.projectJson);
-  } catch (_) {
-    return fail('invalid_project_json', 'Playmesh 项目 JSON 无效。');
-  }
+  const projectFiles = project.projectFiles
+    .map(file => ({ path: file.path, content: file.content }));
   const resources = [];
   for (const resource of project.resources) {
     resources.push(await createPlaymeshHistoryResourceDto(resource));
@@ -144,7 +140,7 @@ export const computePlaymeshHistoryBrowserEvidence = async (
       : 0
   );
   return assertPlaymeshHistoryRestoreBrowserEvidence({
-    projectJsonHash: await hashPlaymeshHistoryJson(projectJson),
+    projectFilesHash: await hashPlaymeshHistoryJson(projectFiles),
     resourceManifestHash: await hashPlaymeshHistoryJson(resources),
   });
 };
@@ -156,7 +152,7 @@ export const assertPlaymeshHistoryBrowserEvidenceMatches = (
   const actual = assertPlaymeshHistoryRestoreBrowserEvidence(actualValue);
   const expected = assertPlaymeshHistoryRestoreBrowserEvidence(expectedValue);
   if (
-    actual.projectJsonHash !== expected.projectJsonHash ||
+    actual.projectFilesHash !== expected.projectFilesHash ||
     actual.resourceManifestHash !== expected.resourceManifestHash
   ) {
     return fail(

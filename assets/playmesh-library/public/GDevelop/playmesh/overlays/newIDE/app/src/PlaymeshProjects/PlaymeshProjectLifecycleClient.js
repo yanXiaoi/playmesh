@@ -1,6 +1,6 @@
 // @flow
 
-const CAPABILITY = 'gdevelop.history.v2';
+const CAPABILITY = 'gdevelop.history.v3';
 const REQUEST_TIMEOUT_MS = 30000;
 
 /*::
@@ -325,7 +325,7 @@ const requireIsoTimestamp = (value /*: mixed */) /*: string */ => {
 const validateCurrentEvidence = (value /*: mixed */) /*: boolean */ => {
   if (value === null) return false;
   const evidence = jsonObject(value);
-  const project = jsonObject(evidence && evidence.project);
+  const projectFiles = jsonObject(evidence && evidence.projectFiles);
   const resources = evidence && evidence.resources;
   if (
     !evidence ||
@@ -333,10 +333,10 @@ const validateCurrentEvidence = (value /*: mixed */) /*: boolean */ => {
     // LocalVersionStore uses revision 0 for the first authoritative current.
     // History versions start at 1 only after the first explicit snapshot.
     evidence.revision < 0 ||
-    !project ||
-    typeof project.contentHash !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(project.contentHash) ||
-    !Number.isSafeInteger(project.size) ||
+    !projectFiles ||
+    typeof projectFiles.contentHash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(projectFiles.contentHash) ||
+    !Number.isSafeInteger(projectFiles.size) ||
     !Array.isArray(resources)
   ) {
     throw new PlaymeshProjectLifecycleError(

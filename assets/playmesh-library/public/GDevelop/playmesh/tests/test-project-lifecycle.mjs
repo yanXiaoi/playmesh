@@ -39,6 +39,11 @@ const jsonResponse = (status, body) => ({
   headers: { get: () => null },
   json: async () => body,
 });
+const projectFilesEvidence = (contentHash, size) => ({
+  contentHash,
+  size,
+  files: [{ path: 'game.json', contentHash, size }],
+});
 
 const initialCurrentProjectList = () => ({
   requestId: 'project-list-initial-current',
@@ -57,7 +62,7 @@ const initialCurrentProjectList = () => ({
       // Allocation initializes the authoritative current at revision 0.
       currentEvidence: {
         revision: 0,
-        project: { contentHash: 'e'.repeat(64), size: 25611 },
+        projectFiles: projectFilesEvidence('e'.repeat(64), 25611),
         resources: [
           { contentHash: 'f'.repeat(64), size: 4096 },
         ],
@@ -94,7 +99,7 @@ const refreshedInitialList = await lifecycle.listPlaymeshProjects();
 assert.equal(refreshedInitialList.projects[0].hasCurrent, true);
 responses.push(
   jsonResponse(200, {
-    historyCapability: 'gdevelop.history.v2',
+    historyCapability: 'gdevelop.history.v3',
     project: {
       gameId: projectRef.gameId,
       created: false,
@@ -128,7 +133,7 @@ responses.push(
         },
         currentEvidence: {
           revision: 1,
-          project: { contentHash: 'a'.repeat(64), size: 123 },
+          projectFiles: projectFilesEvidence('a'.repeat(64), 123),
           resources: [],
         },
       },
@@ -167,7 +172,7 @@ responses.push(
         },
         currentEvidence: {
           revision: 2,
-          project: { contentHash: 'b'.repeat(64), size: 321 },
+          projectFiles: projectFilesEvidence('b'.repeat(64), 321),
           resources: [],
         },
       },
@@ -183,7 +188,7 @@ responses.push(
         },
         currentEvidence: {
           revision: 3,
-          project: { contentHash: 'c'.repeat(64), size: 456 },
+          projectFiles: projectFilesEvidence('c'.repeat(64), 456),
           resources: [{ contentHash: 'not-a-hash', size: 10 }],
         },
       },
@@ -252,7 +257,7 @@ assert.deepEqual(
 
 responses.push(
   jsonResponse(201, {
-    historyCapability: 'gdevelop.history.v2',
+    historyCapability: 'gdevelop.history.v3',
     project: {
       gameId: projectRef.gameId,
       created: true,
@@ -278,7 +283,7 @@ for (const [method, response, action, urlSuffix] of [
   [
     'POST',
     {
-      historyCapability: 'gdevelop.history.v2',
+      historyCapability: 'gdevelop.history.v3',
       project: {
         gameId: projectRef.gameId,
         created: false,
@@ -291,7 +296,7 @@ for (const [method, response, action, urlSuffix] of [
   [
     'PATCH',
     {
-      historyCapability: 'gdevelop.history.v2',
+      historyCapability: 'gdevelop.history.v3',
       project: {
         gameId: projectRef.gameId,
         created: false,

@@ -16,7 +16,7 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
       'gameId',
       'packageName',
       'projectUuid',
-      'projectJsonHash',
+      'projectFilesHash',
       'resourceManifestHash',
     ],
     'properties': {
@@ -24,7 +24,7 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
       'gameId': {'type': 'string'},
       'packageName': {'type': 'string'},
       'projectUuid': {'type': 'string'},
-      'projectJsonHash': _hashSchema,
+      'projectFilesHash': _hashSchema,
       'resourceManifestHash': _hashSchema,
     },
   };
@@ -83,15 +83,15 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
     'required': [
       'packageName',
       'projectUuid',
-      'projectJsonHash',
-      'projectJsonSize',
+      'projectFilesHash',
+      'projectFilesSize',
       'resourceManifestHash',
     ],
     'properties': {
       'packageName': {'type': 'string'},
       'projectUuid': {'type': 'string'},
-      'projectJsonHash': _hashSchema,
-      'projectJsonSize': {'type': 'integer', 'minimum': 1},
+      'projectFilesHash': _hashSchema,
+      'projectFilesSize': {'type': 'integer', 'minimum': 1},
       'resourceManifestHash': _hashSchema,
     },
   };
@@ -163,11 +163,11 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
       additionalResponses: {409: '资源未计划、内容不匹配或 phase 冲突', 413: '资源超出配额'},
     ),
     DeveloperOperationDefinition(
-      id: 'gdevelop.project.allocation.workspace.project.put',
+      id: 'gdevelop.project.allocation.workspace.project-files.put',
       method: 'PUT',
       path:
-          '/dev/api/gdevelop/project-allocation-transactions/{txId}/workspace/project',
-      summary: '流式写入精确原始 GDevelop 工程 JSON',
+          '/dev/api/gdevelop/project-allocation-transactions/{txId}/workspace/project-files',
+      summary: '流式写入 GDevelop 官方多文件 projectFiles JSON DTO',
       permission: 'gdevelop.project.allocate',
       risk: DeveloperOperationRisk.high,
       idempotent: true,
@@ -341,9 +341,9 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
           'resource': reference.toJson(),
         });
         return;
-      case 'gdevelop.project.allocation.workspace.project.put':
+      case 'gdevelop.project.allocation.workspace.project-files.put':
         final reference = await gateway.gdevelopProjectAllocation
-            .uploadWorkspaceProject(
+            .uploadWorkspaceProjectFiles(
               txId: pathParameters['txId']!,
               bytes: request,
               contentLength: request.contentLength < 0

@@ -8,6 +8,7 @@
 
   let sequence = 0;
   let bootstrap = null;
+  let appReadyCompleted = false;
   let appRuntimeLocale = null;
   let appPlatformUiConfiguration = null;
   const pending = new Map();
@@ -561,7 +562,8 @@
   let appFallbackUi = null;
   let appUiConfiguration = null;
   let appUiRuntimeAdapter = null;
-  let appUiKeyboardInstalled = false;
+  let appUiSystemMenuTriggerDisposer = null;
+  let appUiSystemMenuTriggersDisabled = false;
   let appUiTogglePending = false;
   let appUiConsoleCaptureInstalled = false;
   let appUiPerformanceVisible = false;
@@ -1516,16 +1518,23 @@
   }
 
   function handleAppUiNativeBack() {
-    if (!appUiOptions.fallbackUi) return false;
     const ui = appFallbackUi;
-    if (!ui) {
-      void showAppGameSidebar();
+    if (ui && !ui.logsLayer.hidden) {
+      ui.logsClose.onclick();
       return true;
     }
-    if (!ui.logsLayer.hidden) ui.logsClose.onclick();
-    else if (!ui.infoLayer.hidden) ui.infoClose.onclick();
-    else if (!ui.layer.hidden) void hideAppGameSidebar();
-    else void showAppGameSidebar();
+    if (ui && !ui.infoLayer.hidden) {
+      ui.infoClose.onclick();
+      return true;
+    }
+    if (ui && !ui.layer.hidden) {
+      void hideAppGameSidebar();
+      return true;
+    }
+    if (!appUiOptions.fallbackUi || appUiSystemMenuTriggersDisabled) {
+      return false;
+    }
+    void showAppGameSidebar();
     return true;
   }
 
@@ -1604,9 +1613,12 @@
   }
 
   function installAppUiKeyboardInterception() {
-    if (appUiKeyboardInstalled || !global.addEventListener) return;
-    appUiKeyboardInstalled = true;
-    global.addEventListener("keydown", (event) => {
+    if (appUiSystemMenuTriggersDisabled ||
+        appUiSystemMenuTriggerDisposer ||
+        !global.addEventListener) {
+      return;
+    }
+    const handler = (event) => {
       if (event?.defaultPrevented ||
           event?.repeat ||
           isAppUiOwnedKeyboardEvent(event) ||
@@ -1644,7 +1656,34 @@
         return;
       }
       void toggleAppGameSidebar();
-    }, true);
+    };
+    global.addEventListener("keydown", handler, true);
+    const dispose = () => {
+      global.removeEventListener?.("keydown", handler, true);
+      if (appUiSystemMenuTriggerDisposer === dispose) {
+        appUiSystemMenuTriggerDisposer = null;
+      }
+    };
+    appUiSystemMenuTriggerDisposer = dispose;
+  }
+
+  function disableAppUiSystemMenuTriggers() {
+    if (!appReadyCompleted) {
+      throw appUiError(
+        "app_not_ready",
+        "请先等待 playmesh.app.ready",
+      );
+    }
+    if (arguments.length !== 0) {
+      throw appUiError(
+        "invalid_argument",
+        "disableSystemMenuTriggers 不接受参数",
+      );
+    }
+    if (appUiSystemMenuTriggersDisabled) return;
+    appUiSystemMenuTriggersDisabled = true;
+    appUiTogglePending = false;
+    appUiSystemMenuTriggerDisposer?.();
   }
 
   function initializeAppPlatformUi(configuration) {
@@ -1659,6 +1698,143 @@
       void toggleAppGameSidebar();
     }
   }
+
+
+  function appLanError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  function requireAppLanReady() {
+    if (!appReadyCompleted) {
+      throw appLanError("app_not_ready", "请先等待 playmesh.app.ready");
+    }
+  }
+
+  function requireAppLanArguments(args, expected, method) {
+    if (args.length !== expected) {
+      throw appLanError(
+        "invalid_argument",
+        `${method} 参数数量无效`,
+      );
+    }
+  }
+
+  function requireAppLanAvailable() {
+    if (bootstrap?.available !== true) {
+      throw appLanError(
+        "app_unavailable",
+        "当前页面不在 Playmesh App WebView 中",
+      );
+    }
+  }
+
+  function requireAppLanUserActivation() {
+    if (global.navigator?.userActivation?.isActive !== true) {
+      throw appLanError(
+        "user_activation_required",
+        "加入游戏需要当前用户操作",
+      );
+    }
+  }
+
+  function freezeAppLanGame(value) {
+    if (!value || typeof value !== "object" ||
+        typeof value.instanceId !== "string" || !value.instanceId ||
+        typeof value.gameId !== "string" || !value.gameId ||
+        typeof value.name !== "string" || !value.name ||
+        typeof value.host !== "string" || !value.host) {
+      throw appLanError(
+        "discovery_unavailable",
+        "局域网发现结果无效",
+      );
+    }
+    const instanceId = value.instanceId;
+    return Object.freeze({
+      instanceId,
+      gameId: value.gameId,
+      name: value.name,
+      host: value.host,
+      join: async function () {
+        requireAppLanReady();
+        requireAppLanArguments(arguments, 0, "PlaymeshLanGame.join");
+        requireAppLanAvailable();
+        requireAppLanUserActivation();
+        await request("app.lan.joinDiscovered", {
+          instanceId,
+          userActivation: true,
+        });
+      },
+    });
+  }
+
+  function freezeAppLanShareLink(value) {
+    if (!value || typeof value !== "object" ||
+        typeof value.url !== "string" || !value.url ||
+        (value.type !== "lan" && value.type !== "wan") ||
+        typeof value.img !== "string" ||
+        !value.img.startsWith("data:image/png;base64,")) {
+      throw appLanError("share_unavailable", "分享链接结果无效");
+    }
+    return Object.freeze({
+      url: value.url,
+      type: value.type,
+      img: value.img,
+    });
+  }
+
+  const appLanApi = Object.freeze({
+    async discoverGames() {
+      requireAppLanReady();
+      requireAppLanArguments(arguments, 0, "discoverGames");
+      requireAppLanAvailable();
+      const result = await request("app.lan.discover");
+      if (!Array.isArray(result)) {
+        throw appLanError(
+          "discovery_unavailable",
+          "局域网发现结果无效",
+        );
+      }
+      return Object.freeze(result.map(freezeAppLanGame));
+    },
+    async joinByLink(invitationUrl) {
+      requireAppLanReady();
+      requireAppLanArguments(arguments, 1, "joinByLink");
+      if (typeof invitationUrl !== "string" || !invitationUrl.trim()) {
+        throw appLanError("invalid_argument", "invitationUrl 必须是非空字符串");
+      }
+      requireAppLanAvailable();
+      requireAppLanUserActivation();
+      await request("app.lan.joinByLink", {
+        invitationUrl,
+        userActivation: true,
+      });
+    },
+    async scanQrAndJoin() {
+      requireAppLanReady();
+      requireAppLanArguments(arguments, 0, "scanQrAndJoin");
+      requireAppLanAvailable();
+      requireAppLanUserActivation();
+      await request("app.lan.scanQr", { userActivation: true });
+    },
+    async setPublished() {
+      requireAppLanReady();
+      requireAppLanArguments(arguments, 0, "setPublished");
+      requireAppLanAvailable();
+      await request("app.lan.setPublished");
+    },
+    async getShareLinks() {
+      requireAppLanReady();
+      requireAppLanArguments(arguments, 0, "getShareLinks");
+      requireAppLanAvailable();
+      const result = await request("app.lan.getShareLinks");
+      if (!Array.isArray(result)) {
+        throw appLanError("share_unavailable", "分享链接结果无效");
+      }
+      return Object.freeze(result.map(freezeAppLanShareLink));
+    },
+  });
 
 
   const publicAppApi = {
@@ -1727,6 +1903,7 @@
     media: {
       open: openAppMedia,
     },
+    lan: appLanApi,
     device: {
       getPlatform() {
         return bootstrap?.device?.platform || null;
@@ -1752,6 +1929,9 @@
       },
     },
     ui: {
+      disableSystemMenuTriggers() {
+        return disableAppUiSystemMenuTriggers.apply(null, arguments);
+      },
       initializeBrowser() {
         return initializeBrowserAppUi();
       },
@@ -1929,6 +2109,7 @@
       appPlatformUiConfiguration = null;
       initializeAppPlatformUi(runtimePlatformUi);
       global.console?.info?.("Playmesh App SDK 就绪");
+      appReadyCompleted = true;
       return appBootstrapResult;
     })
     : request("app.bootstrap").then((result) => {
@@ -1944,6 +2125,7 @@
       initializeAppPlatformUi(privateUi);
       requestAppInputTakeover();
       global.console?.info?.("Playmesh App SDK 就绪");
+      appReadyCompleted = true;
       return appBootstrapResult;
     });
   Object.defineProperty(publicAppApi, "ready", {

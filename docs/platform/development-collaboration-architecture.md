@@ -37,7 +37,7 @@ GDevelop 的适配方式。
   每名协作者同一时刻只能选择一条活动线路，默认使用上次成功线路，也可以在进入前手动
   选择。所有线路最终进入同一个主机房间和同一条主机权威提交链。
 - 主机和客户端 App 启动、网络恢复或 Go Server 重启后，可以重新登记和自动重连。
-- 编辑器本身不实现抢锁或只读；源码按整个文件、GDevelop 默认按 canonical project 文件
+- 编辑器本身不实现抢锁或只读；源码按整个文件、GDevelop 默认按 canonical folder-project tree
   进入统一协作处理层。只有通过细粒度门禁的 GDevelop 分发才按实例、对象、事件等稳定
   聚合提交。处理层只在一次主线保存提交期间使用极短事务租约，不尝试检测
   dev-cli/外部 IDE 当前打开的文档，也不广播长期文件占用或安装操作系统文件锁。
@@ -186,7 +186,7 @@ canonical current。浏览器状态和页面内 mutation coordinator 不能成�
 - `GDevelopProjectHistoryAdapter.authoritativeChanges` 会在正常保存或用户恢复后发布工程变化。
   其中进程内 sequence 只能作为低延迟失效信号，不能跨进程恢复或代替持久
   `mainSeq`/操作日志。
-- Playmesh AI v2 明确不绑定权威 project revision/hash，也不读写 `current/history`。其 writer
+- Playmesh AI v4 明确不绑定权威 project revision/hash，也不读写 `current/history`。其 writer
   lease 只串行当前 live WebIDE 的修改型工具，不能作为协作 Authority 的提交基础。
 - `PlaymeshAiCallCoordinator` 采用“SSE 只唤醒，按 sequence 轮询 call 状态”的模式。工程协作
   事件流可以复用这个通知原则，但不能把 AI call 状态当作工程事实源。
@@ -916,7 +916,7 @@ Playmesh overlay
 主机内部记录当前协作世代的 `gdevelopSyncMode`，用于选择同步算法和 UI 展示：
 
 ```text
-project_file   既有保存事件驱动的 canonical project 文件级 CAS
+project_tree   既有保存事件驱动的 canonical folder-project tree CAS
 aggregate_save 保存事件驱动的 schema-aware 聚合替换与聚合 revision CAS
 semantic       已通过 Gate G4/G7 的可选细粒度语义操作
 ```
@@ -1330,7 +1330,7 @@ Adapter 生成、主机 owner 确认的 `ProjectContentDescriptor`：
 首期全部拒绝。目录扫描不能跟随链接。项目目录的父目录、相邻工程、用户目录、IDE 全局
 配置、SSH/Git 凭据、系统临时目录、构建缓存和依赖缓存不进入同步。
 
-GDevelop 只同步受管项目 JSON、项目内资源和由当前项目 CAS 持有的 blob。引用项目外绝对
+GDevelop 只同步受管 folder-project tree、项目内资源和由当前项目 CAS 持有的 blob。引用项目外绝对
 路径的资源必须先显式导入项目受管资源，不能由协作层直接读取和发送原路径内容。
 
 `ProjectContentDescriptor.policyHash` 是项目绑定的一部分并由主机在加密通道内下发。加入
@@ -1339,7 +1339,7 @@ GDevelop 只同步受管项目 JSON、项目内资源和由当前项目 CAS 持�
 
 ## 17. GDevelop 适配
 
-GDevelop 协作 Authority 只接收正常编辑流程产生的保存/语义事务。Playmesh AI v2 不是第二个
+GDevelop 协作 Authority 只接收正常编辑流程产生的保存/语义事务。Playmesh AI v4 不是第二个
 事务生产者：它只在当前 WebIDE 的 live `gdProject` 上调用官方编辑函数并形成普通 dirty 状态，
 不会写 history/current、创建 revision 或提交证据。用户之后执行的正常保存与其他人工保存
 使用完全相同的协作边界。
@@ -1410,7 +1410,7 @@ resourceManifestHash` 的 `CommittedGDevelopOperation`。所有字段先持久�
 
 同一事务协议支持三种 payload：
 
-- `project_file`：`changes` 是一次 canonical project/current 替换及资源清单引用，整份工程
+- `project_tree`：`changes` 是一次 canonical project tree/current 替换及资源清单引用，整份工程
   是一个聚合。所有正常保存都走同一日志，但不能进行对象级自动合并。
 - `aggregate_save`：`changes` 来自一次正常保存前后的 schema-aware 聚合投影，只携带受影响
   聚合的 canonical after-state、baseAggregateRevision 和引用闭包；它不声称还原用户动作。
@@ -1420,21 +1420,21 @@ resourceManifestHash` 的 `CommittedGDevelopOperation`。所有字段先持久�
 ### 17.1 默认文件级聚合
 
 规定内的默认能力不依赖对象级修改钩子，协议模式为
-`gdevelopSyncMode=project_file`：
+`gdevelopSyncMode=project_tree`：
 
 | 内容 | aggregateId |
 | --- | --- |
-| canonical project JSON | `gdevelop:project-file` |
+| canonical folder-project tree | `gdevelop:project-tree` |
 | 项目受管资源 | `gdevelop:resource:<resourceId>` |
 
 GDevelop WebIDE 不增加只读、抢锁或“等待编辑权”逻辑。现有 managed storage 的手动保存/
-自动保存事件把 canonical project JSON 作为一个文件状态交给 Collaboration Ingress；主机按
-`projectFileRevision + contentHash` 比较并交换，接受后广播权威版本，基础过期则返回
+自动保存事件把 canonical project tree 作为一个原子状态交给 Collaboration Ingress；主机按
+`projectTreeRevision + contentHash` 比较并交换，接受后广播权威版本，基础过期则返回
 `stale_base`。资源仍按 `ProjectContentDescriptor` 和 CAS 清单增量传输。
 
-该模式能保证主机排序、过期保存不覆盖新主线和在线副本最终收敛，但不能把同一项目文件
-内两个并发修改自动合并。浏览器 IndexedDB 仍只是编辑缓存，不能绕过保存边界成为主线。
-“整个文件”也不包含编辑器安装、缓存、外部绝对资源或其他非项目内容。
+该模式能保证主机排序、过期保存不覆盖新主线和在线副本最终收敛，但不能因为物理上拆成多个
+JSON 就把场景或事件当作独立冲突域。浏览器会话镜像仍只是编辑缓存，不能绕过保存边界成为主线。
+“整个工程树”也不包含编辑器安装、缓存、外部绝对资源或其他非项目内容。
 
 这里的“实时”只表示：主机接受、持久化并分配 `mainSeq` 后立即通知其他在线端。它不广播
 保存前的鼠标拖动轨迹、输入过程或撤销栈。干净 WebIDE 收到通知后自动重载权威 current；
@@ -1469,7 +1469,7 @@ GDevelop WebIDE 不增加只读、抢锁或“等待编辑权”逻辑。现有 
 
 投影器必须忽略无语义序列化噪声，验证引用闭包和 round-trip hash；跨聚合的删除、重命名、
 扩展升级、导入或未知 schema 变化必须形成原子的多聚合 maintenance 事务，不能拆成可能产生
-悬空引用的独立广播。无法证明安全拆分时，本次保存自动退回 `project_file` 事务。
+悬空引用的独立广播。无法证明安全拆分时，本次保存自动退回 `project_tree` 事务。
 
 聚合级保存可以让“修改不同对象、不同场景或不同外部事件”的在线提交自动合并，也能让
 未编辑相同聚合的其他客户端在提交后立即刷新当前界面；它不能恢复保存前的动作顺序，也
@@ -1492,10 +1492,10 @@ GDevelop WebIDE 不增加只读、抢锁或“等待编辑权”逻辑。现有 
 
 普通事件需要稳定 `playmeshCollaborationId`。优先由 overlay/既有序列化扩展实现；只有中立
 字段序列化无法从外部获得且单独评审批准时，才允许增加一个最小 Core seam，使其随标准
-项目 JSON 序列化、复制和反序列化。不能使用事件数组路径或 AI 事件 ID 代替。
+工程树重组后的项目模型序列化、复制和反序列化。不能使用事件数组路径或 AI 事件 ID 代替。
 
 若单对象动作 hook 不存在或实现会超出侵入预算，本节整体关闭，运行时保持第 17.1 节的
-`project_file`，或在聚合投影器已经独立通过门禁时保持 `aggregate_save`；不能在 GDevelop
+`project_tree`，或在聚合投影器已经独立通过门禁时保持 `aggregate_save`；不能在 GDevelop
 Core 补建跨模块动作捕获链。
 
 细粒度模式下，同一事件表的两个编辑器可以先在本地创建事件：
@@ -1513,7 +1513,7 @@ Core 补建跨模块动作捕获链。
 ### 17.3 场景拖动
 
 本节的瞬时拖动可视化只适用于第 17.2 节 `semantic` 能力已经通过门禁的安装；否则拖动结果
-只在下一次正常保存后按 `project_file` 或 `aggregate_save` 同步。细粒度模式下，场景拖动不
+只在下一次正常保存后按 `project_tree` 或 `aggregate_save` 同步。细粒度模式下，场景拖动不
 申请编辑锁。拖动结束后的自动保存生成实例变更包并由处理层拦截。拖动中可
 发送节流后的临时坐标用于远端可视化，但临时坐标不写主线，丢失时以最后权威提交为准。
 如果同一实例的主线版本已经变化，本地拖动结果保存为该协作者的恢复副本并返回
@@ -1522,7 +1522,7 @@ Core 补建跨模块动作捕获链。
 
 ### 17.4 删除和大型操作
 
-本节细粒度事务同样是可选增强；`project_file` 把它们作为一个项目文件版本提交，
+本节细粒度事务同样是可选增强；`project_tree` 把它们作为一个项目树版本提交，
 `aggregate_save` 只在引用闭包完整时把它们作为原子多聚合事务提交。细粒度模式中，删除对象
 的变更包需要在处理层原子获得对象定义、关联实例及相关结构的短提交租约。
 历史恢复、扩展升级和项目导入首期使用项目维护提交事务；事务期间暂停其他
@@ -1540,7 +1540,7 @@ managed storage 的既有外部更新通知重新加载/应用；存在未提交
 
 ### 17.5 结构化操作、前置条件和冲突矩阵
 
-不对整个 GDevelop JSON 使用 CRDT。`project_file` 始终按整工程 revision 冲突；
+不对整个 GDevelop 工程树使用 CRDT。`project_tree` 始终按整工程 revision 冲突；
 `aggregate_save` 按白名单聚合 revision/hash 冲突；仅在 `semantic` 模式下使用稳定实体操作
 和字段级前置条件。首版语义规则：
 
@@ -1566,7 +1566,7 @@ CRDT。
 任何过期提交都由主机处理，而不是让加入者决定是否覆盖：Authority 先把候选内容、当前
 权威内容、共同 base、成员和 hash 持久化成有界 `PendingConflictProposal`，但不把候选当成
 `CommittedOperation` 广播。owner 可以选择保留当前版本、接受候选或在主机端形成手工合并
-结果；决议作为新的权威事务持久化后才广播所有客户端。`project_file` 冲突只能整体选择或
+结果；决议作为新的权威事务持久化后才广播所有客户端。`project_tree` 冲突只能整体选择或
 手工重做，`aggregate_save/semantic` 才能把审阅范围收窄。主机离线恢复副本不自动进入该队列。
 
 ### 17.6 ProjectCollaborationController 与实时应用
@@ -1585,7 +1585,7 @@ WebIDE 新增独立、可移除的 `ProjectCollaborationController` overlay，�
 
 本地脏状态按能力退化：
 
-- `project_file`：只能识别“整个项目干净/脏”。干净时自动重新加载权威 current；脏时暂停
+- `project_tree`：只能识别“整个项目干净/脏”。干净时自动重新加载权威 current；脏时暂停
   外部应用，保存 recovery copy，并要求用户比较、放弃或在同步后手工重放。
 - `aggregate_save`：远端 aggregate 与本地 dirty aggregate 不重叠时应用并刷新当前场景、对象
   树、事件表或属性面板；重叠时立即标记 stale，保留本地候选，提交时进入主机冲突处理。
@@ -1653,7 +1653,7 @@ AEAD 内传输，不能直接复制 AI call input。
 - 每条持久历史记录保存 initiating member、source=human/system、scope、before/after hash、
   revision/mainSeq 和最小审阅摘要。
 
-`project_file` 模式无法安全提供字段级个人撤销，只能把完整历史恢复作为 owner 的 maintenance
+`project_tree` 模式无法安全提供字段级个人撤销，只能把完整历史恢复作为 owner 的 maintenance
 事务，并与当前 project revision 做严格比较。`aggregate_save` 最多在聚合 revision/hash 前置
 条件仍成立时提交聚合级逆事务；真正的字段/实体级“每位参与者独立撤销”属于 semantic 模式
 Gate G4 的验收内容。
@@ -2197,19 +2197,19 @@ blob.abort(hash, reason)
 
 ### 21.3 GDevelop 三级同步与恢复
 
-GDevelop 不能把项目 JSON 当作一组可独立覆盖的普通源码文件。客户端提交最后确认的
-`mainSeq/projectFileRevision/contentHash` 后，默认文件级模式执行：
+GDevelop 不能把 folder-project 分片当作一组可独立覆盖的普通源码文件。客户端提交最后确认的
+`mainSeq/projectTreeRevision/contentHash` 后，默认工程树模式执行：
 
 - hash 一致：只更新确认序号和缺失资源。
-- hash 不一致：主机返回权威 canonical project JSON blob 与资源 manifest；客户端只下载
-  缺失 blob，但以完整项目模型重新建立本地状态。
+- hash 不一致：主机返回权威 canonical project tree 与资源 manifest；客户端只下载缺失
+  内容，但按官方引用重组完整项目模型。
 - 应用完成后在临时项目中反序列化验证，再原子替换本地 main shadow。
 
 第 17.2 节 `aggregate_save` 通过门禁时使用 canonical 聚合结果链：
 
 - 增量链存在：主机返回对象、实例、完整事件表、变量、设置等已提交 canonical 聚合 after-state
   及其 revision/hash，以及缺失资源 CAS hash；客户端不从 JSON diff 猜测用户动作。
-- 增量链已压缩：主机返回当前 canonical project JSON 清单/快照和资源 manifest，客户端
+- 增量链已压缩：主机返回当前 canonical project tree 清单/快照和资源 manifest，客户端
   只下载缺失资源，但重新建立完整项目模型。
 
 仅当 `semantic` 另行通过 Gate G4/G7 时，增量链才可携带稳定对象、实例、事件和字段操作；
@@ -2579,7 +2579,7 @@ Developer Gateway 关闭或重启不能自动关闭已经开启的协作；具�
   当前进程 sequence 不再承担恢复。AI call 的 SSE/轮询继续保持独立，不接入工程日志。
 - 实现独立 `ProjectCollaborationController`；验证主机唯一 WebIDE 与远端协作者 WebIDE：本机
   提交只确认，远端提交在干净页面自动应用，脏页面不被覆盖并进入 recovery/比较流程。
-- 交付既有保存事件驱动的 canonical project 文件级统一事务、资源增量和全端覆盖；人工
+- 交付既有保存事件驱动的 canonical folder-project tree 统一事务、资源增量和全端覆盖；人工
   保存进入同一 Collaboration Ingress，不新增 AI 专用提交或对象级 Core hook。AI 修改只有在
   用户触发普通保存后才沿该路径进入协作主线。
 - 盘点现有 storage/history/mutation seam 和构建期 overlay；只有它们足以捕获稳定语义操作
@@ -2652,10 +2652,10 @@ Developer Gateway 关闭或重启不能自动关闭已经开启的协作；具�
 - 不同源码文件并行；同一文件允许同时本地编辑，保存提交只在主机短 CommitLease 内
   串行。携带可证明旧基础版本的提交返回原协作者 `stale_base`，编辑器不切换只读。
 - GDevelop 默认文件级模式下，同一 canonical project 的并发保存由主机串行，旧
-  `projectFileRevision` 返回 `stale_base`，不能覆盖新版本。
+  `projectTreeRevision` 返回 `stale_base`，不能覆盖新版本。
 - GDevelop `aggregate_save` 模式下，不同白名单聚合可基于各自 revision/hash 合并；同一完整
   事件表或其他同一聚合的旧基础返回 `stale_base`。未知差异、引用闭包不完整或应用后 hash
-  不一致时整笔回退 `project_file`，不允许部分采用投影结果。
+  不一致时整笔回退 `project_tree`，不允许部分采用投影结果。
 - 主机唯一 WebIDE 与远端协作者 WebIDE 共享持久 eventSequence：本机提交只确认，远端提交
   在干净页面应用；SSE/WS 丢事件后 REST 重放得到同一 revision/hash。AI call sequence 与
   工程 eventSequence 保持隔离。
@@ -2738,7 +2738,7 @@ Developer Gateway 关闭或重启不能自动关闭已经开启的协作；具�
 - 每个不可避免的 GDevelop Core seam 都存在 patch manifest 条目、上游 commit 锚点和契约
   测试；seam 无观察者时保持标准行为。
 - 不存在为对象/事件捕获新增的跨模块 Core 调用链；没有稳定 hook 时，自动化验证功能退化
-  到保存事件驱动的 canonical project 文件级同步。
+  到保存事件驱动的 canonical folder-project tree 同步。
 - 从 clean upstream 自动应用 overlays/patches 后得到相同 `effectiveBundleSha256`。
 - 上游升级导致 patch 上下文、导出符号或序列化契约变化时构建失败，不得静默跳过。
 - 删除 collaboration overlay 后，编辑器仍可独立构建；不存在只有协作代码才能补齐的隐式
@@ -2783,7 +2783,7 @@ Developer Gateway 关闭或重启不能自动关闭已经开启的协作；具�
   光标和 XPath 等易失提示明确不属于权威状态。
 - GDevelop 有效分发 SHA-256 或源码 App 完整版本由主机精确判断，不一致不能加入。
 - 主机和远端编辑器使用同一租约、提交和 mainSeq 规则。
-- 源码以及 GDevelop `project_file`、已启用的 `aggregate_save`/`semantic` 的并行粒度、结构
+- 源码以及 GDevelop `project_tree`、已启用的 `aggregate_save`/`semantic` 的并行粒度、结构
   事务、冲突边界和回退行为均通过端到端测试；未通过对应门禁的模式不得出现在能力声明中。
 - GDevelop 正常保存和系统恢复进入同一 Authority/operation log/current 物化链。AI 只修改
   当前 live WebIDE，只有用户后续正常保存才进入该链，不存在 AI 保存或旁路提交路径。
@@ -2837,11 +2837,11 @@ Developer Gateway 关闭或重启不能自动关闭已经开启的协作；具�
 - GDevelop 事件稳定 ID 和 overlay 将产生持续的上游升级维护成本。
 - `aggregate_save` 不是廉价 JSON diff：schema-aware projector、引用闭包、规范化噪声、原子
   多聚合事务和应用后 hash 校验都需要持续随 GDevelop schema 升级；门禁失败时只能退回
-  `project_file`。
+  `project_tree`。
 - 复用 AI 修改函数只能复用受验证的执行适配层，仍需固定工具契约、前后 hash、克隆预执行
   和副作用白名单；它不能覆盖普通 UI 动作，也不能把 AI 会话/SSE 变成协作协议。
 - AI 不进入 operation log，避免新增 AI producer 转换、before/after 证据和专用逆操作维护。
-  AI 辅助产生的 dirty 内容只在用户正常保存时按既有 `project_file`、`aggregate_save` 或
+  AI 辅助产生的 dirty 内容只在用户正常保存时按既有 `project_tree`、`aggregate_save` 或
   已启用的 `semantic`
   保存规则处理，不能宣称 AI 自身提供结构化自动合并。
 - 本机唯一开发入口减少了同设备多 IDE 的回声与 dirty 协调，但需要处理页面崩溃、CLI 失联

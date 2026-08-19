@@ -18,6 +18,8 @@ import '../../models/game_summary.dart';
 import '../../models/user_profile.dart';
 
 class AppWebViewBridge {
+  static const trustedUserActivationLifetime = Duration(seconds: 2);
+
   AppWebViewBridge({
     required this.userId,
     required this.nickname,
@@ -31,6 +33,7 @@ class AppWebViewBridge {
     VibrationDriver? vibrationDriver,
     CapabilityRegistry? capabilityRegistry,
     AppMediaRuntime? mediaRuntime,
+    this.lanHost,
     this.onOpenSharePanel,
     bool? showShareAction,
     this.onInputTakeover,
@@ -60,6 +63,7 @@ class AppWebViewBridge {
   final String playerSource;
   final AppWebPermissionRole webPermissionRole;
   final AppDeviceService deviceService;
+  final AppLanHost? lanHost;
   final Future<void> Function()? onOpenSharePanel;
   final bool showShareAction;
   final void Function()? onInputTakeover;
@@ -71,8 +75,23 @@ class AppWebViewBridge {
   late List<String> _runtimeDeclaredCapabilities = List.unmodifiable(
     declaredCapabilities,
   );
+  DateTime? _trustedUserActivationExpiresAt;
 
   List<String> get runtimeDeclaredCapabilities => _runtimeDeclaredCapabilities;
+
+  /// Records a native pointer or keyboard activation observed by the host.
+  /// The activation is short-lived and consumed by at most one gated command.
+  void recordUserActivation() {
+    _trustedUserActivationExpiresAt = DateTime.now().add(
+      trustedUserActivationLifetime,
+    );
+  }
+
+  bool _consumeUserActivation() {
+    final expiresAt = _trustedUserActivationExpiresAt;
+    _trustedUserActivationExpiresAt = null;
+    return expiresAt != null && !DateTime.now().isAfter(expiresAt);
+  }
 
   Future<bool> authorizeWebPermissions(
     Iterable<String> resources, {
@@ -99,12 +118,24 @@ class AppWebViewBridge {
         throw const FormatException('App SDK 命令必须是对象');
       }
       final command = Map<String, Object?>.from(decoded);
-      requestId = command['requestId'] as String?;
-      final payload = command['payload'] is Map
-          ? Map<String, Object?>.from(command['payload']! as Map)
-          : const <String, Object?>{};
+      final rawRequestId = command['requestId'];
+      if (rawRequestId != null &&
+          (rawRequestId is! String ||
+              rawRequestId.isEmpty ||
+              utf8.encode(rawRequestId).length > 256)) {
+        throw const SdkCommandException(
+          'invalid_argument',
+          'requestId 必须是长度不超过 256 字节的非空字符串',
+        );
+      }
+      requestId = rawRequestId as String?;
+      final rawPayload = command['payload'];
+      if (rawPayload is! Map) {
+        throw const SdkCommandException('invalid_argument', 'payload 必须是对象');
+      }
+      final payload = Map<String, Object?>.from(rawPayload);
       final name = command['command'];
-      if (name is! String || name.isEmpty) {
+      if (name is! String || name.isEmpty || name.length > 128) {
         throw const FormatException('command 必须是非空字符串');
       }
       final result = await SdkFeatureRegistry.dispatchApp(
@@ -114,10 +145,13 @@ class AppWebViewBridge {
           confirmCapabilities: _confirmCapabilities,
           capabilityRuntime: _capabilityRuntime,
           mediaRuntime: mediaRuntime,
-          sendCapabilityEvent: (message) => send(jsonEncode(message)),
+          sendCapabilityEvent: (message) =>
+              send(_encodeAppBridgeMessage(message)),
           disposeCapability: _disposeCapability,
           setFullscreen: _fullscreen,
           openSharePanel: _openSharePanel,
+          consumeUserActivation: _consumeUserActivation,
+          lanHost: lanHost,
           takeOverInput: _takeOverInput,
           requestExit: _requestExit,
           syncAvatar: _syncAvatar,
@@ -129,20 +163,27 @@ class AppWebViewBridge {
           raw: command,
         ),
       );
+      final response = result is AppSdkCommandResponse
+          ? result
+          : AppSdkCommandResponse(result: result);
       await send(
-        jsonEncode({
+        _encodeAppBridgeMessage({
           'type': 'app.command.result',
           'requestId': requestId,
-          'result': result,
+          'result': response.result,
         }),
       );
+      final afterResponse = response.afterResponse;
+      if (afterResponse != null) {
+        unawaited(Future<void>.sync(afterResponse).catchError((Object _) {}));
+      }
     } on Object catch (error) {
       await send(
-        jsonEncode({
+        _encodeAppBridgeMessage({
           'type': 'app.command.error',
           'requestId': requestId,
           if (error is SdkCommandException) 'code': error.code,
-          'error': error.toString(),
+          'error': _publicAppBridgeError(error),
         }),
       );
     }
@@ -316,6 +357,8 @@ class AppWebViewBridge {
   }
 
   Future<void> resetCapabilities() async {
+    _trustedUserActivationExpiresAt = null;
+    lanHost?.resetDocument();
     final previousRuntime = _capabilityRuntime;
     if (acceptRuntimeGameDeclaration) {
       _runtimeDeclaredCapabilities = List.unmodifiable(declaredCapabilities);
@@ -329,10 +372,34 @@ class AppWebViewBridge {
   }
 
   Future<void> close() async {
+    _trustedUserActivationExpiresAt = null;
+    lanHost?.resetDocument();
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
     await mediaRuntime.dispose();
   }
+}
+
+const _maxAppBridgeJsonBytes = 4 * 1024 * 1024;
+
+String _encodeAppBridgeMessage(Map<String, Object?> message) {
+  final encoded = jsonEncode(message);
+  if (utf8.encode(encoded).length > _maxAppBridgeJsonBytes) {
+    throw const SdkCommandException('share_links_too_large', '分享链接负载超过 4 MiB');
+  }
+  return encoded;
+}
+
+String _publicAppBridgeError(Object error) {
+  if (error is SdkCommandException) return error.message;
+  final message = error.toString();
+  if (utf8.encode(message).length > 1024 ||
+      message.contains('inviteToken=') ||
+      message.contains('data:image/png;base64,') ||
+      RegExp(r'https?://', caseSensitive: false).hasMatch(message)) {
+    return 'App SDK 命令执行失败';
+  }
+  return message;
 }
 
 Map<String, Object?>? _normalizePlatformUiConfiguration(

@@ -75,8 +75,15 @@ const sha256Hex = globalThis.__playmeshTestSha256Hex;`
 const historyEvidence = await importSource(transformFlow(historyEvidenceSource));
 
 const objectUrl = 'blob:save-cache-fixture';
+let ownedObjectUrlSequence = 0;
+const ownedBlobs = new Map();
 globalThis.__playmeshTestResourceRegistry = {
-  acquire: () => objectUrl,
+  acquire: resource => {
+    const ownedObjectUrl = `blob:playmesh-owned-${++ownedObjectUrlSequence}`;
+    ownedBlobs.set(ownedObjectUrl, resource.blob);
+    return ownedObjectUrl;
+  },
+  owns: url => ownedBlobs.has(url),
 };
 let projectSerializerSource = await readOverlay(
   'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectSerializer.js'
@@ -108,6 +115,12 @@ const isUnassignedGDevelopGameId = () => false;`
   .replace(
     "import { playmeshResourceObjectUrlRegistry } from './PlaymeshResourceObjectUrlRegistry';",
     'const playmeshResourceObjectUrlRegistry = globalThis.__playmeshTestResourceRegistry;'
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\/PlaymeshProjectFiles';/,
+    `const PLAYMESH_GDEVELOP_ROOT_PROJECT_FILE = 'game.json';
+const splitPlaymeshProject = project => [{ path: 'game.json', content: project }];
+const unsplitPlaymeshProject = async files => files[0].content;`
   );
 const projectSerializer = await importSource(
   transformFlow(projectSerializerSource)
@@ -127,7 +140,10 @@ class CountingBlob extends Blob {
 
 const hashText = value => createHash('sha256').update(value).digest('hex');
 const makeProject = url => ({
-  serializedProject: { resources: [{ file: url }] },
+  serializedProject: { properties: {}, resources: [{ file: url }] },
+  setFolderProject(value) {
+    this.serializedProject.properties.folderProject = value;
+  },
   getResourcesManager: () => ({
     getAllResourceNames: () => ({ toJSArray: () => ['sprite'] }),
     getResource: () => ({ getFile: () => url }),
@@ -138,19 +154,27 @@ const fileMetadata = { fileIdentifier: 'cache-project' };
 const newResourceBlob = new CountingBlob(['unchanged'], {
   type: 'application/octet-stream',
 });
+const fetchableBlobs = new Map([[objectUrl, newResourceBlob]]);
 let fetchCalls = 0;
 globalThis.fetch = async url => {
   fetchCalls += 1;
-  assert.equal(url, objectUrl);
+  const blob = fetchableBlobs.get(url);
+  assert.ok(blob, `unexpected Blob URL fetch: ${url}`);
   return {
     ok: true,
-    blob: async () => newResourceBlob,
+    blob: async () => blob,
   };
 };
 
+const firstProject = makeProject(objectUrl);
 const firstSnapshot = await projectSerializer.createProjectSnapshot(
-  makeProject(objectUrl),
+  firstProject,
   fileMetadata
+);
+assert.equal(
+  firstSnapshot.projectFiles[0].content.properties.folderProject,
+  true,
+  'serializer must force the official folder-project flag before serialization'
 );
 const secondSnapshot = await projectSerializer.createProjectSnapshot(
   makeProject(objectUrl),
@@ -176,12 +200,17 @@ const restoredResource = {
   blob: restoredBlob,
   contentHash: hashText('restored'),
 };
-projectSerializer.restoreStoredResources(
+const restoredContent = projectSerializer.restoreStoredResources(
   { resources: [{ file: restoredLogicalUrl }] },
   [restoredResource]
 );
+const restoredObjectUrl = restoredContent.resources[0].file;
+assert.equal(
+  globalThis.__playmeshTestResourceRegistry.owns(restoredObjectUrl),
+  true
+);
 const restoredSnapshot = await projectSerializer.createProjectSnapshot(
-  makeProject(objectUrl),
+  makeProject(restoredObjectUrl),
   fileMetadata
 );
 assert.equal(fetchCalls, 1, 'a restored registered Blob is not fetched again');
@@ -242,6 +271,99 @@ assert.equal(
   flakyBlob.arrayBufferCalls,
   2,
   'a rejected digest is evicted so a later save can retry'
+);
+
+globalThis.__playmeshTestAdoptResourceBlob =
+  projectSerializer.adoptPlaymeshLocalResourceBlob;
+globalThis.__playmeshTestDownloadBlobs = fetchableBlobs;
+let localResourceFetcherSource = await readOverlay(
+  'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshLocalResourceFetcher.js'
+);
+localResourceFetcherSource = localResourceFetcherSource
+  .replace(
+    /import \{[\s\S]*?\} from '\.\.\/ResourceFetcher';/,
+    ''
+  )
+  .replace(
+    "import { isBlobURL } from '../../ResourcesList/ResourceUtils';",
+    "const isBlobURL = value => typeof value === 'string' && value.startsWith('blob:');"
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\.\/\.\.\/Utils\/BlobDownloader';/,
+    `const downloadUrlsToBlobs = async ({ urlContainers }) =>
+  urlContainers.map(item => ({
+    item,
+    blob: globalThis.__playmeshTestDownloadBlobs.get(item.url) || null,
+    error: null,
+  }));`
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\/PlaymeshProjectSerializer';/,
+    'const adoptPlaymeshLocalResourceBlob = globalThis.__playmeshTestAdoptResourceBlob;'
+  )
+  .replace(
+    "import { playmeshResourceObjectUrlRegistry } from './PlaymeshResourceObjectUrlRegistry';",
+    'const playmeshResourceObjectUrlRegistry = globalThis.__playmeshTestResourceRegistry;'
+  );
+const localResourceFetcher = await importSource(
+  transformFlow(localResourceFetcherSource)
+);
+
+const temporaryEditorUrl = 'blob:external-editor-temporary';
+const temporaryEditorBlob = new CountingBlob(['external-editor-frame'], {
+  type: 'image/png',
+});
+fetchableBlobs.set(temporaryEditorUrl, temporaryEditorBlob);
+const liveResource = {
+  file: temporaryEditorUrl,
+  getName: () => 'external-editor-frame.png',
+  getFile() {
+    return this.file;
+  },
+  setFile(url) {
+    this.file = url;
+  },
+};
+const interleavedProject = {
+  ...makeProject(temporaryEditorUrl),
+  getResourcesManager: () => ({
+    getAllResourceNames: () => ({
+      toJSArray: () => ['external-editor-frame.png'],
+    }),
+    getResource: () => liveResource,
+  }),
+};
+
+// Reproduce the real race: save sees the temporary Blob first and registers
+// its logical identity, then the official external-editor fetch step runs.
+await projectSerializer.createProjectSnapshot(interleavedProject, fileMetadata);
+assert.equal(
+  globalThis.__playmeshTestResourceRegistry.owns(temporaryEditorUrl),
+  false,
+  'snapshot bookkeeping must not turn an editor-owned Blob URL into a stable URL'
+);
+const fetchResult = await localResourceFetcher.fetchPlaymeshLocalResources({
+  project: interleavedProject,
+  fileMetadata,
+  onProgress: () => {},
+});
+assert.deepEqual(fetchResult.erroredResources, []);
+assert.notEqual(liveResource.file, temporaryEditorUrl);
+assert.equal(
+  projectSerializer.getPlaymeshLogicalResourceUrl(temporaryEditorUrl),
+  null,
+  'adopting a temporary URL must release snapshot-only reverse mappings'
+);
+assert.equal(
+  globalThis.__playmeshTestResourceRegistry.owns(liveResource.file),
+  true,
+  'the official fetch seam must replace a temporary URL even after a save snapshot'
+);
+fetchableBlobs.delete(temporaryEditorUrl);
+assert.equal(
+  ownedBlobs.get(liveResource.file),
+  temporaryEditorBlob,
+  'revoking the temporary editor URL must not invalidate the adopted resource'
 );
 
 process.stdout.write('GDevelop save resource cache tests passed.\n');

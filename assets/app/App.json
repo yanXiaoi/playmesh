@@ -1,10 +1,11 @@
 [
   {
     "name": "Gitee",
-    "url": "https://gitee.com/app_update.json"
+    "app": "https://gitee.com/app_update.json",
+    "gdevelop": "https://gitee.com/resources/GDevelop/update.json"
   },
   {
     "name": "GitHub",
-    "url": "https://github.com/app_update.json"
+    "app": "https://github.com/app_update.json"
   }
 ]

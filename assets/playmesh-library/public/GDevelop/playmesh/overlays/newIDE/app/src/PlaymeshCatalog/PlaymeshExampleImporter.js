@@ -25,6 +25,10 @@ import { generateCopiedGDevelopGameId } from '../PlaymeshManifest/PlaymeshGDevel
 import { allocatePlaymeshProjectSnapshot } from '../PlaymeshProjects/PlaymeshProjectAllocationCoordinator';
 import { ensureGDevelopJsPlatformIsRegistered as ensurePlaymeshGDevelopJsPlatformIsRegistered } from '../PlaymeshShared/PlaymeshGDevelopPlatform';
 import { sanitizePlaymeshExternalUrl } from './PlaymeshExternalDownloadDiagnostic';
+import {
+  splitPlaymeshProject,
+  type PlaymeshProjectFile,
+} from '../ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles';
 
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -45,8 +49,8 @@ export type StagedPlaymeshExample = {|
   projectUuid: string,
   gameId: string,
   name: string,
-  project: PlaymeshCatalogJsonObject,
-  projectJson: string,
+  projectFiles: Array<PlaymeshProjectFile>,
+  projectFilesJson: string,
   normalizedProjectHash: string,
   resources: Array<StoredProjectResource>,
   releaseStaging: () => Promise<void>,
@@ -647,13 +651,14 @@ export const stagePlaymeshExample = async ({
     ) {
       properties = propertiesValue;
     } else {
-      properties = {};
+      properties = ({}: PlaymeshCatalogJsonObject);
       project.properties = properties;
     }
     const projectName = exampleManifest.name || header.name;
     setProjectStringProperty(properties, 'projectUuid', projectUuid);
     setProjectStringProperty(properties, 'packageName', gameId);
     setProjectStringProperty(properties, 'name', projectName);
+    properties.folderProject = true;
 
     const replacements: Map<string, string> = new Map();
     const resources: Array<StoredProjectResource> = [];
@@ -683,7 +688,8 @@ export const stagePlaymeshExample = async ({
     });
 
     // 二次检查内存中的 project bytes，避免 JSON 解析器或替换流程产生非确定内容。
-    const normalizedProjectText = JSON.stringify(project);
+    const projectFiles = splitPlaymeshProject(project);
+    const normalizedProjectText = JSON.stringify(projectFiles);
     const normalizedProjectHash = await sha256Hex(
       new TextEncoder().encode(normalizedProjectText)
     );
@@ -693,8 +699,8 @@ export const stagePlaymeshExample = async ({
       projectUuid,
       gameId,
       name: projectName,
-      project,
-      projectJson: normalizedProjectText,
+      projectFiles,
+      projectFilesJson: normalizedProjectText,
       normalizedProjectHash,
       resources: projectResources,
       releaseStaging: (): Promise<void> =>
@@ -722,7 +728,7 @@ export const importPlaymeshExample = async (
         origin: 'create',
         projectUuid: staged.projectUuid,
         snapshot: {
-          project: staged.project,
+          projectFiles: staged.projectFiles,
           resources: staged.resources,
         },
       });

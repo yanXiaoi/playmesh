@@ -45,6 +45,10 @@ const verifySourcePolicyOutput = path.resolve(
 );
 const sourceDependentVerifiers = [
   {
+    path: path.resolve(testDirectory, 'test-ai-tool-contract-source.mjs'),
+    label: 'official GDevelop v12 AI tool contract snapshot',
+  },
+  {
     path: path.resolve(
       testDirectory,
       'test-source-policy-module-contracts.mjs'
@@ -65,6 +69,13 @@ const sourceDependentVerifiers = [
       'test-browser-persistence-boundary.mjs'
     ),
     label: 'local BrowserSW-only persistence and dependency boundary',
+  },
+  {
+    path: path.resolve(
+      testDirectory,
+      'test-external-resource-editors.mjs'
+    ),
+    label: 'official offline browser external-editor contracts',
   },
   {
     path: path.resolve(
@@ -170,6 +181,9 @@ try {
     'Patched newIDE/app/src/BrowserApp.js',
     'Patched newIDE/app/src/ProjectManager/ProjectPropertiesDialog.js',
     'Patched newIDE/app/src/ProjectManager/index.js',
+    'Patched newIDE/app/src/MainFrame/UnsavedChangesContext.js',
+    'Patched newIDE/app/src/ProjectsStorage/index.js',
+    'Patched newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js',
     'Patched newIDE/app/src/MainFrame/index.js',
     'Patched newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js',
     'GDevelop source policy applied successfully.',
@@ -245,7 +259,7 @@ try {
   );
   assert.match(
     `${secondReplay.stdout}\n${secondReplay.stderr}`,
-    /changed upstream\. Expected [a-f0-9]{40}, got [a-f0-9]{40}/
+    /changed upstream\. Expected [a-f0-9]{40}, got [a-f0-9]{40}|Copying the locked (?:piskel|jfxr|yarn) editor tree failed/
   );
 
   process.stdout.write(

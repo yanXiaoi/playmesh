@@ -10,7 +10,8 @@ type ImportResult = {
 };
 
 type ImportOptions = {|
-  archiveBlob: Blob,
+  archiveBlob?: Blob,
+  projectJsonBlob?: Blob,
   importProject?: Object => Promise<ImportResult>,
   generatePackageName?: () => string,
   confirmCopy: ({|
@@ -49,6 +50,7 @@ const requireImportResult = (value /*: mixed */) /*: ImportResult */ => {
 export const importPortableProjectWithCopyDecision = async (
   {
     archiveBlob,
+    projectJsonBlob,
     importProject = importPlaymeshPortableProject,
     generatePackageName = generateCopiedGDevelopGameId,
     confirmCopy,
@@ -63,8 +65,9 @@ export const importPortableProjectWithCopyDecision = async (
       'GDevelop 导入控制器依赖不完整。'
     );
   }
+  const source = projectJsonBlob ? { projectJsonBlob } : { archiveBlob };
   const initialResult = requireImportResult(
-    await importProject({ archiveBlob })
+    await importProject(source)
   );
   if (initialResult.status !== 'needsNewPackageName') return initialResult;
 
@@ -87,7 +90,7 @@ export const importPortableProjectWithCopyDecision = async (
 
   const copiedResult = requireImportResult(
     await importProject({
-      archiveBlob,
+      ...source,
       packageName: suggestedPackageName,
       identityMode: 'copy',
     })

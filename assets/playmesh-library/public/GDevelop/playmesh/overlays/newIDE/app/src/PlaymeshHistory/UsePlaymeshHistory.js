@@ -21,6 +21,9 @@ import {
 import { buildPlaymeshHistoryDiffSummary } from "./PlaymeshHistoryDiffSummary";
 import { buildPlaymeshHistoryDiffModel } from "./PlaymeshHistoryDiffModel";
 import PlaymeshHistoryDiffDialog from "./PlaymeshHistoryDiffDialog";
+import {
+  PlaymeshHistoryRequestCoordinator
+} from "./PlaymeshHistoryRequestCoordinator";
 import type {
   PlaymeshHistoryDiff,
   PlaymeshHistoryReason,
@@ -80,6 +83,11 @@ type MixedRecord = { +[string]: mixed };
 const asMixedRecord = (value: mixed): ?MixedRecord => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return (value: MixedRecord);
+};
+
+const isHistoryRevisionConflict = (value: mixed): boolean => {
+  const error = asMixedRecord(value);
+  return !!error && error.code === "gdevelop_revision_conflict";
 };
 
 const readHistoryStatusDetail = (event: Event): ?HistoryStatusDetail => {
@@ -151,6 +159,39 @@ const styles = {
     gap: 12,
     flexWrap: "wrap"
   },
+  revisionDetails: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "6px 12px",
+    flexWrap: "wrap",
+    marginTop: 2
+  },
+  changeSummary: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    flexWrap: "wrap",
+    fontVariantNumeric: "tabular-nums"
+  },
+  changeSummaryBadge: {
+    display: "inline-flex",
+    minWidth: 38,
+    minHeight: 24,
+    boxSizing: "border-box",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 5,
+    padding: "2px 6px",
+    border: "1px solid currentColor",
+    borderRadius: 3,
+    fontFamily: "monospace",
+    fontSize: 12,
+    lineHeight: 1
+  },
+  changeSummaryLetter: {
+    fontWeight: 700
+  },
   revisionActions: {
     display: "flex",
     gap: 8,
@@ -168,6 +209,8 @@ const reasonLabel = (
       return translate(playmeshMessages.historyReasonExplicitSave);
     case "important_change":
       return translate(playmeshMessages.historyReasonImportantChange);
+    case "autosave":
+      return translate(playmeshMessages.historyReasonAutosave);
     case "before_restore":
       return translate(playmeshMessages.historyReasonBeforeRestore);
     case "restore":
@@ -211,6 +254,33 @@ const usePlaymeshHistory = ({
     setSelectedVersion
   ] = React.useState<?PlaymeshHistoryVersion>(null);
   const gameId = fileMetadata && fileMetadata.gameId;
+  const currentGameIdRef = React.useRef<?string>(gameId);
+  const panelOpenRef = React.useRef<boolean>(panelOpen);
+  const comparisonOpenRef = React.useRef<boolean>(comparisonOpen);
+  const requestCoordinatorRef = React.useRef<PlaymeshHistoryRequestCoordinator>(
+    new PlaymeshHistoryRequestCoordinator()
+  );
+  currentGameIdRef.current = gameId;
+  panelOpenRef.current = panelOpen;
+  comparisonOpenRef.current = comparisonOpen;
+
+  React.useEffect(
+    () => {
+      const requestCoordinator = requestCoordinatorRef.current;
+      requestCoordinator.cancelAll();
+      setVersions(null);
+      setError(null);
+      setBusyRevision(null);
+      setDiff(null);
+      setDiffModel(null);
+      setComparisonOpen(false);
+      comparisonOpenRef.current = false;
+      setComparisonError(null);
+      setSelectedVersion(null);
+      return () => requestCoordinator.cancelAll();
+    },
+    [gameId]
+  );
 
   React.useEffect(
     () => {
@@ -228,18 +298,47 @@ const usePlaymeshHistory = ({
 
   const loadVersions = React.useCallback(
     async (): Promise<void> => {
-      if (!gameId) {
+      const capturedGameId = gameId;
+      if (!capturedGameId) {
+        requestCoordinatorRef.current.cancel("list");
         setVersions([]);
         return;
       }
+      const request = requestCoordinatorRef.current.begin(
+        "list",
+        capturedGameId
+      );
       setError(null);
       try {
-        const response = await listPlaymeshHistory(gameId);
+        const response = await listPlaymeshHistory(
+          capturedGameId,
+          request.signal
+        );
+        if (
+          !panelOpenRef.current ||
+          !requestCoordinatorRef.current.isCurrent(
+            request,
+            currentGameIdRef.current
+          )
+        ) {
+          return;
+        }
         setVersions(response.versions || []);
       } catch (loadError) {
+        if (
+          request.signal.aborted ||
+          !requestCoordinatorRef.current.isCurrent(
+            request,
+            currentGameIdRef.current
+          )
+        ) {
+          return;
+        }
         console.warn("Unable to load Playmesh GDevelop history", loadError);
         setError(playmeshT(playmeshMessages.historyLoadFailed));
         setVersions(null);
+      } finally {
+        requestCoordinatorRef.current.finish(request);
       }
     },
     [gameId, playmeshT]
@@ -261,6 +360,14 @@ const usePlaymeshHistory = ({
         if (!panelOpen || detail.gameId !== gameId) return;
         if (detail.state === "synced") loadVersions();
         if (detail.state === "error") {
+          // A concurrent authoritative save can lose its revision race without
+          // making the already committed history unavailable. Refresh the
+          // history list instead of presenting the save conflict as a history
+          // loading failure.
+          if (isHistoryRevisionConflict(detail.error)) {
+            loadVersions();
+            return;
+          }
           console.warn("Playmesh GDevelop history sync failed", detail.error);
           setError(playmeshT(playmeshMessages.historyUnavailable));
         }
@@ -280,20 +387,36 @@ const usePlaymeshHistory = ({
 
   const compareVersion = React.useCallback(
     async (version: PlaymeshHistoryVersion): Promise<void> => {
-      if (!gameId || !versions || !versions.length) return;
+      const capturedGameId = gameId;
+      if (!capturedGameId || !versions || !versions.length) return;
+      const newestRevision = versions[0].revision;
+      const request = requestCoordinatorRef.current.begin(
+        "compare",
+        capturedGameId
+      );
       setBusyRevision(version.revision);
       setComparisonOpen(true);
+      comparisonOpenRef.current = true;
       setComparisonError(null);
       setSelectedVersion(version);
       setDiff(null);
       setDiffModel(null);
       try {
-        const newestRevision = versions[0].revision;
         const nextDiff = await getPlaymeshHistoryDiff(
-          gameId,
+          capturedGameId,
           version.revision,
-          newestRevision
+          newestRevision,
+          request.signal
         );
+        if (
+          !comparisonOpenRef.current ||
+          !requestCoordinatorRef.current.isCurrent(
+            request,
+            currentGameIdRef.current
+          )
+        ) {
+          return;
+        }
         const nextSemanticDiff = buildPlaymeshHistoryDiffSummary({
           before: nextDiff.before,
           after: nextDiff.after,
@@ -306,10 +429,27 @@ const usePlaymeshHistory = ({
           )
         );
       } catch (diffError) {
+        if (
+          request.signal.aborted ||
+          !requestCoordinatorRef.current.isCurrent(
+            request,
+            currentGameIdRef.current
+          )
+        ) {
+          return;
+        }
         console.warn("Unable to compare Playmesh GDevelop history", diffError);
         setComparisonError(playmeshT(playmeshMessages.historyCompareFailed));
       } finally {
-        setBusyRevision(null);
+        if (
+          requestCoordinatorRef.current.isCurrent(
+            request,
+            currentGameIdRef.current
+          )
+        ) {
+          setBusyRevision(null);
+        }
+        requestCoordinatorRef.current.finish(request);
       }
     },
     [gameId, playmeshT, versions]
@@ -349,8 +489,31 @@ const usePlaymeshHistory = ({
     [fileMetadata, gameId, playmeshT, project]
   );
 
-  const closeHistoryPanel = (): void => {
+  const closeComparison = (): void => {
+    const wasComparing = requestCoordinatorRef.current.hasActive("compare");
+    comparisonOpenRef.current = false;
+    requestCoordinatorRef.current.cancel("compare");
+    if (wasComparing) setBusyRevision(null);
     setComparisonOpen(false);
+    setComparisonError(null);
+    setDiff(null);
+    setDiffModel(null);
+    setSelectedVersion(null);
+  };
+
+  const closeHistoryPanel = (): void => {
+    const wasComparing = requestCoordinatorRef.current.hasActive("compare");
+    panelOpenRef.current = false;
+    requestCoordinatorRef.current.cancelAll();
+    if (wasComparing) setBusyRevision(null);
+    setComparisonOpen(false);
+    comparisonOpenRef.current = false;
+    setComparisonError(null);
+    setDiff(null);
+    setDiffModel(null);
+    setSelectedVersion(null);
+    setVersions(null);
+    setError(null);
     setPanelOpen(false);
   };
 
@@ -472,9 +635,65 @@ const usePlaymeshHistory = ({
                             )}
                           </Text>
                         </div>
-                        <Text noMargin color="secondary">
-                          {reasonLabel(version.reason, playmeshT)}
-                        </Text>
+                        <div style={styles.revisionDetails}>
+                          <Text noMargin color="secondary">
+                            {reasonLabel(version.reason, playmeshT)}
+                          </Text>
+                          <div style={styles.changeSummary}>
+                            {[
+                              {
+                                letter: "A",
+                                label: playmeshT(
+                                  playmeshMessages.historyChangeAdded
+                                ),
+                                color: gdevelopTheme.statusIndicator.success,
+                                value: version.changeSummary
+                                  ? version.changeSummary.added
+                                  : "—"
+                              },
+                              {
+                                letter: "M",
+                                label: playmeshT(
+                                  playmeshMessages.historyChangeModified
+                                ),
+                                color: gdevelopTheme.statusIndicator.warning,
+                                value: version.changeSummary
+                                  ? version.changeSummary.modified
+                                  : "—"
+                              },
+                              {
+                                letter: "D",
+                                label: playmeshT(
+                                  playmeshMessages.historyChangeRemoved
+                                ),
+                                color: gdevelopTheme.statusIndicator.error,
+                                value: version.changeSummary
+                                  ? version.changeSummary.deleted
+                                  : "—"
+                              }
+                            ].map(item => (
+                              <span
+                                key={item.letter}
+                                style={{
+                                  ...styles.changeSummaryBadge,
+                                  color: item.color
+                                }}
+                                aria-label={`${item.label}: ${String(
+                                  item.value
+                                )}`}
+                                title={item.label}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={styles.changeSummaryLetter}
+                                >
+                                  {item.letter}
+                                </span>
+                                <span aria-hidden="true">{item.value}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                         {index !== 0 && (
                           <div style={styles.revisionActions}>
                             <FlatButton
@@ -508,7 +727,7 @@ const usePlaymeshHistory = ({
         isMobile={isMobile}
         translate={playmeshT}
         theme={gdevelopTheme}
-        onClose={() => setComparisonOpen(false)}
+        onClose={closeComparison}
       />
     </React.Fragment>
   );
@@ -544,7 +763,10 @@ const usePlaymeshHistory = ({
 
   return {
     checkedOutVersionStatus: null,
-    openVersionHistoryPanel: () => setPanelOpen(true),
+    openVersionHistoryPanel: () => {
+      panelOpenRef.current = true;
+      setPanelOpen(true);
+    },
     renderVersionHistoryPanel,
     onQuitVersionHistory,
     onCheckoutVersion,

@@ -5,6 +5,9 @@ const String gdevelopEditorInstanceHeader =
     'X-Playmesh-GDevelop-Editor-Instance';
 const String gdevelopEditorPageHeader = 'X-Playmesh-GDevelop-Editor-Page';
 const String gdevelopEditorLeaseHeader = 'X-Playmesh-GDevelop-Editor-Lease';
+const String gdevelopEditorBootstrapQueryParameter = 'editorBootstrap';
+const String gdevelopEditorAcquireCapabilityCookie =
+    'playmesh_gdevelop_editor_acquire';
 
 class GDevelopEditorInstanceLease {
   const GDevelopEditorInstanceLease({
@@ -71,6 +74,22 @@ class GDevelopEditorInstanceAcquireResult {
   bool get acquired => lease != null;
 }
 
+class GDevelopEditorInstanceAuthorizedAcquireResult {
+  const GDevelopEditorInstanceAuthorizedAcquireResult.unauthorized()
+    : authorized = false,
+      acquireResult = null,
+      nextCapability = null;
+
+  const GDevelopEditorInstanceAuthorizedAcquireResult.authorized(
+    this.acquireResult, {
+    this.nextCapability,
+  }) : authorized = true;
+
+  final bool authorized;
+  final GDevelopEditorInstanceAcquireResult? acquireResult;
+  final String? nextCapability;
+}
+
 /// Owns the single process-wide GDevelop editor instance lease.
 ///
 /// This manager is intentionally not keyed by game id: an editor can change
@@ -80,10 +99,12 @@ class GDevelopEditorInstanceLeaseManager {
   GDevelopEditorInstanceLeaseManager({
     DateTime Function()? clock,
     String Function()? tokenFactory,
+    String Function()? acquireCapabilityFactory,
     this.ttl = const Duration(minutes: 2),
     this.heartbeatInterval = const Duration(seconds: 15),
   }) : _clock = clock ?? (() => DateTime.now().toUtc()),
-       _tokenFactory = tokenFactory ?? _secureToken {
+       _tokenFactory = tokenFactory ?? _secureToken,
+       _acquireCapabilityFactory = acquireCapabilityFactory ?? _secureToken {
     if (ttl <= Duration.zero) {
       throw ArgumentError.value(ttl, 'ttl', 'must be positive');
     }
@@ -98,9 +119,11 @@ class GDevelopEditorInstanceLeaseManager {
 
   final DateTime Function() _clock;
   final String Function() _tokenFactory;
+  final String Function() _acquireCapabilityFactory;
   final Duration ttl;
   final Duration heartbeatInterval;
   GDevelopEditorInstanceLease? _active;
+  String? _acquireCapability;
   bool _installationInProgress = false;
   int _generation = 0;
   final Map<String, int> _aiSessionGenerations = {};
@@ -111,6 +134,46 @@ class GDevelopEditorInstanceLeaseManager {
   }
 
   Map<String, String>? get activeRequestHeaders => active?.toRequestHeaders();
+
+  String issueAcquireCapability() =>
+      _acquireCapability ??= _acquireCapabilityFactory();
+
+  bool validatesAcquireCapability(String capability) {
+    final current = _acquireCapability;
+    return current != null && _constantTimeEquals(capability, current);
+  }
+
+  GDevelopEditorInstanceAuthorizedAcquireResult acquireWithCapability({
+    required String acquireCapability,
+    required String instanceId,
+    required String pageId,
+    String? previousLeaseToken,
+    bool resumeAfterReload = false,
+  }) {
+    if (!validatesAcquireCapability(acquireCapability)) {
+      return const GDevelopEditorInstanceAuthorizedAcquireResult.unauthorized();
+    }
+    // Prepare the replacement before acquiring the lease. A failing or broken
+    // capability source must not leave a committed lease behind a 500 response.
+    final nextCapability = _acquireCapabilityFactory();
+    if (_constantTimeEquals(nextCapability, acquireCapability)) {
+      throw StateError('GDevelop editor acquire capability 未轮换');
+    }
+    final result = acquire(
+      instanceId: instanceId,
+      pageId: pageId,
+      previousLeaseToken: previousLeaseToken,
+      resumeAfterReload: resumeAfterReload,
+    );
+    if (!result.acquired) {
+      return GDevelopEditorInstanceAuthorizedAcquireResult.authorized(result);
+    }
+    _acquireCapability = nextCapability;
+    return GDevelopEditorInstanceAuthorizedAcquireResult.authorized(
+      result,
+      nextCapability: nextCapability,
+    );
+  }
 
   /// Monotonic identity for the current editor lease. It is not a credential.
   int get generation {
@@ -259,6 +322,7 @@ class GDevelopEditorInstanceLeaseManager {
 
   void clear() {
     _installationInProgress = false;
+    _acquireCapability = null;
     _replaceActive(null);
   }
 

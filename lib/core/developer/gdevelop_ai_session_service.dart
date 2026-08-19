@@ -23,6 +23,20 @@ enum GDevelopAiMode {
   );
 }
 
+enum GDevelopAiApprovalMode {
+  requestApproval('request_approval'),
+  alwaysAllow('always_allow');
+
+  const GDevelopAiApprovalMode(this.wireName);
+
+  final String wireName;
+
+  static GDevelopAiApprovalMode parse(String value) => values.firstWhere(
+    (mode) => mode.wireName == value,
+    orElse: () => throw const FormatException('GDevelop AI approvalMode 无效'),
+  );
+}
+
 enum GDevelopAiCallState {
   queued('queued'),
   awaitingApproval('awaiting_approval'),
@@ -79,6 +93,7 @@ class GDevelopAiEditorSession {
     required this.id,
     required this.gameId,
     required this.mode,
+    required this.approvalMode,
     required this.locale,
     required this.projectContext,
     required this.createdAt,
@@ -91,6 +106,7 @@ class GDevelopAiEditorSession {
   final String id;
   final String gameId;
   final GDevelopAiMode mode;
+  final GDevelopAiApprovalMode approvalMode;
   final String locale;
   final GDevelopAiProjectContext? projectContext;
   final DateTime createdAt;
@@ -103,6 +119,7 @@ class GDevelopAiEditorSession {
     'editorSessionId': id,
     'gameId': gameId,
     'mode': mode.wireName,
+    'approvalMode': approvalMode.wireName,
     'locale': locale,
     'projectContext': projectContext?.metadataJson(),
     'createdAt': createdAt.toUtc().toIso8601String(),
@@ -119,6 +136,7 @@ class GDevelopAiTurn {
     required this.editorSessionId,
     required this.sequence,
     required this.createdAt,
+    this.echo,
     this.clientMessageId,
   });
 
@@ -126,6 +144,7 @@ class GDevelopAiTurn {
   final String editorSessionId;
   final int sequence;
   final DateTime createdAt;
+  final int? echo;
   final String? clientMessageId;
 
   Map<String, Object?> toJson() => {
@@ -133,6 +152,7 @@ class GDevelopAiTurn {
     'editorSessionId': editorSessionId,
     'sequence': sequence,
     'createdAt': createdAt.toUtc().toIso8601String(),
+    'echo': ?echo,
     if (clientMessageId != null) 'clientMessageId': clientMessageId,
   };
 }
@@ -210,6 +230,7 @@ class _MutableGDevelopAiSession {
     required this.id,
     required this.gameId,
     required this.mode,
+    required this.approvalMode,
     required this.locale,
     required this.projectContext,
     required this.createdAt,
@@ -220,6 +241,7 @@ class _MutableGDevelopAiSession {
   final String id;
   final String gameId;
   final GDevelopAiMode mode;
+  GDevelopAiApprovalMode approvalMode;
   String locale;
   GDevelopAiProjectContext? projectContext;
   final DateTime createdAt;
@@ -230,11 +252,13 @@ class _MutableGDevelopAiSession {
   final Map<String, GDevelopAiTurn> turns = {};
   final Map<String, _MutableGDevelopAiCall> calls = {};
   final Map<String, String> idempotencyCallIds = {};
+  int? lastEcho;
 
   GDevelopAiEditorSession snapshot() => GDevelopAiEditorSession(
     id: id,
     gameId: gameId,
     mode: mode,
+    approvalMode: approvalMode,
     locale: locale,
     projectContext: projectContext,
     createdAt: createdAt,
@@ -325,7 +349,7 @@ class GDevelopAiSessionService {
     }
   }
 
-  static const protocolVersion = '2.0.0';
+  static const protocolVersion = '4.0.0';
 
   GDevelopAiToolRegistry toolRegistryForSession(String editorSessionId) =>
       _requireSession(editorSessionId).toolRegistry;
@@ -432,6 +456,7 @@ class GDevelopAiSessionService {
       id: id,
       gameId: gameId,
       mode: mode,
+      approvalMode: GDevelopAiApprovalMode.requestApproval,
       locale: locale,
       projectContext: projectContext,
       createdAt: now,
@@ -573,8 +598,9 @@ class GDevelopAiSessionService {
     String editorSessionId, {
     String? locale,
     GDevelopAiProjectContext? projectContext,
+    GDevelopAiApprovalMode? approvalMode,
   }) {
-    if (locale == null && projectContext == null) {
+    if (locale == null && projectContext == null && approvalMode == null) {
       throw const FormatException('GDevelop AI session PATCH 没有可更新字段');
     }
     if (locale != null) _validateLocale(locale);
@@ -583,7 +609,17 @@ class GDevelopAiSessionService {
     if (projectContext != null) {
       session.projectContext = projectContext;
     }
+    if (approvalMode != null) {
+      session.approvalMode = approvalMode;
+    }
     session.sequence += 1;
+    if (approvalMode == GDevelopAiApprovalMode.alwaysAllow) {
+      for (final call in session.calls.values.toList(growable: false)) {
+        if (call.state == GDevelopAiCallState.awaitingApproval) {
+          _transition(session, call, GDevelopAiCallState.queued);
+        }
+      }
+    }
     final snapshot = session.snapshot();
     _emitAiEvent(
       GDevelopAiEvent.sessionUpdated(
@@ -596,15 +632,36 @@ class GDevelopAiSessionService {
     return snapshot;
   }
 
-  GDevelopAiTurn createTurn(String editorSessionId, {String? clientMessageId}) {
+  GDevelopAiTurn createTurn(
+    String editorSessionId, {
+    int? echo,
+    String? clientMessageId,
+  }) {
     final normalizedMessageId = clientMessageId == null
         ? null
         : _validateClientId(clientMessageId, 'clientMessageId');
+    final normalizedEcho = _validateEcho(echo);
     final session = _requireSession(editorSessionId);
     if (normalizedMessageId != null) {
       for (final turn in session.turns.values) {
-        if (turn.clientMessageId == normalizedMessageId) return turn;
+        if (turn.clientMessageId != normalizedMessageId) continue;
+        if (turn.echo != normalizedEcho) {
+          throw const GDevelopAiCallConflict(
+            'idempotency_conflict',
+            '相同 clientMessageId 对应不同 turn',
+          );
+        }
+        return turn;
       }
+    }
+    final lastEcho = session.lastEcho;
+    if (normalizedEcho != null &&
+        lastEcho != null &&
+        normalizedEcho <= lastEcho) {
+      throw const GDevelopAiCallConflict(
+        'echo_conflict',
+        'echo 必须在此 AI 编辑器会话中单调递增且不得重复',
+      );
     }
     session.sequence += 1;
     final turn = GDevelopAiTurn(
@@ -612,9 +669,11 @@ class GDevelopAiSessionService {
       editorSessionId: session.id,
       sequence: session.sequence,
       createdAt: clock().toUtc(),
+      echo: normalizedEcho,
       clientMessageId: normalizedMessageId,
     );
     session.turns[turn.id] = turn;
+    if (normalizedEcho != null) session.lastEcho = normalizedEcho;
     _emitAiEvent(
       GDevelopAiEvent.turnCreated(
         gameId: session.gameId,
@@ -729,7 +788,9 @@ class GDevelopAiSessionService {
       arguments: validatedArguments,
       idempotencyKey: normalizedIdempotency,
       requestFingerprint: fingerprint,
-      state: definition.approvalRequired
+      state:
+          definition.approvalRequired &&
+              session.approvalMode == GDevelopAiApprovalMode.requestApproval
           ? GDevelopAiCallState.awaitingApproval
           : GDevelopAiCallState.queued,
       sequence: session.sequence,
@@ -1123,6 +1184,14 @@ class GDevelopAiSessionService {
     final match = RegExp(r'^[A-Za-z0-9._-]+$').firstMatch(value);
     if (value.length > 128 || match == null || match.end != value.length) {
       throw FormatException('GDevelop AI $field 无效');
+    }
+    return value;
+  }
+
+  int? _validateEcho(int? value) {
+    if (value == null) return null;
+    if (value < 1 || value > 9007199254740991) {
+      throw const FormatException('GDevelop AI echo 必须是正安全整数');
     }
     return value;
   }

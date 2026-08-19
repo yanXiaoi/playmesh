@@ -18,6 +18,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
 
   let sequence = 0;
   let bootstrap = null;
+  let appReadyCompleted = false;
   let appRuntimeLocale = null;
   let appPlatformUiConfiguration = null;
   const pending = new Map();

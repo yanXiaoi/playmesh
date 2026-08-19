@@ -4,6 +4,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
+const importSource = sourceText =>
+  import(
+    `data:text/javascript;base64,${Buffer.from(sourceText).toString('base64')}`
+  );
+let projectConfigSource = await readFile(
+  path.resolve(
+    testDirectory,
+    '../overlays/newIDE/app/src/PlaymeshProjectConfig/PlaymeshProjectConfigProtocol.js'
+  ),
+  'utf8'
+);
+globalThis.__playmeshProjectConfigProtocol = await importSource(
+  projectConfigSource.replace(/^\/\/ @flow\s*/, '')
+);
 let source = await readFile(
   path.resolve(
     testDirectory,
@@ -13,27 +27,24 @@ let source = await readFile(
 );
 source = source.replace(/^\/\/ @flow\s*/, '').replace(
   /import \{[\s\S]*?\} from '\.\.\/PlaymeshProjectConfig\/PlaymeshProjectConfigProtocol';/,
-  `const validatePlaymeshProjectConfigGameId = value => {
-  if (typeof value !== 'string' || !value) throw new Error('invalid game id');
-  return value;
-};
-const validatePlaymeshProjectGameType = value => {
-  if (value !== 'single' && value !== 'online') throw new Error('invalid game type');
-  return value;
-};`
+  `const {
+  assertPlaymeshProjectConfig,
+  validatePlaymeshProjectConfigGameId,
+} = globalThis.__playmeshProjectConfigProtocol;`
 );
-const protocol = await import(`data:text/javascript;base64,${Buffer.from(
-  source
-).toString('base64')}`);
+const protocol = await importSource(source);
 
 const gameId = 'com.playmesh.game.restore001';
 const hash = character => character.repeat(64);
 const timestamp = '2026-08-05T01:02:03.000Z';
 const config = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   gameId,
   revision: 3,
   gameType: 'online',
+  minPlayers: 2,
+  maxPlayers: 5,
+  tags: [],
   updatedAt: timestamp,
 };
 const readyConfigEvidence = {
@@ -46,7 +57,7 @@ const readyConfigEvidence = {
 const historyEvidence = (revision, character) => ({
   revision,
   currentContentHash: hash(character),
-  projectJsonHash: hash(character),
+  projectFilesHash: hash(character),
   resourceManifestHash: hash(character),
 });
 const resource = {
@@ -69,8 +80,10 @@ const version = {
 };
 const targetSnapshot = {
   sourceVersion: version,
-  projectReference: { contentHash: hash('f'), size: 18 },
-  project: { name: 'Target' },
+  projectFilesReference: [
+    { path: 'game.json', contentHash: hash('f'), size: 18 },
+  ],
+  projectFiles: [{ path: 'game.json', content: { name: 'Target' } }],
   resources: [resource],
   playmeshProjectConfig: config,
 };
@@ -118,17 +131,59 @@ assert.throws(
   undefined,
   'ordinary restore versions must not retain the removed AI turn reason compatibility'
 );
+assert.doesNotThrow(
+  () =>
+    protocol.assertPlaymeshHistoryRestoreEnvelope(
+      {
+        requestId: 'request-autosave',
+        transaction: {
+          ...transaction,
+          targetSnapshot: {
+            ...targetSnapshot,
+            sourceVersion: {
+              ...version,
+              reason: 'autosave',
+              source: 'system',
+            },
+          },
+        },
+      },
+      gameId
+    ),
+  'autosave revisions must remain restorable through the ordinary history protocol'
+);
 
 const parsed = protocol.assertPlaymeshHistoryRestoreEnvelope(
   { requestId: 'request-1', transaction },
   gameId
 );
 assert.equal(parsed.transaction.targetSnapshot.sourceVersion.revision, 4);
-assert.deepEqual(parsed.transaction.targetSnapshot.projectReference, {
-  contentHash: hash('f'),
-  size: 18,
-});
+assert.deepEqual(parsed.transaction.targetSnapshot.playmeshProjectConfig, config);
+assert.deepEqual(parsed.transaction.targetSnapshot.projectFilesReference, [
+  { path: 'game.json', contentHash: hash('f'), size: 18 },
+]);
 assert.deepEqual(parsed.transaction.targetSnapshot.resources, [resource]);
+assert.throws(() =>
+  protocol.assertPlaymeshHistoryRestoreEnvelope(
+    {
+      requestId: 'request-schema-1',
+      transaction: {
+        ...transaction,
+        targetSnapshot: {
+          ...targetSnapshot,
+          playmeshProjectConfig: {
+            schemaVersion: 1,
+            gameId,
+            revision: 3,
+            gameType: 'online',
+            updatedAt: timestamp,
+          },
+        },
+      },
+    },
+    gameId
+  )
+);
 
 assert.throws(() =>
   protocol.assertPlaymeshHistoryRestoreTransaction(
@@ -142,7 +197,7 @@ assert.throws(() =>
       ...transaction,
       restored: {
         version: { ...version, revision: 9 },
-        project: targetSnapshot.project,
+        projectFiles: targetSnapshot.projectFiles,
         resources: targetSnapshot.resources,
         playmeshProjectConfig: config,
       },
@@ -188,10 +243,12 @@ for (const invalidSize of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '4']) {
         ...transaction,
         targetSnapshot: {
           ...targetSnapshot,
-          projectReference: {
-            ...targetSnapshot.projectReference,
-            size: invalidSize,
-          },
+          projectFilesReference: [
+            {
+              ...targetSnapshot.projectFilesReference[0],
+              size: invalidSize,
+            },
+          ],
         },
       },
       gameId
@@ -225,7 +282,9 @@ assert.deepEqual(
     baseRevision: 7,
     targetRevision: 4,
     source: 'user',
-    currentProject: { name: 'Current' },
+    currentProjectFiles: [
+      { path: 'game.json', content: { name: 'Current' } },
+    ],
     currentResources: [resource],
     clientId: ' client-1 ',
   }),
@@ -234,7 +293,9 @@ assert.deepEqual(
     baseRevision: 7,
     targetRevision: 4,
     source: 'user',
-    currentProject: { name: 'Current' },
+    currentProjectFiles: [
+      { path: 'game.json', content: { name: 'Current' } },
+    ],
     currentResources: [resource],
     clientId: 'client-1',
   }

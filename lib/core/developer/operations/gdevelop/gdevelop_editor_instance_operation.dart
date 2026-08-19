@@ -51,6 +51,14 @@ class _GDevelopEditorInstanceOperation implements _DeveloperHttpOperation {
     DeveloperOperationDefinition definition,
     Map<String, String> pathParameters,
   ) async {
+    final acquireCapability = _gdevelopEditorAcquireCapability(request);
+    if (definition.id == 'gdevelop.editor_instance.acquire' &&
+        !gateway.gdevelopEditorInstances.validatesAcquireCapability(
+          acquireCapability,
+        )) {
+      await _invalidAcquireCapability(request.response, requestId);
+      return;
+    }
     final body = await _jsonBodyWithLimit(request, _bodyLimit);
     final instanceId = _requiredString(body, 'instanceId');
     final pageId = _requiredString(body, 'pageId');
@@ -61,12 +69,18 @@ class _GDevelopEditorInstanceOperation implements _DeveloperHttpOperation {
           resumeAfterReload != null && resumeAfterReload is! bool) {
         throw const FormatException('GDevelop editor acquire 请求格式无效');
       }
-      final result = gateway.gdevelopEditorInstances.acquire(
+      final authorized = gateway.gdevelopEditorInstances.acquireWithCapability(
         instanceId: instanceId,
         pageId: pageId,
+        acquireCapability: acquireCapability,
         previousLeaseToken: previousLeaseToken as String?,
         resumeAfterReload: resumeAfterReload == true,
       );
+      if (!authorized.authorized) {
+        await _invalidAcquireCapability(request.response, requestId);
+        return;
+      }
+      final result = authorized.acquireResult!;
       if (!result.acquired) {
         if (result.installationInProgress) {
           await _json(request.response, HttpStatus.conflict, {
@@ -88,6 +102,9 @@ class _GDevelopEditorInstanceOperation implements _DeveloperHttpOperation {
         });
         return;
       }
+      request.response.cookies.add(
+        _gdevelopEditorAcquireCapabilityCookie(authorized.nextCapability!),
+      );
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
         'status': result.resumed ? 'resumed' : 'acquired',
@@ -145,4 +162,28 @@ class _GDevelopEditorInstanceOperation implements _DeveloperHttpOperation {
     'gdevelop_editor_lease_stale',
     'GDevelop 编辑器 lease 已过期或不属于当前页面',
   );
+
+  static Future<void> _invalidAcquireCapability(
+    HttpResponse response,
+    String requestId,
+  ) => _error(
+    response,
+    HttpStatus.forbidden,
+    requestId,
+    'gdevelop_editor_acquire_capability_invalid',
+    'GDevelop 编辑器 acquire capability 无效或已轮换',
+  );
 }
+
+String _gdevelopEditorAcquireCapability(HttpRequest request) =>
+    request.cookies
+        .where((cookie) => cookie.name == gdevelopEditorAcquireCapabilityCookie)
+        .map((cookie) => cookie.value)
+        .firstOrNull ??
+    '';
+
+Cookie _gdevelopEditorAcquireCapabilityCookie(String capability) =>
+    Cookie(gdevelopEditorAcquireCapabilityCookie, capability)
+      ..httpOnly = true
+      ..sameSite = SameSite.strict
+      ..path = '/dev/api/gdevelop/editor-instance/acquire';

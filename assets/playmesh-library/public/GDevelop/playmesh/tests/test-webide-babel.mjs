@@ -51,10 +51,98 @@ const historyClientPath = path.resolve(
   repositoryRoot,
   'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/src/PlaymeshHistory/PlaymeshHistoryClient.js'
 );
+
+const embeddedExternalEditorWindowPath = path.resolve(
+  repositoryRoot,
+  'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/src/ResourcesList/PlaymeshEmbeddedExternalEditorWindow.js'
+);
+const embeddedExternalEditorWindowSource = readFileSync(
+  embeddedExternalEditorWindowPath,
+  'utf8'
+);
+assert.doesNotThrow(
+  () => transformFlow(embeddedExternalEditorWindowSource),
+  'PlaymeshEmbeddedExternalEditorWindow.js must parse after Flow stripping'
+);
+assert.doesNotThrow(
+  () =>
+    transformSync(embeddedExternalEditorWindowSource, {
+      babelrc: false,
+      configFile: false,
+      filename: embeddedExternalEditorWindowPath,
+      presets: [craProductionPreset],
+      sourceType: 'module',
+    }),
+  'PlaymeshEmbeddedExternalEditorWindow.js must compile with the exact CRA production preset'
+);
 assert.doesNotThrow(
   () => transformFlow(readFileSync(historyClientPath, 'utf8')),
   'PlaymeshHistoryClient.js must parse after Flow stripping'
 );
+
+for (const relativePath of [
+  'PlaymeshHistory/PlaymeshHistoryRestoreClient.js',
+  'PlaymeshHistory/PlaymeshHistoryRestoreCoordinator.js',
+  'PlaymeshHistory/PlaymeshHistoryRestoreProtocol.js',
+  'PlaymeshProjectConfig/PlaymeshProjectConfigProtocol.js',
+  'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshAuthoritativeProjectCommit.js',
+  'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshLocalResourceFetcher.js',
+  'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshManagedProjectStorageController.js',
+  'ProjectsStorage/PlaymeshLocalStorageProvider/PlaymeshProjectFiles.js',
+]) {
+  const filePath = path.resolve(
+    repositoryRoot,
+    'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/src',
+    relativePath
+  );
+  assert.doesNotThrow(
+    () => transformFlow(readFileSync(filePath, 'utf8')),
+    `${relativePath} must parse after Flow stripping`
+  );
+}
+
+for (const relativePath of [
+  'ProjectsStorage/PlaymeshLocalStorageProvider/index.js',
+]) {
+  const filePath = path.resolve(
+    repositoryRoot,
+    'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/src',
+    relativePath
+  );
+  assert.doesNotThrow(
+    () =>
+      transformSync(readFileSync(filePath, 'utf8'), {
+        babelrc: false,
+        configFile: false,
+        filename: path.resolve(
+          path.dirname(appPackage),
+          'src',
+          relativePath
+        ),
+        presets: [craProductionPreset],
+        sourceType: 'module',
+      }),
+    `${relativePath} must compile with the exact CRA production preset`
+  );
+}
+
+for (const fileName of [
+  'PlaymeshAiOfficialLocalEditorRunners.js',
+  'PlaymeshAiJfxrYarnTools.js',
+  'PlaymeshAiPiskelRunner.js',
+  'PlaymeshAiExternalEditorResourceWriter.js',
+  'PlaymeshAiPiskelTool.js',
+]) {
+  const filePath = path.resolve(
+    repositoryRoot,
+    'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/src/PlaymeshAi',
+    fileName
+  );
+  assert.doesNotThrow(
+    () => transformFlow(readFileSync(filePath, 'utf8')),
+    `${fileName} must parse after Flow stripping`
+  );
+}
 
 const playmeshAiIntegrationPath = path.resolve(
   repositoryRoot,

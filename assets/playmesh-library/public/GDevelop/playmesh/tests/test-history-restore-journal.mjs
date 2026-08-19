@@ -37,7 +37,7 @@ protocolSource = protocolSource.replace(
   if (typeof value !== 'string' || !value) throw new Error('invalid game id');
   return value;
 };
-const validatePlaymeshProjectGameType = value => value;`
+const assertPlaymeshProjectConfig = value => value;`
 );
 const protocolModule = await importSource(transformFlow(protocolSource));
 globalThis.__historyProtocol = protocolModule;
@@ -53,8 +53,8 @@ evidenceSource = evidenceSource.replace(
 } = globalThis.__historyProtocol;`
 );
 evidenceSource = evidenceSource.replace(
-  /import \{ sha256Hex \} from '\.\.\/PlaymeshCrypto\/PlaymeshSha256';/,
-  'const { sha256Hex } = globalThis.__playmeshSha256;'
+  /import \{[\s\S]*?\} from '\.\.\/PlaymeshCrypto\/PlaymeshSha256';/,
+  'const { sha256Blob, sha256Hex } = globalThis.__playmeshSha256;'
 );
 const evidenceModule = await importSource(transformFlow(evidenceSource));
 globalThis.__historyEvidence = evidenceModule;
@@ -98,7 +98,12 @@ const existingProject = {
   id: 'file-a',
   name: 'Existing',
   gameId,
-  projectJson: JSON.stringify({ properties: { name: 'Existing' } }),
+  projectFiles: [
+    {
+      path: 'game.json',
+      content: { properties: { name: 'Existing', folderProject: true } },
+    },
+  ],
   resources: [
     {
       logicalUrl: 'playmesh-local-resource://old.txt',
@@ -114,7 +119,12 @@ const oldBrowserEvidence =
 const targetProject = {
   ...existingProject,
   name: 'Target',
-  projectJson: JSON.stringify({ properties: { name: 'Target' } }),
+  projectFiles: [
+    {
+      path: 'game.json',
+      content: { properties: { name: 'Target', folderProject: true } },
+    },
+  ],
   resources: [
     {
       logicalUrl: 'playmesh-local-resource://target.txt',
@@ -172,7 +182,7 @@ let state = await journalModule.readPlaymeshHistoryRestoreBrowserState({
   gameId,
   fileIdentifier: existingProject.id,
 });
-assert.equal(state.project.projectJson, existingProject.projectJson);
+assert.deepEqual(state.project.projectFiles, existingProject.projectFiles);
 assert.equal(state.journal.phase, 'PREPARED_LOCAL');
 
 const applied = await journalModule.applyPlaymeshHistoryRestoreAtomically({
@@ -185,7 +195,7 @@ state = await journalModule.readPlaymeshHistoryRestoreBrowserState({
   fileIdentifier: existingProject.id,
 });
 assert.equal(applied.phase, 'BROWSER_APPLIED_PENDING_ACK');
-assert.equal(state.project.projectJson, targetProject.projectJson);
+assert.deepEqual(state.project.projectFiles, targetProject.projectFiles);
 assert.deepEqual(state.journal.browserEvidence, targetBrowserEvidence);
 
 await assert.rejects(
@@ -200,7 +210,7 @@ state = await journalModule.readPlaymeshHistoryRestoreBrowserState({
   fileIdentifier: existingProject.id,
 });
 assert.equal(state.journal, null);
-assert.equal(state.project.projectJson, targetProject.projectJson);
+assert.deepEqual(state.project.projectFiles, targetProject.projectFiles);
 
 process.stdout.write(
   'GDevelop history restore App-authority/session-journal tests passed.\n'

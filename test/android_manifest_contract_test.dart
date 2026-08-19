@@ -3,6 +3,49 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Android declares the API 36 local discovery permissions', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+
+    expect(
+      _occurrences(manifest, 'android.permission.CHANGE_WIFI_MULTICAST_STATE'),
+      1,
+    );
+    expect(manifest, contains('android.permission.INTERNET'));
+    expect(manifest, contains('android.permission.ACCESS_WIFI_STATE'));
+    expect(
+      manifest,
+      isNot(contains('android.permission.ACCESS_LOCAL_NETWORK')),
+    );
+  });
+
+  test('Android UDP multicast 使用可计数 MulticastLock 并接入 Engine', () {
+    final host = File(
+      'android/app/src/main/java/top/zfjmm/playmesh/LanMulticastLockHost.java',
+    ).readAsStringSync();
+    final activity = File(
+      'android/app/src/main/java/top/zfjmm/playmesh/MainActivity.java',
+    ).readAsStringSync();
+    final service = File(
+      'android/app/src/main/java/top/zfjmm/playmesh/DeveloperForegroundService.java',
+    ).readAsStringSync();
+
+    expect(host, contains('createMulticastLock'));
+    expect(host, contains('playmesh:lan-game-discovery'));
+    expect(host, contains('PackageManager.FEATURE_WIFI'));
+    expect(host, contains('case "acquire"'));
+    expect(host, contains('case "release"'));
+    expect(host, contains('holderIds.add(holderId)'));
+    expect(host, contains('holderIds.remove(holderId)'));
+    expect(host, contains('case "releaseMany"'));
+    expect(host, contains('void dispose(boolean engineWillBeDestroyed)'));
+    expect(host, contains('if (!engineWillBeDestroyed) return;'));
+    expect(host, contains('releaseAll();'));
+    expect(activity, contains('new LanMulticastLockHost('));
+    expect(service, isNot(contains('LanMulticastLockHost.releaseAll();')));
+  });
+
   test('Android launcher enables predictive back callbacks', () {
     final manifest = File(
       'android/app/src/main/AndroidManifest.xml',
@@ -27,3 +70,6 @@ void main() {
     },
   );
 }
+
+int _occurrences(String source, String value) =>
+    value.allMatches(source).length;
