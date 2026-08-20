@@ -1,4 +1,4 @@
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
@@ -41,6 +41,7 @@ const requiredInfrastructureFiles = [
   'playmesh/scripts/prepare-webide.mjs',
   'playmesh/scripts/package-webide-release.mjs',
   'playmesh/extensions/README.md',
+  'playmesh/extensions/index.json',
 ];
 
 for (const relativePath of requiredInfrastructureFiles) {
@@ -149,6 +150,177 @@ for (const sourceName of ['extensions', 'examples']) {
   ) {
     throw new Error(`Invalid fixed catalog source: ${sourceName}`);
   }
+}
+
+const localExtensionsDirectory = path.join(
+  playmeshDirectory,
+  'extensions'
+);
+const localExtensionDirectoryEntries = await readdir(
+  localExtensionsDirectory,
+  { withFileTypes: true }
+);
+if (localExtensionDirectoryEntries.some(entry => !entry.isFile())) {
+  throw new Error('Local extension directory must contain regular files only');
+}
+const localExtensionFileNames = localExtensionDirectoryEntries.map(
+  entry => entry.name
+);
+if (
+  new Set(localExtensionFileNames.map(name => name.toLowerCase())).size !==
+  localExtensionFileNames.length
+) {
+  throw new Error('Local extension directory has case-insensitive duplicates');
+}
+const localExtensionIndexBytes = await readFile(
+  path.join(localExtensionsDirectory, 'index.json')
+);
+if (
+  localExtensionIndexBytes.byteLength < 1 ||
+  localExtensionIndexBytes.byteLength > 256 * 1024
+) {
+  throw new Error('Local extension index has an invalid byte size');
+}
+let localExtensionIndex;
+try {
+  localExtensionIndex = JSON.parse(localExtensionIndexBytes.toString('utf8'));
+} catch (error) {
+  throw new Error(`Local extension index is invalid JSON: ${error.message}`);
+}
+if (
+  !localExtensionIndex ||
+  typeof localExtensionIndex !== 'object' ||
+  Array.isArray(localExtensionIndex) ||
+  localExtensionIndex.schemaVersion !== 1 ||
+  Object.keys(localExtensionIndex).sort().join(',') !==
+    'extensions,schemaVersion' ||
+  !Array.isArray(localExtensionIndex.extensions) ||
+  localExtensionIndex.extensions.length < 1 ||
+  localExtensionIndex.extensions.length > 64
+) {
+  throw new Error('Local extension index has an invalid schema');
+}
+const supportedFunctionTypes = new Set([
+  'StringExpression',
+  'Expression',
+  'Action',
+  'Condition',
+  'ExpressionAndCondition',
+  'ActionWithOperator',
+]);
+const lifecycleFunctionNames = new Set(['onFirstSceneLoaded']);
+const indexedPaths = new Set();
+const indexedNames = new Set();
+const bodyNames = new Set();
+const expectedDirectoryFiles = new Set(['README.md', 'index.json']);
+for (const descriptor of localExtensionIndex.extensions) {
+  if (
+    !descriptor ||
+    typeof descriptor !== 'object' ||
+    Array.isArray(descriptor) ||
+    !Object.keys(descriptor).every(key => key === 'name' || key === 'path') ||
+    !Object.prototype.hasOwnProperty.call(descriptor, 'path') ||
+    Object.keys(descriptor).length > 2 ||
+    typeof descriptor.path !== 'string' ||
+    !/^[A-Za-z][A-Za-z0-9_.-]*\.json$/.test(descriptor.path) ||
+    descriptor.path.toLowerCase() === 'index.json' ||
+    descriptor.path.includes('/') ||
+    descriptor.path.includes('\\') ||
+    (descriptor.name !== undefined &&
+      (typeof descriptor.name !== 'string' ||
+        !/^[A-Za-z][A-Za-z0-9_]*$/.test(descriptor.name)))
+  ) {
+    throw new Error('Local extension index has an invalid entry');
+  }
+  const foldedPath = descriptor.path.toLowerCase();
+  const foldedDeclaredName = descriptor.name?.toLowerCase();
+  if (
+    indexedPaths.has(foldedPath) ||
+    (foldedDeclaredName && indexedNames.has(foldedDeclaredName))
+  ) {
+    throw new Error('Local extension index has a duplicate path or name');
+  }
+  indexedPaths.add(foldedPath);
+  if (foldedDeclaredName) indexedNames.add(foldedDeclaredName);
+  expectedDirectoryFiles.add(descriptor.path);
+
+  const extensionBytes = await readFile(
+    path.join(localExtensionsDirectory, descriptor.path)
+  );
+  if (
+    extensionBytes.byteLength < 1 ||
+    extensionBytes.byteLength > catalogLock.limits.extensionBytes
+  ) {
+    throw new Error(`Local extension has an invalid byte size: ${descriptor.path}`);
+  }
+  let extension;
+  try {
+    extension = JSON.parse(extensionBytes.toString('utf8'));
+  } catch (error) {
+    throw new Error(
+      `Local extension is invalid JSON (${descriptor.path}): ${error.message}`
+    );
+  }
+  if (
+    !extension ||
+    typeof extension !== 'object' ||
+    Array.isArray(extension) ||
+    !/^[A-Za-z][A-Za-z0-9_]*$/.test(extension.name || '') ||
+    (descriptor.name !== undefined && extension.name !== descriptor.name) ||
+    !/^\d+\.\d+\.\d+$/.test(extension.version || '') ||
+    (extension.gdevelopVersion !== undefined &&
+      typeof extension.gdevelopVersion !== 'string') ||
+    !Array.isArray(extension.eventsFunctions) ||
+    !Array.isArray(extension.eventsBasedBehaviors) ||
+    !Array.isArray(extension.eventsBasedObjects)
+  ) {
+    throw new Error(
+      `Local extension has an invalid root schema: ${descriptor.path}`
+    );
+  }
+  const foldedBodyName = extension.name.toLowerCase();
+  if (bodyNames.has(foldedBodyName)) {
+    throw new Error(`Local extension name is duplicated: ${extension.name}`);
+  }
+  bodyNames.add(foldedBodyName);
+  const extensionFunctionNames = new Set();
+  for (const eventsFunction of extension.eventsFunctions) {
+    const isLifecycleFunction =
+      lifecycleFunctionNames.has(eventsFunction?.name) &&
+      eventsFunction?.fullName === '';
+    if (
+      !eventsFunction ||
+      typeof eventsFunction !== 'object' ||
+      Array.isArray(eventsFunction) ||
+      !/^[A-Za-z][A-Za-z0-9_]*$/.test(eventsFunction.name || '') ||
+      (!isLifecycleFunction &&
+        eventsFunction.functionType !== 'ActionWithOperator' &&
+        (typeof eventsFunction.fullName !== 'string' ||
+          eventsFunction.fullName.length === 0)) ||
+      (isLifecycleFunction &&
+        (!Array.isArray(eventsFunction.parameters) ||
+          eventsFunction.parameters.length !== 0)) ||
+      !supportedFunctionTypes.has(eventsFunction.functionType)
+    ) {
+      throw new Error(
+        `Local extension has an invalid event function: ${descriptor.path}`
+      );
+    }
+    if (extensionFunctionNames.has(eventsFunction.name)) {
+      throw new Error(
+        `Local extension has a duplicate function: ${extension.name}::${eventsFunction.name}`
+      );
+    }
+    extensionFunctionNames.add(eventsFunction.name);
+  }
+}
+if (
+  expectedDirectoryFiles.size !== localExtensionFileNames.length ||
+  localExtensionFileNames.some(name => !expectedDirectoryFiles.has(name))
+) {
+  throw new Error(
+    'Local extension directory and index are not a one-to-one file set'
+  );
 }
 
 const generatedCatalogDirectory = path.join(

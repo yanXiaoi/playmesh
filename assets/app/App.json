@@ -2,7 +2,8 @@
   {
     "name": "Gitee",
     "app": "https://gitee.com/app_update.json",
-    "gdevelop": "https://gitee.com/resources/GDevelop/update.json"
+    "gdevelop": "https://gitee.com/resources/GDevelop/update.json",
+    "export": "https://gitee.com/resources/runtime/update.json"
   },
   {
     "name": "GitHub",

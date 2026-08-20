@@ -19,6 +19,7 @@ import 'package:playmesh/core/developer/gdevelop_project_history.dart';
 import 'package:playmesh/core/developer/gdevelop_project_root_resolver.dart';
 import 'package:playmesh/core/developer/gdevelop_web_ide_source.dart';
 import 'package:playmesh/core/game_package/game_library_repository.dart';
+import 'package:playmesh/core/game_package/game_package_share_files.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/lifecycle/go_core_host.dart';
@@ -1025,10 +1026,7 @@ void main() {
     expect(aiPrompt.body, contains('只有非 Authority 多人页面'));
     expect(aiPrompt.body, contains('stateType 可选'));
     expect(aiPrompt.body, contains('getState()'));
-    expect(
-      aiPrompt.body,
-      contains('多人 Player 页面在普通浏览器和 App WebView 中可用'),
-    );
+    expect(aiPrompt.body, contains('多人 Player 页面在普通浏览器和 App WebView 中可用'));
     expect(aiPrompt.body, contains('当前 origin 的 localStorage'));
     expect(aiPrompt.body, contains('App 由宿主持久化'));
     expect(aiPrompt.body, contains('都同步当前 Core'));
@@ -2427,6 +2425,113 @@ void main() {
 
     await runtime.disableDeveloperMode();
     expect(backgroundHost.active, isFalse);
+  });
+
+  test('项目包导出复用宽松 Operation 并只包含发布内容', () async {
+    final port = await _availablePort();
+    final libraryRoot = await Directory.systemTemp.createTemp(
+      'playmesh-workspace-export-',
+    );
+    addTearDown(() => libraryRoot.delete(recursive: true));
+    final workspace = Directory(
+      '${libraryRoot.path}${Platform.pathSeparator}packages',
+    );
+    await workspace.create(recursive: true);
+    final transfer = GamePackageTransferService(libraryRoot: libraryRoot);
+    final catalog = GameLibraryDeveloperProjectCatalog(
+      GameLibraryRepository(() async => const <GameSummary>[]),
+      workspaceRoot: workspace,
+      packageTransfer: transfer,
+    );
+    final project = await catalog.createProject(
+      DeveloperProjectDraft(
+        id: 'com.example.source-export',
+        name: "源码'Odd(版)*",
+        author: 'Test Author',
+        lastModifiedAt: DateTime.utc(2026, 8, 20),
+        mode: 'solo',
+        orientation: GameOrientation.landscape,
+        displayMode: 'multi_screen',
+        minPlayers: 1,
+        maxPlayers: 1,
+      ),
+    );
+    final projectRoot = Directory(
+      '${workspace.path}${Platform.pathSeparator}${project.id}',
+    );
+    await File(
+      '${projectRoot.path}${Platform.pathSeparator}capabilities.json',
+    ).writeAsString('{broken-json');
+    for (final path in [
+      'data/private.json',
+      'cache/developer/history.json',
+      '.playmesh/internal.json',
+    ]) {
+      final file = File(
+        '${projectRoot.path}${Platform.pathSeparator}'
+        '${path.replaceAll('/', Platform.pathSeparator)}',
+      );
+      await file.create(recursive: true);
+      await file.writeAsString('private');
+    }
+
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: 'source-export-token',
+      catalog: catalog,
+      packageTransfer: transfer,
+    );
+    addTearDown(gateway.close);
+    final response = await http.get(
+      Uri.parse(
+        'http://127.0.0.1:$port/dev/api/projects/${project.id}/package',
+      ),
+      headers: const {
+        HttpHeaders.authorizationHeader: 'Bearer source-export-token',
+      },
+    );
+
+    expect(response.statusCode, HttpStatus.ok, reason: response.body);
+    expect(
+      response.headers['x-playmesh-operation-id'],
+      'packages.export_project',
+    );
+    expect(response.headers['content-type'], startsWith('application/zip'));
+    final disposition = response.headers['content-disposition']!;
+    final fallbackName = gamePackageFileName(
+      name: project.id,
+      version: project.version,
+    );
+    expect(
+      disposition,
+      startsWith('attachment; filename="$fallbackName"; filename*=UTF-8\'\''),
+    );
+    final encodedName = disposition.split("filename*=UTF-8''").last;
+    expect(encodedName, contains('%27'));
+    expect(encodedName, contains('%28'));
+    expect(encodedName, contains('%29'));
+    expect(encodedName, isNot(contains("'")));
+    expect(encodedName, isNot(contains('(')));
+    expect(encodedName, isNot(contains(')')));
+    expect(
+      Uri.decodeComponent(encodedName),
+      gamePackageFileName(name: project.name, version: project.version),
+    );
+    expect(
+      int.parse(response.headers['content-length']!),
+      response.bodyBytes.length,
+    );
+    final archive = ZipDecoder().decodeBytes(response.bodyBytes);
+    final paths = archive.files
+        .where((file) => file.isFile)
+        .map((file) => file.name)
+        .toSet();
+    expect(paths, contains('main.json'));
+    expect(paths, contains('capabilities.json'));
+    expect(paths.any((path) => path.startsWith('app/')), isTrue);
+    expect(paths.any((path) => path.startsWith('data/')), isFalse);
+    expect(paths.any((path) => path.startsWith('cache/')), isFalse);
+    expect(paths.any((path) => path.startsWith('.playmesh/')), isFalse);
   });
 
   test('工作区发布仅暴露候选源并支持部分成功后重试失败源', () async {

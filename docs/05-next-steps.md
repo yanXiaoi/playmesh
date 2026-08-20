@@ -43,6 +43,12 @@ App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏�
   -> 恢复进入前的全屏状态和系统屏幕方向
 ```
 
+当前文件导出入口固定在源代码开发工作区：原“发布”改为“导出”，其下“导出源码”
+直接复用既有 `/package` 宽松备份 Operation；普通浏览器下载，App WebView 由原生宿主
+流式保存。“上传到发布源”仍执行完整校验和既有多源发布流程。游戏详情只负责查看、开始、
+清理数据和删除，不再提供导出。该调整不新增 Developer Operation，也不改变 CLI 依赖的
+损坏项目修复语义。
+
 ```text
 外部 CLI dev
   -> adapter.Adapter / development.Mapping / CLI development.Proxy
@@ -173,6 +179,9 @@ App Bridge SDK、Go Core、Core 与 Relay 版本在该功能中均保持现有�
 ## 必须保持的边界
 
 - 游戏包直接位于 `playmesh-library/packages/{gameId}/`，不增加版本或 `files` 中间目录。
+- 源代码工作区导出只复用 `GET /dev/api/projects/{projectId}/package`；浏览器与 App
+  WebView 只是交付适配器，不得再实现第二套打包器或借用需要 GDevelop editor lease 的
+  Blob 暂存路由。
 - `packages/{gameId}/app/` 直接映射为运行时 `/`；平台公共 SDK、头像等资源位于 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。运行时只额外映射 `data/data` 中由 SDK 上传的文件到 `/bucket/{bucket}/{file}`；`data/json` 与 `cache/` 永不映射。
 - 普通 JSON 持久化文件位于 `packages/{gameId}/data/json/{bucket}.json`；同步 GDevelop
   逻辑名使用 `data/json/logical/sha256-{digest}.json` 原名 envelope。二进制上传位于

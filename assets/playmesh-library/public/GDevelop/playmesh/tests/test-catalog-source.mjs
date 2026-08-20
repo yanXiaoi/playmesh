@@ -505,6 +505,11 @@ const state = {
   projectBytes: null,
   licenseBytes: null,
   fetchedKinds: [],
+  localExtensionIndex: null,
+  localExtensionsByPath: {},
+  localExtensionError: null,
+  localExtensionLoads: [],
+  officialExtensionsAvailable: true,
 };
 
 const projectArtifact = artifact({
@@ -605,6 +610,90 @@ const index = {
   source: examplesSource,
   headers: [header],
 };
+const officialExtensionHeader = {
+  tier: 'reviewed',
+  authorIds: [],
+  extensionNamespace: '',
+  fullName: 'Official fixture',
+  name: 'OfficialFixture',
+  version: '1.0.0',
+  gdevelopVersion: '',
+  url: 'https://example.invalid/OfficialFixture.json',
+  headerUrl: 'playmesh-catalog-header://OfficialFixture',
+  tags: [],
+  category: 'General',
+  previewIconUrl: '',
+  changelog: [],
+  requiredExtensions: [],
+  shortDescription: 'Official fixture',
+  eventsBasedBehaviorsCount: 0,
+  eventsFunctionsCount: 0,
+  eventsBasedBehaviors: [],
+  eventsFunctions: [],
+  eventsBasedObjects: [],
+  helpPath: '/extensions/OfficialFixture',
+  description: 'Official fixture',
+  iconUrl: '',
+  artifactId: 'extension:OfficialFixture',
+};
+const officialBehaviorHeader = {
+  tier: 'reviewed',
+  authorIds: [],
+  extensionNamespace: '',
+  fullName: 'Official behavior',
+  name: 'OfficialBehavior',
+  version: '1.0.0',
+  gdevelopVersion: '',
+  url: 'https://example.invalid/OfficialFixture.json',
+  headerUrl: 'playmesh-catalog-header://OfficialFixture',
+  tags: [],
+  category: 'General',
+  previewIconUrl: '',
+  changelog: [],
+  requiredExtensions: [],
+  description: 'Behavior from the official catalog.',
+  extensionName: 'OfficialFixture',
+  objectType: 'Object',
+  allRequiredBehaviorTypes: [],
+};
+const shadowedOfficialBehaviorHeader = {
+  ...officialBehaviorHeader,
+  fullName: 'Official-only shadowed behavior',
+  name: 'OfficialOnlyBehavior',
+  description: 'Must not outlive the shadowed official extension body.',
+  extensionName: 'LocalUtility',
+};
+const officialExtensionsIndex = {
+  schemaVersion: 1,
+  catalogRevision: manifest.catalogRevision,
+  engine: manifest.engine,
+  source: manifest.sources.extensions,
+  version: '0.0.1-playmesh',
+  headers: [officialExtensionHeader],
+  views: { default: { firstIds: ['OfficialFixture'] } },
+  behavior: {
+    headers: [shadowedOfficialBehaviorHeader, officialBehaviorHeader],
+    views: {
+      default: {
+        firstIds: [
+          {
+            extensionName: 'LocalUtility',
+            behaviorName: 'OfficialOnlyBehavior',
+          },
+          {
+            extensionName: 'OfficialFixture',
+            behaviorName: 'OfficialBehavior',
+          },
+        ],
+      },
+    },
+  },
+  artifacts: {
+    'extension:OfficialFixture': {
+      id: 'extension:OfficialFixture',
+    },
+  },
+};
 
 const runtimeMocks = {
   PlaymeshCatalogError,
@@ -613,6 +702,29 @@ const runtimeMocks = {
   validateCatalogFeatureManifest: ({ value }) => value,
   loadRootCatalogManifest: async () => manifest,
   loadCatalogJson: async ({ descriptor }) => {
+    if (descriptor.path === 'extensions-manifest.v1.json') {
+      if (!state.officialExtensionsAvailable) {
+        throw new Error('Injected official extension catalog failure');
+      }
+      return {
+        schemaVersion: 1,
+        kind: 'extensions',
+        catalogRevision: manifest.catalogRevision,
+        engine: manifest.engine,
+        source: manifest.sources.extensions,
+        index: {
+          path: 'extensions-index.json',
+          bytes: 1,
+          sha256: '5'.repeat(64),
+        },
+      };
+    }
+    if (descriptor.path === 'extensions-index.json') {
+      if (!state.officialExtensionsAvailable) {
+        throw new Error('Injected official extension catalog failure');
+      }
+      return officialExtensionsIndex;
+    }
     if (descriptor.path === 'examples-manifest.v1.json') {
       return {
         schemaVersion: 1,
@@ -629,6 +741,19 @@ const runtimeMocks = {
     }
     if (descriptor.path === 'examples-index.json') return index;
     throw new Error(`Unexpected descriptor: ${descriptor.path}`);
+  },
+  loadSameOriginJson: async options => {
+    state.localExtensionLoads.push(options);
+    if (state.localExtensionError) throw state.localExtensionError;
+    const pathname = new URL(options.url).pathname;
+    if (pathname.endsWith('/extensions/index.json')) {
+      return state.localExtensionIndex;
+    }
+    const filename = pathname.split('/').at(-1);
+    if (!(filename in state.localExtensionsByPath)) {
+      throw new Error(`Unexpected local extension URL: ${options.url}`);
+    }
+    return state.localExtensionsByPath[filename];
   },
   parseCatalogJsonArtifact: async ({ artifact: requestedArtifact }) => {
     state.fetchedKinds.push(requestedArtifact.kind);
@@ -659,6 +784,7 @@ moduleSource = moduleSource.replace(
   fetchCatalogArtifact,
   loadCatalogJson,
   loadRootCatalogManifest,
+  loadSameOriginJson,
   parseCatalogJsonArtifact,
   validateCatalogFeatureManifest,
   validateArtifactUrl,
@@ -699,7 +825,244 @@ const installProject = resourceFiles => {
   state.fetchedKinds = [];
 };
 
-const reset = () => catalogSource.resetPlaymeshCatalogForRetry();
+const reset = feature => catalogSource.resetPlaymeshCatalogForRetry(feature);
+
+const playmeshLocalExtension = {
+  authorIds: ['playmesh'],
+  category: 'PlayMesh',
+  description: ['Bundled Playmesh SDK extension.'],
+  eventsBasedBehaviors: [],
+  eventsBasedObjects: [],
+  eventsFunctions: [
+    {
+      name: 'SdkReady',
+      fullName: 'Playmesh SDK is ready',
+      description: 'Check whether the current context SDK is ready.',
+      functionType: 'Condition',
+      private: false,
+      events: [],
+    },
+    {
+      name: 'onFirstSceneLoaded',
+      fullName: '',
+      description: '',
+      functionType: 'Action',
+      private: true,
+      parameters: [],
+      events: [],
+    },
+  ],
+  extensionNamespace: '',
+  fullName: 'Playmesh SDK',
+  gdevelopVersion: '>=5.6.276',
+  helpPath: '/extensions/Playmesh',
+  metadata: { nested: { stable: true } },
+  name: 'Playmesh',
+  requiredExtensions: [],
+  shortDescription: 'Use the installed Playmesh SDK.',
+  tags: 'playmesh, sdk, native',
+  version: '1.2.3',
+};
+const utilityLocalExtension = {
+  authorIds: ['playmesh'],
+  category: 'PlayMesh',
+  description: 'Second bundled extension fixture.',
+  eventsBasedBehaviors: [
+    {
+      name: 'LocalBehavior',
+      fullName: 'Local utility behavior',
+      description: 'Behavior from the second bundled extension.',
+      objectType: 'Object',
+      propertyDescriptors: [],
+      eventsFunctions: [],
+    },
+  ],
+  eventsBasedObjects: [],
+  eventsFunctions: [
+    {
+      name: 'Run',
+      fullName: 'Run local utility',
+      description: 'Run the local utility.',
+      functionType: 'Action',
+      private: false,
+      events: [],
+    },
+  ],
+  name: 'LocalUtility',
+  requiredExtensions: [],
+  shortDescription: 'Second local extension.',
+  tags: ['playmesh'],
+  version: '2.0.0',
+};
+state.localExtensionIndex = {
+  schemaVersion: 1,
+  extensions: [
+    { name: 'Playmesh', path: 'Playmesh.json' },
+    { name: 'LocalUtility', path: 'LocalUtility.json' },
+  ],
+};
+state.localExtensionsByPath = {
+  'Playmesh.json': playmeshLocalExtension,
+  'LocalUtility.json': utilityLocalExtension,
+};
+
+let extensionRegistry = await catalogSource.getPlaymeshExtensionsRegistry();
+assert.deepEqual(
+  extensionRegistry.headers.map(extension => extension.name),
+  ['Playmesh', 'LocalUtility', 'OfficialFixture']
+);
+assert.deepEqual(extensionRegistry.views.default.firstIds, [
+  'Playmesh',
+  'LocalUtility',
+  'OfficialFixture',
+]);
+assert.equal(extensionRegistry.headers[0].tier, 'reviewed');
+assert.equal(extensionRegistry.headers[0].eventsFunctionsCount, 1);
+assert.equal(
+  extensionRegistry.version,
+  '0.0.1-playmesh+local.Playmesh.1.2.3.LocalUtility.2.0.0'
+);
+assert.equal(state.localExtensionLoads.length, 3);
+assert.equal(
+  state.localExtensionLoads[0].url,
+  'http://127.0.0.1:8768/playmesh/GDevelop/playmesh/extensions/index.json'
+);
+assert.equal(state.localExtensionLoads[0].maximumBytes, 256 * 1024);
+assert.equal(
+  state.localExtensionLoads[1].url,
+  'http://127.0.0.1:8768/playmesh/GDevelop/playmesh/extensions/Playmesh.json'
+);
+assert.equal(state.localExtensionLoads[1].maximumBytes, 8 * 1024 * 1024);
+
+globalThis.gd = {
+  PlatformExtension: {
+    getBehaviorFullType: (extensionName, behaviorName) =>
+      `${extensionName}::${behaviorName}`,
+  },
+};
+let behaviorRegistry = await catalogSource.getPlaymeshBehaviorsRegistry();
+assert.deepEqual(
+  behaviorRegistry.headers.map(
+    behavior => `${behavior.extensionName}::${behavior.name}`
+  ),
+  ['LocalUtility::LocalBehavior', 'OfficialFixture::OfficialBehavior']
+);
+assert.equal(
+  behaviorRegistry.headers[0].type,
+  'LocalUtility::LocalBehavior'
+);
+assert.deepEqual(behaviorRegistry.views.default.firstIds, [
+  { extensionName: 'LocalUtility', behaviorName: 'LocalBehavior' },
+  { extensionName: 'OfficialFixture', behaviorName: 'OfficialBehavior' },
+]);
+
+const localHeader = await catalogSource.getPlaymeshExtensionHeader({
+  name: 'Playmesh',
+});
+assert.equal(localHeader.name, 'Playmesh');
+assert.equal(localHeader.tier, 'reviewed');
+assert.equal(
+  localHeader.url,
+  '/playmesh/GDevelop/playmesh/extensions/Playmesh.json'
+);
+
+const firstLocalBody = await catalogSource.getPlaymeshExtension({
+  name: 'Playmesh',
+});
+firstLocalBody.eventsFunctions[0].description = 'mutated by installer';
+firstLocalBody.metadata.nested.stable = false;
+const secondLocalBody = await catalogSource.getPlaymeshExtension({
+  name: 'Playmesh',
+});
+assert.equal(
+  secondLocalBody.eventsFunctions[0].description,
+  'Check whether the current context SDK is ready.'
+);
+assert.equal(secondLocalBody.metadata.nested.stable, true);
+assert.notEqual(firstLocalBody.eventsFunctions, secondLocalBody.eventsFunctions);
+assert.deepEqual(secondLocalBody.tags, ['playmesh', 'sdk', 'native']);
+assert.deepEqual(state.fetchedKinds, []);
+
+state.officialExtensionsAvailable = false;
+reset('extensions');
+extensionRegistry = await catalogSource.getPlaymeshExtensionsRegistry();
+assert.deepEqual(
+  extensionRegistry.headers.map(extension => extension.name),
+  ['Playmesh', 'LocalUtility'],
+  'all bundled extensions must remain installable without the official catalog'
+);
+assert.deepEqual(extensionRegistry.views.default.firstIds, [
+  'Playmesh',
+  'LocalUtility',
+]);
+behaviorRegistry = await catalogSource.getPlaymeshBehaviorsRegistry();
+assert.deepEqual(
+  behaviorRegistry.headers.map(behavior => behavior.name),
+  ['LocalBehavior'],
+  'bundled behaviors must remain available without the official catalog'
+);
+
+const validLocalExtensionIndex = state.localExtensionIndex;
+for (const invalidExtensions of [
+  [{ name: 'Playmesh', path: '../Playmesh.json' }],
+  [
+    { name: 'Playmesh', path: 'Playmesh.json' },
+    { name: 'Other', path: 'playmesh.json' },
+  ],
+  [
+    { name: 'Playmesh', path: 'Playmesh.json' },
+    { name: 'playmesh', path: 'Other.json' },
+  ],
+  [{ name: 'Playmesh', path: 'Playmesh.txt' }],
+]) {
+  state.localExtensionIndex = {
+    schemaVersion: 1,
+    extensions: invalidExtensions,
+  };
+  reset('extensions');
+  await assert.rejects(
+    catalogSource.getPlaymeshExtensionHeader({
+      name: 'Playmesh',
+      url: '/playmesh/GDevelop/playmesh/extensions/Playmesh.json',
+    }),
+    error => error.code === 'invalid_catalog'
+  );
+}
+state.localExtensionIndex = validLocalExtensionIndex;
+state.localExtensionsByPath['LocalUtility.json'] = {
+  ...utilityLocalExtension,
+  name: 'WrongName',
+};
+reset('extensions');
+await assert.rejects(
+  catalogSource.getPlaymeshExtensionHeader({
+    name: 'Playmesh',
+    url: '/playmesh/GDevelop/playmesh/extensions/Playmesh.json',
+  }),
+  error => error.code === 'invalid_extension'
+);
+state.localExtensionsByPath['LocalUtility.json'] = utilityLocalExtension;
+
+state.localExtensionError = new Error('Injected bundled extension failure');
+state.localExtensionLoads = [];
+state.fetchedKinds = [];
+reset('extensions');
+await assert.rejects(
+  catalogSource.getPlaymeshExtension({
+    name: 'Playmesh',
+    url: '/playmesh/GDevelop/playmesh/extensions/Playmesh.json',
+  }),
+  /Injected bundled extension failure/
+);
+assert.equal(state.localExtensionLoads.length, 1);
+assert.deepEqual(
+  state.fetchedKinds,
+  [],
+  'a missing bundled extension must not fall back to the App artifact Gateway'
+);
+state.localExtensionError = null;
+state.officialExtensionsAvailable = true;
+reset('extensions');
 
 installProject(['assets/image.png', 'data:image/png;base64,AA==']);
 let inspection = await catalogSource.inspectPlaymeshExampleLicense({ header });

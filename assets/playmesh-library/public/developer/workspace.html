@@ -25,7 +25,7 @@
   <button id="projectPicker" class="project-picker" data-i18n-title="workspace.manage_projects" aria-haspopup="menu" aria-expanded="false"><svg class="lucide project-kind-icon" aria-hidden="true"><use href="#folder-kanban"></use></svg><span id="projectPickerLabel" data-i18n="workspace.select_project"></span><svg class="lucide project-chevron" aria-hidden="true"><use href="#chevron-down"></use></svg></button>
   <button id="save" data-i18n-title="workspace.save_current_file"><span class="toolbar-wide" data-i18n="workspace.save"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#save"></use></svg></button>
   <button id="run" class="run" data-i18n-title="workspace.run_project"><span id="toolbarRunLabel" class="toolbar-wide" data-i18n="workspace.run"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#play"></use></svg></button>
-  <button id="publish" class="publish" data-i18n-title="workspace.publish_to_sources"><span class="toolbar-wide" data-i18n="workspace.publish"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#upload"></use></svg></button>
+  <button id="publish" class="publish" data-i18n-title="workspace.export_project"><span class="toolbar-wide" data-i18n="workspace.export"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#file-archive"></use></svg></button>
   <button id="aiPanel" class="ai-action" data-i18n-title="workspace.open_ai_development"><span class="toolbar-wide" data-i18n="workspace.ai"></span><svg class="lucide toolbar-compact" aria-hidden="true"><use href="#sparkles"></use></svg></button>
   <div class="toolbar-menu-wrap"><button id="moreActions" class="more-actions" data-i18n-title="workspace.more_actions" aria-haspopup="menu" aria-expanded="false"><span class="toolbar-wide" data-i18n="workspace.more"></span><svg class="lucide" aria-hidden="true"><use href="#ellipsis"></use></svg></button></div>
 </header>
@@ -56,7 +56,7 @@
 </div>
 
 <div id="toolbarMenu" class="toolbar-menu anchored-menu" role="menu">
-  <button id="publishFromMenu" class="mobile-only" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#upload"></use></svg><span data-i18n="workspace.publish"></span></button>
+  <button id="publishFromMenu" class="mobile-only" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#file-archive"></use></svg><span data-i18n="workspace.export"></span></button>
   <button id="quickPanel" role="menuitem" data-i18n="workspace.conversation_console"></button>
   <button id="webviewJavaScriptPanel" role="menuitem" data-i18n-title="workspace.webview_console_title" data-i18n="workspace.webview_console"></button>
   <button id="validate" role="menuitem"><svg class="lucide" aria-hidden="true"><use href="#check"></use></svg><span data-i18n="workspace.validate_project"></span></button>
@@ -209,8 +209,16 @@
   <div id="validationList" class="validation-list"></div>
 </div></div>
 
+<div id="exportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="exportTitle"><div class="dialog export-dialog">
+  <div class="dialog-head"><strong id="exportTitle" data-i18n="workspace.export_project"></strong><button id="closeExport" type="button" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
+  <div class="export-body"><div class="export-options">
+    <button id="exportSource" class="export-option" type="button" data-initial-focus><svg class="lucide" aria-hidden="true"><use href="#file-archive"></use></svg><strong data-i18n="workspace.export_source"></strong></button>
+    <button id="uploadToPublishSource" class="export-option" type="button"><svg class="lucide" aria-hidden="true"><use href="#upload"></use></svg><strong data-i18n="workspace.upload_to_publish_source"></strong></button>
+  </div></div>
+</div></div>
+
 <div id="publishModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="publishTitle"><div class="dialog publish-dialog">
-  <div class="dialog-head"><strong id="publishTitle" data-i18n="workspace.publish_sources"></strong><span id="publishStep" class="publish-step" aria-live="polite"></span><button id="closePublish" type="button" data-initial-focus data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
+  <div class="dialog-head"><strong id="publishTitle" data-i18n="workspace.publish_sources"></strong><span id="publishStep" class="publish-step" aria-live="polite"></span><button id="closePublish" type="button" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
   <form id="publishForm" class="publish-body"><p id="publishIntro" data-i18n="workspace.publish_intro"></p><div id="publishSources" class="publish-sources"></div><div id="publishEmpty" class="publish-empty" hidden data-i18n="workspace.publish_empty"></div><div id="publishResult" class="publish-result" aria-live="polite"></div><div class="publish-actions"><button id="cancelPublish" type="button" data-i18n="workspace.cancel"></button><button id="retryPublish" type="button" hidden data-i18n="workspace.publish_retry"></button><button id="confirmPublish" type="submit" class="primary" disabled data-i18n="workspace.publish_confirm"></button></div></form>
 </div></div>
 

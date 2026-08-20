@@ -169,6 +169,159 @@ void main() {
     expect(script, isNot(contains('textOr(')));
   });
 
+  test('Workspace export chooser reuses the package and publish pipelines', () {
+    final html = File('$developerRoot/workspace.html').readAsStringSync();
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+    final css = File('$developerRoot/workspace.css').readAsStringSync();
+
+    expect(
+      html,
+      contains(
+        'id="publish" class="publish" '
+        'data-i18n-title="workspace.export_project"',
+      ),
+    );
+    expect(
+      html,
+      contains('id="publishFromMenu" class="mobile-only" role="menuitem"'),
+    );
+    expect(html, contains('data-i18n="workspace.export"'));
+    expect(html, isNot(contains('workspace.publish_to_sources')));
+    expect(html, isNot(contains('data-i18n="workspace.publish"')));
+    expect(html, contains('id="exportModal" class="modal" role="dialog"'));
+    expect(
+      html,
+      contains(
+        'id="exportSource" class="export-option" type="button" '
+        'data-initial-focus',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="uploadToPublishSource" class="export-option" type="button"',
+      ),
+    );
+    expect(html, contains('data-i18n="workspace.export_source"'));
+    expect(html, contains('data-i18n="workspace.upload_to_publish_source"'));
+    expect(html, isNot(contains('workspace.export_intro')));
+    expect(html, isNot(contains('workspace.export_source_description')));
+    expect(
+      html,
+      isNot(contains('workspace.upload_to_publish_source_description')),
+    );
+    expect(html, isNot(contains('<small')));
+    expect(html, contains('id="publishModal" class="modal"'));
+    expect(html, contains('id="publishForm" class="publish-body"'));
+
+    final exportStart = script.indexOf('async function exportProjectSource()');
+    expect(exportStart, isNonNegative);
+    final exportEnd = script.indexOf('\n', exportStart);
+    final exportSource = script.substring(exportStart, exportEnd);
+    expect(exportSource, contains("endpoint('package','')"));
+    expect(
+      exportSource,
+      contains("typeof globalThis.__playmeshSaveBlobDownload==='function'"),
+    );
+    expect(
+      exportSource,
+      contains(
+        'await globalThis.__playmeshSaveBlobDownload({url:downloadUrl})',
+      ),
+    );
+    expect(exportSource, contains('await waitForExportFeedback()'));
+    expect(exportSource, contains('await waitForExportFeedback(180)'));
+    expect(exportSource, contains('await waitForExportFeedback(450)'));
+    expect(exportSource, contains('startBrowserPackageDownload(downloadUrl)'));
+    expect(exportSource, isNot(contains('fetch(')));
+    expect(exportSource, isNot(contains('.blob(')));
+    expect(
+      script,
+      contains(
+        "function startBrowserPackageDownload(downloadUrl){const link="
+        "document.createElement('a');link.href=downloadUrl;link.download='';"
+        'link.hidden=true;document.body.append(link)',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "q('uploadToPublishSource').onclick=()=>openPublishFromExport()",
+      ),
+    );
+    expect(
+      script,
+      contains('await openPublishPanel(returnFocus)'),
+      reason: 'Upload must continue through the existing publish workflow.',
+    );
+    expect(
+      script,
+      contains("openExportPanel(q('moreActions'))"),
+      reason:
+          'The closed mobile menu must restore focus to its visible trigger.',
+    );
+    expect(script, isNot(contains('publishReturnFocus')));
+    expect(
+      script,
+      isNot(
+        contains(
+          "setTimeout(()=>q('publishSources').querySelector('input')?.focus()",
+        ),
+      ),
+    );
+    expect(css, contains('.export-option {'));
+    expect(css, contains('grid-template-rows: 44px auto;'));
+    expect(css, contains('grid-template-columns: repeat(2, minmax(0, 1fr));'));
+    expect(css, contains('height: auto;'));
+    expect(css, contains('justify-items: stretch;'));
+    expect(css, contains('.export-option strong {'));
+    expect(css, contains('.export-option.processing::before {'));
+    expect(css, contains('@keyframes workspace-export-processing'));
+    expect(css, isNot(contains('.export-option-copy')));
+    expect(script, contains("source.classList.toggle('processing',busy)"));
+    expect(
+      script,
+      contains(
+        "busy?tr('workspace.export_processing'):tr('workspace.export_source')",
+      ),
+    );
+  });
+
+  test('Opening a file keeps the existing project tree in place', () {
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+    final loadFileStart = script.indexOf('async function loadFile(path)');
+    final loadAssetStart = script.indexOf('async function loadAsset(path)');
+    final loadTreeOnlyStart = script.indexOf(
+      'async function loadTreeOnly(',
+      loadAssetStart,
+    );
+
+    expect(loadFileStart, isNonNegative);
+    expect(loadAssetStart, greaterThan(loadFileStart));
+    expect(loadTreeOnlyStart, greaterThan(loadAssetStart));
+    expect(script, contains('button.dataset.treeFile=file.path'));
+    expect(
+      script,
+      contains(
+        "function updateTreeSelection(){tree.querySelectorAll('[data-tree-file]')",
+      ),
+    );
+    expect(script, contains("button.classList.toggle('active',active)"));
+    expect(script, contains("button.setAttribute('aria-current','page')"));
+
+    final loadFileSource = script.substring(loadFileStart, loadAssetStart);
+    final loadAssetSource = script.substring(loadAssetStart, loadTreeOnlyStart);
+    for (final source in [loadFileSource, loadAssetSource]) {
+      expect(source, contains('updateTreeSelection()'));
+      expect(
+        source,
+        isNot(contains('loadTreeOnly(')),
+        reason: 'Selecting a file must not rebuild or scroll the project tree.',
+      );
+      expect(source, isNot(contains('renderTree(')));
+    }
+  });
+
   test('Developer Workspace has no independent localization bundle', () {
     final middleware = File(
       'lib/core/developer/operations/middleware/'
@@ -890,7 +1043,7 @@ void main() {
     );
   });
 
-  test('Project tree keeps collapsed directories while opening resources', () {
+  test('Project tree keeps collapsed directories across tree refreshes', () {
     final script = File('$developerRoot/workspace.js').readAsStringSync();
 
     expect(script, contains('treeCollapsedDirectories=new Set()'));
@@ -914,13 +1067,6 @@ void main() {
         'treeCollapsedDirectories=new Set([...treeCollapsedDirectories]'
         '.filter(path=>treeDirectories.has(path)))',
       ),
-    );
-    expect(
-      script,
-      contains("activateEditorView({focus:true});await loadTreeOnly()"),
-      reason:
-          'Opening a resource may rebuild the tree, so expansion state must '
-          'survive loadTreeOnly.',
     );
   });
 }

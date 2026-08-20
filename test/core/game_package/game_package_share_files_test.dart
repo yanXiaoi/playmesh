@@ -41,6 +41,17 @@ void main() {
     );
   });
 
+  test('宽松修复包的版本字段也经过文件名安全处理', () {
+    expect(
+      gamePackageFileName(name: 'Repair', version: '../1\\2'),
+      'Repair-v.._1_2.zip',
+    );
+    expect(
+      gamePackageFileName(name: 'Repair', version: ''),
+      'Repair-vunknown.zip',
+    );
+  });
+
   test('连续二十次分享后只保留当前租约文件', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-share-20-');
     addTearDown(() => root.delete(recursive: true));

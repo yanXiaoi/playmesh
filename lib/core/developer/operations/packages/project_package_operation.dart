@@ -53,11 +53,19 @@ class _ProjectPackageOperation implements _DeveloperHttpOperation {
         ),
       );
       await gateway.packageTransfer.exportPackage(game, file, validate: false);
+      final packageLength = await file.length();
+      final downloadName = gamePackageShareFileName(game);
+      final fallbackName = gamePackageFileName(
+        name: project.id,
+        version: project.version,
+      );
       request.response.headers
         ..contentType = ContentType('application', 'zip')
+        ..contentLength = packageLength
         ..set(
           'Content-Disposition',
-          'attachment; filename="$projectId.playmesh.zip"',
+          'attachment; filename="$fallbackName"; '
+              'filename*=UTF-8\'\'${_encodeRfc8187FileName(downloadName)}',
         )
         ..set('X-Request-ID', requestId);
       await file.openRead().pipe(request.response);
@@ -66,3 +74,9 @@ class _ProjectPackageOperation implements _DeveloperHttpOperation {
     }
   });
 }
+
+String _encodeRfc8187FileName(String value) => Uri.encodeComponent(value)
+    .replaceAll("'", '%27')
+    .replaceAll('(', '%28')
+    .replaceAll(')', '%29')
+    .replaceAll('*', '%2A');

@@ -8,6 +8,18 @@ const macScript = fs.readFileSync("tool/build_dev_cli_macos.sh", "utf8");
 const release = fs.readFileSync("tool/build_release.ps1", "utf8");
 const windowsRelease = fs.readFileSync("tool/build_windows_release_ninja.ps1", "utf8");
 const coreRelease = fs.readFileSync("tool/build_go_core.ps1", "utf8");
+const runtimeCoreRelease = fs.readFileSync(
+  "runtime/src/tool/build_go_core.ps1",
+  "utf8",
+);
+const apkSignerCli = fs.readFileSync(
+  "go-core/cmd/playmesh-apksign/main.go",
+  "utf8",
+);
+const apkSignerBridge = fs.readFileSync(
+  "go-core/appnative/apksig.go",
+  "utf8",
+);
 
 for (const [name, content] of [["Windows", windows], ["Linux", linux]]) {
   assert.match(content, /PLAYMESH_CLI_SOURCE_DIR/);
@@ -33,9 +45,25 @@ assert.match(macProject, /build_dev_cli_macos\.sh/);
 assert.match(macScript, /GOOS=darwin/);
 assert.match(macScript, /xcrun lipo -create/);
 assert.match(release, /'playmesh-cli\.exe'/);
+assert.match(release, /'playmesh-apksign\.exe'/);
+assert.match(release, /'APKSIG-GO-LICENSE\.txt'/);
+assert.match(release, /'APKSIG-GO-NOTICE\.txt'/);
 assert.match(release, /'LICENSE'/);
 assert.match(release, /\[ValidateSet\('all', 'android', 'windows'\)\]/);
 assert.match(coreRelease, /\[ValidateSet\("android", "windows", "all"\)\]/);
+assert.match(coreRelease, /PLAYMESH_APKSIG_GO_ROOT/);
+assert.match(coreRelease, /playmesh-apksign\.exe/);
+assert.match(coreRelease, /\.\/cmd\/playmesh-apksign/);
+assert.match(coreRelease, /CGO_ENABLED\s*=\s*"0"/);
+assert.match(coreRelease, /\.\/mobile \.\/appnative/);
+assert.match(coreRelease, /META-INF\/LICENSE-apksig-go\.txt/);
+assert.match(coreRelease, /META-INF\/NOTICE-apksig-go\.txt/);
+assert.match(runtimeCoreRelease, /-o \$Output `\s*\.\/mobile/);
+assert.doesNotMatch(runtimeCoreRelease, /appnative|apksig/i);
+assert.match(apkSignerCli, /appnative\.SignApk/);
+assert.doesNotMatch(apkSignerCli, /flags\.(?:Bool|String)\("align"/);
+assert.doesNotMatch(apkSignerCli, /flags\.(?:Bool|String)\("v3/);
+assert.match(apkSignerBridge, /Align:\s+false/);
 assert.match(release, /-SkipSdkGeneration/);
 assert.match(windowsRelease, /pubspec\.yaml version must use MAJOR\.MINOR\.PATCH\+BUILD/);
 assert.match(windowsRelease, /\[switch\]\$SkipSdkGeneration/);

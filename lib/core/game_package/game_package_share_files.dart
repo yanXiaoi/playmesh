@@ -3,18 +3,38 @@ import 'dart:math';
 
 import '../../models/game_summary.dart';
 
-String gamePackageShareFileName(GameSummary game) {
-  var name = game.name
+String gamePackageFileName({required String name, required String version}) {
+  final safeName = _packageFileNameComponent(
+    name,
+    fallback: 'game',
+    maxRunes: 80,
+  );
+  final safeVersion = _packageFileNameComponent(
+    version,
+    fallback: 'unknown',
+    maxRunes: 64,
+  );
+  return '$safeName-v$safeVersion.zip';
+}
+
+String gamePackageShareFileName(GameSummary game) =>
+    gamePackageFileName(name: game.name, version: game.version);
+
+String _packageFileNameComponent(
+  String value, {
+  required String fallback,
+  required int maxRunes,
+}) {
+  var safe = value
       .trim()
       .replaceAll(RegExp(r'[<>:"/\\|?*\u0000-\u001f]'), '_')
       .replaceAll(RegExp(r'[. ]+$'), '');
-  if (name.isEmpty) name = 'game';
-  if (name.runes.length > 80) {
-    name = String.fromCharCodes(name.runes.take(80));
-    name = name.replaceAll(RegExp(r'[. ]+$'), '');
+  if (safe.isEmpty) safe = fallback;
+  if (safe.runes.length > maxRunes) {
+    safe = String.fromCharCodes(safe.runes.take(maxRunes));
+    safe = safe.replaceAll(RegExp(r'[. ]+$'), '');
   }
-  if (name.isEmpty) name = 'game';
-  return '$name-v${game.version}.zip';
+  return safe.isEmpty ? fallback : safe;
 }
 
 final class GamePackageShareFiles {

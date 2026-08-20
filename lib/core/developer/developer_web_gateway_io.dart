@@ -12,6 +12,7 @@ import '../../models/game_capabilities.dart';
 import '../../models/game_manifest.dart';
 import '../../models/game_summary.dart';
 import '../../models/local_game_entry.dart';
+import '../game_package/game_package_share_files.dart';
 import '../game_package/game_package_transfer_service.dart';
 import '../game_package/game_web_resource_source.dart';
 import '../game_sdk/sdk_feature_registry.dart';

@@ -1,14 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart' hide XFile;
 
 import '../../models/game_summary.dart';
 import '../../core/game_package/game_package_icon.dart';
-import '../../core/game_package/game_package_share_files.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/storage/game_storage_service.dart';
 import '../../ui/game_tags.dart';
@@ -16,43 +12,14 @@ import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
 
 typedef GameDelete = Future<void> Function(GameSummary game);
-typedef GamePackageExport =
-    Future<void> Function(GameSummary game, String destinationPath);
-
-String gamePackageExportFileName(GameSummary game) {
-  return gamePackageShareFileName(game);
-}
-
-Future<GamePackageShareFiles>? _mobileShareFiles;
-
-Future<GamePackageShareFiles> _mobileGamePackageShareFiles() {
-  return _mobileShareFiles ??= getTemporaryDirectory().then(
-    (directory) => GamePackageShareFiles(temporaryRoot: directory),
-  );
-}
-
-Future<void> cleanupStaleGamePackageExport() async {
-  if (!Platform.isAndroid) return;
-  try {
-    await (await _mobileGamePackageShareFiles()).cleanup();
-  } on Object {
-    // 启动时的清理采用尽力而为策略；下次导出会在写入前再次清理。
-  }
-}
 
 class GameDetailPage extends StatelessWidget {
-  const GameDetailPage({
-    super.key,
-    required this.game,
-    required this.onDelete,
-    this.onExport,
-  });
+  const GameDetailPage({super.key, required this.game, required this.onDelete});
 
   static const routeName = '/game-details';
 
   final GameSummary game;
   final GameDelete onDelete;
-  final GamePackageExport? onExport;
 
   @override
   Widget build(BuildContext context) {
@@ -93,17 +60,6 @@ class GameDetailPage extends StatelessWidget {
                             const SizedBox(height: 18),
                             _ManifestFacts(game: game),
                             const SizedBox(height: 12),
-                            if (onExport != null)
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: TextButton.icon(
-                                  onPressed: () => _exportGame(context),
-                                  icon: const Icon(Icons.download_outlined),
-                                  label: Text(
-                                    context.tr('game.export_package'),
-                                  ),
-                                ),
-                              ),
                             Align(
                               alignment: Alignment.centerLeft,
                               child: TextButton.icon(
@@ -195,96 +151,6 @@ class GameDetailPage extends StatelessWidget {
           SnackBar(
             content: Text(
               context.tr('game.delete_failed', arguments: {'error': error}),
-            ),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _exportGame(BuildContext context) async {
-    final suggestedName = gamePackageExportFileName(game);
-    if (Platform.isAndroid) {
-      final exportSubject = context.tr(
-        'game.export_subject',
-        arguments: {'name': game.name},
-      );
-      final exportText = context.tr(
-        'game.export_text',
-        arguments: {'name': game.name, 'version': game.version},
-      );
-      File? destination;
-      GamePackageShareFiles? shareFiles;
-      try {
-        shareFiles = await _mobileGamePackageShareFiles();
-        destination = await shareFiles.create(game);
-        await onExport!(game, destination.path);
-        await SharePlus.instance.share(
-          ShareParams(
-            files: [XFile(destination.path, mimeType: 'application/zip')],
-            subject: exportSubject,
-            text: exportText,
-            fileNameOverrides: [suggestedName],
-          ),
-        );
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(context.tr('game.export_share_ready'))),
-          );
-        }
-      } on Object catch (error) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                context.tr('game.export_failed', arguments: {'error': error}),
-              ),
-            ),
-          );
-        }
-      } finally {
-        try {
-          if (destination != null && shareFiles != null) {
-            // Android 分享面板可能在接收方打开 URI 前返回。先释放租约，
-            // 让下次分享或 App 启动时移除过期文件，避免在接收方使用期间删除。
-            await shareFiles.complete(destination, deleteNow: false);
-          }
-        } on Object {
-          // 下次启动或分享时会重试清理，且不掩盖分享错误。
-        }
-      }
-      return;
-    }
-    final location = await getSaveLocation(
-      suggestedName: suggestedName,
-      acceptedTypeGroups: [
-        XTypeGroup(
-          label: context.tr('library.package_type'),
-          extensions: const ['zip'],
-        ),
-      ],
-    );
-    if (location == null || !context.mounted) return;
-    try {
-      await onExport!(game, location.path);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr(
-                'game.exported_to',
-                arguments: {'path': location.path},
-              ),
-            ),
-          ),
-        );
-      }
-    } on Object catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr('game.export_failed', arguments: {'error': error}),
             ),
           ),
         );

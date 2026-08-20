@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
@@ -5,6 +6,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
 
+import '../game_package/game_package_share_files.dart';
 import 'developer_native_file_save.dart';
 import 'developer_native_file_save_service_contract.dart';
 
@@ -53,22 +55,35 @@ final class DeveloperNativeFileSaveServiceIo
     required Uri workspaceUri,
     Rect? sharePositionOrigin,
   }) async {
-    if (message.kind != DeveloperNativeFileSaveMessageKind.ready ||
+    final staged = message.kind == DeveloperNativeFileSaveMessageKind.ready;
+    if ((!staged &&
+            message.kind != DeveloperNativeFileSaveMessageKind.download) ||
         message.downloadPath == null ||
-        message.filename == null ||
         message.mimeType == null ||
-        message.size == null) {
-      throw const FormatException('原生保存消息不是可下载的 ready 消息');
+        (staged && (message.filename == null || message.size == null))) {
+      throw const FormatException('原生保存消息不是可下载消息');
     }
     final transferUri = workspaceUri.resolve(message.downloadPath!);
-    _validateTransferUri(workspaceUri, transferUri);
+    if (staged) {
+      _validateTransferUri(workspaceUri, transferUri);
+    } else {
+      _validateProjectPackageUri(workspaceUri, transferUri);
+    }
     final token = workspaceUri.queryParameters['token']?.trim() ?? '';
     if (token.isEmpty) throw const FormatException('开发者会话 Token 缺失');
+    final filename = staged
+        ? message.filename!
+        : await _projectPackageFilename(
+            workspaceUri: workspaceUri,
+            transferUri: transferUri,
+            token: token,
+          );
 
     try {
       if (Platform.isAndroid || Platform.isIOS) {
         return await _shareOnMobile(
           message: message,
+          filename: filename,
           transferUri: transferUri,
           token: token,
           sharePositionOrigin: sharePositionOrigin,
@@ -76,21 +91,23 @@ final class DeveloperNativeFileSaveServiceIo
       }
       return await _saveOnDesktop(
         message: message,
+        filename: filename,
         transferUri: transferUri,
         token: token,
       );
     } finally {
-      await _release(transferUri, token);
+      if (staged) await _release(transferUri, token);
     }
   }
 
   Future<DeveloperNativeFileSaveResult> _saveOnDesktop({
     required DeveloperNativeFileSaveMessage message,
+    required String filename,
     required Uri transferUri,
     required String token,
   }) async {
-    final extension = _filenameExtension(message.filename!);
-    final location = await _saveLocationPicker(message.filename!, [
+    final extension = _filenameExtension(filename);
+    final location = await _saveLocationPicker(filename, [
       XTypeGroup(label: 'File', extensions: [extension]),
     ]);
     if (location == null) {
@@ -101,14 +118,15 @@ final class DeveloperNativeFileSaveServiceIo
 
     final destination = File(location.path);
     final partial = File(
-      '${destination.path}.playmesh-part-${message.transferId}',
+      '${destination.path}.playmesh-part-'
+      '${message.transferId ?? message.requestId}',
     );
     try {
       await _download(
         transferUri,
         token,
         partial,
-        expectedLength: message.size!,
+        expectedLength: message.size,
       );
       if (await destination.exists()) await destination.delete();
       await partial.rename(destination.path);
@@ -124,6 +142,7 @@ final class DeveloperNativeFileSaveServiceIo
 
   Future<DeveloperNativeFileSaveResult> _shareOnMobile({
     required DeveloperNativeFileSaveMessage message,
+    required String filename,
     required Uri transferUri,
     required String token,
     required Rect? sharePositionOrigin,
@@ -136,18 +155,18 @@ final class DeveloperNativeFileSaveServiceIo
     await _cleanupStaleMobileFiles(root);
     final destination = File(
       '${root.path}${Platform.pathSeparator}'
-      '${message.transferId}-${message.filename}',
+      '${message.transferId ?? message.requestId}-$filename',
     );
     try {
       await _download(
         transferUri,
         token,
         destination,
-        expectedLength: message.size!,
+        expectedLength: message.size,
       );
       final disposition = await _shareFile(
         destination,
-        message.filename!,
+        filename,
         message.mimeType!,
         sharePositionOrigin,
       );
@@ -157,8 +176,8 @@ final class DeveloperNativeFileSaveServiceIo
           DeveloperNativeFileSaveOutcome.cancelled,
         );
       }
-      // The receiver can open the content URI after the share call returns.
-      // Retain it briefly; the next export removes stale files.
+      // 接收方可能在分享调用返回后才打开内容 URI，因此短暂保留文件，
+      // 并在下一次导出时移除过期文件。
       return DeveloperNativeFileSaveResult(
         DeveloperNativeFileSaveOutcome.shared,
         path: destination.path,
@@ -169,11 +188,56 @@ final class DeveloperNativeFileSaveServiceIo
     }
   }
 
+  Future<String> _projectPackageFilename({
+    required Uri workspaceUri,
+    required Uri transferUri,
+    required String token,
+  }) async {
+    final packageUri = parseDeveloperProjectPackageDownloadPath(
+      transferUri.path,
+    );
+    if (packageUri == null) {
+      throw const FormatException('项目包下载地址无效');
+    }
+    final projectId = packageUri.pathSegments[3];
+    final projectsUri = workspaceUri.resolve('/dev/api/projects');
+    final client = _httpClientFactory();
+    try {
+      final request = await client.getUrl(projectsUri);
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      final response = await request.close();
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        throw HttpException(
+          '读取项目导出文件名失败（HTTP ${response.statusCode}）',
+          uri: projectsUri,
+        );
+      }
+      final decoded = jsonDecode(await utf8.decoder.bind(response).join());
+      if (decoded is! Map || decoded['projects'] is! List) {
+        throw const FormatException('项目列表响应格式无效');
+      }
+      Map<Object?, Object?>? selected;
+      for (final candidate in decoded['projects'] as List) {
+        if (candidate is Map && candidate['id'] == projectId) {
+          selected = candidate.cast<Object?, Object?>();
+          break;
+        }
+      }
+      if (selected == null) throw const FormatException('项目列表中不存在待导出项目');
+      final name = selected['name']?.toString() ?? '';
+      final version = selected['version']?.toString() ?? '';
+      return gamePackageFileName(name: name, version: version);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<void> _download(
     Uri transferUri,
     String token,
     File destination, {
-    required int expectedLength,
+    required int? expectedLength,
   }) async {
     final client = _httpClientFactory();
     RandomAccessFile? output;
@@ -188,21 +252,25 @@ final class DeveloperNativeFileSaveServiceIo
           uri: transferUri,
         );
       }
-      if (response.contentLength >= 0 &&
+      if (expectedLength != null &&
+          response.contentLength >= 0 &&
           response.contentLength != expectedLength) {
         await response.drain<void>();
         throw const FormatException('原生保存文件长度与暂存回执不一致');
       }
+      final verifiedLength =
+          expectedLength ??
+          (response.contentLength >= 0 ? response.contentLength : null);
       output = await destination.open(mode: FileMode.writeOnly);
       var received = 0;
       await for (final chunk in response) {
         received += chunk.length;
-        if (received > expectedLength) {
+        if (verifiedLength != null && received > verifiedLength) {
           throw const FormatException('原生保存下载超过暂存回执长度');
         }
         await output.writeFrom(chunk);
       }
-      if (received != expectedLength) {
+      if (verifiedLength != null && received != verifiedLength) {
         throw const FormatException('原生保存下载未完整接收');
       }
       await output.flush();
@@ -213,7 +281,7 @@ final class DeveloperNativeFileSaveServiceIo
         try {
           await output.close();
         } on Object {
-          // Preserve the original transfer error.
+          // 保留原始传输错误。
         }
       }
       client.close(force: true);
@@ -228,7 +296,7 @@ final class DeveloperNativeFileSaveServiceIo
       final response = await request.close();
       await response.drain<void>();
     } on Object {
-      // Gateway TTL and session shutdown are the final cleanup backstops.
+      // Gateway TTL 与会话关闭仍是最终清理兜底。
     } finally {
       client.close(force: true);
     }
@@ -243,7 +311,7 @@ final class DeveloperNativeFileSaveServiceIo
           await entity.delete();
         }
       } on Object {
-        // Best effort: a receiving app can still have the content URI open.
+        // 尽力清理：接收方此时仍可能持有内容 URI。
       }
     }
   }
@@ -295,5 +363,16 @@ void _validateTransferUri(Uri workspaceUri, Uri transferUri) {
       transferUri.hasQuery ||
       transferUri.hasFragment) {
     throw const FormatException('原生保存下载地址不属于当前开发者网关');
+  }
+}
+
+void _validateProjectPackageUri(Uri workspaceUri, Uri packageUri) {
+  if (packageUri.scheme != workspaceUri.scheme ||
+      packageUri.host != workspaceUri.host ||
+      packageUri.port != workspaceUri.port ||
+      parseDeveloperProjectPackageDownloadPath(packageUri.path) == null ||
+      packageUri.hasQuery ||
+      packageUri.hasFragment) {
+    throw const FormatException('项目包下载地址不属于当前开发者网关');
   }
 }

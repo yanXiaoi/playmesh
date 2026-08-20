@@ -175,6 +175,11 @@ if ($buildAndroid) {
 }
 
 if ($buildWindows) {
+  & (Join-Path $PSScriptRoot 'build_go_core.ps1') -Target windows
+  if ($LASTEXITCODE -ne 0) {
+    throw "Windows Go dependencies build failed: $LASTEXITCODE"
+  }
+
   & (Join-Path $PSScriptRoot 'build_windows_release_ninja.ps1') `
     -ReleaseAssetSnapshot $releaseAssetSnapshot `
     -SkipReleaseAssetPreflight `
@@ -184,6 +189,22 @@ if ($buildWindows) {
   }
 
   $windowsBundle = Join-Path $repoRoot 'build\windows\x64-ninja\runner\Release'
+  $apkSignerSidecar = Join-Path $repoRoot 'build\go-core\windows\playmesh-apksign.exe'
+  if (-not (Test-Path -LiteralPath $apkSignerSidecar -PathType Leaf)) {
+    throw "Windows APK signer sidecar is missing: $apkSignerSidecar"
+  }
+  Copy-Item -LiteralPath $apkSignerSidecar `
+    -Destination (Join-Path $windowsBundle 'playmesh-apksign.exe') `
+    -Force
+  foreach ($noticeName in @('APKSIG-GO-LICENSE.txt', 'APKSIG-GO-NOTICE.txt')) {
+    $noticeSource = Join-Path $repoRoot "build\go-core\windows\$noticeName"
+    if (-not (Test-Path -LiteralPath $noticeSource -PathType Leaf)) {
+      throw "Windows APK signer attribution is missing: $noticeSource"
+    }
+    Copy-Item -LiteralPath $noticeSource `
+      -Destination (Join-Path $windowsBundle $noticeName) `
+      -Force
+  }
   $windowsArtifact = Join-Path $releaseDir "$artifactPrefix-windows-x64-portable.zip"
   Compress-Archive -Path (Join-Path $windowsBundle '*') `
     -DestinationPath $windowsArtifact `
@@ -198,6 +219,9 @@ if ($buildWindows) {
         'playmesh.exe',
         'playmesh-core.exe',
         'playmesh-cli.exe',
+        'playmesh-apksign.exe',
+        'APKSIG-GO-LICENSE.txt',
+        'APKSIG-GO-NOTICE.txt',
         'LICENSE',
         'flutter_windows.dll',
         'WebView2Loader.dll',

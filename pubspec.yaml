@@ -72,6 +72,7 @@ flutter:
     - assets/playmesh-library/public/developer/contracts/
     - assets/playmesh-library/public/developer/contracts/schemas/
     - assets/playmesh-library/public/GDevelop/playmesh/catalog-lock.json
+    - assets/playmesh-library/public/GDevelop/playmesh/extensions/
     - assets/app/App.json
     - assets/playmesh-localization/
     - assets/playmesh-localization/locales/zh-CN/

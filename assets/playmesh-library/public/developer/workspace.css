@@ -977,6 +977,99 @@ button,
   border-radius: 50%;
 }
 
+.export-dialog {
+  width: min(620px, calc(100vw - 32px));
+  height: auto;
+  max-height: calc(100vh - 32px);
+  grid-template-rows: 44px auto;
+}
+
+.export-body {
+  min-height: 0;
+  padding: 18px;
+  overflow: auto;
+}
+
+.export-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.export-option {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  justify-items: stretch;
+  width: 100%;
+  height: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--text);
+  text-align: left;
+}
+
+.export-option:hover:not(:disabled) {
+  border-color: var(--violet);
+  background: var(--selected);
+}
+
+.export-option > .lucide {
+  grid-column: 1;
+  grid-row: 1;
+  box-sizing: border-box;
+  width: 38px;
+  height: 38px;
+  padding: 8px;
+  justify-self: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--violet) 12%, transparent);
+  color: var(--violet);
+}
+
+.export-option + .export-option > .lucide {
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  color: var(--blue);
+}
+
+.export-option strong {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.export-option.processing:disabled {
+  opacity: 1;
+  cursor: wait;
+}
+
+.export-option.processing::before {
+  content: "";
+  grid-column: 1;
+  grid-row: 1;
+  width: 20px;
+  height: 20px;
+  justify-self: center;
+  border: 2px solid color-mix(in srgb, var(--violet) 32%, transparent);
+  border-top-color: var(--violet);
+  border-radius: 50%;
+  animation: workspace-export-processing 720ms linear infinite;
+}
+
+.export-option.processing > .lucide {
+  visibility: hidden;
+}
+
+@keyframes workspace-export-processing {
+  to { transform: rotate(360deg); }
+}
+
 .publish-dialog {
   width: min(680px, calc(100vw - 32px));
   height: min(720px, calc(100vh - 32px));
@@ -1138,6 +1231,19 @@ button,
 }
 
 @media (max-width: 720px) {
+  .export-dialog {
+    width: 100vw;
+    max-height: 100vh;
+  }
+
+  .export-body {
+    padding: 14px;
+  }
+
+  .export-options {
+    grid-template-columns: 1fr;
+  }
+
   .publish-dialog {
     width: 100vw;
     height: 100vh;

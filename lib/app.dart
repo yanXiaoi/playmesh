@@ -181,7 +181,6 @@ class _PlaymeshAppState extends State<PlaymeshApp>
               : _gameLibrary.refresh()
         : SynchronousFuture(_gameLibrary.cachedGames);
     _developerRuns = DeveloperRunController(onLaunch: _launchDeveloperProject);
-    unawaited(cleanupStaleGamePackageExport());
     // Android 嵌入层目前负责 ACTION_VIEW/打开文件桥接。
     if (!kIsWeb && Platform.isAndroid) {
       final incomingFiles = IncomingFileService();
@@ -651,11 +650,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
 
           return MaterialPageRoute<String>(
             settings: settings,
-            builder: (_) => GameDetailPage(
-              game: game,
-              onDelete: _deleteGame,
-              onExport: _exportGame,
-            ),
+            builder: (_) => GameDetailPage(game: game, onDelete: _deleteGame),
           );
         }
 
@@ -818,10 +813,6 @@ class _PlaymeshAppState extends State<PlaymeshApp>
     setState(() {
       _games = _gameLibrary.refresh();
     });
-  }
-
-  Future<void> _exportGame(GameSummary game, String destinationPath) async {
-    await _packageTransfer.exportPackage(game, File(destinationPath));
   }
 
   Future<void> _handleIncomingFile(IncomingFile file) async {

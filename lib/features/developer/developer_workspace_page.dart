@@ -315,9 +315,9 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
       return;
     }
     final text = result.outcome == DeveloperNativeFileSaveOutcome.shared
-        ? context.tr('game.export_share_ready')
+        ? context.tr('developer.export_share_ready')
         : context.tr(
-            'game.exported_to',
+            'developer.exported_to',
             arguments: {'path': result.path ?? message.filename ?? ''},
           );
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -337,7 +337,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          context.tr('game.export_failed', arguments: {'error': error}),
+          context.tr('developer.export_failed', arguments: {'error': error}),
         ),
       ),
     );

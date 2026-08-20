@@ -5,6 +5,7 @@ import {
   fetchCatalogArtifact,
   loadCatalogJson,
   loadRootCatalogManifest,
+  loadSameOriginJson,
   parseCatalogJsonArtifact,
   validateCatalogFeatureManifest,
   validateArtifactUrl,
@@ -39,6 +40,13 @@ type RawExtensionTier =
   | 'experimental'
   | 'reviewed'
   | 'installed';
+
+const LOCAL_EXTENSION_PUBLIC_BASE_PATH =
+  '/playmesh/GDevelop/playmesh/extensions/';
+const LOCAL_EXTENSION_INDEX_PATH = `${LOCAL_EXTENSION_PUBLIC_BASE_PATH}index.json`;
+const LOCAL_EXTENSION_INDEX_MAXIMUM_BYTES = 256 * 1024;
+const LOCAL_EXTENSION_MAXIMUM_BYTES = 8 * 1024 * 1024;
+const LOCAL_EXTENSION_MAXIMUM_COUNT = 64;
 
 export type PlaymeshCatalogJsonValue =
   | null
@@ -90,6 +98,17 @@ type PlaymeshExtensionsIndex = {|
     views: PlaymeshBehaviorViews,
   |},
   artifacts: { [string]: PlaymeshCatalogArtifact },
+|};
+
+type LocalExtensionIndexEntry = {|
+  path: string,
+  name?: string,
+|};
+
+type LocalPlaymeshExtensionStore = {|
+  extension: PlaymeshCatalogJsonObject,
+  header: IndexedExtensionHeader,
+  sourcePath: string,
 |};
 
 export type PlaymeshExampleFile = {|
@@ -265,7 +284,15 @@ const decodeJsonValue = (
   }
   const result: PlaymeshCatalogJsonObject = {};
   Object.keys(record).forEach((key: string) => {
-    result[key] = decodeJsonValue(record[key], depth + 1);
+    // Define JSON keys as own data properties so a literal "__proto__" key
+    // cannot invoke Object.prototype's setter. Legitimate constructor or
+    // prototype field names remain representable for official extensions.
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: decodeJsonValue(record[key], depth + 1),
+    });
   });
   return result;
 };
@@ -412,6 +439,471 @@ const decodeOptionalObjects = (
         decodeOptionalEventFunctions(record.eventsFunctions) || [],
     };
   });
+};
+
+const readOptionalLocalString = (
+  record: MixedRecord,
+  key: string,
+  fallback: string = ''
+): string => {
+  const value = record[key];
+  if (value === undefined) return fallback;
+  if (typeof value !== 'string') {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      `本地 Playmesh 扩展字段 ${key} 无效。`
+    );
+  }
+  return value;
+};
+
+const readLocalDescription = (value: mixed): string => {
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+    return value.join('\n');
+  }
+  throw new PlaymeshCatalogError(
+    'invalid_extension',
+    '本地 Playmesh 扩展描述无效。'
+  );
+};
+
+const normalizeLocalTags = (value: mixed): Array<string> => {
+  const tags =
+    typeof value === 'string'
+      ? value.split(',')
+      : Array.isArray(value)
+      ? value
+      : value === undefined
+      ? []
+      : null;
+  if (!tags || tags.some(tag => typeof tag !== 'string')) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地 Playmesh 扩展标签无效。'
+    );
+  }
+  return Array.from(
+    new Set(
+      tags
+        .map(tag => tag.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+};
+
+const readLocalRecordArray = (
+  value: mixed,
+  label: string
+): Array<MixedRecord> => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new PlaymeshCatalogError('invalid_extension', `${label}无效。`);
+  }
+  return value.map(item => requireRecord(item, `${label}无效。`));
+};
+
+const filterLocalPublicRecords = (
+  value: mixed,
+  label: string
+): Array<MixedRecord> =>
+  readLocalRecordArray(value, label).filter(record => {
+    if (record.private !== undefined && typeof record.private !== 'boolean') {
+      throw new PlaymeshCatalogError(
+        'invalid_extension',
+        `${label} private 标记无效。`
+      );
+    }
+    return record.private !== true;
+  });
+
+const readLocalFunctionDescription = (record: MixedRecord): string => {
+  const value = record.description;
+  if (value === undefined) return '';
+  if (typeof value !== 'string') {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地 Playmesh 扩展函数描述无效。'
+    );
+  }
+  return value;
+};
+
+const formatLocalEventFunction = (
+  allFunctions: Array<MixedRecord>,
+  eventsFunction: MixedRecord
+): IndexedEventFunction => {
+  const name = requireString(
+    eventsFunction,
+    'name',
+    '本地 Playmesh 扩展函数名缺失。'
+  );
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地 Playmesh 扩展函数名不安全。'
+    );
+  }
+  const functionType = decodeEventFunctionType(eventsFunction.functionType);
+  if (functionType === 'ActionWithOperator') {
+    const getterName = readOptionalLocalString(eventsFunction, 'getterName');
+    const getter = allFunctions.find(candidate => candidate.name === getterName);
+    const fullName = getter
+      ? readOptionalLocalString(getter, 'fullName', name)
+      : readOptionalLocalString(eventsFunction, 'fullName', name);
+    return {
+      name,
+      fullName,
+      description: `Change ${
+        getter
+          ? readLocalFunctionDescription(getter) || fullName
+          : readLocalFunctionDescription(eventsFunction) || fullName
+      }`,
+      functionType: 'Action',
+    };
+  }
+  const fullName = requireString(
+    eventsFunction,
+    'fullName',
+    '本地 Playmesh 扩展函数全名缺失。'
+  );
+  const description = readLocalFunctionDescription(eventsFunction);
+  if (functionType === 'ExpressionAndCondition') {
+    return {
+      name,
+      fullName,
+      description: `Compare ${description}`,
+      functionType: 'Condition',
+    };
+  }
+  return { name, fullName, description, functionType };
+};
+
+const formatLocalFunctions = (value: mixed): Array<IndexedEventFunction> => {
+  const functions = filterLocalPublicRecords(
+    value,
+    '本地 Playmesh 扩展函数列表'
+  );
+  return functions
+    .filter(
+      eventsFunction =>
+        (typeof eventsFunction.fullName === 'string' &&
+          eventsFunction.fullName.length > 0) ||
+        eventsFunction.functionType === 'ActionWithOperator'
+    )
+    .map(eventsFunction =>
+      formatLocalEventFunction(functions, eventsFunction)
+    );
+};
+
+const sanitizeLocalInlineIcon = (extension: MixedRecord): string => {
+  for (const key of ['previewIconUrl', 'iconUrl']) {
+    const candidate = extension[key];
+    if (
+      typeof candidate === 'string' &&
+      /^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(candidate)
+    ) {
+      return candidate;
+    }
+  }
+  return '';
+};
+
+const decodeLocalExtensionIndex = (
+  value: mixed
+): Array<LocalExtensionIndexEntry> => {
+  const decodedIndex = decodeJsonValue(value);
+  const record = requireRecord(
+    decodedIndex,
+    '本地扩展索引不是 JSON 对象。'
+  );
+  const keys = Object.keys(record).sort();
+  if (
+    record.schemaVersion !== 1 ||
+    keys.length !== 2 ||
+    keys[0] !== 'extensions' ||
+    keys[1] !== 'schemaVersion' ||
+    !Array.isArray(record.extensions) ||
+    record.extensions.length < 1 ||
+    record.extensions.length > LOCAL_EXTENSION_MAXIMUM_COUNT
+  ) {
+    throw new PlaymeshCatalogError(
+      'invalid_catalog',
+      '本地扩展索引结构无效。'
+    );
+  }
+  const seenPaths = new Set();
+  const declaredNames = new Set();
+  return record.extensions.map((value: mixed) => {
+    const entry = requireRecord(value, '本地扩展索引项无效。');
+    const entryKeys = Object.keys(entry).sort();
+    if (
+      entryKeys.length < 1 ||
+      entryKeys.length > 2 ||
+      !entryKeys.includes('path') ||
+      entryKeys.some(key => key !== 'name' && key !== 'path')
+    ) {
+      throw new PlaymeshCatalogError(
+        'invalid_catalog',
+        '本地扩展索引项字段无效。'
+      );
+    }
+    const sourcePath = requireString(
+      entry,
+      'path',
+      '本地扩展索引路径缺失。'
+    );
+    if (
+      !/^[A-Za-z][A-Za-z0-9_.-]*\.json$/.test(sourcePath) ||
+      sourcePath.toLowerCase() === 'index.json' ||
+      sourcePath.includes('/') ||
+      sourcePath.includes('\\') ||
+      sourcePath === '.' ||
+      sourcePath === '..'
+    ) {
+      throw new PlaymeshCatalogError(
+        'invalid_catalog',
+        '本地扩展索引路径不安全。'
+      );
+    }
+    const foldedPath = sourcePath.toLowerCase();
+    if (seenPaths.has(foldedPath)) {
+      throw new PlaymeshCatalogError(
+        'invalid_catalog',
+        '本地扩展索引路径重复。'
+      );
+    }
+    seenPaths.add(foldedPath);
+    const declaredName = entry.name;
+    if (
+      declaredName !== undefined &&
+      (typeof declaredName !== 'string' ||
+        !/^[A-Za-z][A-Za-z0-9_]*$/.test(declaredName))
+    ) {
+      throw new PlaymeshCatalogError(
+        'invalid_catalog',
+        '本地扩展索引名称无效。'
+      );
+    }
+    if (typeof declaredName === 'string') {
+      const foldedName = declaredName.toLowerCase();
+      if (declaredNames.has(foldedName)) {
+        throw new PlaymeshCatalogError(
+          'invalid_catalog',
+          '本地扩展索引名称重复。'
+        );
+      }
+      declaredNames.add(foldedName);
+    }
+    return {
+      path: sourcePath,
+      ...(typeof declaredName === 'string' ? { name: declaredName } : {}),
+    };
+  });
+};
+
+const decodeLocalPlaymeshExtension = (
+  value: mixed,
+  expectedName?: string
+): PlaymeshCatalogJsonObject => {
+  const decodedExtension = decodeJsonValue(value);
+  const record = asMixedRecord(decodedExtension);
+  const name = record ? record.name : null;
+  if (
+    typeof name !== 'string' ||
+    !/^[A-Za-z][A-Za-z0-9_]*$/.test(name) ||
+    (expectedName !== undefined && name !== expectedName)
+  ) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地扩展正文名称无效或与索引不一致。'
+    );
+  }
+  const version = requireString(
+    record,
+    'version',
+    '本地 Playmesh 扩展版本缺失。'
+  );
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地 Playmesh 扩展版本无效。'
+    );
+  }
+  readOptionalLocalString(record, 'gdevelopVersion');
+  if (!Array.isArray(record.eventsFunctions)) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地 Playmesh 扩展函数列表无效。'
+    );
+  }
+  readLocalRecordArray(record.eventsBasedBehaviors, '本地 Playmesh 扩展行为列表');
+  readLocalRecordArray(record.eventsBasedObjects, '本地 Playmesh 扩展对象列表');
+  return decodedExtension;
+};
+
+const createLocalPlaymeshExtensionHeader = (
+  extension: PlaymeshCatalogJsonObject,
+  sourcePath: string
+): IndexedExtensionHeader => {
+  const record = requireRecord(
+    extension,
+    '本地 Playmesh 扩展正文不是 JSON 对象。'
+  );
+  const publicFunctions = formatLocalFunctions(record.eventsFunctions);
+  const publicBehaviors = filterLocalPublicRecords(
+    record.eventsBasedBehaviors,
+    '本地 Playmesh 扩展行为列表'
+  );
+  const publicObjects = filterLocalPublicRecords(
+    record.eventsBasedObjects,
+    '本地 Playmesh 扩展对象列表'
+  );
+  const authorIds = record.authorIds;
+  if (
+    authorIds !== undefined &&
+    (!Array.isArray(authorIds) ||
+      authorIds.some(authorId => typeof authorId !== 'string'))
+  ) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地 Playmesh 扩展作者列表无效。'
+    );
+  }
+  const changelog = readLocalRecordArray(
+    record.changelog,
+    '本地 Playmesh 扩展变更记录'
+  ).map(entry => {
+    const breaking = entry.breaking;
+    if (
+      breaking !== undefined &&
+      typeof breaking !== 'string' &&
+      (!Array.isArray(breaking) ||
+        breaking.some(item => typeof item !== 'string'))
+    ) {
+      throw new PlaymeshCatalogError(
+        'invalid_extension',
+        '本地 Playmesh 扩展变更说明无效。'
+      );
+    }
+    return {
+      version: requireString(
+        entry,
+        'version',
+        '本地 Playmesh 扩展变更版本缺失。'
+      ),
+      breaking: Array.isArray(breaking) ? breaking.join('\n') : breaking,
+    };
+  });
+  const requiredExtensions = readLocalRecordArray(
+    record.requiredExtensions,
+    '本地 Playmesh 扩展依赖列表'
+  ).map(dependency => ({
+    extensionName: requireString(
+      dependency,
+      'extensionName',
+      '本地 Playmesh 扩展依赖名称缺失。'
+    ),
+    extensionVersion: requireString(
+      dependency,
+      'extensionVersion',
+      '本地 Playmesh 扩展依赖版本缺失。'
+    ),
+  }));
+  const previewIconUrl = sanitizeLocalInlineIcon(record);
+  const extensionName = requireString(
+    record,
+    'name',
+    '本地 Playmesh 扩展名称缺失。'
+  );
+  const sourceUrl = `${LOCAL_EXTENSION_PUBLIC_BASE_PATH}${sourcePath}`;
+  return {
+    tier: 'reviewed',
+    authorIds: authorIds || [],
+    extensionNamespace: readOptionalLocalString(record, 'extensionNamespace'),
+    fullName: readOptionalLocalString(
+      record,
+      'fullName',
+      extensionName
+    ),
+    name: extensionName,
+    version: requireString(
+      record,
+      'version',
+      '本地 Playmesh 扩展版本缺失。'
+    ),
+    gdevelopVersion: readOptionalLocalString(record, 'gdevelopVersion'),
+    url: sourceUrl,
+    headerUrl: sourceUrl,
+    tags: normalizeLocalTags(record.tags),
+    category: readOptionalLocalString(record, 'category', 'PlayMesh'),
+    previewIconUrl,
+    changelog,
+    requiredExtensions,
+    shortDescription: readOptionalLocalString(record, 'shortDescription'),
+    description: readLocalDescription(record.description),
+    iconUrl: previewIconUrl,
+    eventsBasedBehaviorsCount: publicBehaviors.length,
+    eventsFunctionsCount: publicFunctions.length,
+    helpPath: readOptionalLocalString(
+      record,
+      'helpPath',
+      `/extensions/${extensionName}`
+    ),
+    artifactId: `playmesh-local-extension:${extensionName}`,
+    eventsBasedBehaviors: publicBehaviors.map(behavior => ({
+      description: readOptionalLocalString(behavior, 'description'),
+      fullName: readOptionalLocalString(
+        behavior,
+        'fullName',
+        requireString(
+          behavior,
+          'name',
+          '本地 Playmesh 扩展行为名缺失。'
+        )
+      ),
+      name: requireString(
+        behavior,
+        'name',
+        '本地 Playmesh 扩展行为名缺失。'
+      ),
+      objectType: requireString(
+        behavior,
+        'objectType',
+        '本地 Playmesh 扩展行为对象类型缺失。'
+      ),
+      eventsFunctions: formatLocalFunctions(behavior.eventsFunctions),
+    })),
+    eventsFunctions: publicFunctions,
+    eventsBasedObjects: publicObjects.map(object => ({
+      description: readOptionalLocalString(object, 'description'),
+      fullName: readOptionalLocalString(
+        object,
+        'fullName',
+        requireString(
+          object,
+          'name',
+          '本地 Playmesh 扩展对象名缺失。'
+        )
+      ),
+      name: requireString(
+        object,
+        'name',
+        '本地 Playmesh 扩展对象名缺失。'
+      ),
+      defaultName: readOptionalLocalString(
+        object,
+        'defaultName',
+        requireString(
+          object,
+          'name',
+          '本地 Playmesh 扩展对象名缺失。'
+        )
+      ),
+      eventsFunctions: formatLocalFunctions(object.eventsFunctions),
+    })),
+  };
 };
 
 const decodeRegistryHeaderBase = (record: MixedRecord): RegistryHeaderBase => {
@@ -810,6 +1302,9 @@ const decodeExamplesIndex = (
 let rootManifestPromise: ?Promise<PlaymeshCatalogManifest> = null;
 let extensionsIndexPromise: ?Promise<PlaymeshExtensionsIndex> = null;
 let examplesIndexPromise: ?Promise<PlaymeshExamplesIndex> = null;
+let localPlaymeshExtensionStoresPromise: ?Promise<
+  Array<LocalPlaymeshExtensionStore>
+> = null;
 
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -819,6 +1314,90 @@ const getManifestUrl = (): URL => {
     throw new PlaymeshCatalogError('invalid_base_url', '当前页面基础地址无效。');
   }
   return new URL('./playmesh/catalog/catalog-manifest.json', baseUri);
+};
+
+const getLocalExtensionPublicUrl = (sourcePath?: string): URL => {
+  const baseUri = document.baseURI;
+  if (typeof baseUri !== 'string' || !baseUri) {
+    throw new PlaymeshCatalogError('invalid_base_url', '当前页面基础地址无效。');
+  }
+  let pageUrl;
+  let extensionUrl;
+  try {
+    pageUrl = new URL(baseUri);
+    extensionUrl = new URL(
+      sourcePath
+        ? `${LOCAL_EXTENSION_PUBLIC_BASE_PATH}${sourcePath}`
+        : LOCAL_EXTENSION_INDEX_PATH,
+      pageUrl
+    );
+  } catch (_) {
+    throw new PlaymeshCatalogError('invalid_base_url', '当前页面基础地址无效。');
+  }
+  if (extensionUrl.origin !== pageUrl.origin) {
+    throw new PlaymeshCatalogError(
+      'invalid_manifest',
+      '本地 Playmesh 扩展必须来自当前内核。'
+    );
+  }
+  return extensionUrl;
+};
+
+const loadLocalPlaymeshExtensionStores = ({
+  signal,
+  force = false,
+}: LoadOptions = {}): Promise<Array<LocalPlaymeshExtensionStore>> => {
+  if (force) localPlaymeshExtensionStoresPromise = null;
+  if (localPlaymeshExtensionStoresPromise) {
+    return localPlaymeshExtensionStoresPromise;
+  }
+  const indexUrl = getLocalExtensionPublicUrl();
+  const nextPromise = loadSameOriginJson({
+    url: indexUrl.href,
+    maximumBytes: LOCAL_EXTENSION_INDEX_MAXIMUM_BYTES,
+    signal,
+  })
+    .then((value: mixed) => decodeLocalExtensionIndex(value))
+    .then(async entries => {
+      const stores = await Promise.all(
+        entries.map(async entry => {
+          const extension = decodeLocalPlaymeshExtension(
+            await loadSameOriginJson({
+              url: getLocalExtensionPublicUrl(entry.path).href,
+              maximumBytes: LOCAL_EXTENSION_MAXIMUM_BYTES,
+              signal,
+            }),
+            entry.name
+          );
+          return {
+            extension,
+            header: createLocalPlaymeshExtensionHeader(
+              extension,
+              entry.path
+            ),
+            sourcePath: entry.path,
+          };
+        })
+      );
+      const names = new Set();
+      stores.forEach(store => {
+        const foldedName = store.header.name.toLowerCase();
+        if (names.has(foldedName)) {
+          throw new PlaymeshCatalogError(
+            'invalid_catalog',
+            '本地扩展正文名称重复。'
+          );
+        }
+        names.add(foldedName);
+      });
+      return stores;
+    })
+    .catch(error => {
+      localPlaymeshExtensionStoresPromise = null;
+      throw error;
+    });
+  localPlaymeshExtensionStoresPromise = nextPromise;
+  return nextPromise;
 };
 
 const loadManifest = ({
@@ -998,22 +1577,198 @@ const createExampleArtifact = ({
   };
 };
 
+const localStoreForName = (
+  stores: Array<LocalPlaymeshExtensionStore>,
+  extensionName: string
+): ?LocalPlaymeshExtensionStore =>
+  stores.find(store => store.header.name === extensionName);
+
+const isExplicitLocalExtensionHeader = (
+  header: ExtensionShortHeader | BehaviorShortHeader | ObjectShortHeader
+): boolean =>
+  typeof header.url === 'string' &&
+  header.url.startsWith(LOCAL_EXTENSION_PUBLIC_BASE_PATH);
+
+const createFreshLocalExtensionHeader = (
+  store: LocalPlaymeshExtensionStore
+): IndexedExtensionHeader =>
+  createLocalPlaymeshExtensionHeader(store.extension, store.sourcePath);
+
+const collectLocalRequiredBehaviorTypes = (
+  extension: MixedRecord,
+  behavior: MixedRecord,
+  collected: Array<string> = []
+): Array<string> => {
+  const extensionName = requireString(
+    extension,
+    'name',
+    '本地扩展名称缺失。'
+  );
+  const behaviors = readLocalRecordArray(
+    extension.eventsBasedBehaviors,
+    '本地扩展行为列表'
+  );
+  for (const descriptor of readLocalRecordArray(
+    behavior.propertyDescriptors,
+    '本地扩展行为属性列表'
+  )) {
+    if (descriptor.type !== 'Behavior') continue;
+    const extraInformation = descriptor.extraInformation;
+    if (
+      !Array.isArray(extraInformation) ||
+      extraInformation.some(value => typeof value !== 'string')
+    ) {
+      throw new PlaymeshCatalogError(
+        'invalid_extension',
+        '本地扩展行为依赖信息无效。'
+      );
+    }
+    const requiredType = extraInformation[0];
+    if (!requiredType || collected.includes(requiredType)) continue;
+    collected.push(requiredType);
+    const ownPrefix = `${extensionName}::`;
+    if (!requiredType.startsWith(ownPrefix)) continue;
+    const requiredBehaviorName = requiredType.slice(ownPrefix.length);
+    const requiredBehavior = behaviors.find(
+      candidate => candidate.name === requiredBehaviorName
+    );
+    if (!requiredBehavior) {
+      throw new PlaymeshCatalogError(
+        'invalid_extension',
+        '本地扩展缺少声明的行为依赖。'
+      );
+    }
+    collectLocalRequiredBehaviorTypes(
+      extension,
+      requiredBehavior,
+      collected
+    );
+  }
+  return collected;
+};
+
+const createLocalBehaviorHeaders = (
+  store: LocalPlaymeshExtensionStore
+): Array<IndexedBehaviorHeader> => {
+  const extension = requireRecord(
+    store.extension,
+    '本地扩展正文不是 JSON 对象。'
+  );
+  const extensionHeader = createFreshLocalExtensionHeader(store);
+  return filterLocalPublicRecords(
+    extension.eventsBasedBehaviors,
+    '本地扩展行为列表'
+  ).map(behavior => {
+    const behaviorName = requireString(
+      behavior,
+      'name',
+      '本地扩展行为名缺失。'
+    );
+    return {
+      tier: 'reviewed',
+      authorIds: [...extensionHeader.authorIds],
+      extensionNamespace: extensionHeader.extensionNamespace,
+      fullName: readOptionalLocalString(
+        behavior,
+        'fullName',
+        behaviorName
+      ),
+      name: behaviorName,
+      version: extensionHeader.version,
+      gdevelopVersion: extensionHeader.gdevelopVersion,
+      url: extensionHeader.url,
+      headerUrl: extensionHeader.headerUrl,
+      tags: [...extensionHeader.tags],
+      category: extensionHeader.category,
+      previewIconUrl:
+        sanitizeLocalInlineIcon(behavior) ||
+        extensionHeader.previewIconUrl,
+      changelog: extensionHeader.changelog
+        ? [...extensionHeader.changelog]
+        : [],
+      requiredExtensions: extensionHeader.requiredExtensions
+        ? [...extensionHeader.requiredExtensions]
+        : [],
+      description: readOptionalLocalString(behavior, 'description'),
+      extensionName: extensionHeader.name,
+      objectType: requireString(
+        behavior,
+        'objectType',
+        '本地扩展行为对象类型缺失。'
+      ),
+      allRequiredBehaviorTypes: collectLocalRequiredBehaviorTypes(
+        extension,
+        behavior
+      ),
+      type: '',
+    };
+  });
+};
+
 export const getPlaymeshExtensionsRegistry = async (): Promise<
   ExtensionsRegistry
 > => {
+  let localStores: Array<LocalPlaymeshExtensionStore> = [];
+  try {
+    localStores = await loadLocalPlaymeshExtensionStores();
+  } catch (error) {
+    console.warn('Bundled Playmesh extensions are unavailable.', error);
+  }
   try {
     const index = await loadPlaymeshExtensionsIndex();
-    return {
-      version: index.version,
-      headers: index.headers.map((header: IndexedExtensionHeader) =>
+    const localShortHeaders = localStores.map(store =>
+      adaptExtensionShortHeader(createFreshLocalExtensionHeader(store))
+    );
+    const localNames = new Set(
+      localShortHeaders.map(header => header.name)
+    );
+    const officialHeaders = index.headers
+      .filter(
+        (header: IndexedExtensionHeader) =>
+          !localNames.has(header.name)
+      )
+      .map((header: IndexedExtensionHeader) =>
         adaptExtensionShortHeader(header)
-      ),
-      views: index.views,
+      );
+    const officialFirstIds = index.views.default.firstIds.filter(
+      id => !localNames.has(id)
+    );
+    return {
+      version: localStores.length
+        ? `${index.version}+local.${localStores
+            .map(store => `${store.header.name}.${store.header.version}`)
+            .join('.')}`
+        : index.version,
+      headers: [...localShortHeaders, ...officialHeaders],
+      views: {
+        default: {
+          firstIds: [
+            ...localShortHeaders.map(header => header.name),
+            ...officialFirstIds,
+          ],
+        },
+      },
     };
   } catch (error) {
     // The optional catalog must never mark the current project as having an
     // extension loading error or block save/preview/publish.
     console.warn('Playmesh extension catalog is unavailable.', error);
+    if (localStores.length) {
+      const localShortHeaders = localStores.map(store =>
+        adaptExtensionShortHeader(createFreshLocalExtensionHeader(store))
+      );
+      return {
+        version: `0.0.1-playmesh-local.${localStores
+          .map(store => `${store.header.name}.${store.header.version}`)
+          .join('.')}`,
+        headers: localShortHeaders,
+        views: {
+          default: {
+            firstIds: localShortHeaders.map(header => header.name),
+          },
+        },
+      };
+    }
     return {
       version: '0.0.1-playmesh-unavailable',
       headers: [],
@@ -1025,27 +1780,63 @@ export const getPlaymeshExtensionsRegistry = async (): Promise<
 export const getPlaymeshBehaviorsRegistry = async (): Promise<
   BehaviorsRegistry
 > => {
+  let localStores: Array<LocalPlaymeshExtensionStore> = [];
+  try {
+    localStores = await loadLocalPlaymeshExtensionStores();
+  } catch (error) {
+    console.warn('Bundled Playmesh behaviors are unavailable.', error);
+  }
+  const gd = global.gd;
+  const adaptBehavior = (
+    header: IndexedBehaviorHeader
+  ): BehaviorShortHeader => ({
+    ...header,
+    tier: adaptExtensionTier(header.tier),
+    type: gd.PlatformExtension.getBehaviorFullType(
+      header.extensionNamespace || header.extensionName,
+      header.name
+    ),
+  });
+  const localHeaders = localStores
+    .flatMap(store => createLocalBehaviorHeaders(store))
+    .map(adaptBehavior);
+  const localKeys = new Set(
+    localHeaders.map(header => `${header.extensionName}\0${header.name}`)
+  );
+  const localExtensionNames = new Set(
+    localStores.map(store => store.header.name)
+  );
+  const localFirstIds = localHeaders.map(header => ({
+    extensionName: header.extensionName,
+    behaviorName: header.name,
+  }));
   try {
     const index = await loadPlaymeshExtensionsIndex();
-    const gd = global.gd;
+    const officialHeaders = index.behavior.headers
+      .filter(
+        header =>
+          !localExtensionNames.has(header.extensionName) &&
+          !localKeys.has(`${header.extensionName}\0${header.name}`)
+      )
+      .map(adaptBehavior);
+    const officialFirstIds = index.behavior.views.default.firstIds.filter(
+      item =>
+        !localExtensionNames.has(item.extensionName) &&
+        !localKeys.has(`${item.extensionName}\0${item.behaviorName}`)
+    );
     return {
-      headers: index.behavior.headers.map(
-        (header: IndexedBehaviorHeader): BehaviorShortHeader => ({
-          ...header,
-          tier: adaptExtensionTier(header.tier),
-          type: gd.PlatformExtension.getBehaviorFullType(
-            header.extensionNamespace || header.extensionName,
-            header.name
-          ),
-        })
-      ),
-      views: index.behavior.views,
+      headers: [...localHeaders, ...officialHeaders],
+      views: {
+        default: {
+          firstIds: [...localFirstIds, ...officialFirstIds],
+        },
+      },
     };
   } catch (error) {
     console.warn('Playmesh behavior catalog is unavailable.', error);
     return {
-      headers: [],
-      views: { default: { firstIds: [] } },
+      headers: localHeaders,
+      views: { default: { firstIds: localFirstIds } },
     };
   }
 };
@@ -1056,8 +1847,19 @@ export const getPlaymeshExtensionHeader = async (
     | BehaviorShortHeader
     | ObjectShortHeader
 ): Promise<ExtensionHeader> => {
-  const index = await loadPlaymeshExtensionsIndex();
   const extensionName = resolveCatalogExtensionName(extensionShortHeader);
+  let localStores: Array<LocalPlaymeshExtensionStore>;
+  try {
+    localStores = await loadLocalPlaymeshExtensionStores();
+  } catch (error) {
+    if (isExplicitLocalExtensionHeader(extensionShortHeader)) throw error;
+    localStores = [];
+  }
+  const localStore = localStoreForName(localStores, extensionName);
+  if (localStore) {
+    return adaptExtensionHeader(createFreshLocalExtensionHeader(localStore));
+  }
+  const index = await loadPlaymeshExtensionsIndex();
   const header = index.headers.find(
     candidate => candidate.name === extensionName
   );
@@ -1070,20 +1872,42 @@ export const getPlaymeshExtensionHeader = async (
 export const getPlaymeshExtension = async (
   extensionHeader: ExtensionShortHeader | BehaviorShortHeader
 ): Promise<SerializedExtension> => {
-  const index = await loadPlaymeshExtensionsIndex();
   const extensionName = resolveCatalogExtensionName(extensionHeader);
-  const header = index.headers.find(candidate => candidate.name === extensionName);
-  const artifact = header && index.artifacts[header.artifactId];
-  if (!header || !artifact) {
-    throw new PlaymeshCatalogError('not_found', '扩展正文描述缺失。');
+  let header: IndexedExtensionHeader;
+  let decodedExtension: PlaymeshCatalogJsonValue;
+  let localStores: Array<LocalPlaymeshExtensionStore>;
+  try {
+    localStores = await loadLocalPlaymeshExtensionStores();
+  } catch (error) {
+    if (isExplicitLocalExtensionHeader(extensionHeader)) throw error;
+    localStores = [];
   }
-  assertArtifactMatchesSource(artifact, index.source);
-  const manifest = await loadManifest();
-  const { value } = await parseCatalogJsonArtifact({
-    artifact,
-    limits: manifest.limits,
-  });
-  const decodedExtension = decodeJsonValue(value);
+  const localStore = localStoreForName(localStores, extensionName);
+  if (localStore) {
+    header = createFreshLocalExtensionHeader(localStore);
+    // Never expose the cached canonical object. GDevelop mutates serialized
+    // extension bodies during installation, so each request receives a full
+    // JSON-safe clone.
+    decodedExtension = decodeJsonValue(localStore.extension);
+  } else {
+    const index = await loadPlaymeshExtensionsIndex();
+    const officialHeader = index.headers.find(
+      candidate => candidate.name === extensionName
+    );
+    const artifact =
+      officialHeader && index.artifacts[officialHeader.artifactId];
+    if (!officialHeader || !artifact) {
+      throw new PlaymeshCatalogError('not_found', '扩展正文描述缺失。');
+    }
+    header = officialHeader;
+    assertArtifactMatchesSource(artifact, index.source);
+    const manifest = await loadManifest();
+    const { value } = await parseCatalogJsonArtifact({
+      artifact,
+      limits: manifest.limits,
+    });
+    decodedExtension = decodeJsonValue(value);
+  }
   if (
     !decodedExtension ||
     typeof decodedExtension !== 'object' ||
@@ -1776,6 +2600,9 @@ export const resetPlaymeshCatalogForRetry = (
   feature?: ?CatalogFeature
 ): void => {
   rootManifestPromise = null;
-  if (!feature || feature === 'extensions') extensionsIndexPromise = null;
+  if (!feature || feature === 'extensions') {
+    extensionsIndexPromise = null;
+    localPlaymeshExtensionStoresPromise = null;
+  }
   if (!feature || feature === 'examples') examplesIndexPromise = null;
 };

@@ -621,6 +621,47 @@ type LoadCatalogJsonOptions = {|
   signal?: ?AbortSignal,
 |};
 
+type LoadSameOriginJsonOptions = {|
+  url: string,
+  maximumBytes: number,
+  signal?: ?AbortSignal,
+|};
+
+// Playmesh-owned inputs are not official catalog artifacts: they are loaded
+// from the App public Library's same-origin route and must never fall back to
+// the artifact Gateway or a remote URL. Keep this primitive descriptor-free
+// so canonical local files remain independent from the WebIDE package and the
+// generated official catalog while retaining bounded, fatal-UTF-8 JSON parsing.
+export const loadSameOriginJson = async ({
+  url,
+  maximumBytes,
+  signal,
+}: LoadSameOriginJsonOptions): Promise<mixed> => {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new PlaymeshCatalogError('invalid_limits', '本地 JSON 大小限制无效。');
+  }
+  let localUrl;
+  let pageUrl;
+  try {
+    localUrl = new URL(url);
+    pageUrl = new URL(document.baseURI);
+  } catch (_) {
+    throw new PlaymeshCatalogError('invalid_base_url', '当前页面基础地址无效。');
+  }
+  if (localUrl.origin !== pageUrl.origin) {
+    throw new PlaymeshCatalogError('invalid_manifest', '本地 JSON 必须来自当前内核。');
+  }
+  const bytes = await fetchWithRetry({
+    url: localUrl.href,
+    maximumBytes,
+    timeoutMs: 10000,
+    retryCount: 0,
+    credentials: 'same-origin',
+    signal,
+  });
+  return parseJsonBytes(bytes);
+};
+
 export const loadCatalogJson = async ({
   baseUrl,
   descriptor,

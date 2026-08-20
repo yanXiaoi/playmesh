@@ -444,7 +444,43 @@ DELETE /dev/api/capability-tests/instances/{instanceId}
 API 路径、事件类型和 JSON 正文是机器协议，不做国际化；标题、按钮和状态解释使用
 App 统一的 `workspace.*` 词条。
 
-### 多源发布
+### 导出与多源发布
+
+Workspace 顶部保留既有 `#publish` 与移动端 `#publishFromMenu` DOM ID，但用户可见名称为
+“导出”。打开后先显示两个可键盘操作的同级选项；选项只显示动作名称，不重复陈述下游
+保存或校验流程：
+
+- “导出源码”先保存当前未保存文本，再请求
+  `GET /dev/api/projects/{projectId}/package`。这是既有 `packages.export_project`
+  Operation，继续使用 `GamePackageTransferService` 的宽松导出，用于正常备份，也允许取回
+  待修复项目；不得为这一 UI 新增第二个 Operation 或改变 CLI 依赖的宽松语义。
+- “上传到发布源”进入原有发布源候选、校验、提交、状态与失败重试界面。
+
+源码包下载名必须复用 `gamePackageFileName` / `gamePackageShareFileName` 的单一规则，保持为
+`{游戏名称}-v{版本}.zip`；浏览器从 `/package` 的 UTF-8 `Content-Disposition` 取得名称，
+WebView 宿主从既有项目列表读取同一名称与版本后调用同一 Dart helper，不得回退为项目 ID
+命名或在 JavaScript 中复制文件名清洗算法。
+
+点击“导出源码”后必须先渲染可见的“处理中”状态并禁止重复触发，再保存未提交文本和交接
+下载。普通浏览器在提交标准下载请求后显示等待浏览器接管的状态；WebView 使用同一状态覆盖
+消息交给原生宿主前的空窗，随后由系统保存器或分享界面提供原生反馈。网页不得为显示进度而
+把完整项目包读取成 Blob，也不得伪造无法从标准下载链获知的字节进度或完成状态。
+
+导出产物是 Playmesh 项目包：可解析时规范化的 `main.json`（待修复时保留原文件）、
+可选 `icon.png`、可选
+`capabilities.json` 与 `app/`；`data/`、`cache/`、`.playmesh/` 和其他私有文件不得进入。
+它不等同于外部 TypeScript、Cocos 等工具的原始工程。普通浏览器使用同源
+`<a download>`，不先读取完整 Blob；App WebView 只把同源且精确匹配项目包路由的 URL
+交给原生宿主。源码工作区与 GDevelop 共用既有 `__playmeshSaveBlobDownload` 兼容钩子、
+消息通道、系统选择/分享界面、Bearer 下载、分块写盘和清理函数；钩子只在输入适配层区分
+Blob 与白名单项目包 URL。宿主复用当前 Developer Token 流式写入系统保存目标。该直连
+消息不得接受外部 Origin、查询参数、fragment、其他 Developer 路由或越界项目 ID；项目包
+本身不得 POST 到需要 GDevelop editor lease 的 `/dev/api/gdevelop/native-file-saves`，
+也不得先读入 WebView Blob 再二次暂存。`/package` 在 ZIP 生成后声明精确
+`Content-Length`，共用下载函数必须核对完整接收并在取消或失败时清理半成品。
+
+`/package` 不做完整语义校验是已知且保留的修复能力；UI 与文档不得把宽松导出结果描述为
+项目已通过校验。重新导入、安装和“上传到发布源”仍执行严格校验。
 
 发布必须使用正式 Operation，不在 Workspace JavaScript 中直接拼 Catalog 请求：
 
@@ -511,7 +547,8 @@ Workspace 自有视觉规则统一保存在 `workspace.css`，页面只加载这
 
 项目入口、文件树和工具栏共享同一图标工厂。文件树至少区分目录、CSS、JavaScript、
 图片、文本、压缩包、`main.json` 与未知文件；移动端固定呈现“项目 / 运行 / 保存 /
-AI / 更多”，桌面端同时显示图标与文字。AI 是工具栏唯一的强强调操作。
+AI / 更多”，导出位于“更多”；桌面端同时显示图标与文字并直接显示“导出”。AI 是工具栏
+唯一的强强调操作。
 
 主题仍支持 `system/light/dark`，但选择只保存在 App UI 偏好中；Workspace 不得使用
 `localStorage` 或浏览器 `matchMedia` 建立第二套主题状态。Gateway 在返回工作区 HTML
@@ -577,6 +614,11 @@ WebView JavaScript 等 View 操作在不可用时返回结构化 `409`。
 - Android 后台安全接口可用，View 操作返回准确的结构化错误。
 - 新接口已评估 Developer API 版本并记录验证边界。
 - 发布候选响应不包含 Host、读取 Token 或上传密钥。
+- 导出选择弹层、发布源弹层和移动端菜单都可全键盘操作，关闭后恢复到实际触发控件。
+- 浏览器导出走标准下载；WebView 直连保存只接受当前网关的项目包路径、携带当前会话
+  Token、流式写入并在取消或失败时清理半成品，不经 GDevelop Blob 暂存。
+- `/package` 继续允许待修复项目宽松导出，且产物排除 `data/`、`cache/`、`.playmesh/`；
+  重新导入与上传发布源仍严格校验。
 - 校验失败不打包，部分失败可以只重试失败源，所有路径清理临时 ZIP。
 - 项目设置保存只投影当前表单字段；任意额外 `main.json` 字段静默忽略，且不存在
   字段专用识别、删除、告警或兼容逻辑。
@@ -587,5 +629,5 @@ WebView JavaScript 等 View 操作在不可用时返回结构化 `409`。
 - system/light/dark、reduced motion、320px、平板、桌面和 TV 视口无溢出。
 - 平台自有样式只加载 `workspace.css`；所有交互命中区达到 44px，长列表启用跳过渲染
   或分批渲染。
-- 发布弹层、项目菜单、文件树、更多菜单和 AI 审批可全键盘操作并恢复焦点；AI 审批
+- 导出选择弹层、发布源弹层、项目菜单、文件树、更多菜单和 AI 审批可全键盘操作并恢复焦点；AI 审批
   不允许通过 Escape 绕过。

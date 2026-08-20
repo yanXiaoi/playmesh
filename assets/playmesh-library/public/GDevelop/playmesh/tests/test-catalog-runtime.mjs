@@ -209,6 +209,9 @@ globalThis.window = {
   setTimeout,
   clearTimeout,
 };
+globalThis.document = {
+  baseURI: 'http://127.0.0.1/gdevelop/',
+};
 
 const limits = {
   catalogFileBytes: 1024 * 1024,
@@ -367,6 +370,58 @@ assert.equal(
     })
   ).catalogRevision,
   'same-origin-credentials'
+);
+
+const bundledExtensionBytes = new TextEncoder().encode(
+  '{"schemaVersion":1,"extensions":[]}'
+);
+let bundledExtensionFetches = 0;
+globalThis.fetch = async (url, options) => {
+  bundledExtensionFetches++;
+  assert.equal(
+    url,
+    'http://127.0.0.1/playmesh/GDevelop/playmesh/extensions/index.json'
+  );
+  assert.equal(options.credentials, 'same-origin');
+  assert.equal(options.cache, 'no-store');
+  assert.equal(options.redirect, 'error');
+  return responseFor(bundledExtensionBytes);
+};
+assert.deepEqual(
+  await runtime.loadSameOriginJson({
+    url: 'http://127.0.0.1/playmesh/GDevelop/playmesh/extensions/index.json',
+    maximumBytes: 256 * 1024,
+  }),
+  { schemaVersion: 1, extensions: [] }
+);
+assert.equal(bundledExtensionFetches, 1);
+await assert.rejects(
+  runtime.loadSameOriginJson({
+    url: 'https://example.invalid/extensions/index.json',
+    maximumBytes: 256 * 1024,
+  }),
+  error => error.code === 'invalid_manifest'
+);
+assert.equal(
+  bundledExtensionFetches,
+  1,
+  'cross-origin bundled JSON must be rejected before a request is sent'
+);
+await assert.rejects(
+  runtime.loadSameOriginJson({
+    url: 'http://127.0.0.1/playmesh/GDevelop/playmesh/extensions/index.json',
+    maximumBytes: bundledExtensionBytes.byteLength - 1,
+  }),
+  error => error.code === 'too_large'
+);
+globalThis.fetch = async () =>
+  responseFor(new TextEncoder().encode('{"name":'));
+await assert.rejects(
+  runtime.loadSameOriginJson({
+    url: 'http://127.0.0.1/playmesh/GDevelop/playmesh/extensions/index.json',
+    maximumBytes: 1024,
+  }),
+  error => error.code === 'invalid_json'
 );
 
 const validBytes = new TextEncoder().encode('{"name":"Fixture"}');

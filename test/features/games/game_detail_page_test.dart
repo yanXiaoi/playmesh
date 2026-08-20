@@ -31,31 +31,6 @@ void main() {
     entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: '可运行'),
   );
 
-  test('导出包使用游戏名称-v版本.zip', () {
-    expect(gamePackageExportFileName(game), '欢乐派对-v1.2.3.zip');
-    expect(
-      gamePackageExportFileName(
-        const GameSummary(
-          id: 'com.example.unsafe',
-          name: '派对/问答:* ',
-          version: '2.0.0',
-          description: '',
-          minPlayers: 1,
-          maxPlayers: 1,
-          supportsMultiplayer: false,
-          displayModeLabel: '单屏',
-          displayMode: 'multi_screen',
-          orientation: GameOrientation.portrait,
-          entry: LocalGameEntry(
-            gameEntryPath: 'index.html',
-            statusLabel: '可运行',
-          ),
-        ),
-      ),
-      '派对_问答__-v2.0.0.zip',
-    );
-  });
-
   testWidgets('从游戏库详情启动时默认进入全屏', (tester) async {
     GameLaunchArguments? launched;
     await tester.pumpWidget(
@@ -71,6 +46,9 @@ void main() {
         },
       ),
     );
+
+    expect(find.text('导出游戏包'), findsNothing);
+    expect(find.byIcon(Icons.download_outlined), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('game-detail-start')));
     await tester.pumpAndSettle();
