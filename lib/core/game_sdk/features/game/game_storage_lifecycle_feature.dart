@@ -6,6 +6,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   order: 70,
   typeScript: r'''  const standardStorageRevisions = new Map();
   const standardStorageBucketOperations = new Map();
+  let nicknameUpdateTail = Promise.resolve();
   const main = {
     version: PLAYMESH_SDK_VERSION,
     ready: null,
@@ -52,13 +53,21 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
         return bootstrap && bootstrap.player;
       },
       setNickname(nickname) {
-        if (!global.__PLAYMESH_BROWSER__ || appSdk.isAvailable()) {
-          return Promise.reject(new Error("修改昵称仅适用于浏览器玩家"));
-        }
-        if (global.__PLAYMESH_BROWSER__.mode === "solo") {
-          return Promise.reject(new Error("单机分享没有玩家昵称"));
-        }
-        return updateBrowserNickname(nickname);
+        const run = () => {
+          if (appSdk.isAvailable()) {
+            return updateAppNickname(nickname);
+          }
+          if (!global.__PLAYMESH_BROWSER__) {
+            return updateHostNickname(nickname);
+          }
+          if (global.__PLAYMESH_BROWSER__.mode === "solo") {
+            throw new Error("单机分享没有玩家昵称");
+          }
+          return updateBrowserNickname(nickname);
+        };
+        const operation = nicknameUpdateTail.then(run, run);
+        nicknameUpdateTail = operation.catch(() => {});
+        return operation;
       },
     },
     game: {
@@ -823,6 +832,18 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     }
   }
 
+  function restoreBrowserNickname(nickname) {
+    try {
+      if (nickname) {
+        global.localStorage?.setItem(browserNicknameStorageKey, nickname);
+      } else {
+        global.localStorage?.removeItem(browserNicknameStorageKey);
+      }
+    } catch (_) {
+      // 本地存储不可用时只能保留当前内存身份。
+    }
+  }
+
   function resolveBrowserPlayerId() {
     try {
       const cached = global.localStorage?.getItem(browserPlayerIdStorageKey);
@@ -847,32 +868,188 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     return playerId;
   }
 
+  function applyNicknameUpdate(
+    payload,
+    nickname,
+    persistBrowserNickname,
+    expectedPlayerId = bootstrap?.player?.id,
+    expectedSessionId = bootstrap?.session?.id,
+  ) {
+    const player = publicPlayer(payload?.player || payload);
+    const session = payload?.session ? publicSession(payload.session) : null;
+    if (!player ||
+        !expectedPlayerId ||
+        player.id !== expectedPlayerId ||
+        player.nickname !== nickname ||
+        (session && expectedSessionId && session.id !== expectedSessionId)) {
+      throw new Error("宿主没有返回匹配当前身份的玩家资料");
+    }
+    bootstrap.player = player;
+    if (session) {
+      bootstrap.session = session;
+    } else if (bootstrap.session) {
+      bootstrap.session = {
+        ...bootstrap.session,
+        players: bootstrap.session.players.map((member) =>
+          member.id === player.id ? player : member),
+      };
+    }
+    if (persistBrowserNickname) writeBrowserNickname(nickname);
+    if (browserConnectionConfig) {
+      browserConnectionConfig = { ...browserConnectionConfig, nickname };
+    }
+    if (browserCredential) {
+      browserCredential = { ...browserCredential, player: { ...player } };
+    }
+    if (bootstrap.session) emit(sessionListeners, bootstrap.session);
+    return bootstrap.player;
+  }
+
+  async function updateHostNickname(value) {
+    const nickname = validateNickname(value, true);
+    await main.ready;
+    return applyNicknameUpdate(
+      await post("player.setNickname", { nickname }),
+      nickname,
+      false,
+    );
+  }
+
+  async function updateAppNickname(value) {
+    const nickname = validateNickname(value, true);
+    await main.ready;
+    if (typeof appInternalRuntime.updateIdentityNickname !== "function") {
+      throw new Error("当前宿主不支持修改玩家昵称");
+    }
+    const payload = await appInternalRuntime.updateIdentityNickname(
+      nickname,
+      browserCredential && bootstrap?.session?.id
+        ? bootstrap.session.id
+        : undefined,
+      browserCredential?.token,
+      browserCredential && bootstrap?.player?.id
+        ? bootstrap.player.id
+        : undefined,
+    );
+    return applyNicknameUpdate(payload, nickname, false);
+  }
+
   async function updateBrowserNickname(value) {
     const nickname = validateNickname(value, true);
     await main.ready;
     const config = global.__PLAYMESH_BROWSER__;
-    const response = await fetch(new URL(
-      `v1/sessions/${encodeURIComponent(bootstrap.session.id)}/players/me`,
-      config.coreBase,
-    ), {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${browserCredential.token}`,
-      },
-      body: JSON.stringify({
-        nickname,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error?.message || payload.error || "修改昵称失败");
+    const sessionId = bootstrap?.session?.id;
+    const playerId = bootstrap?.player?.id;
+    if (!sessionId || !playerId || !browserCredential?.token) {
+      throw new Error("当前页面没有可修改昵称的玩家会话");
     }
-    bootstrap.session = publicSession(payload.session);
-    bootstrap.player = publicPlayer(payload.player);
+    const previousNickname = readBrowserNickname();
+    const previousPlayerNickname = bootstrap.player.nickname;
     writeBrowserNickname(nickname);
-    emit(sessionListeners, bootstrap.session);
-    return bootstrap.player;
+    if (browserConnectionConfig) {
+      browserConnectionConfig = { ...browserConnectionConfig, nickname };
+    }
+    let ambiguousError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(new URL(
+          `v1/sessions/${encodeURIComponent(sessionId)}/players/me`,
+          config.coreBase,
+        ), {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${browserCredential.token}`,
+          },
+          body: JSON.stringify({ nickname }),
+        });
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (error) {
+          if (response.ok) throw error;
+        }
+        if (!response.ok && response.status >= 400 && response.status < 500) {
+          const error = new Error(
+            payload?.error?.message || payload?.error || "修改昵称失败",
+          );
+          error.nicknameCommitRejected = true;
+          throw error;
+        }
+        if (!response.ok) {
+          throw new Error(`修改昵称结果不明确（HTTP ${response.status}）`);
+        }
+        return applyNicknameUpdate(
+          payload,
+          nickname,
+          false,
+          playerId,
+          sessionId,
+        );
+      } catch (error) {
+        if (error?.nicknameCommitRejected) {
+          restoreBrowserNickname(previousNickname);
+          if (browserConnectionConfig) {
+            browserConnectionConfig = {
+              ...browserConnectionConfig,
+              nickname: previousPlayerNickname,
+            };
+          }
+          throw error;
+        }
+        ambiguousError = error;
+      }
+    }
+    let snapshot;
+    try {
+      const response = await fetch(new URL(
+        `v1/sessions/${encodeURIComponent(sessionId)}`,
+        config.coreBase,
+      ), {
+        headers: { "Authorization": `Bearer ${browserCredential.token}` },
+      });
+      if (!response.ok) throw new Error("读取房间昵称状态失败");
+      snapshot = await response.json();
+    } catch (_) {
+      const error = new Error("昵称已保存在本机，等待与房间重新同步");
+      error.code = "nickname_update_pending";
+      error.cause = ambiguousError;
+      throw error;
+    }
+    const authoritativePlayer = Array.isArray(snapshot?.players)
+      ? snapshot.players.find((player) => player?.id === playerId)
+      : null;
+    const authoritativeNickname = validateNickname(
+      authoritativePlayer?.nickname,
+      false,
+    );
+    if (snapshot?.id !== sessionId || !authoritativePlayer || !authoritativeNickname) {
+      const error = new Error("昵称已保存在本机，等待与房间重新同步");
+      error.code = "nickname_update_pending";
+      error.cause = ambiguousError;
+      throw error;
+    }
+    if (authoritativeNickname === nickname) {
+      return applyNicknameUpdate(
+        { session: snapshot, player: authoritativePlayer },
+        nickname,
+        false,
+        playerId,
+        sessionId,
+      );
+    }
+    restoreBrowserNickname(authoritativeNickname);
+    applyNicknameUpdate(
+      { session: snapshot, player: authoritativePlayer },
+      authoritativeNickname,
+      false,
+      playerId,
+      sessionId,
+    );
+    const error = new Error("Core 未提交昵称更新");
+    error.code = "nickname_update_failed";
+    error.cause = ambiguousError;
+    throw error;
   }
 
   function validateNickname(value, throws) {
@@ -883,11 +1060,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   }
 
   async function editBrowserNickname() {
-    if (appSdk.isAvailable()) return false;
     const value = await openBrowserNicknameDialog({
       required: false,
       current: bootstrap?.player?.nickname || readBrowserNickname() || "",
-      submit: updateBrowserNickname,
+      submit: main.player.setNickname,
     });
     return value !== null;
   }
@@ -978,7 +1154,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
           multiplayer: gameInfo.multiplayer,
           isAuthority: main.session.isAuthority(),
           playerName: player?.nickname || null,
-          canEditNickname: !appSdk.isAvailable(),
+          canEditNickname: gameInfo.multiplayer === true && player !== null,
           playerCount: Array.isArray(session?.players)
             ? session.players.length
             : null,

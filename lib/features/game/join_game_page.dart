@@ -23,6 +23,7 @@ class JoinGamePage extends StatefulWidget {
     this.discoveryService,
     this.joinCoordinator,
     this.joinRouter = const GameJoinRouter(),
+    this.onNicknameChanged,
   });
 
   static const routeName = '/join-game';
@@ -33,6 +34,7 @@ class JoinGamePage extends StatefulWidget {
   final LanGameDiscoveryService? discoveryService;
   final GameJoinPreparationService? joinCoordinator;
   final GameJoinRouter joinRouter;
+  final Future<void> Function(String nickname)? onNicknameChanged;
 
   @override
   State<JoinGamePage> createState() => _JoinGamePageState();
@@ -623,6 +625,7 @@ class _JoinGamePageState extends State<JoinGamePage>
         userId: widget.initialUserId,
         nickname: widget.initialNickname,
         discoveryService: _discoveryService,
+        onNicknameChanged: widget.onNicknameChanged,
       );
     } on GameJoinException catch (error) {
       if (mounted) {

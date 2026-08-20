@@ -16,6 +16,7 @@ class GameRuntimeBridge implements GameSdkBridge {
     this.gameName = 'Playmesh 游戏',
     this.tags = const <String>[],
     this.requiredCapabilities = const <String>[],
+    this.onNicknameUpdate,
   }) {
     _sessionSubscription = connection.messages.listen(
       (message) => unawaited(_handleTransportMessage(message)),
@@ -30,6 +31,8 @@ class GameRuntimeBridge implements GameSdkBridge {
   final String gameName;
   final List<String> tags;
   final List<String> requiredCapabilities;
+  final Future<Map<String, Object?>> Function(String nickname)?
+  onNicknameUpdate;
   final StreamController<String> _outbound = StreamController.broadcast();
   final Map<String, Completer<void>> _lifecycleOperations = {};
   int _lifecycleSequence = 0;
@@ -75,6 +78,7 @@ class GameRuntimeBridge implements GameSdkBridge {
             operation.complete();
             return true;
           },
+          updateNickname: onNicknameUpdate ?? _rejectNicknameUpdate,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -103,6 +107,13 @@ class GameRuntimeBridge implements GameSdkBridge {
 
   void _sendResult(String? requestId, Object? result) {
     _send({'type': 'command.result', 'requestId': requestId, 'result': result});
+  }
+
+  Future<Map<String, Object?>> _rejectNicknameUpdate(String nickname) {
+    throw const SdkCommandException(
+      'nickname_managed_by_app',
+      '当前 App 玩家昵称由平台资料管理',
+    );
   }
 
   Future<void> _handleTransportMessage(Map<String, Object?> message) async {

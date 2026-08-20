@@ -20,6 +20,7 @@ class GameLauncher extends StatelessWidget {
     this.appLanHost,
     this.onOpenSharePanel,
     this.onExitRequested,
+    this.onNicknameUpdate,
     this.onSystemBackHandlerChanged,
     this.onJavaScriptExecutorChanged,
   });
@@ -33,6 +34,8 @@ class GameLauncher extends StatelessWidget {
   final AppLanHost? appLanHost;
   final Future<void> Function()? onOpenSharePanel;
   final Future<void> Function()? onExitRequested;
+  final Future<Object?> Function(Map<String, Object?> payload)?
+  onNicknameUpdate;
   final ValueChanged<VoidCallback?>? onSystemBackHandlerChanged;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
@@ -60,6 +63,7 @@ class GameLauncher extends StatelessWidget {
       appLanHost: appLanHost,
       onOpenSharePanel: onOpenSharePanel,
       onExitRequested: onExitRequested,
+      onNicknameUpdate: onNicknameUpdate,
       onSystemBackHandlerChanged: onSystemBackHandlerChanged,
       onJavaScriptExecutorChanged: onJavaScriptExecutorChanged,
     );

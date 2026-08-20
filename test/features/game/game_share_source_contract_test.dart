@@ -83,8 +83,16 @@ void main() {
     expect(createCoordinator, contains('MultiplayerGameShareAccessProvider('));
     expect(
       createCoordinator,
-      contains('hostNickname: widget.localNickname'),
-      reason: 'single_screen Authority 的固定名称不是真实主机玩家昵称',
+      contains('hostNickname: _currentNickname'),
+    );
+    expect(
+      createCoordinator,
+      contains('hostNicknameProvider: () =>'),
+    );
+    expect(
+      createCoordinator,
+      contains('bridge.connection.currentPlayer.nickname'),
+      reason: 'LAN presence 必须随 Core 中的当前房主昵称更新',
     );
 
     expect(source, isNot(contains('GameWebGateway')));

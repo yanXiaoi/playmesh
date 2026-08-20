@@ -492,16 +492,17 @@ assert.equal(
   lanCommandCountBeforeInvalidArguments,
 );
 window.navigator.userActivation.isActive = false;
-for (const operation of [
-  () => discoveredGames[0].join(),
-  () => app.lan.joinByLink("https://relay.example/j/invitation"),
-  () => app.lan.scanQrAndJoin(),
-]) {
-  await assert.rejects(
-    operation(),
-    (error) => error?.code === "user_activation_required",
-  );
-}
+const lanCommandCountBeforeInactiveBrowserFlag = commands.filter(
+  (item) => item.command.startsWith("app.lan."),
+).length;
+await discoveredGames[0].join();
+await app.lan.joinByLink("https://relay.example/j/invitation");
+await app.lan.scanQrAndJoin();
+assert.equal(
+  commands.filter((item) => item.command.startsWith("app.lan.")).length,
+  lanCommandCountBeforeInactiveBrowserFlag + 3,
+  "公开 SDK 必须把加入请求交给宿主 Bridge 校验原生用户操作",
+);
 window.navigator.userActivation.isActive = true;
 for (const methodName of [
   "discoverGames",

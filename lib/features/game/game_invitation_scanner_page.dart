@@ -15,6 +15,7 @@ class GameInvitationScannerPage extends StatefulWidget {
     this.initialNickname,
     this.joinRouter = const GameJoinRouter(),
     this.discoveryService,
+    this.onNicknameChanged,
   }) : assert(
          (initialUserId == null) == (initialNickname == null),
          'The direct-join identity must be provided as a complete pair.',
@@ -26,6 +27,7 @@ class GameInvitationScannerPage extends StatefulWidget {
   final String? initialNickname;
   final GameJoinRouter joinRouter;
   final LanGameDiscoveryService? discoveryService;
+  final Future<void> Function(String nickname)? onNicknameChanged;
 
   @override
   State<GameInvitationScannerPage> createState() =>
@@ -122,6 +124,7 @@ class _GameInvitationScannerPageState extends State<GameInvitationScannerPage> {
         userId: userId,
         nickname: widget.initialNickname!,
         discoveryService: widget.discoveryService,
+        onNicknameChanged: widget.onNicknameChanged,
       );
     } on GameJoinException catch (error) {
       if (!mounted) return;

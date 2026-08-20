@@ -1730,15 +1730,6 @@
     }
   }
 
-  function requireAppLanUserActivation() {
-    if (global.navigator?.userActivation?.isActive !== true) {
-      throw appLanError(
-        "user_activation_required",
-        "加入游戏需要当前用户操作",
-      );
-    }
-  }
-
   function freezeAppLanGame(value) {
     if (!value || typeof value !== "object" ||
         typeof value.instanceId !== "string" || !value.instanceId ||
@@ -1760,7 +1751,6 @@
         requireAppLanReady();
         requireAppLanArguments(arguments, 0, "PlaymeshLanGame.join");
         requireAppLanAvailable();
-        requireAppLanUserActivation();
         await request("app.lan.joinDiscovered", {
           instanceId,
           userActivation: true,
@@ -1805,7 +1795,6 @@
         throw appLanError("invalid_argument", "invitationUrl 必须是非空字符串");
       }
       requireAppLanAvailable();
-      requireAppLanUserActivation();
       await request("app.lan.joinByLink", {
         invitationUrl,
         userActivation: true,
@@ -1815,7 +1804,6 @@
       requireAppLanReady();
       requireAppLanArguments(arguments, 0, "scanQrAndJoin");
       requireAppLanAvailable();
-      requireAppLanUserActivation();
       await request("app.lan.scanQr", { userActivation: true });
     },
     async setPublished() {
@@ -2021,6 +2009,19 @@
     },
     syncAvatar(sessionId, credentialToken) {
       return request("app.identity.syncAvatar", { sessionId, credentialToken });
+    },
+    updateIdentityNickname(nickname, sessionId, credentialToken, playerId) {
+      return request("app.identity.updateNickname", {
+        nickname,
+        ...(sessionId && credentialToken && playerId
+          ? { sessionId, credentialToken, playerId }
+          : {}),
+      }).then((result) => {
+        if (result?.identity) {
+          bootstrap = { ...bootstrap, identity: clone(result.identity) };
+        }
+        return clone(result);
+      });
     },
     confirmCapabilities() {
       return request("app.capabilities.confirm");

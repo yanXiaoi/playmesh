@@ -190,12 +190,14 @@ class GameSdkCommandContext {
     this.gameInfo = const <String, Object?>{},
     this.connection,
     this.standalonePlayer,
+    this.updateNickname,
   });
 
   final GameSessionConnection? connection;
   final Map<String, Object?>? standalonePlayer;
   final Map<String, Object?> gameInfo;
   final bool Function(String requestId) completeLifecycle;
+  final Future<Map<String, Object?>> Function(String nickname)? updateNickname;
 
   bool get isStandalone => connection == null;
 }
@@ -216,6 +218,7 @@ class AppSdkCommandContext {
     required this.takeOverInput,
     required this.requestExit,
     required this.syncAvatar,
+    required this.updateNickname,
   });
 
   final Future<Map<String, Object?>> Function(
@@ -238,6 +241,7 @@ class AppSdkCommandContext {
   final Object? Function() takeOverInput;
   final Object? Function() requestExit;
   final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
+  final Future<Object?> Function(Map<String, Object?> payload) updateNickname;
 }
 
 /// 唯一 SDK 注册位置。新增功能时在对应 feature 文件实现并在这里注册一次。

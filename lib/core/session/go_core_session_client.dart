@@ -151,6 +151,48 @@ class GoCoreSessionClient {
     return GameSessionSnapshot.fromJson(payload);
   }
 
+  Future<GameNicknameUpdate> updateNickname({
+    required String sessionId,
+    required String token,
+    required String nickname,
+  }) async {
+    final response = await _httpClient.patch(
+      baseUri.resolve('v1/sessions/$sessionId/players/me'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'nickname': nickname}),
+    );
+    final payload = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw GameSessionException.fromPayload(response.statusCode, payload);
+    }
+    return GameNicknameUpdate(
+      session: GameSessionSnapshot.fromJson(
+        Map<String, Object?>.from(payload['session']! as Map),
+      ),
+      player: GameSessionPlayer.fromJson(
+        Map<String, Object?>.from(payload['player']! as Map),
+      ),
+    );
+  }
+
+  Future<GameSessionSnapshot> readSnapshot({
+    required String sessionId,
+    required String token,
+  }) async {
+    final response = await _httpClient.get(
+      baseUri.resolve('v1/sessions/$sessionId'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    final payload = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw GameSessionException.fromPayload(response.statusCode, payload);
+    }
+    return GameSessionSnapshot.fromJson(payload);
+  }
+
   Future<GameShareGrant> openShare(String sessionId, String token) async {
     final response = await _httpClient.post(
       baseUri.resolve('v1/sessions/$sessionId/share'),
@@ -393,6 +435,24 @@ class GameSessionConnection {
     return snapshot;
   }
 
+  Future<GameSessionPlayer> updateNickname(String nickname) async {
+    final update = await _client.updateNickname(
+      sessionId: snapshot.id,
+      token: bootstrap.credential.token,
+      nickname: nickname,
+    );
+    snapshot = update.session;
+    return update.player;
+  }
+
+  Future<GameSessionSnapshot> refreshSnapshot() async {
+    snapshot = await _client.readSnapshot(
+      sessionId: snapshot.id,
+      token: bootstrap.credential.token,
+    );
+    return snapshot;
+  }
+
   Future<GameShareGrant> openShare() {
     return _client.openShare(snapshot.id, bootstrap.credential.token);
   }
@@ -569,6 +629,13 @@ class GameShareGrant {
   const GameShareGrant({required this.token});
 
   final String token;
+}
+
+class GameNicknameUpdate {
+  const GameNicknameUpdate({required this.session, required this.player});
+
+  final GameSessionSnapshot session;
+  final GameSessionPlayer player;
 }
 
 class GameSessionException implements Exception {

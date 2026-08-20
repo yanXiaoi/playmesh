@@ -470,7 +470,7 @@ feat(session): add browser join identity step
 - 当前平台不支持的能力必须在 SDK 弹窗中标注“本平台暂不支持”，但不能阻止用户同意后进入。游戏应通过 `playmesh.app.capabilities.getAvailable()` 做非阻塞降级；SDK 只允许创建已经声明、用户本次确认且当前设备可用的插件。
 - 浏览器玩家必须由 SDK 读取或生成 `p_...` 玩家 ID 并确认昵称后，才能调用加入接口获得短期凭证。分享 URL 不得携带昵称或玩家 ID；`localStorage` 只允许保存 SDK 管理的 `playmesh.player-id.v1` 与昵称偏好，不得保存玩家凭证或游戏 Bucket。
 - Core 必须保留掉线玩家的稳定 ID 和 `connected: false` 状态；同 ID 在线时拒绝后续 Join 和 WebSocket，旧连接掉线并撤销旧凭据后才允许同 ID 重新签发凭据。游戏通过 SDK 连接事件处理等待、中途加入和状态恢复。
-- SDK 必须在浏览器环境统一提供昵称修改悬浮入口，使用当前玩家凭证更新会话；App WebView 不显示也不需要该入口。
+- `playmesh.main.player.setNickname()` 必须在普通浏览器和 App WebView 的多人 Player 页面保持同一语义：浏览器把偏好写入当前 origin 的 `localStorage`，App 由宿主持久化，两者都同步当前 Core。单机和 `single_screen_multiplayer` 公共 Authority 屏必须拒绝。SDK 仍在普通浏览器提供统一昵称修改悬浮入口；App WebView 不要因此重复创建网页悬浮入口。
 - 外部网页只能访问当前游戏和当前会话，不能访问 App token、用户文件、其他游戏包或任意原生端口。
 - USB 设备优先映射为标准输入事件；不向 AI 生成的游戏默认开放原始 USB 设备。
 - 所有权限必须在 SDK、服务端和 UI 三处保持一致，不能只隐藏界面按钮。

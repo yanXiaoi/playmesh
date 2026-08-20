@@ -112,11 +112,16 @@ class MultiplayerGameShareAccessProvider implements GameShareAccessProvider {
     required this.bridge,
     required this.coreEndpoint,
     required this.hostNickname,
+    this.hostNicknameProvider,
   });
 
   final GameRuntimeBridge bridge;
   final Uri coreEndpoint;
   final String hostNickname;
+  final String Function()? hostNicknameProvider;
+
+  String get _currentHostNickname =>
+      hostNicknameProvider?.call() ?? hostNickname;
 
   @override
   Future<GameShareAccess> open() async {
@@ -125,10 +130,10 @@ class MultiplayerGameShareAccessProvider implements GameShareAccessProvider {
       shareToken: grant.token,
       storage: bridge.storage,
       displayMode: bridge.connection.snapshot.displayMode,
-      currentPresence: () => _multiplayerPresence(bridge, hostNickname),
+      currentPresence: () => _multiplayerPresence(bridge, _currentHostNickname),
       presenceChanges: bridge.connection.messages
           .where((message) => message['session'] is Map)
-          .map((_) => _multiplayerPresence(bridge, hostNickname))
+          .map((_) => _multiplayerPresence(bridge, _currentHostNickname))
           .distinct(),
       coreEndpoint: coreEndpoint,
       joinCode: bridge.connection.snapshot.joinCode,

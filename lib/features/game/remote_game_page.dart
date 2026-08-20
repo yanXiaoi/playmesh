@@ -25,6 +25,8 @@ import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
 import '../../core/network/lan_game_discovery_service.dart';
+import '../../core/profile/user_profile_store.dart';
+import '../../models/user_profile.dart';
 import 'game_app_lan_host.dart';
 import 'game_invitation_scanner_page.dart';
 import 'game_join_router.dart';
@@ -43,6 +45,7 @@ class RemoteGamePage extends StatefulWidget {
     this.gameName,
     this.sourceInstanceId,
     this.discoveryService,
+    this.onNicknameChanged,
   });
 
   static const routeName = '/remote-game';
@@ -54,6 +57,7 @@ class RemoteGamePage extends StatefulWidget {
   final String? gameName;
   final String? sourceInstanceId;
   final LanGameDiscoveryService? discoveryService;
+  final Future<void> Function(String nickname)? onNicknameChanged;
   @visibleForTesting
   final Future<bool> Function()? nativeBackHandler;
   @visibleForTesting
@@ -83,6 +87,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   Map<String, Object?>? _platformUiConfiguration;
   bool _allowPop = false;
   Future<void>? _nativeBackOperation;
+  late String _currentNickname;
 
   Uri get _launchUri => _localEntryUri ?? widget.entryUri;
 
@@ -91,6 +96,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   @override
   void initState() {
     super.initState();
+    _currentNickname = widget.nickname;
     final gameId = widget.gameId;
     if (gameId != null) {
       final discoveryService =
@@ -196,7 +202,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
             );
       _appBridge = AppWebViewBridge(
         userId: widget.userId,
-        nickname: widget.nickname,
+        nickname: _currentNickname,
         webPermissionRole: AppWebPermissionRole.joiner,
         acceptRuntimeGameDeclaration: true,
         coreBaseUri: coreGateway.localBaseUri,
@@ -206,6 +212,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         showShareAction: false,
         lanHost: _appLanHost,
         onExitRequested: _exitFromAppGameMenu,
+        onNicknameChanged: _persistNickname,
       );
       if (_usesFlutterWebView) {
         await _initialize();
@@ -391,11 +398,29 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       context,
       launch: launch,
       userId: widget.userId,
-      nickname: widget.nickname,
+      nickname: _currentNickname,
       discoveryService: _ownsLanGameDiscoveryService
           ? null
           : _lanGameDiscoveryService,
+      onNicknameChanged: widget.onNicknameChanged,
     );
+  }
+
+  Future<void> _persistNickname(String nickname) async {
+    final callback = widget.onNicknameChanged;
+    if (callback != null) {
+      await callback(nickname);
+    } else {
+      final store = const UserProfileStore();
+      final profile = await store.load(
+        UserProfile(userId: widget.userId, nickname: _currentNickname),
+      );
+      if (profile.userId != widget.userId) {
+        throw const SdkCommandException('identity_mismatch', '本机身份与当前玩家不一致');
+      }
+      await store.save(profile.copyWith(nickname: nickname));
+    }
+    _currentNickname = nickname;
   }
 
   Future<void> _rejectLanAuthorityOperation() async {

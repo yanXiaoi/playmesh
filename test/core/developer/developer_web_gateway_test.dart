@@ -1025,7 +1025,18 @@ void main() {
     expect(aiPrompt.body, contains('只有非 Authority 多人页面'));
     expect(aiPrompt.body, contains('stateType 可选'));
     expect(aiPrompt.body, contains('getState()'));
-    expect(aiPrompt.body, contains('仅浏览器联机玩家可用'));
+    expect(
+      aiPrompt.body,
+      contains('多人 Player 页面在普通浏览器和 App WebView 中可用'),
+    );
+    expect(aiPrompt.body, contains('当前 origin 的 localStorage'));
+    expect(aiPrompt.body, contains('App 由宿主持久化'));
+    expect(aiPrompt.body, contains('都同步当前 Core'));
+    expect(
+      aiPrompt.body,
+      contains('single_screen_multiplayer 公共 Authority 屏不可用'),
+    );
+    expect(aiPrompt.body, isNot(contains('仅浏览器联机玩家可用')));
     expect(aiPrompt.body, isNot(contains('仅浏览器控制器可用')));
     expect(aiPrompt.body, isNot(contains('重载后 SDK 会自动请求最新快照')));
     expect(aiPrompt.body, contains('static/js/service/index.js'));

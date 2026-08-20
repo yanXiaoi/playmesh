@@ -9,6 +9,44 @@ import 'package:playmesh/core/session/go_core_session_client.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
+  test('昵称更新使用当前会话凭据并返回权威快照', () async {
+    final client = GoCoreSessionClient(
+      baseUri: Uri.parse('http://127.0.0.1:42000/'),
+      httpClient: MockClient((request) async {
+        expect(request.method, 'PATCH');
+        expect(request.url.path, '/v1/sessions/s-1/players/me');
+        expect(request.headers['Authorization'], 'Bearer token-1');
+        expect(jsonDecode(request.body), {'nickname': '新昵称'});
+        return http.Response.bytes(
+          utf8.encode(jsonEncode({
+            'session': _sessionPayload(
+              connected: true,
+              avatar: null,
+              nickname: '新昵称',
+            ),
+            'player': _playerPayload(
+              connected: true,
+              avatar: null,
+              nickname: '新昵称',
+            ),
+          })),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+    addTearDown(client.close);
+
+    final update = await client.updateNickname(
+      sessionId: 's-1',
+      token: 'token-1',
+      nickname: '新昵称',
+    );
+
+    expect(update.player.nickname, '新昵称');
+    expect(update.session.players.single.nickname, '新昵称');
+  });
+
   test('加入者无头像时跳过上传并直接建立 WebSocket', () async {
     var requestCount = 0;
     late _FakeWebSocketChannel channel;
@@ -283,6 +321,7 @@ Map<String, Object?> _bootstrapPayload({
 Map<String, Object?> _sessionPayload({
   required bool connected,
   required String? avatar,
+  String nickname = '玩家',
 }) => {
   'id': 's-1',
   'joinCode': 'ABC123',
@@ -292,15 +331,22 @@ Map<String, Object?> _sessionPayload({
   'minPlayers': 1,
   'maxPlayers': 4,
   'authorityClientId': 'p-authority',
-  'players': [_playerPayload(connected: connected, avatar: avatar)],
+  'players': [
+    _playerPayload(
+      connected: connected,
+      avatar: avatar,
+      nickname: nickname,
+    ),
+  ],
 };
 
 Map<String, Object?> _playerPayload({
   required bool connected,
   required String? avatar,
+  String nickname = '玩家',
 }) => {
   'id': 'p-player',
-  'nickname': '玩家',
+  'nickname': nickname,
   'connected': connected,
   'role': 'player',
   'avatar': avatar,

@@ -190,6 +190,19 @@ const appDeviceSdkSource = SdkSourceFragment(
     syncAvatar(sessionId, credentialToken) {
       return request("app.identity.syncAvatar", { sessionId, credentialToken });
     },
+    updateIdentityNickname(nickname, sessionId, credentialToken, playerId) {
+      return request("app.identity.updateNickname", {
+        nickname,
+        ...(sessionId && credentialToken && playerId
+          ? { sessionId, credentialToken, playerId }
+          : {}),
+      }).then((result) => {
+        if (result?.identity) {
+          bootstrap = { ...bootstrap, identity: clone(result.identity) };
+        }
+        return clone(result);
+      });
+    },
     confirmCapabilities() {
       return request("app.capabilities.confirm");
     },
@@ -320,6 +333,7 @@ class _AppDeviceFeature implements _AppSdkCommandFeature {
     'app.device.fullscreen',
     'app.game.exit',
     'app.identity.syncAvatar',
+    'app.identity.updateNickname',
   };
 
   @override
@@ -334,6 +348,8 @@ class _AppDeviceFeature implements _AppSdkCommandFeature {
         return context.requestExit();
       case 'app.identity.syncAvatar':
         return context.syncAvatar(command.payload);
+      case 'app.identity.updateNickname':
+        return context.updateNickname(command.payload);
     }
     throw StateError('未注册的 App 设备命令: ${command.name}');
   }

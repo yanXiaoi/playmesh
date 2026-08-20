@@ -1129,8 +1129,10 @@ MVP 建议默认关闭普通浏览器发布，由用户在每次游玩时单独�
 在当前来源的 `localStorage` 中保存 `playmesh.player-id.v1` 和昵称偏好，但不保存
 玩家凭证或游戏 Bucket。刷新后复用同一玩家 ID；旧 WebSocket 在线时同 ID 的后续
 加入与连接直接拒绝，旧连接掉线后才可重新签发凭证并触发 `onPlayerReconnect`。
-SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不显示该入口，并使用 App 自动
-注入的 `u_...` 用户 ID 和昵称。
+SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不重复显示该网页入口，并使用 App 自动
+注入的 `u_...` 用户 ID 和昵称。多人 Player 页面在两种环境都可调用
+`playmesh.main.player.setNickname()`：浏览器写当前 origin 的 `localStorage`，App 由宿主持久化，
+并在两种路径同步当前 Core。单机和单屏多人公共 Authority 屏不提供该玩家操作。
 
 ## 用户、游戏声明和联机会话
 

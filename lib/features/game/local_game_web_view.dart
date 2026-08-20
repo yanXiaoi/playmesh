@@ -37,6 +37,7 @@ class LocalGameWebView extends StatefulWidget {
     this.appLanHost,
     this.onOpenSharePanel,
     this.onExitRequested,
+    this.onNicknameUpdate,
     this.onSystemBackHandlerChanged,
     this.onJavaScriptExecutorChanged,
   });
@@ -53,6 +54,8 @@ class LocalGameWebView extends StatefulWidget {
   final AppLanHost? appLanHost;
   final Future<void> Function()? onOpenSharePanel;
   final Future<void> Function()? onExitRequested;
+  final Future<Object?> Function(Map<String, Object?> payload)?
+  onNicknameUpdate;
   final ValueChanged<VoidCallback?>? onSystemBackHandlerChanged;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onJavaScriptExecutorChanged;
@@ -104,6 +107,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       onOpenSharePanel: widget.onOpenSharePanel,
       onInputTakeover: _takeOverAppSdkInput,
       onExitRequested: _exitFromAppGameMenu,
+      onNicknameUpdate: widget.onNicknameUpdate,
     );
     HardwareKeyboard.instance.addHandler(_recordHardwareUserActivation);
     widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);

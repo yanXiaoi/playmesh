@@ -350,13 +350,15 @@ Authority 上下文或 Sync 上下文。游戏如需观察当前页面的联机�
 
 ### `playmesh.main.player.setNickname(nickname)`
 
-仅普通浏览器可用。更新当前玩家昵称、广播新的会话快照并把成功后的昵称写回浏览器本地缓存；玩家 ID 和凭证不会变化。App WebView 调用会 reject。
+多人 Player 页面可用，包括普通浏览器和 App WebView。普通浏览器把昵称偏好写入当前 origin 的 `localStorage`，App WebView 由宿主持久化 App 资料；两种环境都会把新昵称同步到当前 Core，由 Core 广播新的会话快照。玩家 ID 和凭证不会变化。
+
+单机页面不可用。`single_screen_multiplayer` 的公共 Authority 屏不是 Player，`getCurrent()` 返回 `null`，调用 `setNickname()` 会 reject；该模式中真正加入 Session 的控制器 Player 仍可调用。
 
 ```js
 await playmesh.main.player.setNickname("新昵称");
 ```
 
-浏览器版 SDK 会在游戏菜单的“游戏信息”弹窗中提供昵称修改入口，游戏不需要再制作昵称设置界面。昵称去除首尾空白后长度必须为 1 至 32 个字符。
+浏览器版 SDK 会在游戏菜单的“游戏信息”弹窗中提供昵称修改入口。游戏也可在多人 Player 页面调用同一 API，但不得自行改写浏览器缓存、App 资料或 Core 玩家状态。昵称去除首尾空白后长度必须为 1 至 32 个字符。
 
 ## 游戏消息
 

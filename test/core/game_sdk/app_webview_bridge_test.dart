@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:playmesh/core/app_media/app_media_adapter.dart';
 import 'package:playmesh/core/app_media/app_media_runtime.dart';
 import 'package:playmesh/core/capabilities/camera/camera_capability_plugin.dart';
@@ -647,6 +649,175 @@ void main() {
     expect(deviceService.fullscreenCalls, [
       (enabled: true, orientation: GameOrientation.portrait),
     ]);
+  });
+
+  test('远程昵称先持久化再提交 Core，失败时回滚本机身份', () async {
+    final persisted = <String>[];
+    var requestCount = 0;
+    final client = MockClient((request) async {
+      requestCount += 1;
+      expect(request.method, 'PATCH');
+      expect(request.url.path, '/v1/sessions/session-1/players/me');
+      expect(request.headers['Authorization'], 'Bearer credential-1');
+      final body = Map<String, Object?>.from(jsonDecode(request.body) as Map);
+      if (requestCount == 1) {
+        return http.Response(
+          jsonEncode({
+            'session': {
+              'id': 'session-1',
+              'players': [
+                {'id': 'player-1', 'nickname': body['nickname']},
+              ],
+            },
+            'player': {'id': 'player-1', 'nickname': body['nickname']},
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'error': {'code': 'update_failed', 'message': 'failed'},
+        }),
+        400,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+    final bridge = AppWebViewBridge(
+      userId: 'player-1',
+      nickname: '旧昵称',
+      coreBaseUri: Uri.parse('http://core.example/'),
+      onNicknameChanged: (nickname) async => persisted.add(nickname),
+      httpClient: client,
+    );
+    addTearDown(bridge.close);
+
+    final success = await _command(
+      bridge,
+      'app.identity.updateNickname',
+      'nickname-success',
+      payload: {
+        'nickname': '新昵称',
+        'sessionId': 'session-1',
+        'credentialToken': 'credential-1',
+        'playerId': 'player-1',
+      },
+    );
+    expect(success['type'], 'app.command.result');
+    expect(
+      (success['result']! as Map)['identity'],
+      containsPair('nickname', '新昵称'),
+    );
+
+    final failure = await _command(
+      bridge,
+      'app.identity.updateNickname',
+      'nickname-failure',
+      payload: {
+        'nickname': '失败昵称',
+        'sessionId': 'session-1',
+        'credentialToken': 'credential-1',
+        'playerId': 'player-1',
+      },
+    );
+    expect(failure['type'], 'app.command.error');
+    expect(failure['code'], 'nickname_update_failed');
+    expect(persisted, ['新昵称', '失败昵称', '新昵称']);
+    final bootstrap = await _command(
+      bridge,
+      'app.bootstrap',
+      'nickname-bootstrap',
+    );
+    expect(
+      (bootstrap['result']! as Map)['identity'],
+      containsPair('nickname', '新昵称'),
+    );
+  });
+
+  test('本机昵称命令只委托宿主事务并刷新 App 身份', () async {
+    Map<String, Object?>? received;
+    final bridge = AppWebViewBridge(
+      userId: 'player-local',
+      nickname: '旧昵称',
+      onNicknameUpdate: (payload) async {
+        received = payload;
+        return {
+          'session': {
+            'id': 'session-local',
+            'players': [
+              {'id': 'player-local', 'nickname': '本机新昵称'},
+            ],
+          },
+          'player': {'id': 'player-local', 'nickname': '本机新昵称'},
+        };
+      },
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.identity.updateNickname',
+      'nickname-local',
+      payload: {'nickname': '本机新昵称'},
+    );
+
+    expect(received, {'nickname': '本机新昵称'});
+    expect(response['type'], 'app.command.result');
+    expect(
+      (response['result']! as Map)['identity'],
+      containsPair('nickname', '本机新昵称'),
+    );
+  });
+
+  test('远程昵称响应丢失时读取 Core 权威状态，不盲目回滚', () async {
+    final persisted = <String>[];
+    var patchCount = 0;
+    final client = MockClient((request) async {
+      if (request.method == 'PATCH') {
+        patchCount += 1;
+        throw TimeoutException('response lost');
+      }
+      expect(request.method, 'GET');
+      expect(request.url.path, '/v1/sessions/session-2');
+      return http.Response(
+        jsonEncode({
+          'id': 'session-2',
+          'players': [
+            {'id': 'player-2', 'nickname': '已提交昵称'},
+          ],
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+    final bridge = AppWebViewBridge(
+      userId: 'player-2',
+      nickname: '旧昵称',
+      coreBaseUri: Uri.parse('http://core.example/'),
+      onNicknameChanged: (nickname) async => persisted.add(nickname),
+      httpClient: client,
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.identity.updateNickname',
+      'nickname-reconcile',
+      payload: {
+        'nickname': '已提交昵称',
+        'sessionId': 'session-2',
+        'credentialToken': 'credential-2',
+        'playerId': 'player-2',
+      },
+    );
+
+    expect(response['type'], 'app.command.result');
+    expect(patchCount, 2);
+    expect(persisted, ['已提交昵称']);
+    expect(
+      (response['result']! as Map)['identity'],
+      containsPair('nickname', '已提交昵称'),
+    );
   });
 }
 

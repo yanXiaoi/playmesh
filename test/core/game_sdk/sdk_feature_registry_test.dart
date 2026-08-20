@@ -12,6 +12,7 @@ void main() {
       'session.start',
       'session.reset',
       'session.finish',
+      'player.setNickname',
       'performance.ping',
       'performance.pong',
       'lifecycle.complete',
@@ -36,6 +37,7 @@ void main() {
       'app.device.fullscreen',
       'app.game.exit',
       'app.identity.syncAvatar',
+      'app.identity.updateNickname',
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;

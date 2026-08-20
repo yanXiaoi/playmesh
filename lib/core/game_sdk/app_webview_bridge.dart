@@ -38,9 +38,15 @@ class AppWebViewBridge {
     bool? showShareAction,
     this.onInputTakeover,
     this.onExitRequested,
+    this.onNicknameUpdate,
+    this.onNicknameChanged,
+    this.profileStore = const UserProfileStore(),
+    http.Client? httpClient,
   }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
          platformUiConfiguration,
        ),
+       _httpClient = httpClient ?? http.Client(),
+       _ownsHttpClient = httpClient == null,
        showShareAction = showShareAction ?? onOpenSharePanel != null {
     this.mediaRuntime = mediaRuntime ?? createDefaultAppMediaRuntime();
     this.capabilityRegistry =
@@ -56,7 +62,7 @@ class AppWebViewBridge {
   }
 
   final String userId;
-  final String nickname;
+  String nickname;
   final List<String> declaredCapabilities;
   final bool acceptRuntimeGameDeclaration;
   final Uri? coreBaseUri;
@@ -68,6 +74,12 @@ class AppWebViewBridge {
   final bool showShareAction;
   final void Function()? onInputTakeover;
   final Future<void> Function()? onExitRequested;
+  final Future<Object?> Function(Map<String, Object?> payload)?
+  onNicknameUpdate;
+  final Future<void> Function(String nickname)? onNicknameChanged;
+  final UserProfileStore profileStore;
+  final http.Client _httpClient;
+  final bool _ownsHttpClient;
   late final CapabilityRegistry capabilityRegistry;
   late final AppMediaRuntime mediaRuntime;
   Map<String, Object?>? _platformUiConfiguration;
@@ -76,6 +88,7 @@ class AppWebViewBridge {
     declaredCapabilities,
   );
   DateTime? _trustedUserActivationExpiresAt;
+  Future<void> _nicknameUpdateTail = Future<void>.value();
 
   List<String> get runtimeDeclaredCapabilities => _runtimeDeclaredCapabilities;
 
@@ -155,6 +168,7 @@ class AppWebViewBridge {
           takeOverInput: _takeOverInput,
           requestExit: _requestExit,
           syncAvatar: _syncAvatar,
+          updateNickname: _updateNickname,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -341,7 +355,7 @@ class AppWebViewBridge {
     if (profile.userId != userId || bytes == null || digest == null) {
       return null;
     }
-    final response = await http.put(
+    final response = await _httpClient.put(
       baseUri.resolve('v1/sessions/$sessionId/avatar'),
       headers: {
         'Authorization': 'Bearer $credentialToken',
@@ -354,6 +368,279 @@ class AppWebViewBridge {
       throw StateError('头像同步失败（HTTP ${response.statusCode}）');
     }
     return null;
+  }
+
+  Future<Object?> _updateNickname(Map<String, Object?> payload) {
+    final previous = _nicknameUpdateTail;
+    final operation = () async {
+      try {
+        await previous;
+      } on Object {
+        // 前一项失败不能阻断后续改名。
+      }
+      return _performNicknameUpdate(payload);
+    }();
+    _nicknameUpdateTail = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
+
+  Future<Object?> _performNicknameUpdate(Map<String, Object?> payload) async {
+    final callback = onNicknameUpdate;
+    final rawResult = callback == null
+        ? await _updateRemoteNickname(payload)
+        : await callback(payload);
+    if (rawResult is! Map) {
+      throw const SdkCommandException('nickname_update_failed', '昵称更新结果无效');
+    }
+    final result = Map<String, Object?>.from(rawResult);
+    final rawSession = result['session'];
+    final rawPlayer = result['player'];
+    if (rawSession is! Map || rawPlayer is! Map) {
+      throw const SdkCommandException('nickname_update_failed', '昵称更新结果缺少玩家资料');
+    }
+    final session = Map<String, Object?>.from(rawSession);
+    final player = Map<String, Object?>.from(rawPlayer);
+    final requestedNickname = payload['nickname'];
+    final expectedSessionId = payload['sessionId'];
+    final playerId = player['id'];
+    final updatedNickname = player['nickname'];
+    if (session['id'] is! String ||
+        (expectedSessionId != null && session['id'] != expectedSessionId) ||
+        playerId != userId ||
+        requestedNickname is! String ||
+        updatedNickname is! String ||
+        !_isValidNickname(updatedNickname) ||
+        updatedNickname.trim() != requestedNickname.trim()) {
+      throw const SdkCommandException('nickname_update_failed', '昵称更新结果无效');
+    }
+    nickname = updatedNickname.trim();
+    return {
+      ...result,
+      'session': session,
+      'player': player,
+      'identity': _identityEnvironment(),
+    };
+  }
+
+  Future<Map<String, Object?>> _updateRemoteNickname(
+    Map<String, Object?> payload,
+  ) async {
+    if (payload.length != 4 ||
+        !payload.keys.every(
+          const {
+            'nickname',
+            'sessionId',
+            'credentialToken',
+            'playerId',
+          }.contains,
+        )) {
+      throw const SdkCommandException('invalid_argument', '远程昵称参数无效');
+    }
+    final baseUri = coreBaseUri;
+    final rawNickname = payload['nickname'];
+    final sessionId = payload['sessionId'];
+    final credentialToken = payload['credentialToken'];
+    final playerId = payload['playerId'];
+    if (baseUri == null ||
+        rawNickname is! String ||
+        !_isValidNickname(rawNickname) ||
+        sessionId is! String ||
+        sessionId.isEmpty ||
+        sessionId.length > 128 ||
+        credentialToken is! String ||
+        credentialToken.isEmpty ||
+        credentialToken.length > 4096 ||
+        playerId is! String ||
+        playerId != userId) {
+      throw const SdkCommandException('invalid_argument', '远程昵称参数无效');
+    }
+    final previousNickname = nickname;
+    final requestedNickname = rawNickname.trim();
+    await _persistNickname(requestedNickname);
+    nickname = requestedNickname;
+    Object? ambiguousError;
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await _commitRemoteNickname(
+          baseUri: baseUri,
+          sessionId: sessionId,
+          credentialToken: credentialToken,
+          playerId: playerId,
+          nickname: requestedNickname,
+        );
+      } on _NicknameCommitRejected catch (error) {
+        await _restoreNickname(previousNickname);
+        throw SdkCommandException('nickname_update_failed', error.message);
+      } on Object catch (error) {
+        ambiguousError = error;
+      }
+    }
+    try {
+      final result = await _readRemoteNicknameState(
+        baseUri: baseUri,
+        sessionId: sessionId,
+        credentialToken: credentialToken,
+        playerId: playerId,
+      );
+      final player = Map<String, Object?>.from(result['player']! as Map);
+      final authoritativeNickname = (player['nickname']! as String).trim();
+      if (authoritativeNickname == requestedNickname) return result;
+      await _persistNickname(authoritativeNickname);
+      nickname = authoritativeNickname;
+      throw SdkCommandException(
+        'nickname_update_failed',
+        'Core 未提交昵称更新：${ambiguousError ?? '未知错误'}',
+      );
+    } on SdkCommandException {
+      rethrow;
+    } on Object {
+      // PATCH 结果不明确且无法读取权威状态时，保留本机意图供重连对账。
+      throw const SdkCommandException(
+        'nickname_update_pending',
+        '昵称已保存在本机，等待与房间重新同步',
+      );
+    }
+  }
+
+  Future<Map<String, Object?>> _commitRemoteNickname({
+    required Uri baseUri,
+    required String sessionId,
+    required String credentialToken,
+    required String playerId,
+    required String nickname,
+  }) async {
+    final response = await _httpClient
+        .patch(
+          baseUri.resolve(
+            'v1/sessions/${Uri.encodeComponent(sessionId)}/players/me',
+          ),
+          headers: {
+            'Authorization': 'Bearer $credentialToken',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'nickname': nickname}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode >= 400 && response.statusCode < 500) {
+      throw _NicknameCommitRejected('远程昵称更新失败（HTTP ${response.statusCode}）');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('远程昵称更新结果不明确（HTTP ${response.statusCode}）');
+    }
+    return _decodeNicknameResult(
+      response,
+      sessionId: sessionId,
+      playerId: playerId,
+      nickname: nickname,
+    );
+  }
+
+  Future<Map<String, Object?>> _readRemoteNicknameState({
+    required Uri baseUri,
+    required String sessionId,
+    required String credentialToken,
+    required String playerId,
+  }) async {
+    final response = await _httpClient
+        .get(
+          baseUri.resolve('v1/sessions/${Uri.encodeComponent(sessionId)}'),
+          headers: {'Authorization': 'Bearer $credentialToken'},
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('读取 Core 昵称状态失败');
+    }
+    if (response.bodyBytes.length > 1024 * 1024) {
+      throw const FormatException('Core 快照响应过大');
+    }
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (decoded is! Map) throw const FormatException('Core 快照响应无效');
+    final session = Map<String, Object?>.from(decoded);
+    if (session['id'] != sessionId || session['players'] is! List) {
+      throw const FormatException('Core 快照身份不匹配');
+    }
+    Map<String, Object?>? player;
+    for (final candidate in session['players']! as List) {
+      if (candidate is! Map) continue;
+      final normalized = Map<String, Object?>.from(candidate);
+      if (normalized['id'] == playerId) {
+        player = normalized;
+        break;
+      }
+    }
+    final authoritativeNickname = player?['nickname'];
+    if (player == null ||
+        authoritativeNickname is! String ||
+        !_isValidNickname(authoritativeNickname)) {
+      throw const FormatException('Core 快照缺少当前玩家');
+    }
+    return {'session': session, 'player': player};
+  }
+
+  Map<String, Object?> _decodeNicknameResult(
+    http.Response response, {
+    required String sessionId,
+    required String playerId,
+    required String nickname,
+  }) {
+    if (response.bodyBytes.length > 1024 * 1024) {
+      throw const FormatException('昵称更新响应过大');
+    }
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (decoded is! Map) throw const FormatException('昵称更新响应无效');
+    final result = Map<String, Object?>.from(decoded);
+    final rawSession = result['session'];
+    final rawPlayer = result['player'];
+    if (rawSession is! Map || rawPlayer is! Map) {
+      throw const FormatException('昵称更新响应无效');
+    }
+    final session = Map<String, Object?>.from(rawSession);
+    final player = Map<String, Object?>.from(rawPlayer);
+    if (session['id'] != sessionId ||
+        player['id'] != playerId ||
+        player['nickname'] is! String ||
+        (player['nickname']! as String).trim() != nickname) {
+      throw const FormatException('昵称更新响应身份不匹配');
+    }
+    return {'session': session, 'player': player};
+  }
+
+  Future<void> _restoreNickname(String value) async {
+    try {
+      await _persistNickname(value);
+    } on Object {
+      // 明确失败仍恢复内存身份；持久层在下次保存时修复。
+    }
+    nickname = value;
+  }
+
+  Future<void> _persistNickname(String value) async {
+    final callback = onNicknameChanged;
+    if (callback != null) {
+      await callback(value);
+      return;
+    }
+    final profile = await profileStore.load(
+      UserProfile(userId: userId, nickname: nickname),
+    );
+    if (profile.userId != userId) {
+      throw const SdkCommandException('identity_mismatch', '本机身份与当前玩家不一致');
+    }
+    await profileStore.save(profile.copyWith(nickname: value));
+  }
+
+  Map<String, Object?> _identityEnvironment() => {
+    'userId': userId,
+    'nickname': nickname,
+    'source': 'playmesh_app',
+  };
+
+  bool _isValidNickname(String value) {
+    final normalized = value.trim();
+    return normalized.isNotEmpty && normalized.runes.length <= 32;
   }
 
   Future<void> resetCapabilities() async {
@@ -377,7 +664,14 @@ class AppWebViewBridge {
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
     await mediaRuntime.dispose();
+    if (_ownsHttpClient) _httpClient.close();
   }
+}
+
+class _NicknameCommitRejected implements Exception {
+  const _NicknameCommitRejected(this.message);
+
+  final String message;
 }
 
 const _maxAppBridgeJsonBytes = 4 * 1024 * 1024;

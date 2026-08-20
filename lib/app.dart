@@ -586,6 +586,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
             ? null
             : _retryGameLibraryScan,
         lanGameDiscoveryService: _lanGameDiscoveryService,
+        onNicknameChanged: _saveNickname,
       ),
       routes: {
         ProfilePage.routeName: (_) =>
@@ -639,6 +640,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
         JoinGamePage.routeName: (_) => JoinGamePage(
           initialUserId: _profile.userId,
           initialNickname: _profile.nickname,
+          onNicknameChanged: _saveNickname,
           discoveryService: _lanGameDiscoveryService,
         ),
       },
@@ -681,6 +683,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
               localUserId: _profile.userId,
               localNickname: _profile.nickname,
               localProfile: _profile,
+              onNicknameChanged: _saveNickname,
               orientationController: widget.gameOrientationController,
               goCoreRuntime: _runtime,
               catalogController: widget.games == null
@@ -754,6 +757,10 @@ class _PlaymeshAppState extends State<PlaymeshApp>
   Future<void> _saveProfile(UserProfile profile) async {
     await _profileStore.save(profile);
     if (mounted) setState(() => _profile = profile);
+  }
+
+  Future<void> _saveNickname(String nickname) {
+    return _saveProfile(_profile.copyWith(nickname: nickname));
   }
 
   Future<GameSummary> _importGame(String sourcePath) async {

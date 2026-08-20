@@ -128,6 +128,7 @@ class _GameSessionFeature implements _GameSdkCommandFeature {
     'session.start',
     'session.reset',
     'session.finish',
+    'player.setNickname',
   };
 
   @override
@@ -135,6 +136,18 @@ class _GameSessionFeature implements _GameSdkCommandFeature {
     GameSdkCommandContext context,
     SdkCommandEnvelope command,
   ) async {
+    if (command.name == 'player.setNickname') {
+      final update = context.updateNickname;
+      if (update == null) {
+        throw const SdkCommandException(
+          'nickname_update_unavailable',
+          '当前宿主不支持修改玩家昵称',
+        );
+      }
+      return SdkCommandResult(
+        await update(sdkRequiredString(command.payload, 'nickname')),
+      );
+    }
     final connection = context.connection;
     if (connection == null) {
       throw FormatException('单机模式不支持 SDK 命令: ${command.name}');

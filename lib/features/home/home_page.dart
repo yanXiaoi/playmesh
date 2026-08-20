@@ -33,6 +33,7 @@ class HomePage extends StatelessWidget {
     this.onRetryGameLibrary,
     this.externalUrlLauncher,
     this.lanGameDiscoveryService,
+    this.onNicknameChanged,
   });
 
   static const profileHeroKey = Key('home-profile-hero');
@@ -59,6 +60,7 @@ class HomePage extends StatelessWidget {
   final VoidCallback? onRetryGameLibrary;
   final Future<bool> Function(Uri uri)? externalUrlLauncher;
   final LanGameDiscoveryService? lanGameDiscoveryService;
+  final Future<void> Function(String nickname)? onNicknameChanged;
 
   List<GameSummary> get _visibleGames {
     final featured = featuredGame;
@@ -110,6 +112,7 @@ class HomePage extends StatelessWidget {
           initialUserId: user.userId,
           initialNickname: user.nickname,
           discoveryService: lanGameDiscoveryService,
+          onNicknameChanged: onNicknameChanged,
         ),
       ),
     );

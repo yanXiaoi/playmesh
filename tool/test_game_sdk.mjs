@@ -353,6 +353,7 @@ let appPlatformUiConfiguration = {
   locale: localizationManifest.defaultLocale,
   messages: localizationMessages.get(localizationManifest.defaultLocale),
 };
+const identityNicknameUpdates = [];
 const appInternalRuntime = {
   publicApi: appPublicApi,
   takePlatformUiConfiguration() {
@@ -361,6 +362,30 @@ const appInternalRuntime = {
     return value;
   },
   restoreGameContentFocus() {},
+  updateIdentityNickname(nickname, sessionId, credentialToken, playerId) {
+    identityNicknameUpdates.push({ nickname, sessionId, credentialToken, playerId });
+    const current = window.playmesh.main.session.getCurrent();
+    const player = {
+      id: "p-authority",
+      nickname,
+      avatar: null,
+      role: "authority_player",
+      connected: true,
+    };
+    return Promise.resolve({
+      session: {
+        ...current,
+        authorityClientId: player.id,
+        players: [player, ...current.players],
+      },
+      player,
+      identity: {
+        userId: "u-local",
+        nickname,
+        source: "playmesh_app",
+      },
+    });
+  },
 };
 
 globalThis.window = {
@@ -484,7 +509,13 @@ globalThis.window = {
             displayMode: "multi_screen",
             requiredCapabilities: [],
           },
-          player: null,
+          player: {
+            id: "p-authority",
+            nickname: "Authority",
+            avatar: null,
+            role: "authority_player",
+            connected: true,
+          },
           binaryTransport: { url: "ws://127.0.0.1/binary?token=secret" },
           session: {
             id: "s-1", joinCode: "ABC123", state: "lobby",
@@ -578,7 +609,7 @@ assert.equal(window.playmeshApp, undefined);
 assert.equal(Object.getOwnPropertyDescriptor(window, mainInternalKey).enumerable, false);
 assert.deepEqual(Object.keys(window.playmesh.main).filter((key) => key.startsWith("__")), []);
 assert.equal(window.playmesh.main.session.isAuthority(), true);
-assert.equal(window.playmesh.main.player.getCurrent(), null);
+assert.equal(window.playmesh.main.player.getCurrent().id, "p-authority");
 assert.equal(window.playmesh.main.session.getCurrent().joinCode, "ABC123");
 assert.deepEqual(
   Object.keys(window.playmesh.main.session.getCurrent().players[0]).sort(),
@@ -600,9 +631,18 @@ const finishedSession = await window.playmesh.main.session.finish();
 assert.equal(finishedSession.state, "stopped");
 assert.equal("source" in finishedSession.players[0], false);
 assert.equal("latencyMs" in finishedSession.players[0], false);
-await assert.rejects(
-  window.playmesh.main.player.setNickname("App 玩家"),
-  /仅适用于浏览器玩家/,
+const renamedPlayer = await window.playmesh.main.player.setNickname("App 玩家");
+assert.equal(renamedPlayer.nickname, "App 玩家");
+assert.deepEqual(identityNicknameUpdates, [{
+  nickname: "App 玩家",
+  sessionId: undefined,
+  credentialToken: undefined,
+  playerId: undefined,
+}]);
+assert.equal(
+  commands.some((command) => command.command === "player.setNickname"),
+  false,
+  "App 宿主昵称更新必须由 App Bridge 处理",
 );
 
 const binaryChannel = await window.playmesh.main.binary.createChannel({

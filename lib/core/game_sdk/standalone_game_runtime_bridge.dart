@@ -87,6 +87,7 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
             operation.complete();
             return true;
           },
+          updateNickname: _rejectNicknameUpdate,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -155,6 +156,13 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     _lifecycleOperations.clear();
     await _storage?.close();
     await _outbound.close();
+  }
+
+  Future<Map<String, Object?>> _rejectNicknameUpdate(String nickname) {
+    throw const SdkCommandException(
+      'nickname_managed_by_app',
+      '当前 App 玩家昵称由平台资料管理',
+    );
   }
 
   void _sendResult(String? requestId, Object? result) {

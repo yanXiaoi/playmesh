@@ -69,6 +69,7 @@ class GamePage extends StatefulWidget {
     this.localUserId = 'u_local',
     this.localNickname = playmeshDefaultLocalNickname,
     this.localProfile,
+    this.onNicknameChanged,
     this.previewBuilder,
     this.orientationController,
     this.goCoreRuntime,
@@ -91,6 +92,7 @@ class GamePage extends StatefulWidget {
   final String localUserId;
   final String localNickname;
   final UserProfile? localProfile;
+  final Future<void> Function(String nickname)? onNicknameChanged;
   final GamePreviewBuilder? previewBuilder;
   final GameOrientationController? orientationController;
   final GoCoreRuntime? goCoreRuntime;
@@ -148,6 +150,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   late final LanGameDiscoveryService _lanGameDiscoveryService;
   late final bool _ownsLanGameDiscoveryService;
   late final GameAppLanHostAdapter _appLanHost;
+  late String _currentNickname;
+  Future<void> _nicknameUpdateTail = Future<void>.value();
 
   GameSdkBridge? get _webViewBridge => _bridge ?? _soloBridge;
   bool get _canShareFromAppSdk =>
@@ -158,6 +162,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _currentNickname = widget.localNickname;
     _gameResourceSource = resolveGameWebResourceSource(
       widget.game,
       widget.developerResourceSession,
@@ -200,6 +205,10 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(GamePage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.localNickname != widget.localNickname &&
+        _currentNickname == oldWidget.localNickname) {
+      _currentNickname = widget.localNickname;
+    }
     final oldOrientation = oldWidget.game.orientation;
     final oldShouldEnterFullscreen = oldWidget.enterFullscreenOnLaunch;
     if (_shouldEnterFullscreenOnLaunch &&
@@ -260,7 +269,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           game.capabilities.controllerRequired,
         ) ||
         oldWidget.localUserId != widget.localUserId ||
-        oldWidget.localNickname != widget.localNickname ||
         (oldWidget.previewBuilder == null) != (widget.previewBuilder == null);
   }
 
@@ -500,17 +508,147 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
             bridge: _webViewBridge,
             resourceSource: _gameResourceSource,
             localUserId: widget.localUserId,
-            localNickname: widget.localNickname,
+            localNickname: _currentNickname,
             developerResourceSession: widget.developerResourceSession,
             appLanHost: _appLanHost,
             onOpenSharePanel: _canShareFromAppSdk ? _openShareFromAppSdk : null,
             onExitRequested: _returnToPrevious,
+            onNicknameUpdate: _updateNicknameFromSdk,
             onSystemBackHandlerChanged: _setGameSystemBackHandler,
             onJavaScriptExecutorChanged: (executor) {
               _developerJavaScriptExecutor = executor;
             },
           ),
     );
+  }
+
+  Future<Object?> _updateNicknameFromSdk(Map<String, Object?> payload) {
+    final previous = _nicknameUpdateTail;
+    late final Future<Object?> operation;
+    operation = () async {
+      try {
+        await previous;
+      } on Object {
+        // 队列中的前一项失败不阻断后续改名。
+      }
+      return _performNicknameUpdate(payload);
+    }();
+    _nicknameUpdateTail = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
+
+  Future<Object?> _performNicknameUpdate(Map<String, Object?> payload) async {
+    if (payload.length != 1 || !payload.containsKey('nickname')) {
+      throw const SdkCommandException('invalid_argument', '昵称参数无效');
+    }
+    final rawNickname = payload['nickname'];
+    if (rawNickname is! String) {
+      throw const SdkCommandException('invalid_argument', '昵称参数无效');
+    }
+    final normalized = rawNickname.trim();
+    if (normalized.isEmpty || normalized.runes.length > 32) {
+      throw const SdkCommandException('invalid_argument', '昵称必须为 1 至 32 个字符');
+    }
+    final connection = _bridge?.connection;
+    if (connection == null) {
+      throw const SdkCommandException(
+        'nickname_update_unavailable',
+        '当前游戏没有可更新昵称的多人会话',
+      );
+    }
+    if (connection.snapshot.displayMode == 'single_screen_multiplayer') {
+      throw const SdkCommandException(
+        'nickname_update_unavailable',
+        '公共 Authority 屏没有可修改昵称的当前玩家',
+      );
+    }
+    final expectedPlayerId = connection.currentPlayer.id;
+    final previousNickname = _currentNickname;
+    await _persistLocalNickname(normalized);
+    Object? ambiguousError;
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        final player = await connection.updateNickname(normalized);
+        if (player.id != expectedPlayerId || player.nickname != normalized) {
+          throw const FormatException('Core 昵称更新响应身份不匹配');
+        }
+        return _nicknameUpdatePayload(connection, player);
+      } on GameSessionException catch (error) {
+        if (error.statusCode >= 400 && error.statusCode < 500) {
+          await _restoreLocalNickname(previousNickname);
+          rethrow;
+        }
+        ambiguousError = error;
+      } on Object catch (error) {
+        ambiguousError = error;
+      }
+    }
+    try {
+      final snapshot = await connection.refreshSnapshot();
+      final player = snapshot.players
+          .where((candidate) => candidate.id == expectedPlayerId)
+          .firstOrNull;
+      if (player == null) {
+        throw const FormatException('Core 快照缺少当前玩家');
+      }
+      if (player.nickname == normalized) {
+        return _nicknameUpdatePayload(connection, player);
+      }
+      await _persistLocalNickname(player.nickname);
+      throw SdkCommandException(
+        'nickname_update_failed',
+        'Core 未提交昵称更新：${ambiguousError ?? '未知错误'}',
+      );
+    } on SdkCommandException {
+      rethrow;
+    } on Object {
+      // 无法判断 Core 是否已提交时保留本地意图；下次重连会携带该昵称完成对账。
+      throw const SdkCommandException(
+        'nickname_update_pending',
+        '昵称已保存在本机，等待与房间重新同步',
+      );
+    }
+  }
+
+  Map<String, Object?> _nicknameUpdatePayload(
+    GameSessionConnection connection,
+    GameSessionPlayer player,
+  ) => {
+    'session': connection.snapshot.toJson(),
+    'player': player.toJson(),
+    'identity': {
+      'userId': widget.localUserId,
+      'nickname': player.nickname,
+      'source': 'playmesh_app',
+    },
+  };
+
+  Future<void> _restoreLocalNickname(String nickname) async {
+    try {
+      await _persistLocalNickname(nickname);
+    } on Object {
+      _currentNickname = nickname;
+    }
+  }
+
+  Future<void> _persistLocalNickname(String nickname) async {
+    final callback = widget.onNicknameChanged;
+    if (callback != null) {
+      await callback(nickname);
+    } else {
+      final fallback =
+          widget.localProfile ??
+          UserProfile(userId: widget.localUserId, nickname: _currentNickname);
+      final profile = await const UserProfileStore().load(fallback);
+      if (profile.userId != widget.localUserId) {
+        throw const SdkCommandException('identity_mismatch', '本机身份与当前玩家不一致');
+      }
+      await const UserProfileStore().save(profile.copyWith(nickname: nickname));
+    }
+    _currentNickname = nickname;
   }
 
   void _applyOrientation(
@@ -638,6 +776,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         requiredCapabilities: game.capabilities
             .requiredForRole(controller: false)
             .toList(),
+        onNicknameUpdate: (nickname) async => Map<String, Object?>.from(
+          await _updateNicknameFromSdk({'nickname': nickname}) as Map,
+        ),
       );
       await _syncLocalAvatar(connection, localAvatar);
       if (!_isCurrentConfiguration(configurationGeneration)) {
@@ -795,7 +936,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         ? MultiplayerGameShareAccessProvider(
             bridge: bridge,
             coreEndpoint: widget.goCoreRuntime!.endpoint,
-            hostNickname: widget.localNickname,
+            hostNickname: _currentNickname,
+            hostNicknameProvider: () =>
+                bridge.connection.currentPlayer.nickname,
           )
         : StandaloneGameShareAccessProvider(soloBridge!);
     return GameShareCoordinator(
@@ -929,7 +1072,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     Map<String, Object?> extra = const {},
   }) {
     debugPrint(
-      '[$level] $message ${jsonEncode({'component': 'game-session', 'event': event, 'sessionId': ?sessionId, 'playerId': playerId, 'nickname': widget.localNickname, ...extra})}',
+      '[$level] $message ${jsonEncode({'component': 'game-session', 'event': event, 'sessionId': ?sessionId, 'playerId': playerId, 'nickname': _currentNickname, ...extra})}',
     );
   }
 
@@ -1038,10 +1181,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       context,
       launch: launch,
       userId: widget.localUserId,
-      nickname: widget.localNickname,
+      nickname: _currentNickname,
       discoveryService: _ownsLanGameDiscoveryService
           ? null
           : _lanGameDiscoveryService,
+      onNicknameChanged: widget.onNicknameChanged,
     );
   }
 

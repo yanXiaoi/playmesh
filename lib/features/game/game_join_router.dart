@@ -17,12 +17,14 @@ class GameJoinRouter {
     required String userId,
     required String nickname,
     LanGameDiscoveryService? discoveryService,
+    Future<void> Function(String nickname)? onNicknameChanged,
   }) => Navigator.of(context).push<void>(
     _route(
       launch: launch,
       userId: userId,
       nickname: nickname,
       discoveryService: discoveryService,
+      onNicknameChanged: onNicknameChanged,
     ),
   );
 
@@ -32,12 +34,14 @@ class GameJoinRouter {
     required String userId,
     required String nickname,
     LanGameDiscoveryService? discoveryService,
+    Future<void> Function(String nickname)? onNicknameChanged,
   }) => Navigator.of(context).pushReplacement<void, void>(
     _route(
       launch: launch,
       userId: userId,
       nickname: nickname,
       discoveryService: discoveryService,
+      onNicknameChanged: onNicknameChanged,
     ),
   );
 
@@ -46,6 +50,7 @@ class GameJoinRouter {
     required String userId,
     required String nickname,
     required LanGameDiscoveryService? discoveryService,
+    required Future<void> Function(String nickname)? onNicknameChanged,
   }) => MaterialPageRoute<void>(
     settings: RouteSettings(name: RemoteGamePage.routeName, arguments: launch),
     builder: (_) => RemoteGamePage(
@@ -56,6 +61,7 @@ class GameJoinRouter {
       gameName: launch.gameName,
       sourceInstanceId: launch.sourceInstanceId,
       discoveryService: discoveryService,
+      onNicknameChanged: onNicknameChanged,
     ),
   );
 }

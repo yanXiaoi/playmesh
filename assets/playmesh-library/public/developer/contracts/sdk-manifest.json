@@ -398,7 +398,8 @@
         {
           "name": "setNickname",
           "signature": "setNickname(nickname: string): Promise<Player>",
-          "availability": "Browser multiplayer player only; unavailable in App WebView and browser solo",
+          "availability": "Multiplayer Player page in an ordinary browser or Playmesh App WebView; unavailable in solo and on the single_screen_multiplayer public Authority display",
+          "behavior": "The browser persists the nickname preference in localStorage for the current origin; the App host persists its local profile. Both synchronize the current Core session without changing the player id or credential",
           "constraints": "Trimmed length 1 to 32 Unicode characters"
         }
       ]
