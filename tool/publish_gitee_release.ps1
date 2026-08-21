@@ -11,7 +11,10 @@ param(
   [ValidateRange(1, 60)]
   [int]$MirrorPollSeconds = 5,
   [ValidateRange(30, 3600)]
-  [int]$HttpTimeoutSeconds = 900
+  [int]$HttpTimeoutSeconds = 900,
+  [switch]$SkipArtifacts,
+  [switch]$DirectPush,
+  [string]$Branch = 'master'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -228,22 +231,24 @@ if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
 }
 
 $artifacts = [System.Collections.Generic.List[string]]::new()
-if ($Target -in @('all', 'android')) {
+if (-not $SkipArtifacts) {
+  if ($Target -in @('all', 'android')) {
+    $artifacts.Add(
+      (Join-Path $releaseDir "$artifactPrefix-android-universal.apk")
+    )
+  }
+  if ($Target -in @('all', 'windows')) {
+    $artifacts.Add(
+      (Join-Path $releaseDir "$artifactPrefix-windows-x64-portable.zip")
+    )
+  }
   $artifacts.Add(
-    (Join-Path $releaseDir "$artifactPrefix-android-universal.apk")
+    (Join-Path $releaseDir "$artifactPrefix-SHA256SUMS.txt")
   )
-}
-if ($Target -in @('all', 'windows')) {
-  $artifacts.Add(
-    (Join-Path $releaseDir "$artifactPrefix-windows-x64-portable.zip")
-  )
-}
-$artifacts.Add(
-  (Join-Path $releaseDir "$artifactPrefix-SHA256SUMS.txt")
-)
-foreach ($artifact in $artifacts) {
-  if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
-    throw "Release artifact was not found: $artifact"
+  foreach ($artifact in $artifacts) {
+    if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
+      throw "Release artifact was not found: $artifact"
+    }
   }
 }
 
@@ -293,6 +298,41 @@ if ($CommitSha -notmatch '^[0-9a-fA-F]{40}$') {
   throw "Commit SHA must contain 40 hexadecimal characters: $CommitSha"
 }
 $CommitSha = $CommitSha.ToLowerInvariant()
+
+if ($DirectPush) {
+  if (-not $gitCommand) {
+    throw 'Git was not found; direct Gitee push cannot continue.'
+  }
+  if ([string]::IsNullOrWhiteSpace($Branch)) {
+    throw 'Gitee branch must not be empty.'
+  }
+  $giteeGitUrl = "https://gitee.com/$Repository.git"
+  $previousLfsSkipPush = $env:GIT_LFS_SKIP_PUSH
+  [Environment]::SetEnvironmentVariable(
+    'GIT_LFS_SKIP_PUSH',
+    '1',
+    'Process'
+  )
+  Push-Location $repoRoot
+  try {
+    & $gitCommand.Source `
+      '-c' `
+      'credential.interactive=never' `
+      'push' `
+      $giteeGitUrl `
+      "${CommitSha}:refs/heads/$Branch"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Direct Git push to Gitee branch '$Branch' failed."
+    }
+  } finally {
+    Pop-Location
+    [Environment]::SetEnvironmentVariable(
+      'GIT_LFS_SKIP_PUSH',
+      $previousLfsSkipPush,
+      'Process'
+    )
+  }
+}
 
 Add-Type -AssemblyName System.Net.Http
 [Net.ServicePointManager]::SecurityProtocol =
@@ -403,17 +443,21 @@ try {
     }
   }
 
-  foreach ($artifact in $artifacts) {
-    $fileName = [IO.Path]::GetFileName($artifact)
-    if ($existingNames.Contains($fileName)) {
-      Write-Output "Gitee attachment already exists; skipping: $fileName"
-      continue
+  if ($SkipArtifacts) {
+    Write-Output 'Skipping Gitee artifact uploads.'
+  } else {
+    foreach ($artifact in $artifacts) {
+      $fileName = [IO.Path]::GetFileName($artifact)
+      if ($existingNames.Contains($fileName)) {
+        Write-Output "Gitee attachment already exists; skipping: $fileName"
+        continue
+      }
+      Write-Output "Uploading Gitee attachment: $fileName"
+      Send-GiteeAttachment `
+        -Path "/repos/$owner/$repo/releases/$releaseId/attach_files" `
+        -FilePath $artifact |
+        Out-Null
     }
-    Write-Output "Uploading Gitee attachment: $fileName"
-    Send-GiteeAttachment `
-      -Path "/repos/$owner/$repo/releases/$releaseId/attach_files" `
-      -FilePath $artifact |
-      Out-Null
   }
 
   Write-Output (

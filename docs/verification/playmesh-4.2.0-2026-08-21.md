@@ -64,6 +64,17 @@
 - Windows 编译器提示部分依赖把警告级别从 `/W3` 覆盖为 `/W4`；正式 bundle 仍成功生成并
   通过资源复核。
 
+## 发布结果
+
+- GitHub `master` 与标签 `v4.2.0-build28` 指向同一发行提交；GitHub Release 上传完整
+  Android APK、Windows ZIP 和 `SHA256SUMS.txt`。两个 `resources/app/` 固定镜像的 LFS
+  对象也已上传，可从 GitHub 主分支镜像地址读取。
+- Gitee `master` 与同名标签已同步。Gitee 免费仓库不支持 Git LFS，因此分支仍跟踪两个
+  LFS 指针，但不作为二进制镜像下载源。
+- 本次发布过程中，Gitee 在用户补充“不用上传已构建产物”前已经保留 Windows ZIP、校验
+  文件及因 100 MB 单附件限制拆分的 Android APK；按随后指示无需撤回。发布脚本此后默认
+  只同步 Gitee 代码、标签和 Release 信息，不再上传构建产物。
+
 ## 人工验收边界
 
 - Android、Windows、macOS、Linux 的 LAN 跨设备发布、发现、更新/丢失、权限拒绝、网络

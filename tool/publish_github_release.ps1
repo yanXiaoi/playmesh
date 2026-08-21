@@ -267,6 +267,9 @@ try {
       Repository = $GiteeRepository
       CommitSha = $commitSha
       MirrorTimeoutSeconds = $GiteeMirrorTimeoutSeconds
+      SkipArtifacts = $true
+      DirectPush = $true
+      Branch = $Branch
     }
     if ($Prerelease) {
       $giteeParameters.Prerelease = $true
