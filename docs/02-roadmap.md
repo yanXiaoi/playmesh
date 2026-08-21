@@ -228,7 +228,7 @@ AI 心智负担要求：
 
 第六阶段是最后一个阶段。后续更改不再新增阶段、阶段中间状态或阶段完成文档，改为按实际发布版本维护 `docs/version/{MAJOR.MINOR.PATCH}.md` 详细更新日志，并同步 App 内简略更新日志。版本与日志规则见 `docs/version/README.md` 和 `docs/06-engineering-standards.md`。
 
-### Playmesh 4.2.0 局域网发现与 App SDK（已开发，待实机）
+### Playmesh 4.2.0 局域网发现与 App SDK（已发布，待补实机验收）
 
 - 已实现默认不公开的自定义 IPv4 UDP multicast：打开分享面板或本机房主调用
   `playmesh.app.lan.setPublished()` 才单向发布，关闭面板不取消，生命周期结束停止公告并
@@ -248,10 +248,10 @@ AI 心智负担要求：
 - App `4.2.0+28`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Go Core `0.5.0`、
   Core `1.3.0` 与 Relay `3.0.0` 保持不变；`/playmesh/join` 只兼容增加预检字段。
 - 自动化与静态契约已完成；Android、Windows、macOS、Linux 的跨设备发布、发现、丢失、
-  权限、物理/虚拟网卡切换和实际加入仍须实机验收，未完成前不得标记发布完成。iOS 自动
+  权限、物理/虚拟网卡切换和实际加入仍须实机验收，未完成前不得标记实机验收完成。iOS 自动
   发现/发布显式为 `unsupported`，扫码、手工邀请和分享链接保留。
 
-### Playmesh 4.2.0 统一导出入口（已开发，待实机）
+### Playmesh 4.2.0 统一导出入口（已发布，待补实机验收）
 
 - 游戏详情不再提供游戏包导出。源代码开发工作区将原“发布”入口改为“导出”，先选择
   “导出源码”“上传到发布源”或“安装包导出”。安装包导出再选择 Android ARM64、

@@ -1,0 +1,158 @@
+name: Build GDevelop Web IDE
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      # The production audit inspects original source modules through the map;
+      # prepare-webide removes every map before the distributable is packaged.
+      GENERATE_SOURCEMAP: "true"
+      LOCK_FILE: assets/playmesh-library/public/GDevelop/playmesh/webide-lock.json
+      INTEGRATION_ROOT: assets/playmesh-library/public/GDevelop/playmesh
+    steps:
+      - name: Check out Playmesh
+        uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        id: lock
+        shell: bash
+        run: |
+          node -e '
+            const lock = require("./" + process.env.LOCK_FILE);
+            const outputs = {
+              tag: lock.upstream.tag,
+              commit: lock.upstream.commit,
+              source_archive: lock.upstream.sourceArchive,
+              source_archive_sha256: lock.upstream.sourceArchiveSha256,
+              asset_name: lock.distribution.assetName,
+            };
+            for (const [name, value] of Object.entries(outputs)) {
+              console.log(`${name}=${value}`);
+            }
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: Download pinned official source archive
+        shell: bash
+        env:
+          SOURCE_ARCHIVE_URL: ${{ steps.lock.outputs.source_archive }}
+          SOURCE_ARCHIVE_SHA256: ${{ steps.lock.outputs.source_archive_sha256 }}
+          UPSTREAM_TAG: ${{ steps.lock.outputs.tag }}
+        run: |
+          mkdir -p .upstream
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --output .upstream/GDevelop-source.zip \
+            "$SOURCE_ARCHIVE_URL"
+          actual_sha256="$(sha256sum .upstream/GDevelop-source.zip | cut -d ' ' -f 1)"
+          if [[ "$actual_sha256" != "$SOURCE_ARCHIVE_SHA256" ]]; then
+            echo "Official source archive SHA-256 mismatch" >&2
+            exit 1
+          fi
+          unzip -q .upstream/GDevelop-source.zip -d .upstream
+          extracted_root=".upstream/GDevelop-${UPSTREAM_TAG#v}"
+          if [[ ! -d "$extracted_root" ]]; then
+            echo "Official source archive root is unexpected" >&2
+            exit 1
+          fi
+          mv "$extracted_root" .upstream/GDevelop
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: .upstream/GDevelop/newIDE/app/package-lock.json
+
+      - name: Verify integration layout
+        run: node "${INTEGRATION_ROOT}/scripts/verify-layout.mjs"
+
+      - name: Apply Playmesh service policy to disposable checkout
+        run: node "${INTEGRATION_ROOT}/scripts/apply-source-policy.mjs" --source .upstream/GDevelop
+
+      - name: Import exact-commit official libGD pair
+        id: libgd
+        shell: bash
+        env:
+          UPSTREAM_COMMIT: ${{ steps.lock.outputs.commit }}
+          UPSTREAM_TAG: ${{ steps.lock.outputs.tag }}
+        run: |
+          set -euo pipefail
+          libgd_url="https://s3.amazonaws.com/gdevelop-gdevelop.js/master/commit/${UPSTREAM_COMMIT}"
+          libgd_dir=".upstream/GDevelop/Binaries/embuild/GDevelop.js"
+          mkdir -p "$libgd_dir"
+          for name in libGD.js libGD.wasm; do
+            curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+              --output "${libgd_dir}/${name}" "${libgd_url}/${name}"
+          done
+          echo "source=${libgd_url}" >> "$GITHUB_OUTPUT"
+          echo "version=${UPSTREAM_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "js_sha256=$(sha256sum "${libgd_dir}/libGD.js" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "js_size=$(stat -c %s "${libgd_dir}/libGD.js")" >> "$GITHUB_OUTPUT"
+          echo "wasm_sha256=$(sha256sum "${libgd_dir}/libGD.wasm" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "wasm_size=$(stat -c %s "${libgd_dir}/libGD.wasm")" >> "$GITHUB_OUTPUT"
+
+      - name: Install official dependencies
+        working-directory: .upstream/GDevelop/newIDE/app
+        run: npm ci
+
+      - name: Build official Web IDE
+        working-directory: .upstream/GDevelop/newIDE/app
+        run: npm run build
+
+      - name: Verify replayed source policy
+        run: >-
+          node "${INTEGRATION_ROOT}/tests/test-source-policy-output.mjs"
+          --source .upstream/GDevelop
+
+      - name: Audit production build and issue build provenance
+        run: >-
+          node "${INTEGRATION_ROOT}/tests/test-production-build-audit.mjs"
+          --build .upstream/GDevelop/newIDE/app/build
+          --lock "${LOCK_FILE}"
+          --source .upstream/GDevelop
+          --source-archive .upstream/GDevelop-source.zip
+          --source-policy-manifest "${INTEGRATION_ROOT}/source-policy-output-manifest.json"
+          --overlay "${INTEGRATION_ROOT}/overlays"
+          --libgd-kind official-exact-commit-artifact
+          --libgd-source "${{ steps.libgd.outputs.source }}"
+          --libgd-upstream-version "${{ steps.libgd.outputs.version }}"
+          --libgd-js-sha256 "${{ steps.libgd.outputs.js_sha256 }}"
+          --libgd-js-size "${{ steps.libgd.outputs.js_size }}"
+          --libgd-wasm-sha256 "${{ steps.libgd.outputs.wasm_sha256 }}"
+          --libgd-wasm-size "${{ steps.libgd.outputs.wasm_size }}"
+          --libgd-user-decision not-required
+          --expect-ai session-bootstrap
+
+      - name: Verify local release packager
+        run: node "${INTEGRATION_ROOT}/tests/test-webide-release-package.mjs"
+
+      - name: Prepare Playmesh Web IDE package
+        run: >-
+          node "${INTEGRATION_ROOT}/scripts/prepare-webide.mjs"
+          --input .upstream/GDevelop/newIDE/app/build
+          --gdjs .upstream/GDevelop/newIDE/app/resources/GDJS
+          --output dist/gdevelop-webide
+
+      - name: Package and verify local tracked artifacts
+        id: artifact
+        shell: bash
+        run: |
+          node "${INTEGRATION_ROOT}/scripts/package-webide-release.mjs" --action package --prepared dist/gdevelop-webide
+          node "${INTEGRATION_ROOT}/scripts/package-webide-release.mjs" --action verify
+          artifact_path="resources/GDevelop/${{ steps.lock.outputs.asset_name }}"
+          compressed_bytes="$(stat -c %s "$artifact_path")"
+          installed_bytes="$(du -sb dist/gdevelop-webide | cut -f1)"
+          echo "compressed_bytes=$compressed_bytes" >> "$GITHUB_OUTPUT"
+          echo "installed_bytes=$installed_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Report measured sizes
+        shell: bash
+        run: |
+          echo "Compressed bytes: ${{ steps.artifact.outputs.compressed_bytes }}"
+          echo "Installed bytes: ${{ steps.artifact.outputs.installed_bytes }}"

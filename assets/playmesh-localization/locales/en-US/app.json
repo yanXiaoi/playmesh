@@ -406,6 +406,7 @@
   "release.highlight_5": "The Join Game page can now discover nearby games on the same local network; hosts appear only after opening Share or explicitly publishing.",
   "release.highlight_6": "App games can use the new LAN SDK to discover and join the same game, read unified share links and QR codes, and disable automatic system-menu key triggers.",
   "release.highlight_7": "Game-package export has moved to the source workspace. Export can save a source package or upload it to publish sources; the app uses the system save or share surface while browsers download directly.",
+  "release.highlight_8": "The source workspace can export standalone Android ARM64, Android x86_64, or Windows x64 packages from Runtime base packages that are downloaded and verified on demand.",
   "game.details": "Game details",
   "game.start": "Start game",
   "game.description": "About this game",

@@ -7,7 +7,7 @@
 
 | 版本 | 文档 | 范围 |
 | --- | --- | --- |
-| Playmesh `4.2.0+28` | [手动检查 App 更新](playmesh-4.2.0-app-update.md) | 并发读取远端更新清单、最高语义版本选择、当前平台下载线路与延迟展示、系统默认浏览器打开 |
+| Playmesh `4.2.0+28` | [4.2.0 正式版本日志](../version/4.2.0.md) · [手动检查 App 更新](playmesh-4.2.0-app-update.md) · [局域网发现与分享](playmesh-4.2.0-lan-game-discovery.md) | 制作游戏与 GDevelop、本地 AI 与完整资源历史、附近对局与统一分享、源码/发布源/安装包导出、手动检查更新 |
 | Playmesh `4.1.0+27` | [4.1.0 正式实现与验证](../version/4.1.0.md) | 英文默认 README、多语言 AI 提示词目录与清单、全局 locale/文案复用、Developer API 4.1 locale 查询、工作区语言联动与分语言用户覆盖 |
 | Playmesh `4.0.0+26` | [4.0.0 正式实现与验证](../version/4.0.0.md) | 根 Web 运行时、外部工程与 CLI 2.0、Game SDK 4.0 / App SDK 3.2 双命名空间和成对注入、Developer API 4、Catalog/Relay 3、普通网页 ZIP 转换 |
 | Playmesh `3.2.0+25` | [3.0.0 历史本地功能实现基线](playmesh-3.0.0-local-implementation.md) | 4.0 之前的 Catalog 2.0、本地数据 v2、工作区多源发布、Go Server 账号与治理、头像与 SDK、统一 App 国际化、主题、键盘/TV、主页 GitHub 入口、居中游戏菜单、统一 WebView 权限、Android ARCore 位姿与按需终端媒体 |

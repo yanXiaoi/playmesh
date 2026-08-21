@@ -26,6 +26,7 @@ $versionName = $matches[1]
 $buildNumber = $matches[2]
 $artifactPrefix = "Playmesh-$versionName-build$buildNumber"
 $releaseDir = Join-Path $repoRoot "release\$versionName"
+$appResourceDir = Join-Path $repoRoot 'resources\app'
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
 $buildAndroid = $Target -in @('all', 'android')
@@ -145,6 +146,10 @@ if ($buildAndroid) {
   Copy-Item -LiteralPath $apkSource -Destination $apkArtifact -Force
   Assert-ReleaseAssets -Artifact $apkArtifact -Kind android
   $artifacts.Add($apkArtifact)
+  New-Item -ItemType Directory -Force -Path $appResourceDir | Out-Null
+  Copy-Item -LiteralPath $apkArtifact `
+    -Destination (Join-Path $appResourceDir 'playmesh.apk') `
+    -Force
 
   $androidSdkRoot = $env:ANDROID_SDK_ROOT
   if (-not $androidSdkRoot) {
@@ -247,6 +252,10 @@ if ($buildWindows) {
   }
   Assert-ReleaseAssets -Artifact $windowsArtifact -Kind windows
   $artifacts.Add($windowsArtifact)
+  New-Item -ItemType Directory -Force -Path $appResourceDir | Out-Null
+  Copy-Item -LiteralPath $windowsArtifact `
+    -Destination (Join-Path $appResourceDir 'playmesh.zip') `
+    -Force
 }
 
 Write-Output 'Release artifacts:'

@@ -406,6 +406,7 @@
   "release.highlight_5": "加入对局页现在可以发现同一局域网内的附近游戏；房主只有在打开分享面板或主动公开后才会出现。",
   "release.highlight_6": "App 游戏可通过新版 LAN SDK 发现并加入同款游戏、读取统一分享链接与二维码，也可关闭系统菜单的自动按键触发。",
   "release.highlight_7": "游戏包导出已移至源代码工作区；“导出”可选择保存源码包或上传到发布源，App 使用系统保存或分享界面，浏览器直接下载。",
+  "release.highlight_8": "源代码工作区可基于按需下载并校验的 Runtime 底包，导出 Android ARM64、Android x86_64 或 Windows x64 独立安装包。",
   "game.details": "游戏详情",
   "game.start": "开始游戏",
   "game.description": "游戏简介",

@@ -12,12 +12,10 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.1.0+27`、Go Core
+归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.2.0+28`、Go Core
 `0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`、Game SDK `4.0.0`、
-App Bridge SDK `3.2.0`；当前未发布工作树目标为 App `4.2.0+28`、Developer API /
-OpenAPI `4.2.0`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`。本次 LAN 功能没有再次
-提升这些版本。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
+Developer API / OpenAPI `4.3.0`、Developer CLI `2.0.0`、Game SDK `4.1.0`、
+App Bridge SDK `3.3.0`；当前没有新的未发布变更。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在，内部协作使用不可枚举的私有
@@ -122,9 +120,9 @@ Go Core 监听 0.0.0.0:0
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
-## Playmesh 4.2.0 局域网发现功能交接
+## Playmesh 4.2.0 局域网发现实机验收交接
 
-当前未发布 App 目标 `4.2.0+28` 已完成局域网发现与 App SDK 自动化开发，下一项工作
+正式 App `4.2.0+28` 已完成局域网发现与 App SDK 自动化开发并发布，后续工作
 不是再造分享或加入通道，而是四个受支持平台的跨设备实机验收：
 
 - Android、macOS、Windows、Linux 分别验证自定义 IPv4 UDP multicast 的发布、发现、

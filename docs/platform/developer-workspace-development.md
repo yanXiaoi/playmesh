@@ -8,7 +8,7 @@
 Agent API、项目文件与本地历史。游戏作者使用说明见
 [网页开发者通道](../game/web-dev-channel.md)。
 
-当前未发布 Developer API / OpenAPI 版本为 `4.3.0`。开发资源会话与外部工程接入变更见
+当前正式 Developer API / OpenAPI 版本为 `4.3.0`。开发资源会话与外部工程接入变更见
 [Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 

@@ -3,3 +3,4 @@ official/*
 !official/external-editors.json
 !official/external-editors/
 !official/external-editors/**
+official/external-editors/**/.DS_Store

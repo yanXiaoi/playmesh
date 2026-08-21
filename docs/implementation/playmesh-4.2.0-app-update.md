@@ -70,4 +70,4 @@ Fragment，也不改写 URL。
 - `flutter test`
 
 本功能只增加 App 内部模型、服务、设置页 UI、文案与测试，不调整 Game SDK、App Bridge
-SDK、Go Core、Catalog、Relay 或 Developer API 契约版本；归入未发布 App `4.2.0+28`。
+SDK、Go Core、Catalog、Relay 或 Developer API 契约版本；已归入正式 App `4.2.0+28`。

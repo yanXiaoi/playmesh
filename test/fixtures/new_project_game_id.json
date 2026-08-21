@@ -1,0 +1,30 @@
+{
+  "maxLength": 64,
+  "valid": [
+    "com.example.game",
+    "A.B",
+    "com.Example.Game_2",
+    "a.b_0"
+  ],
+  "invalid": [
+    "",
+    "com",
+    ".com.game",
+    "com..game",
+    "1com.example",
+    "com.1game",
+    "_com.example",
+    "com._game",
+    "com.example-game",
+    "com.example$game",
+    "com/example/game",
+    "com.example.game.",
+    " com.example.game",
+    "com.example.game ",
+    "公司.游戏"
+  ],
+  "boundary": {
+    "prefix": "a.",
+    "segmentCharacter": "b"
+  }
+}

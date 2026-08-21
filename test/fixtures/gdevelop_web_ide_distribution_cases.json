@@ -1,0 +1,257 @@
+{
+  "endpointCases": [
+    {
+      "name": "empty development list",
+      "valid": true,
+      "value": []
+    },
+    {
+      "name": "two named HTTPS endpoints",
+      "valid": true,
+      "value": [
+        {
+          "name": "Gitee",
+          "url": "https://gitee.com/example/webide-manifest.json"
+        },
+        {
+          "name": "GitHub",
+          "url": "https://github.com/example/releases/download/current/webide-manifest.json?source=app"
+        }
+      ]
+    },
+    {
+      "name": "not an array",
+      "valid": false,
+      "value": {}
+    },
+    {
+      "name": "missing endpoint field",
+      "valid": false,
+      "value": [{ "name": "GitHub" }]
+    },
+    {
+      "name": "unknown endpoint field",
+      "valid": false,
+      "value": [
+        {
+          "name": "GitHub",
+          "url": "https://example.com/a.json",
+          "probeUrl": "https://example.com/"
+        }
+      ]
+    },
+    {
+      "name": "blank endpoint name",
+      "valid": false,
+      "value": [{ "name": " ", "url": "https://example.com/a.json" }]
+    },
+    {
+      "name": "endpoint name with control character",
+      "valid": false,
+      "value": [{ "name": "Bad\nName", "url": "https://example.com/a.json" }]
+    },
+    {
+      "name": "duplicate name case insensitive",
+      "valid": false,
+      "value": [
+        { "name": "GitHub", "url": "https://example.com/a.json" },
+        { "name": "github", "url": "https://example.com/b.json" }
+      ]
+    },
+    {
+      "name": "duplicate URL",
+      "valid": false,
+      "value": [
+        { "name": "One", "url": "https://example.com/a.json" },
+        { "name": "Two", "url": "https://example.com/a.json" }
+      ]
+    },
+    {
+      "name": "HTTP endpoint",
+      "valid": true,
+      "value": [{ "name": "HTTP", "url": "http://example.com/a.json" }]
+    },
+    {
+      "name": "credential endpoint",
+      "valid": true,
+      "value": [
+        {
+          "name": "Credential",
+          "url": "https://user:password@example.com/a.json"
+        }
+      ]
+    },
+    {
+      "name": "fragment endpoint",
+      "valid": true,
+      "value": [
+        { "name": "Fragment", "url": "https://example.com/a.json#latest" }
+      ]
+    },
+    {
+      "name": "malformed endpoint JSON",
+      "valid": false,
+      "source": "[not-json"
+    }
+  ],
+  "manifestCases": [
+    {
+      "name": "valid release manifest",
+      "valid": true,
+      "value": {
+        "version": "5.6.269",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": [
+          {
+            "name": "Gitee",
+            "url": "https://gitee.com/example/releases/download/current/webide.zip"
+          },
+          {
+            "name": "GitHub",
+            "url": "https://github.com/example/releases/download/current/webide.zip"
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing manifest field",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "unknown manifest field",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }],
+        "schemaVersion": 1
+      }
+    },
+    {
+      "name": "null manifest fields",
+      "valid": false,
+      "value": { "version": null, "sha256": null, "size": 0, "downloads": [] }
+    },
+    {
+      "name": "unsafe version",
+      "valid": false,
+      "value": {
+        "version": "-v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "version with whitespace",
+      "valid": false,
+      "value": {
+        "version": "v 1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "uppercase SHA",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "short SHA",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "abcd",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "empty downloads",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": []
+      }
+    },
+    {
+      "name": "null downloads",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": null
+      }
+    },
+    {
+      "name": "HTTP nested download",
+      "valid": true,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "http://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "legacy sha field",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "zero size",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 0,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "non-integer size",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 123.5,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "unsafe JSON integer size",
+      "valid": false,
+      "value": {
+        "version": "v1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 9007199254740992,
+        "downloads": [{ "name": "A", "url": "https://example.com/a.zip" }]
+      }
+    },
+    {
+      "name": "malformed manifest JSON",
+      "valid": false,
+      "source": "{not-json"
+    }
+  ]
+}

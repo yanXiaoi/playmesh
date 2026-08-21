@@ -1,8 +1,8 @@
 # Playmesh 局域网与公共中转联机架构
 
-状态：Relay 3.0 开发基线；4.2.0 LAN 发现与统一分享协调器已开发，待 Android、Windows、
+状态：Relay 3.0 正式基线；4.2.0 LAN 发现与统一分享协调器已发布，仍待 Android、Windows、
 macOS、Linux 实机验收；iOS 自动发现/发布显式 unsupported
-适用版本：NEXT
+适用版本：4.2.0
 范围：App 运行时、游戏分享、在线游戏源、`go-server`
 当前协议：Relay `3.0.0`、Catalog `3.0.0`、LAN discovery wire v1
 

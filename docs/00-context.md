@@ -79,11 +79,9 @@ Flutter App
 
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
 `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。当前
-正式版本为 Playmesh `4.1.0+27`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
-`4.0.0`、App Bridge SDK `3.2.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`；未发布工作树目标为 App
-`4.2.0+28`、Game SDK `4.1.0`、App Bridge SDK `3.3.0` 与 Developer API / OpenAPI
-`4.2.0`。两套 SDK 已收敛为 Dart
+正式版本为 Playmesh `4.2.0+28`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
+`4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
+Developer API / OpenAPI `4.3.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
 唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。当前 Game SDK 只接受
 `4.1.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0` 的清单请求，并统一解析到兼容的
 `3.3.0` 运行包。更旧或未知版本直接拒绝。所有游戏、
@@ -93,8 +91,8 @@ Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`；未发布工作树目�
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。后续不再建立阶段，
 所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并
 按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
-本轮局域网发现与 App SDK 功能已完成开发和自动化验证，但 Android、Windows、macOS、
-Linux 的跨设备实机验收尚未完成，不能据此标记为已发布；iOS 自动发现/发布明确为
+4.2.0 已正式发布，但局域网发现与 App SDK 的 Android、Windows、macOS、Linux
+跨设备实机验收尚未完成，不能把正式包构建等同于这些平台的实机验收；iOS 自动发现/发布明确为
 `unsupported`，只保留扫码、手工邀请和分享链接入口。
 
 App 内置 Developer Workspace 和平台注入游戏 WebView 的 UI 都使用 App

@@ -32,13 +32,13 @@ Go Server（可选外部服务）
 ## 当前实现边界
 
 第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前正式
-App 为 `4.1.0+27`，当前工作树目标为 Playmesh App `4.2.0+28`、Game SDK `4.1.0`、
-App Bridge SDK `3.3.0` 与 Developer API / OpenAPI `4.2.0`；完整组件矩阵和发布状态见
-`docs/version/README.md`、`docs/version/4.1.0.md` 与 `docs/version/NEXT.md`，本地实现
+App 为 `4.2.0+28`，搭载 Game SDK `4.1.0`、App Bridge SDK `3.3.0` 与 Developer API /
+OpenAPI `4.3.0`；完整组件矩阵和发布状态见
+`docs/version/README.md`、`docs/version/4.2.0.md` 与 `docs/version/NEXT.md`，本地实现
 基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能
 继续作为当前项目、SDK 或 Catalog 的生成基线。
-LAN 发现与 App SDK 已完成开发和自动化验证；Android、Windows、macOS、Linux 的跨设备
-实机验收仍未完成，不能据此标记为已发布。iOS 自动发现/发布明确为 `unsupported`，扫码、
+LAN 发现与 App SDK 已随 4.2.0 发布并完成自动化验证；Android、Windows、macOS、Linux
+的跨设备实机验收仍未完成，不能把正式构建写成跨设备验收完成。iOS 自动发现/发布明确为 `unsupported`，扫码、
 手工邀请和分享链接仍可使用。
 
 ```text

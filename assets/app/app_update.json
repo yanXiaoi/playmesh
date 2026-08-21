@@ -1,6 +1,6 @@
 {
   "version": "4.2.0",
-  "releaseNotes": "修复了一些问题",
+  "releaseNotes": "新增附近对局、统一游戏分享、GDevelop 完整工程与资源历史、本地 AI 编辑工具、源码/发布源/独立安装包导出，以及手动检查更新；同时修复开发工作区与游戏运行问题。",
   "windows": {
     "downloads": [
       {

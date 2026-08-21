@@ -2,15 +2,13 @@
 
 ## 状态
 
-- 状态：`4.1.0+27` 已于 2026-08-03 正式发布；当前开发目标为 App
-  `4.2.0+28`、Developer API / OpenAPI `4.2.0`，以下变更尚未发布。
-- 当前发行基线：App `4.1.0+27`、Go Core `0.5.0`、Core 协议 `1.3.0`、
-  Game SDK `4.0.0`、App Bridge SDK `3.2.0`、Catalog API `3.0.0`、
-  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.1.0`、Developer CLI `2.0.0`。
-- 当前未发布组件目标：Game SDK `4.1.0`、App Bridge SDK `3.3.0`。已发布的 App
-  `4.1.0+27` 从未搭载 Game SDK `4.1.0`；该 SDK 版本只属于本工作树的下一发行。
-- 最新正式发布日志：`docs/version/4.1.0.md`；本文件保留 4.1.0 与 4.0.0 发布归档。
-- Game SDK 的未发布 `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
+- 状态：App `4.2.0+28` 已于 2026-08-21 正式发布；当前没有新的未发布变更。
+- 当前发行基线：App `4.2.0+28`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+  Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
+  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.3.0`、Developer CLI `2.0.0`。
+- 最新正式发布日志：`docs/version/4.2.0.md`；本文件保留 4.2.0、4.1.0 与 4.0.0
+  发布归档。
+- Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
   隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
   行为在 Playmesh 内改用命名空间 Authority 服务与 Binary relay，不存在 Playmesh SDK 时
   保留官方运行层。Go Core 与 Core 协议版本不变。
@@ -19,10 +17,10 @@
   `getDataSync/setDataSync`；异步与同步 JSON 统一改走同源 HTTP GET/PUT/DELETE、
   SHA-256、requestId 幂等和 revision/CAS，binary upload 继续独立使用 POST 与
   `data/data`。SDK、App host、GameRuntimeBridge 与 Go Core 主 Session 链中的旧 WS 存储
-  请求/响应、pending/settle、双读、双写和 fallback 全部删除，旧嵌入 SDK 明确不兼容。
-  因 Game SDK `4.1.0` 尚未发布，本轮继续归入该未发布版本，不再次升号。
+  请求/响应、pending/settle、双读、双写和 fallback 全部删除。正式项目清单使用升级完成的
+  Game SDK `4.1.0`；其公共异步 API 签名与 Promise 语义保持兼容。
 
-## 未发布变更
+## 4.2.0 发布归档
 
 - 游戏详情移除“导出游戏包”，源代码开发工作区把原“发布”入口改为“导出”，并提供
   “导出源码 / 上传到发布源”两个选项。源码导出直接复用既有宽松
@@ -37,6 +35,11 @@
   文件名清洗函数，不再暴露 `{projectId}.playmesh.zip`。
   在文件树中打开文本、图片或其他资源时不再重新请求并重建整棵树，只更新当前文件选中态，
   因而保留左侧滚动位置和目录展开状态。
+- “安装包导出”使用独立 `package_exports.*` Operation，选择 Android ARM64、Android
+  x86_64 或 Windows x64，并可配置一个内置中转服务器。主 App 不携带 Runtime 底包；
+  服务按 `App.json -> Runtime update.json -> 目标下载线路` 获取并校验 SHA-256，已有底包
+  默认复用且可强制刷新。Android 导出执行注入、加密与签名，Windows 导出重写资源并打包
+  ZIP；源码包与安装包共用浏览器下载/App 原生保存函数和进度状态。
 - 完成默认不公开的局域网附近对局：游戏启动和开发预览不申请 publication lease；用户
   打开分享面板或
   本机房主调用无参数 `playmesh.app.lan.setPublished()` 后，App 才通过唯一自定义 IPv4
@@ -72,7 +75,7 @@
   `0.5.0`、Core 协议 `1.3.0`、Catalog `3.0.0` 与 Relay `3.0.0` 不变；
   `/playmesh/join` 只兼容增加 `gameId/gameName` 预检字段。自动化与静态契约已完成，
   Android、Windows、macOS、Linux 的发布、发现、丢失、权限、网络切换和实际加入仍待
-  跨设备实机验收，尚不能标记为已发布；iOS 回归范围是稳定 unsupported 与保留入口。
+  跨设备实机验收；正式包发布不代表这些实机项完成。iOS 回归范围是稳定 unsupported 与保留入口。
 - 设置页“关于 Playmesh”新增手动检查更新。App 只打包统一资源渠道目录
   `assets/app/App.json`，检查更新时仅投影存在 `app` 字段的渠道；缺少该资源的渠道跳过，
   其他资源键不校验。并发请求全部 App 远端 JSON 后按严格语义版本选择最高有效清单，再按
@@ -89,7 +92,7 @@
   `workspaceKind` 条件分支。GDevelop WebIDE 的远端版本清单渠道同样只从 `App.json` 的
   `gdevelop` 字段投影，不再维护独立入口文件。GDevelop 官方 WebIDE 仍为运行时可替换资源，
   不内置下载器或新服务器。
-- Developer API / OpenAPI 兼容升级到 `4.2.0`，新增独立 capability
+- Developer API / OpenAPI 兼容升级到 `4.3.0`，新增安装包导出、临时开发资源会话与独立 capability
   `gdevelop.history.v3`。GDevelop 当前工程与历史 revision 同时保存官方 folder-project
   多文件树、
   图片、音频、视频、字体、3D 等完整 PlaymeshLocal 资源 manifest；每项目独立 CAS 以 SHA-256
@@ -231,7 +234,7 @@
 - 局域网邀请改为 `/playmesh/join#inviteToken=...` 两段式握手：落地页以 POST
   交换短期 HttpOnly Cookie 后重定向到 manifest 完整入口。最终游戏 URL 不再追加
   或覆盖 `channelId/token`，普通浏览器和 App WebView 使用同一协议。
-- Game SDK 升级到 `4.0.0`，App Bridge SDK 升级到 `3.3.0`。公共游戏域只位于
+- Game SDK 升级到 `4.0.0`，App Bridge SDK 升级到 `3.2.0`。公共游戏域只位于
   `playmesh.main.*`，当前客户端域只位于 `playmesh.app.*`；locale 固定为
   `playmesh.app.runtime.getLocale()`，性能固定为 `playmesh.app.performance.*`，
   不存在 `playmesh.main.performance`。面向游戏开发者的唯一全局对象是
@@ -243,8 +246,8 @@
   `/playmesh/sdk/v1/playmesh-app.js`，类型文件成对改为 `playmesh-main.d.ts` 与
   `playmesh-app.d.ts`；旧 `playmesh.js` 和旧 Game 类型文件均不兼容、不回退。
 - 性能浮层唯一由 App SDK 创建和维护；Game SDK 的旧浏览器性能 panel 已删除。
-- `main.json.sdkVersion` 只接受 `4.0.0`；`appSdkVersion` 接受 `3.2.0` 或 `3.3.0`，
-  并通过版本通道解析到兼容的 `3.3.0` bundle。更旧、未知或格式错误值直接拒绝，
+- `main.json.sdkVersion` 只接受 `4.0.0`；`appSdkVersion` 只接受 `3.2.0`。
+  更旧、未知或格式错误值直接拒绝，
   不提供历史静态文件或旧命名空间 shim。
 - `/playmesh/**` 与 `/bucket/**` 成为唯一平台保留命名空间。App、CLI 与 Go Server
   统一拒绝物理 `app/playmesh/`、`app/bucket/` 的大小写变体，以及百分号编码、
