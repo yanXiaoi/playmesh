@@ -88,7 +88,13 @@ if (-not $gitCommand) {
 }
 $ghCommand = Get-Command gh -ErrorAction SilentlyContinue
 if (-not $ghCommand) {
-  throw 'GitHub CLI was not found. Install it with: winget install --id GitHub.cli'
+  $bundledGhPath = Join-Path $repoRoot 'release\tools\bin\gh.exe'
+  if (Test-Path -LiteralPath $bundledGhPath -PathType Leaf) {
+    $ghCommand = Get-Command $bundledGhPath -ErrorAction SilentlyContinue
+  }
+}
+if (-not $ghCommand) {
+  throw 'GitHub CLI was not found in PATH or release/tools/bin.'
 }
 
 $pubspec = Get-Content -LiteralPath $pubspecPath -Encoding UTF8
