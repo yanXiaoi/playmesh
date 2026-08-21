@@ -1,7 +1,7 @@
 [
   {
     "name": "GitHub",
-    "app": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/assets/app/App.json",
+    "app": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/assets/app/app_update.json",
     "gdevelop": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/GDevelop/update.json",
     "export": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/runtime/update.json"
   },
