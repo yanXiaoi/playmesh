@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/developer/developer_installation_package_service.dart';
 import 'package:playmesh/core/developer/developer_installation_package_service_io.dart';
@@ -287,6 +288,18 @@ void main() {
         byId[developerInstallationPackageTargetWindowsX64]!.downloadAvailable,
         isTrue,
       );
+      expect(
+        byId[developerInstallationPackageTargetAndroidArm64]!.updateAvailable,
+        isTrue,
+      );
+      expect(
+        byId[developerInstallationPackageTargetAndroidX86_64]!.updateAvailable,
+        isFalse,
+      );
+      expect(
+        byId[developerInstallationPackageTargetWindowsX64]!.updateAvailable,
+        isTrue,
+      );
       expect(statuses.map((status) => status.runtimeVersion).toSet(), {
         'v1.0.0-build1',
       });
@@ -313,6 +326,66 @@ void main() {
       expect(statuses.every((status) => status.runtimeVersion == null), isTrue);
       expect(runtimePackages.configReadCount, 1);
       expect(runtimePackages.manifestReadCount, 1);
+    });
+
+    test('Runtime 版本变化但 SHA 相同时不提示可更新', () async {
+      final source = NamedDownloadEndpoint(
+        name: 'Runtime releases',
+        url: Uri.parse('https://runtime.example.test/update.json'),
+      );
+      Future<String> installedSha(RuntimePackageTarget target) => sha256
+          .bind(File(runtimePackages.pathFor(target)).openRead())
+          .first
+          .then((digest) => digest.toString());
+
+      runtimePackages
+        ..configSources = RuntimePackageConfigSources([source])
+        ..releaseManifests[source.url] = RuntimePackageReleaseManifest.parse(
+          jsonEncode({
+            'version': 'v999.0.0-build999',
+            'platform': {
+              'android': {
+                'x86': {
+                  'sha256': await installedSha(RuntimePackageTarget.androidX86),
+                  'downloads': [
+                    {
+                      'name': 'HTTPS',
+                      'url': 'https://runtime.example.test/runtime-x86.apk',
+                    },
+                  ],
+                },
+                'arm': {
+                  'sha256': await installedSha(RuntimePackageTarget.androidArm),
+                  'downloads': [
+                    {
+                      'name': 'HTTPS',
+                      'url': 'https://runtime.example.test/runtime-arm.apk',
+                    },
+                  ],
+                },
+              },
+              'windows': {
+                'sha256': await installedSha(RuntimePackageTarget.windowsX64),
+                'downloads': [
+                  {
+                    'name': 'HTTPS',
+                    'url': 'https://runtime.example.test/runtime-win.zip',
+                  },
+                ],
+              },
+            },
+          }),
+        );
+
+      final statuses = await service.inspectTargets();
+
+      expect(
+        statuses.every((status) => status.updateAvailable == false),
+        isTrue,
+      );
+      expect(statuses.map((status) => status.runtimeVersion).toSet(), {
+        'v999.0.0-build999',
+      });
     });
 
     test('底包下载复用真实字节进度并按百分比或 256KiB 节流', () async {

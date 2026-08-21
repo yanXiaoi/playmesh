@@ -92,6 +92,24 @@ assert.ok(
   'The initial homepage route must be consumed by an effect, not by a click handler.'
 );
 
+for (const marker of [
+  "import { useResponsiveWindowSize } from '../../../UI/Responsive/ResponsiveWindowMeasurer'",
+  'const { isMobile } = useResponsiveWindowSize()',
+  "flexDirection: 'row-reverse'",
+  "flexDirection: 'column'",
+  'isMobile ? styles.mobileContainer : styles.desktopContainer',
+]) {
+  assert.ok(
+    homeSource.includes(marker),
+    `Missing responsive homepage-axis contract: ${marker}`
+  );
+}
+assert.ok(
+  homeSource.indexOf('<PlaymeshCreateSection') <
+    homeSource.indexOf('<HomePageMenu'),
+  'The mobile column must keep page content before the bottom menu.'
+);
+
 assert.doesNotMatch(createSectionSource, /onChooseProject/);
 assert.equal(
   (createSectionSource.match(/playmeshMessages\.homeOpenLocalProject/g) || [])
@@ -119,7 +137,6 @@ assert.ok(
     createSectionSource.indexOf('hasSuccessfulProjectList && !projectListUnavailable'),
   'Loading state must be resolved before the successful empty-project state.'
 );
-
 for (const marker of [
   "import Dialog from '../../../UI/Dialog'",
   'onRequestClose={closeDialog}',
@@ -159,8 +176,18 @@ for (const key of [
 ]) {
   assert.match(messageKeysSource, new RegExp(`${key}:`));
 }
-assert.equal(zh['workspace.gdevelop_home.about_editor'], '关于此编辑器');
-assert.equal(en['workspace.gdevelop_home.about_editor'], 'About this editor');
+const compactHomeActions = {
+  'workspace.gdevelop_home.about_editor': ['关于', 'About'],
+  'workspace.gdevelop_home.open_local_project': ['打开', 'Open'],
+  'workspace.gdevelop_home.import_gdevelop_zip': ['导入', 'Import'],
+  'workspace.gdevelop_home.export_source_zip': ['导出', 'Export'],
+  'workspace.gdevelop_home.create_new_game': ['新建', 'New'],
+  'workspace.gdevelop_home.delete_project': ['删除', 'Delete'],
+};
+for (const [key, [zhLabel, enLabel]] of Object.entries(compactHomeActions)) {
+  assert.equal(zh[key], zhLabel, `${key} must stay compact in Chinese.`);
+  assert.equal(en[key], enLabel, `${key} must stay compact in English.`);
+}
 assert.equal(
   zh['workspace.gdevelop_home.projects_loading'],
   '正在加载本地工程…'

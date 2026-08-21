@@ -8,7 +8,7 @@
 Agent API、项目文件与本地历史。游戏作者使用说明见
 [网页开发者通道](../game/web-dev-channel.md)。
 
-当前正式 Developer API / OpenAPI 版本为 `4.3.0`。开发资源会话与外部工程接入变更见
+当前正式 Developer API / OpenAPI 版本为 `4.4.0`。开发资源会话与外部工程接入变更见
 [Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
@@ -60,7 +60,7 @@ lib/core/developer/operations/{domain}/
 
 ## 当前完整 Operation 注册表
 
-下表记录 Developer API `4.3.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
+下表记录 Developer API `4.4.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
 真正用于路由的是“HTTP method + path 模板”，operation ID 用于响应头、OpenAPI、
 操作目录、审批和诊断，不参与路径命中。
 
@@ -184,6 +184,14 @@ constantTimeEquals(Bearer token, gateway.token)
 三项都不相等时返回 `401 unauthorized`。只有
 `request.method == "GET"` 且 `request.uri.path.startsWith("/playmesh/developer/")`
 的开发者静态资源跳过 Token；业务 API 不跳过。
+
+App 内工作区的首次入口 URL 可以携带一次性 query 凭据；bootstrap 重定向建立 HttpOnly
+Cookie 后，Windows WebView2 与 Flutter WebView 的所有宿主刷新必须复用同一个稳定 URL：
+只保留 scheme、userinfo、host、port 与 path，明确移除完整 query 和 fragment。平台实现只提供
+`load(Uri)`，刷新目标由共享 `DeveloperWorkspacePage` 协调器统一生成；不得让某个平台直接
+`reload()` 初始请求，也不得在 WebView 重建时重放 `token` 或 GDevelop `editorBootstrap`。
+在 Dart 中 `Uri.replace(query: null, fragment: null)` 表示保留原值，不是清空，不能用来移除
+一次性凭据。
 
 ### 3. Gateway 外壳路由
 
@@ -455,16 +463,20 @@ Workspace 顶部保留既有 `#publish` 与移动端 `#publishFromMenu` DOM ID�
   Operation，继续使用 `GamePackageTransferService` 的宽松导出，用于正常备份，也允许取回
   待修复项目；不得为这一 UI 新增第二个 Operation 或改变 CLI 依赖的宽松语义。
 - “安装包导出”进入独立的 `package_exports.*` Operation：用户只选择一个
-  `android-arm64`、`android-x86_64` 或 `windows-x64` 目标。导出设置区提供可搜索的
-  当前可用中转服务器列表，并保留“不内置”和“使用自定义地址”两种选择；选择已配置服务器时，
-  工作区将其 Catalog 地址与读取 Token 组合为 Runtime publicURL。重新下载 Runtime 是目标
-  底包维护动作，不属于游戏导出设置。
+  `android-arm64`、`android-x86_64` 或 `windows-x64` 目标。三个目标使用可横向滚动的紧凑
+  卡片，角标只显示“已安装”“未安装”或“可更新”，不展示 Runtime 版本及安装/下载诊断行。
+  导出设置区提供当前可用中转服务器列表，并保留“不内置”和“使用自定义地址”两种选择；
+  桌面端可手动使用搜索框，移动端列表在文档流内展开且不自动聚焦搜索输入，避免软键盘遮挡
+  当前选项。选择已配置服务器时，工作区将其 Catalog 地址与读取 Token 组合为 Runtime
+  publicURL。重新下载 Runtime 是目标底包维护动作，不属于游戏导出设置。
 - “上传到发布源”进入原有发布源候选、校验、提交、状态与失败重试界面。
 
 安装包 Runtime 不得进入主 App 的 Flutter assets。固定安装位置是
 `<playmesh-library>/runtime/packages/` 下的 `playmesh-runtime-arm.apk`、
 `playmesh-runtime-x86.apk` 与 `playmesh-runtime-win.zip`；`installed` 只表示对应文件存在，
-因此测试期可以手工复制。文件不存在或用户选择重新下载时，服务必须按
+因此测试期可以手工复制。`package_exports.options` 的 `updateAvailable` 只在本地文件已存在、
+目标有可用下载线路，且本地文件 SHA-256 与 Runtime 清单中该目标的 SHA-256 不一致时为
+`true`；版本字符串不参与判定。文件不存在或用户选择重新下载时，服务必须按
 `assets/app/App.json` 的 `export` 源依次读取 Runtime `update.json`，再按目标选择下载线路，
 流式下载并只以声明的 SHA-256 验证，成功后原子替换固定文件。已存在且未要求重新下载时
 直接复用，不访问远端；重新下载失败必须保留旧文件。

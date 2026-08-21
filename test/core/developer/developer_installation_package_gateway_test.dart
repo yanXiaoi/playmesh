@@ -55,7 +55,7 @@ void main() {
 
       expect(response.statusCode, HttpStatus.ok, reason: response.body);
       final catalogDocument = jsonDecode(response.body) as Map;
-      expect(catalogDocument['catalogVersion'], '4.3.0');
+      expect(catalogDocument['catalogVersion'], '4.4.0');
       final operations = catalogDocument['operations'] as List;
       Map<String, Object?> operation(String id) => Map<String, Object?>.from(
         operations.singleWhere((item) => (item as Map)['id'] == id) as Map,
@@ -147,6 +147,7 @@ void main() {
         allOf(
           containsPair('installed', true),
           containsPair('downloadAvailable', true),
+          containsPair('updateAvailable', true),
           containsPair('runtimeVersion', '1.0.0'),
         ),
       );
@@ -598,6 +599,7 @@ final class _FakeInstallationPackageService
         runtimeFilename: 'playmesh-runtime-arm.apk',
         installed: true,
         downloadAvailable: true,
+        updateAvailable: true,
         runtimeVersion: '1.0.0',
         sizeBytes: 4096,
       ),
@@ -608,6 +610,7 @@ final class _FakeInstallationPackageService
         runtimeFilename: 'playmesh-runtime-x86.apk',
         installed: false,
         downloadAvailable: true,
+        updateAvailable: false,
         runtimeVersion: '1.0.0',
         sizeBytes: 4096,
       ),
@@ -618,6 +621,7 @@ final class _FakeInstallationPackageService
         runtimeFilename: 'playmesh-runtime-win.zip',
         installed: true,
         downloadAvailable: false,
+        updateAvailable: false,
         runtimeVersion: '1.0.0',
         sizeBytes: 3072,
       ),

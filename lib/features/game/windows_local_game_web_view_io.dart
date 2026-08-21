@@ -40,7 +40,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final bool appSdkInputTakenOver;
   final bool gameExternalNavigationEnabled;
   final VoidCallback? onNavigationStarted;
-  final ValueChanged<Future<void> Function()?>? onReloadReady;
+  final ValueChanged<Future<void> Function(Uri)?>? onReloadReady;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;
@@ -195,7 +195,9 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
 
       if (mounted) {
         setState(() => _ready = true);
-        widget.onReloadReady?.call(_controller.reload);
+        widget.onReloadReady?.call(
+          (uri) => _controller.loadUrl(uri.toString()),
+        );
         _scheduleInitialFocus();
       }
     } on Object catch (error) {

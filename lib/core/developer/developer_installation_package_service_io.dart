@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/game_summary.dart';
@@ -197,19 +198,46 @@ final class FileDeveloperInstallationPackageService
     _ensureOpen();
     final statuses = await runtimePackages.inspectPackages();
     final release = await _releaseForInspection();
-    return [
-      for (final status in statuses)
+    final results = <DeveloperInstallationPackageTargetStatus>[];
+    for (final status in statuses) {
+      final downloadAvailable = release?.canDownload(status.target) ?? false;
+      results.add(
         DeveloperInstallationPackageTargetStatus(
           id: status.target.id,
           platform: status.target.platform,
           architecture: status.target.architecture,
           runtimeFilename: status.target.fileName,
           installed: status.installed,
-          downloadAvailable: release?.canDownload(status.target) ?? false,
+          downloadAvailable: downloadAvailable,
+          updateAvailable: await _runtimeUpdateAvailable(
+            status: status,
+            release: release,
+            downloadAvailable: downloadAvailable,
+          ),
           runtimeVersion: release?.version,
           sizeBytes: status.sizeBytes,
         ),
-    ];
+      );
+    }
+    return results;
+  }
+
+  Future<bool> _runtimeUpdateAvailable({
+    required RuntimePackageStatus status,
+    required RuntimePackageReleaseManifest? release,
+    required bool downloadAvailable,
+  }) async {
+    if (!status.installed || release == null || !downloadAvailable) {
+      return false;
+    }
+    final expectedSha256 = release.sha256For(status.target);
+    if (expectedSha256.isEmpty) return false;
+    try {
+      final digest = await sha256.bind(File(status.filePath).openRead()).first;
+      return digest.toString() != expectedSha256;
+    } on FileSystemException {
+      return false;
+    }
   }
 
   @override

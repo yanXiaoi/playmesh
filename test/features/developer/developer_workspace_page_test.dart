@@ -30,37 +30,59 @@ void main() {
     }
   });
 
-  test('Windows 工作区刷新复用当前 WebView，不重放初始入口地址', () async {
-    var nativeReloads = 0;
-    var flutterReloads = 0;
-    var windowsRestarts = 0;
-    var flutterInitializations = 0;
+  test('工作区刷新协调器复用当前 WebView 和统一稳定地址', () async {
+    Uri? loadedUri;
+    var recoveries = 0;
+    final reloadUri = Uri.parse('http://127.0.0.1:16666/dev/example/gdevelop/');
 
     await reloadDeveloperWorkspaceWebView(
-      usesWindowsWebView: true,
-      windowsReload: () async => nativeReloads += 1,
-      flutterReload: () async => flutterReloads += 1,
-      restartWindowsWebView: () => windowsRestarts += 1,
-      initializeFlutterWebView: () async => flutterInitializations += 1,
+      load: (uri) async => loadedUri = uri,
+      reloadUri: reloadUri,
+      recoverUnavailableLoader: (_) async => recoveries += 1,
     );
 
-    expect(nativeReloads, 1);
-    expect(flutterReloads, 0);
-    expect(windowsRestarts, 0);
-    expect(flutterInitializations, 0);
+    expect(loadedUri, reloadUri);
+    expect(recoveries, 0);
   });
 
-  test('Windows WebView 尚未就绪时仅重建一次', () async {
-    var windowsRestarts = 0;
+  test('工作区 WebView 加载器尚未就绪时只恢复一次', () async {
+    var recoveries = 0;
+    Uri? recoveryUri;
+    final reloadUri = Uri.parse('http://127.0.0.1/workspace');
 
     await reloadDeveloperWorkspaceWebView(
-      usesWindowsWebView: true,
-      windowsReload: null,
-      flutterReload: null,
-      restartWindowsWebView: () => windowsRestarts += 1,
-      initializeFlutterWebView: null,
+      load: null,
+      reloadUri: reloadUri,
+      recoverUnavailableLoader: (uri) async {
+        recoveries += 1;
+        recoveryUri = uri;
+      },
     );
 
-    expect(windowsRestarts, 1);
+    expect(recoveries, 1);
+    expect(recoveryUri, reloadUri);
+  });
+
+  test('Android 工作区刷新只加载无一次性 capability 的稳定地址', () async {
+    final bootstrapUri = Uri.parse(
+      'http://127.0.0.1:16666/dev/example/gdevelop/'
+      '?token=developer-token&editorBootstrap=one-shot-capability#editor',
+    );
+    Uri? loadedUri;
+    var recoveries = 0;
+
+    await reloadDeveloperWorkspaceWebView(
+      load: (uri) async => loadedUri = uri,
+      reloadUri: developerWorkspaceReloadUri(bootstrapUri),
+      recoverUnavailableLoader: (_) async => recoveries += 1,
+    );
+
+    expect(
+      loadedUri,
+      Uri.parse('http://127.0.0.1:16666/dev/example/gdevelop/'),
+    );
+    expect(loadedUri?.query, isEmpty);
+    expect(loadedUri?.fragment, isEmpty);
+    expect(recoveries, 0);
   });
 }

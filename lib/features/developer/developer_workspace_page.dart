@@ -38,11 +38,12 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
   WebViewController? _controller;
   Object? _error;
   int _windowsReloadKey = 0;
+  late Uri _windowsEntryUri;
   late final DeveloperNativeFileSaveService _nativeFileSaveService =
       widget.nativeFileSaveService ?? createDeveloperNativeFileSaveService();
   Future<void> _nativeFileSaveTail = Future<void>.value();
   Future<void> _fullscreenTail = Future<void>.value();
-  Future<void> Function()? _reloadWindowsWebView;
+  Future<void> Function(Uri)? _reloadWindowsWebView;
   Future<void> Function(String)? _runWindowsJavaScript;
   bool _fullscreen = false;
 
@@ -51,10 +52,11 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
   @override
   void initState() {
     super.initState();
+    _windowsEntryUri = widget.workspaceUri;
     if (_usesFlutterWebView) unawaited(_initialize());
   }
 
-  Future<void> _initialize() async {
+  Future<void> _initialize({Uri? entryUri}) async {
     try {
       late final WebViewController controller;
       controller = WebViewController()
@@ -107,7 +109,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
             },
           ),
         );
-      await controller.loadRequest(widget.workspaceUri);
+      await controller.loadRequest(entryUri ?? widget.workspaceUri);
       if (mounted) setState(() => _controller = controller);
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
@@ -166,7 +168,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
       return WindowsLocalGameWebView(
         key: ValueKey('developer-workspace-$_windowsReloadKey'),
         assetPath: 'developer-workspace',
-        entryUri: widget.workspaceUri,
+        entryUri: _windowsEntryUri,
         title: widget.workspaceTitle ?? context.tr('home.developer'),
         onOpenExternalUri: _openExternalUri,
         additionalDocumentCreatedScripts: const [
@@ -199,15 +201,27 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
   Future<void> _reload() async {
     if (mounted) setState(() => _error = null);
     try {
+      final usesWindowsWebView =
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+      final flutterController = _controller;
+      final reloadUri = developerWorkspaceReloadUri(widget.workspaceUri);
       await reloadDeveloperWorkspaceWebView(
-        usesWindowsWebView:
-            !kIsWeb && defaultTargetPlatform == TargetPlatform.windows,
-        windowsReload: _reloadWindowsWebView,
-        flutterReload: _controller?.reload,
-        restartWindowsWebView: () {
-          if (mounted) setState(() => _windowsReloadKey += 1);
+        load: usesWindowsWebView
+            ? _reloadWindowsWebView
+            : flutterController?.loadRequest,
+        reloadUri: reloadUri,
+        recoverUnavailableLoader: (uri) async {
+          if (usesWindowsWebView) {
+            if (mounted) {
+              setState(() {
+                _windowsEntryUri = uri;
+                _windowsReloadKey += 1;
+              });
+            }
+          } else if (_usesFlutterWebView) {
+            await _initialize(entryUri: uri);
+          }
         },
-        initializeFlutterWebView: _usesFlutterWebView ? _initialize : null,
       );
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
@@ -330,7 +344,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
           'Native file save failed: code=${code ?? 'native_file_save_failed'} '
           'error=$error',
       source: 'developer-workspace-webview',
-      href: widget.workspaceUri.replace(query: null, fragment: null).toString(),
+      href: developerWorkspaceReloadUri(widget.workspaceUri).toString(),
       eventType: 'native.file_save.error',
     );
     if (!mounted) return;
@@ -368,26 +382,23 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
 }
 
 @visibleForTesting
+Uri developerWorkspaceReloadUri(Uri workspaceUri) => Uri(
+  scheme: workspaceUri.scheme,
+  userInfo: workspaceUri.userInfo,
+  host: workspaceUri.host,
+  port: workspaceUri.hasPort ? workspaceUri.port : null,
+  path: workspaceUri.path,
+);
+
+@visibleForTesting
 Future<void> reloadDeveloperWorkspaceWebView({
-  required bool usesWindowsWebView,
-  required Future<void> Function()? windowsReload,
-  required Future<void> Function()? flutterReload,
-  required VoidCallback restartWindowsWebView,
-  required Future<void> Function()? initializeFlutterWebView,
+  required Future<void> Function(Uri)? load,
+  required Uri reloadUri,
+  required Future<void> Function(Uri) recoverUnavailableLoader,
 }) async {
-  if (usesWindowsWebView) {
-    final reload = windowsReload;
-    if (reload != null) {
-      await reload();
-    } else {
-      restartWindowsWebView();
-    }
+  if (load != null) {
+    await load(reloadUri);
     return;
   }
-  final reload = flutterReload;
-  if (reload != null) {
-    await reload();
-  } else {
-    await initializeFlutterWebView?.call();
-  }
+  await recoverUnavailableLoader(reloadUri);
 }

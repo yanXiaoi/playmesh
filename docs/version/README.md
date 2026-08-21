@@ -28,11 +28,11 @@
 
 ## 当前基线
 
-- 当前正式发行：App `4.2.0+28`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`、
+- 当前正式发行：App `4.2.1+29`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`、
   Go Core `0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-  Developer API `4.3.0`、Developer CLI `2.0.0`
-- 当前版本详细日志：`docs/version/4.2.0.md`
-- 最新正式发行详细日志：`docs/version/4.2.0.md`
+  Developer API `4.4.0`、Developer CLI `2.0.0`
+- 当前版本详细日志：`docs/version/4.2.1.md`
+- 最新正式发行详细日志：`docs/version/4.2.1.md`
 - 当前开发临时日志：`docs/version/NEXT.md`（没有未发布变更时只记录发行基线）
 - 当前本地实现索引：`docs/implementation/README.md`（3.0.0 文档只作为历史基线）
 - 历史阶段终点：`docs/status/phase-06-complete.md`

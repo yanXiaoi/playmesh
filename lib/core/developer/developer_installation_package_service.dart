@@ -70,6 +70,7 @@ final class DeveloperInstallationPackageTargetStatus {
     required this.runtimeFilename,
     required this.installed,
     required this.downloadAvailable,
+    required this.updateAvailable,
     this.runtimeVersion,
     this.sizeBytes,
   });
@@ -80,6 +81,7 @@ final class DeveloperInstallationPackageTargetStatus {
   final String runtimeFilename;
   final bool installed;
   final bool downloadAvailable;
+  final bool updateAvailable;
   final String? runtimeVersion;
   final int? sizeBytes;
 
@@ -90,6 +92,7 @@ final class DeveloperInstallationPackageTargetStatus {
     'runtimeFilename': runtimeFilename,
     'installed': installed,
     'downloadAvailable': downloadAvailable,
+    'updateAvailable': updateAvailable,
     if (runtimeVersion != null) 'runtimeVersion': runtimeVersion,
     if (sizeBytes != null) 'sizeBytes': sizeBytes,
   };

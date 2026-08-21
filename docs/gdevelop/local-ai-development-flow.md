@@ -301,6 +301,9 @@ Editor session `4.0.0` 另外提供仅属于当前 WebIDE session 的 `approvalM
   HttpOnly acquire Cookie，申请成功后立即轮换。Developer Bearer、AI channel 请求头或普通
   index GET 都不能签发或替代该能力，因此外部 Agent 也不能借通用审批接口批准自己的
   GDevelop 调用。
+- 首次启动 URL 消费后，Windows WebView2 与 Flutter WebView 的宿主刷新统一加载无 query、
+  无 fragment 的 workspace URL，并依赖已有 HttpOnly Cookie 恢复；任何平台都不得重放已经
+  轮换的 `editorBootstrap`。平台层只实现 `load(Uri)`，稳定刷新地址由共享宿主代码生成。
 
 ## Gateway v4 路由职责
 

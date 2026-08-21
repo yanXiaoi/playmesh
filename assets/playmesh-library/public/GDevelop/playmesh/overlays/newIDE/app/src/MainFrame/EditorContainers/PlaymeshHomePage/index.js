@@ -9,6 +9,7 @@ import { setEditorHotReloadNeeded } from '../../../EmbeddedGame/EmbeddedGameFram
 import { usePlaymeshLocalization } from '../../../PlaymeshLocalization/PlaymeshLocalizationProvider';
 import { playmeshMessages } from '../../../PlaymeshLocalization/PlaymeshMessageKeys';
 import RouterContext from '../../RouterContext';
+import { useResponsiveWindowSize } from '../../../UI/Responsive/ResponsiveWindowMeasurer';
 
 const noop = () => {};
 const playmeshHomePageRouteArguments = [
@@ -25,11 +26,19 @@ const playmeshHomePageRouteArguments = [
 const styles = {
   container: {
     display: 'flex',
-    flexDirection: 'row-reverse',
     margin: 0,
     flex: 1,
     minHeight: 0,
     width: '100%',
+  },
+  desktopContainer: {
+    flexDirection: 'row-reverse',
+  },
+  mobileContainer: {
+    // HomePageMenu renders a full-width bottom bar on mobile. Keeping the
+    // desktop row here makes that bar compete with the page for horizontal
+    // space and collapses the project section to a few characters wide.
+    flexDirection: 'column',
   },
   scrollableContainer: {
     display: 'flex',
@@ -59,6 +68,7 @@ const PlaymeshHomePage = React.forwardRef<any, any>((props, ref) => {
     closeProject,
   } = props;
   const { t: playmeshT } = usePlaymeshLocalization();
+  const { isMobile } = useResponsiveWindowSize();
   const { routeArguments, removeRouteArguments } = React.useContext(
     RouterContext
   );
@@ -123,7 +133,12 @@ const PlaymeshHomePage = React.forwardRef<any, any>((props, ref) => {
   }));
 
   return (
-    <div style={styles.container}>
+    <div
+      style={{
+        ...styles.container,
+        ...(isMobile ? styles.mobileContainer : styles.desktopContainer),
+      }}
+    >
       <div style={styles.scrollableContainer}>
         <PlaymeshCreateSection
           project={project}

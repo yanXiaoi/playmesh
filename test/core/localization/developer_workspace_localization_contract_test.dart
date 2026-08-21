@@ -349,13 +349,21 @@ void main() {
         reason: 'The target ID must cross the frontend API unchanged.',
       );
     }
-    for (final field in const [
+    expect(
+      RegExp('data-package-export-field="badge"').allMatches(html).length,
+      3,
+    );
+    for (final removedField in const [
       'installed',
       'downloadAvailable',
       'runtimeVersion',
       'status',
     ]) {
-      expect(html, contains('data-package-export-field="$field"'));
+      expect(
+        html,
+        isNot(contains('data-package-export-field="$removedField"')),
+        reason: 'Runtime diagnostics do not belong on compact target cards.',
+      );
     }
     expect(
       html,
@@ -403,8 +411,10 @@ void main() {
       ),
     );
     expect(html, contains('id="packageExportRefreshRuntime"'));
+    expect(html, contains('id="packageExportRuntimeActions"'));
     final runtimeActionsStart = html.indexOf(
-      '<div class="package-export-runtime-actions">',
+      '<div id="packageExportRuntimeActions" '
+      'class="package-export-runtime-actions">',
     );
     final settingsStart = html.indexOf(
       '<section class="package-export-settings"',
@@ -483,7 +493,6 @@ void main() {
       'workspace.package_export_relay_none_help',
       'workspace.package_export_relay_search',
       'workspace.package_export_relay_server',
-      'workspace.package_export_relay_server_help',
       'workspace.package_export_relay_server_placeholder',
     ]) {
       expect(zh[key], isNotEmpty, reason: 'Missing zh-CN relay key: $key');
@@ -491,6 +500,24 @@ void main() {
     }
 
     expect(script, contains("packageExportRelaySelection='none'"));
+    expect(
+      script,
+      contains('if(target?.updateAvailable===true)return'),
+      reason: 'The corner badge must use the SHA-derived update state.',
+    );
+    expect(
+      script,
+      contains(
+        "canRefresh=target?.installed===true&&target?.downloadAvailable===true",
+      ),
+      reason:
+          'A missing runtime downloads automatically and needs no refresh UI.',
+    );
+    expect(
+      script,
+      isNot(contains("runtimeVersion||'—'")),
+      reason: 'Runtime versions are not rendered in the export chooser.',
+    );
     expect(
       script,
       contains("packageExportRelayOption('none',noneName"),
@@ -525,6 +552,16 @@ void main() {
         "q('packageExportRelaySearch').oninput="
         'renderPackageExportRelayOptions',
       ),
+    );
+    expect(
+      script,
+      isNot(contains('requestAnimationFrame(()=>search.focus())')),
+      reason: 'Opening the relay picker must not summon a mobile keyboard.',
+    );
+    expect(
+      script,
+      contains('openPackageExportRelayMenu(true)'),
+      reason: 'Keyboard navigation may focus a list option without an input.',
     );
     expect(
       script,
@@ -776,6 +813,9 @@ void main() {
 
     expect(css, contains('.package-export-targets {'));
     expect(css, contains('.package-export-target {'));
+    expect(css, contains('scroll-snap-type: inline mandatory;'));
+    expect(css, contains('.package-export-target-badge {'));
+    expect(css, contains('.package-export-target-check {'));
     expect(css, contains('min-height: var(--target-size);'));
     expect(css, contains('.package-export-result {'));
     expect(css, contains('.package-export-progress {'));
@@ -788,6 +828,18 @@ void main() {
     expect(css, contains('.package-export-relay-list {'));
     expect(css, contains('.package-export-relay-option {'));
     expect(css, contains('.package-export-custom-relay[hidden] {'));
+    expect(
+      RegExp(
+        r'\.package-export-relay-search\s*\{\s*display:\s*none;',
+      ).hasMatch(css),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r'\.package-export-relay-menu\s*\{\s*position:\s*static;',
+      ).hasMatch(css),
+      isTrue,
+    );
     expect(css, contains('.package-export-actions {'));
   });
 

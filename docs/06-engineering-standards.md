@@ -341,18 +341,18 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `4.2.0+28` | `pubspec.yaml` |
+| Playmesh App | `4.2.1+29` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
 | Game SDK | `4.1.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
 | App Bridge SDK | `3.3.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
-| Developer API / OpenAPI | `4.3.0` | Developer Gateway、安装包导出与临时开发资源会话契约 |
+| Developer API / OpenAPI | `4.4.0` | Developer Gateway、安装包导出与临时开发资源会话契约 |
 | Developer CLI | `2.0.0` | `dev-cli/`、adapter.Adapter、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `3.0.0` | `/apps/info`、根相对入口、包校验、版本化下载、图标与上传声明 |
 | Relay 协议 | `3.0.0` | 根相对邀请入口、App 端点加密邀请与 Go Server 中转协议 |
 
 该矩阵描述当前代码与生成契约；发布状态和历史版本见
-`docs/version/README.md`、`docs/version/4.2.0.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+`docs/version/README.md`、`docs/version/4.2.1.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `dev/run` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段并与目标 App 精确核对，禁止手工声明不一致版本。CLI 2.0 只接受根 `playmesh-cli.json`；发布内容隔离在 `playmesh/package/`，SDK/类型隔离在 `playmesh/sdk/`，上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根 `icon.png` 和必需物理 `app/`。`outputDirectory` 和入口都相对于外层 `packageRoot/app/`；首段 `app` 合法，例如入口 `app/index.html` 对应物理 `packageRoot/app/app/index.html` 和运行时 `/app/index.html`。项目平台差异只能通过唯一 `adapter.Registry` 中的 `Adapter` 实现，公共命令不得按 Cocos/语言复制分支或维护第二份适配器实例表。

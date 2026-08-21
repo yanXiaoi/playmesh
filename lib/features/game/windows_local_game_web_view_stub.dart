@@ -31,7 +31,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
   final bool appSdkInputTakenOver;
   final bool gameExternalNavigationEnabled;
   final VoidCallback? onNavigationStarted;
-  final ValueChanged<Future<void> Function()?>? onReloadReady;
+  final ValueChanged<Future<void> Function(Uri)?>? onReloadReady;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
   final ValueChanged<DeveloperWebViewJavaScriptExecutor?>?
   onEvaluateJavaScriptReady;

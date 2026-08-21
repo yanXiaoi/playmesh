@@ -2,11 +2,11 @@
 
 ## 状态
 
-- 状态：App `4.2.0+28` 已于 2026-08-21 正式发布；当前没有新的未发布变更。
-- 当前发行基线：App `4.2.0+28`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+- 状态：App `4.2.1+29` 已于 2026-08-21 完成正式构建；当前没有新的未发布变更。
+- 当前发行基线：App `4.2.1+29`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
-  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.3.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.2.0.md`；本文件保留 4.2.0、4.1.0 与 4.0.0
+  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.4.0`、Developer CLI `2.0.0`。
+- 最新正式发布日志：`docs/version/4.2.1.md`；本文件保留 4.2.1、4.2.0、4.1.0 与 4.0.0
   发布归档。
 - Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
   隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
@@ -19,6 +19,17 @@
   `data/data`。SDK、App host、GameRuntimeBridge 与 Go Core 主 Session 链中的旧 WS 存储
   请求/响应、pending/settle、双读、双写和 fallback 全部删除。正式项目清单使用升级完成的
   Game SDK `4.1.0`；其公共异步 API 签名与 Promise 语义保持兼容。
+
+## 4.2.1 发布归档
+
+- 安装包导出使用横向平台卡片和安装/更新角标，移除 Runtime 版本及重复的安装/下载诊断行；
+  `package_exports.options` 兼容新增 `updateAvailable`，只按本地与清单 SHA-256 判定更新。
+- 移动端中转服务器菜单改为文档流内展开且不自动聚焦搜索框，避免软键盘覆盖选项；桌面和
+  Android 继续复用同一套工作区前端。
+- GDevelop 主页侧栏和动作短文案完成响应式修复；开发者 WebView 刷新统一加载去除一次性
+  query/fragment 的稳定 URL，不再重放已轮换 capability。
+- App 升级为 `4.2.1+29`，Developer API / OpenAPI 升级为 `4.4.0`，其余 SDK、Core、
+  Catalog、Relay 与 CLI 版本不变。
 
 ## 4.2.0 发布归档
 
