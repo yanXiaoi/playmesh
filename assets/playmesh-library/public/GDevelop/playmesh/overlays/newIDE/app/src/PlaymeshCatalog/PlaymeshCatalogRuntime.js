@@ -644,7 +644,7 @@ export const loadSameOriginJson = async ({
   let pageUrl;
   try {
     localUrl = new URL(url);
-    pageUrl = new URL(document.baseURI);
+    pageUrl = new URL(document.baseURI || '');
   } catch (_) {
     throw new PlaymeshCatalogError('invalid_base_url', '当前页面基础地址无效。');
   }

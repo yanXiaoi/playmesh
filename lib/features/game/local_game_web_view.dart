@@ -17,6 +17,7 @@ import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_package/game_asset_gateway.dart';
 import '../../core/game_web/android_webview_file_selector.dart';
+import '../../core/game_web/game_web_external_navigation.dart';
 import '../../core/localization/platform_game_ui_assets.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/platform/app_platform.dart';
@@ -209,8 +210,18 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                 );
               },
             )
+            ..addJavaScriptChannel(
+              playmeshGameExternalNavigationChannel,
+              onMessageReceived: (message) {
+                final uri = parseGameWebViewExternalNavigationMessage(
+                  message.message,
+                );
+                if (uri != null) unawaited(_openExternalNavigation(uri));
+              },
+            )
             ..setNavigationDelegate(
               NavigationDelegate(
+                onNavigationRequest: _handleNavigationRequest,
                 onWebResourceError: (error) {
                   recordLocalWebViewConsole(
                     level: 'error',
@@ -225,9 +236,23 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   _resetAppSdkDocument();
                   widget.onJavaScriptExecutorChanged?.call(null);
                   _messageQueue.pause(clearPending: true);
+                  unawaited(
+                    _runJavaScript(playmeshGameWindowOpenScript).catchError((
+                      Object error,
+                    ) {
+                      debugPrint('安装 Android 游戏外部导航兼容脚本失败: $error');
+                    }),
+                  );
                 },
                 onPageFinished: (_) {
                   _androidNavigationCompleted = true;
+                  unawaited(
+                    _runJavaScript(playmeshGameWindowOpenScript).catchError((
+                      Object error,
+                    ) {
+                      debugPrint('确认 Android 游戏外部导航兼容脚本失败: $error');
+                    }),
+                  );
                   widget.onJavaScriptExecutorChanged?.call(_evaluateJavaScript);
                   unawaited(
                     _messageQueue.resume().catchError((Object error) {
@@ -273,6 +298,26 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       appSdkReceiveScript(message),
       generation: generation,
     );
+  }
+
+  NavigationDecision _handleNavigationRequest(NavigationRequest request) {
+    if (!request.isMainFrame) return NavigationDecision.navigate;
+    switch (classifyGameWebViewNavigation(request.url)) {
+      case GameWebViewNavigationDisposition.navigate:
+        return NavigationDecision.navigate;
+      case GameWebViewNavigationDisposition.prevent:
+        return NavigationDecision.prevent;
+      case GameWebViewNavigationDisposition.openExternal:
+        final uri = parseGameWebViewExternalUri(request.url);
+        if (uri != null) unawaited(_openExternalNavigation(uri));
+        return NavigationDecision.prevent;
+    }
+  }
+
+  Future<void> _openExternalNavigation(Uri uri) async {
+    if (!await openGameWebViewExternalUri(uri)) {
+      debugPrint('系统未能处理游戏外部链接: $uri');
+    }
   }
 
   void _takeOverAppSdkInput() {
@@ -544,6 +589,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   bridge: widget.bridge,
                   appBridge: _appBridge,
                   appSdkInputTakenOver: _appSdkInputTakenOver,
+                  gameExternalNavigationEnabled: true,
                   onNavigationStarted: _resetAppSdkDocument,
                   onRunJavaScriptReady: (executor) {
                     _runWindowsJavaScript = executor;

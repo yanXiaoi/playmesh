@@ -69,6 +69,25 @@ void main() {
       expect(source, isNot(contains('"microphone".equals')));
     },
   );
+
+  test(
+    'Android Runtime export channel keeps native work off the UI thread',
+    () {
+      final source = File(
+        'android/app/src/main/java/top/zfjmm/playmesh/MainActivity.java',
+      ).readAsStringSync();
+
+      expect(source, contains('"playmesh/runtime_export"'));
+      expect(source, contains('"exportAndroid"'));
+      expect(source, contains('"exportWindows"'));
+      expect(source, contains('call.argument("requestJson")'));
+      expect(source, contains('Executors.newSingleThreadExecutor()'));
+      expect(source, contains('Appnative.exportAndroidRuntime(requestJson)'));
+      expect(source, contains('Appnative.exportWindowsRuntime(requestJson)'));
+      expect(source, contains('mainHandler.post('));
+      expect(source, contains('runtimeExportExecutor.shutdownNow()'));
+    },
+  );
 }
 
 int _occurrences(String source, String value) =>

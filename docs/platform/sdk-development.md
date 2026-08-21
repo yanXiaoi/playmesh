@@ -3,6 +3,8 @@
 本约定适用于 Game SDK、App Bridge SDK、网页运行片段、Dart 宿主执行器和 SDK
 精确版本发行定义。游戏作者 API 见 [Game SDK / App Bridge SDK](../game/sdk-v1.md)。
 
+> **三端同步要求：** 对 Game SDK 或 App SDK 的任何修改，都必须同步更新 Runtime 底包和 GDevelop Playmesh 扩展，确保 SDK、Runtime、GDevelop 三端的公开能力、版本与行为一致；任一端未同步不得视为完成。
+
 Playmesh `4.2.0+28` 的 LAN feature 与 UI 自动菜单解绑已接入现有 Game SDK `4.1.0`、
 App Bridge SDK `3.3.0`，属于兼容新增，不提升 SDK 版本。自动化契约已完成；
 Android、Windows、macOS、Linux 的跨设备实机验收仍未完成。iOS 自动发现/发布明确为

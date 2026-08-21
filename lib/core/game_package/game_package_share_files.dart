@@ -20,6 +20,33 @@ String gamePackageFileName({required String name, required String version}) {
 String gamePackageShareFileName(GameSummary game) =>
     gamePackageFileName(name: game.name, version: game.version);
 
+/// Produces a bounded Win32-safe executable filename for an exported game.
+///
+/// Device names remain reserved even when an extension is appended, so they
+/// are prefixed instead of relying on the trailing `.exe` to make them safe.
+String gameWindowsExecutableFileName(String name) {
+  var safeName = _packageFileNameComponent(
+    name,
+    fallback: 'game',
+    maxRunes: 80,
+  );
+  if (_windowsReservedDeviceName.hasMatch(safeName)) {
+    safeName = 'game-$safeName';
+  }
+  // playmesh-core.exe remains beside the game executable in every Runtime
+  // bundle. Avoid a case-insensitive ZIP/filesystem collision with that fixed
+  // companion; playmesh-runtime.exe is safe because it is the renamed entry.
+  if ('$safeName.exe'.toLowerCase() == 'playmesh-core.exe') {
+    safeName = 'game-$safeName';
+  }
+  return '$safeName.exe';
+}
+
+final _windowsReservedDeviceName = RegExp(
+  r'^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)',
+  caseSensitive: false,
+);
+
 String _packageFileNameComponent(
   String value, {
   required String fallback,

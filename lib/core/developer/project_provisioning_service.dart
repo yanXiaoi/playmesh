@@ -110,6 +110,11 @@ class ProjectProvisioningService {
        clock = clock ?? DateTime.now;
 
   static const metadataSchemaVersion = 1;
+  static const _androidApplicationIdIdentityPolicy =
+      'android_application_id_v1';
+  static final RegExp _legacyManagedGameIdPattern = RegExp(
+    r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$',
+  );
   static final Map<String, Future<void>> _projectTails = {};
   static int _stagingSequence = 0;
 
@@ -124,8 +129,29 @@ class ProjectProvisioningService {
     final normalizedGameId = gameId.trim();
     final normalizedName = name.trim();
     if (!isValidPlaymeshGameId(normalizedGameId) ||
-        !RegExp(r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$').hasMatch(normalizedGameId)) {
+        !_legacyManagedGameIdPattern.hasMatch(normalizedGameId)) {
       throw const FormatException('项目 ID 必须是小写反向域名格式');
+    }
+    if (normalizedName.isEmpty || normalizedName.length > 80) {
+      throw const FormatException('项目名称长度必须为 1 到 80 个字符');
+    }
+    return (gameId: normalizedGameId, name: normalizedName);
+  }
+
+  /// Identity policy used only by the source workspace's create-project API.
+  /// It intentionally does not replace [validateIdentity], because existing
+  /// managed projects may contain a hyphen in their game ID.
+  static ({String gameId, String name}) validateNewSourceIdentity({
+    required String gameId,
+    required String name,
+  }) {
+    final normalizedGameId = gameId.trim();
+    final normalizedName = name.trim();
+    if (!isValidPlaymeshNewProjectGameId(normalizedGameId)) {
+      throw const FormatException(
+        '项目 ID 必须是 Android applicationId 格式：至少两段，以点分隔；'
+        '每段以英文字母开头，且只能包含英文字母、数字和下划线；最长 64 个字符',
+      );
     }
     if (normalizedName.isEmpty || normalizedName.length > 80) {
       throw const FormatException('项目名称长度必须为 1 到 80 个字符');
@@ -139,14 +165,46 @@ class ProjectProvisioningService {
     name: '_',
   ).gameId;
 
+  static String _validateStoredGameId(
+    String gameId, {
+    required bool allowAndroidApplicationId,
+  }) {
+    final normalized = gameId.trim();
+    if ((_legacyManagedGameIdPattern.hasMatch(normalized) &&
+            isValidPlaymeshGameId(normalized)) ||
+        (allowAndroidApplicationId &&
+            isValidPlaymeshNewProjectGameId(normalized))) {
+      return normalized;
+    }
+    throw const FormatException('项目 ID 无效');
+  }
+
+  static ({String gameId, String name}) _validateStoredIdentity({
+    required String gameId,
+    required String name,
+    required String? identityPolicy,
+  }) => identityPolicy == _androidApplicationIdIdentityPolicy
+      ? validateNewSourceIdentity(gameId: gameId, name: name)
+      : validateIdentity(gameId: gameId, name: name);
+
   Future<ProvisionedProject> createProject({
     required String gameId,
     required String name,
     required PlaymeshProjectKind kind,
+    bool requireAndroidApplicationId = false,
     Map<String, Object?> additionalMetadata = const {},
     Future<void> Function(Directory stagingRoot)? initialize,
   }) {
-    final identity = validateIdentity(gameId: gameId, name: name);
+    if (requireAndroidApplicationId && kind != PlaymeshProjectKind.source) {
+      throw ArgumentError.value(
+        kind,
+        'kind',
+        'Android applicationId 创建规则只适用于源码项目',
+      );
+    }
+    final identity = requireAndroidApplicationId
+        ? validateNewSourceIdentity(gameId: gameId, name: name)
+        : validateIdentity(gameId: gameId, name: name);
     return _serialize(identity.gameId, () async {
       final projects = await _projectsRoot();
       final target = _projectRoot(projects, identity.gameId);
@@ -172,6 +230,9 @@ class ProjectProvisioningService {
           gameId: identity.gameId,
           name: identity.name,
           kind: kind,
+          identityPolicy: requireAndroidApplicationId
+              ? _androidApplicationIdIdentityPolicy
+              : null,
           createdAt: now,
           updatedAt: now,
         );
@@ -203,7 +264,10 @@ class ProjectProvisioningService {
     required String gameId,
     required PlaymeshProjectKind kind,
   }) {
-    final normalized = validateGameId(gameId);
+    final normalized = _validateStoredGameId(
+      gameId,
+      allowAndroidApplicationId: kind == PlaymeshProjectKind.source,
+    );
     return _serialize(normalized, () async {
       final root = _projectRoot(await _projectsRoot(), normalized);
       if (!await root.exists()) throw ProjectProvisioningMissing(normalized);
@@ -226,11 +290,14 @@ class ProjectProvisioningService {
     required PlaymeshProjectKind kind,
     Map<String, Object?> additionalMetadata = const {},
   }) {
-    final identity = validateIdentity(gameId: gameId, name: name);
-    return _serialize(identity.gameId, () async {
-      final root = _projectRoot(await _projectsRoot(), identity.gameId);
+    final normalizedGameId = _validateStoredGameId(
+      gameId,
+      allowAndroidApplicationId: kind == PlaymeshProjectKind.source,
+    );
+    return _serialize(normalizedGameId, () async {
+      final root = _projectRoot(await _projectsRoot(), normalizedGameId);
       if (!await root.exists()) {
-        throw ProjectProvisioningMissing(identity.gameId);
+        throw ProjectProvisioningMissing(normalizedGameId);
       }
       final metadataFile = _metadataFile(root);
       final existing = await _readMetadata(metadataFile);
@@ -238,17 +305,22 @@ class ProjectProvisioningService {
         return _validatedProject(
           root: root,
           metadata: existing,
-          gameId: identity.gameId,
+          gameId: normalizedGameId,
           kind: kind,
           created: false,
         );
       }
+      // Binding an untyped legacy package is not a new-project entry. Keep its
+      // historical identity policy; the Android policy is only persisted by
+      // createProject(requireAndroidApplicationId: true).
+      final identity = validateIdentity(gameId: gameId, name: name);
       final now = clock().toUtc();
       final metadata = _composeMetadata(
         additionalMetadata,
         gameId: identity.gameId,
         name: identity.name,
         kind: kind,
+        identityPolicy: null,
         createdAt: now,
         updatedAt: now,
       );
@@ -270,7 +342,10 @@ class ProjectProvisioningService {
     String? name,
     required Map<String, Object?> Function(Map<String, Object?> current) update,
   }) {
-    final normalized = validateGameId(gameId);
+    final normalized = _validateStoredGameId(
+      gameId,
+      allowAndroidApplicationId: kind == PlaymeshProjectKind.source,
+    );
     return _serialize(normalized, () async {
       final root = _projectRoot(await _projectsRoot(), normalized);
       if (!await root.exists()) throw ProjectProvisioningMissing(normalized);
@@ -284,14 +359,20 @@ class ProjectProvisioningService {
         kind: kind,
         created: false,
       );
+      final parsedExisting = _parseMetadata(existing);
       final normalizedName = name == null
           ? opened.name
-          : validateIdentity(gameId: normalized, name: name).name;
+          : _validateStoredIdentity(
+              gameId: normalized,
+              name: name,
+              identityPolicy: parsedExisting.identityPolicy,
+            ).name;
       final updated = _composeMetadata(
         update(Map<String, Object?>.from(existing)),
         gameId: normalized,
         name: normalizedName,
         kind: kind,
+        identityPolicy: parsedExisting.identityPolicy,
         createdAt: DateTime.parse(existing['createdAt']! as String),
         updatedAt: clock().toUtc(),
       );
@@ -490,29 +571,46 @@ class ProjectProvisioningService {
     );
   }
 
-  ({String gameId, String name, PlaymeshProjectKind kind}) _parseMetadata(
-    Map<String, Object?> metadata,
-  ) {
+  ({
+    String gameId,
+    String name,
+    PlaymeshProjectKind kind,
+    String? identityPolicy,
+  })
+  _parseMetadata(Map<String, Object?> metadata) {
     final gameId = metadata['gameId'];
     final name = metadata['name'];
     final kind = metadata['kind'];
     final createdAt = metadata['createdAt'];
     final updatedAt = metadata['updatedAt'];
+    final identityPolicy = metadata['identityPolicy'];
     if (metadata['schemaVersion'] != metadataSchemaVersion ||
         gameId is! String ||
         name is! String ||
         kind is! String ||
+        (identityPolicy != null &&
+            identityPolicy != _androidApplicationIdIdentityPolicy) ||
         createdAt is! String ||
         updatedAt is! String ||
         DateTime.tryParse(createdAt) == null ||
         DateTime.tryParse(updatedAt) == null) {
       throw const FormatException('Playmesh 项目元数据无效');
     }
-    final identity = validateIdentity(gameId: gameId, name: name);
+    final parsedKind = PlaymeshProjectKind.parse(kind);
+    if (identityPolicy == _androidApplicationIdIdentityPolicy &&
+        parsedKind != PlaymeshProjectKind.source) {
+      throw const FormatException('Playmesh 项目元数据无效');
+    }
+    final identity = _validateStoredIdentity(
+      gameId: gameId,
+      name: name,
+      identityPolicy: identityPolicy as String?,
+    );
     return (
       gameId: identity.gameId,
       name: identity.name,
-      kind: PlaymeshProjectKind.parse(kind),
+      kind: parsedKind,
+      identityPolicy: identityPolicy,
     );
   }
 
@@ -521,17 +619,23 @@ class ProjectProvisioningService {
     required String gameId,
     required String name,
     required PlaymeshProjectKind kind,
+    required String? identityPolicy,
     required DateTime createdAt,
     required DateTime updatedAt,
-  }) => <String, Object?>{
-    ...additional,
-    'schemaVersion': metadataSchemaVersion,
-    'kind': kind.wireName,
-    'gameId': gameId,
-    'name': name,
-    'createdAt': createdAt.toUtc().toIso8601String(),
-    'updatedAt': updatedAt.toUtc().toIso8601String(),
-  };
+  }) {
+    final sanitized = Map<String, Object?>.from(additional)
+      ..remove('identityPolicy');
+    return <String, Object?>{
+      ...sanitized,
+      'schemaVersion': metadataSchemaVersion,
+      'kind': kind.wireName,
+      'gameId': gameId,
+      'name': name,
+      'identityPolicy': ?identityPolicy,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+      'updatedAt': updatedAt.toUtc().toIso8601String(),
+    };
+  }
 
   Future<void> _writeMetadata(File file, Map<String, Object?> metadata) async {
     await file.parent.create(recursive: true);

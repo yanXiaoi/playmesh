@@ -1,12 +1,14 @@
 [
   {
-    "name": "Gitee",
-    "app": "https://gitee.com/app_update.json",
-    "gdevelop": "https://gitee.com/resources/GDevelop/update.json",
-    "export": "https://gitee.com/resources/runtime/update.json"
+    "name": "GitHub",
+    "app": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/assets/app/App.json",
+    "gdevelop": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/GDevelop/update.json",
+    "export": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/runtime/update.json"
   },
   {
-    "name": "GitHub",
-    "app": "https://github.com/app_update.json"
+    "name": "临时源",
+    "app": "http://8.137.106.103:1000/playmesh/app_update.json",
+    "gdevelop": "http://8.137.106.103:1000/playmesh/resources/GDevelop/update.json",
+    "export": "http://8.137.106.103:1000/playmesh/resources/runtime/update.json"
   }
 ]

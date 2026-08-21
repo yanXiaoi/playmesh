@@ -267,6 +267,55 @@ func TestCreateRejectsNonEmptyDestinationBeforeCallingDeveloperAPI(t *testing.T)
 	}
 }
 
+func TestNewProjectIDUsesSharedAndroidApplicationIDContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(
+		"..", "..", "..", "test", "fixtures", "new_project_game_id.json",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		MaxLength int      `json:"maxLength"`
+		Valid     []string `json:"valid"`
+		Invalid   []string `json:"invalid"`
+		Boundary  struct {
+			Prefix           string `json:"prefix"`
+			SegmentCharacter string `json:"segmentCharacter"`
+		} `json:"boundary"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range fixture.Valid {
+		if err := validateNewProjectID(value); err != nil {
+			t.Errorf("expected valid project ID %q: %v", value, err)
+		}
+	}
+	for _, value := range fixture.Invalid {
+		if err := validateNewProjectID(value); err == nil {
+			t.Errorf("expected invalid project ID %q", value)
+		}
+	}
+	maximum := fixture.Boundary.Prefix + strings.Repeat(
+		fixture.Boundary.SegmentCharacter,
+		fixture.MaxLength-len(fixture.Boundary.Prefix),
+	)
+	if err := validateNewProjectID(maximum); err != nil {
+		t.Fatalf("maximum-length project ID was rejected: %v", err)
+	}
+	if err := validateNewProjectID(maximum + fixture.Boundary.SegmentCharacter); err == nil {
+		t.Fatal("overlong project ID was accepted")
+	}
+
+	randomID, err := randomProjectID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNewProjectID(randomID); err != nil {
+		t.Fatalf("generated project ID %q is invalid: %v", randomID, err)
+	}
+}
+
 func createTestProjectPackage(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buffer bytes.Buffer

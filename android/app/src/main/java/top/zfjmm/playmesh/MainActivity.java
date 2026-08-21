@@ -1,12 +1,15 @@
 package top.zfjmm.playmesh;
 
 import android.app.KeyguardManager;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.OpenableColumns;
 
@@ -23,10 +26,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
+import appnative.Appnative;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.embedding.engine.FlutterEngineCache;
+import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import mobile.Mobile;
 
@@ -39,10 +47,21 @@ public class MainActivity extends FlutterActivity {
             "playmesh/webview_permission";
     private static final String DEVELOPER_BACKGROUND_CHANNEL =
             "playmesh/developer_background_host";
+    private static final String RUNTIME_EXPORT_CHANNEL =
+            "playmesh/runtime_export";
+    private static final String EXTERNAL_NAVIGATION_CHANNEL =
+            "playmesh/external_navigation";
     private static final int WEBVIEW_PERMISSION_REQUEST_CODE = 7301;
 
     private MethodChannel openFileChannel;
+    private MethodChannel runtimeExportChannel;
     private MethodChannel.Result pendingWebPermissionResult;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService runtimeExportExecutor =
+            Executors.newSingleThreadExecutor();
+    private final Set<MethodChannel.Result> pendingRuntimeExportResults =
+            new LinkedHashSet<>();
+    private boolean runtimeExportDestroyed;
     private Pose6dNativeHost pose6dNativeHost;
     private WebRtcAppMediaNativeHost webRtcAppMediaNativeHost;
     private LanMulticastLockHost lanMulticastLockHost;
@@ -111,6 +130,12 @@ public class MainActivity extends FlutterActivity {
             }
         });
 
+        runtimeExportChannel = new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
+                RUNTIME_EXPORT_CHANNEL
+        );
+        runtimeExportChannel.setMethodCallHandler(this::handleRuntimeExport);
+
         openFileChannel = new MethodChannel(
                 flutterEngine.getDartExecutor().getBinaryMessenger(),
                 OPEN_FILE_CHANNEL
@@ -127,6 +152,25 @@ public class MainActivity extends FlutterActivity {
                 result.error(
                         incomingFileErrorCode(error),
                         error.toString(),
+                        null
+                );
+            }
+        });
+
+        new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
+                EXTERNAL_NAVIGATION_CHANNEL
+        ).setMethodCallHandler((call, result) -> {
+            if (!"openIntentUri".equals(call.method)) {
+                result.notImplemented();
+                return;
+            }
+            try {
+                result.success(openBrowsableIntentUri(call.arguments));
+            } catch (Exception error) {
+                result.error(
+                        "external_navigation_invalid_intent",
+                        error.getMessage(),
                         null
                 );
             }
@@ -201,6 +245,77 @@ public class MainActivity extends FlutterActivity {
                 );
             }
         });
+    }
+
+    private void handleRuntimeExport(
+            @NonNull MethodCall call,
+            @NonNull MethodChannel.Result result
+    ) {
+        if (!"exportAndroid".equals(call.method)
+                && !"exportWindows".equals(call.method)) {
+            result.notImplemented();
+            return;
+        }
+        String requestJson = call.argument("requestJson");
+        if (requestJson == null || requestJson.trim().isEmpty()) {
+            result.error(
+                    "runtime_export_invalid_request",
+                    "requestJson must be a non-empty string",
+                    null
+            );
+            return;
+        }
+        if (runtimeExportDestroyed || runtimeExportExecutor.isShutdown()) {
+            result.error(
+                    "runtime_export_unavailable",
+                    "Runtime exporter is unavailable after Activity destruction",
+                    null
+            );
+            return;
+        }
+
+        pendingRuntimeExportResults.add(result);
+        try {
+            runtimeExportExecutor.execute(() -> {
+                try {
+                    final String report = "exportAndroid".equals(call.method)
+                            ? Appnative.exportAndroidRuntime(requestJson)
+                            : Appnative.exportWindowsRuntime(requestJson);
+                    mainHandler.post(() -> completeRuntimeExportSuccess(result, report));
+                } catch (Exception error) {
+                    final String diagnostic = error.getMessage() == null
+                            ? error.getClass().getSimpleName()
+                            : error.getMessage();
+                    mainHandler.post(() -> completeRuntimeExportError(
+                            result,
+                            diagnostic
+                    ));
+                }
+            });
+        } catch (RejectedExecutionException error) {
+            pendingRuntimeExportResults.remove(result);
+            result.error(
+                    "runtime_export_unavailable",
+                    "Runtime exporter rejected the operation",
+                    null
+            );
+        }
+    }
+
+    private void completeRuntimeExportSuccess(
+            @NonNull MethodChannel.Result result,
+            @Nullable String report
+    ) {
+        if (!pendingRuntimeExportResults.remove(result)) return;
+        result.success(report);
+    }
+
+    private void completeRuntimeExportError(
+            @NonNull MethodChannel.Result result,
+            @NonNull String diagnostic
+    ) {
+        if (!pendingRuntimeExportResults.remove(result)) return;
+        result.error("runtime_export_native_error", diagnostic, null);
     }
 
     private void requestWebPermissions(
@@ -347,6 +462,67 @@ public class MainActivity extends FlutterActivity {
         return "incoming_file_native_error";
     }
 
+    private boolean openBrowsableIntentUri(Object rawValue) throws Exception {
+        if (!(rawValue instanceof String)) {
+            throw new IllegalArgumentException("intent_uri_must_be_string");
+        }
+        String rawUri = ((String) rawValue).trim();
+        if (rawUri.isEmpty() || rawUri.length() > 8192
+                || !rawUri.regionMatches(true, 0, "intent:", 0, 7)) {
+            throw new IllegalArgumentException("invalid_intent_uri");
+        }
+        Intent intent = Intent.parseUri(rawUri, Intent.URI_INTENT_SCHEME);
+        String action = intent.getAction();
+        if (action != null && !Intent.ACTION_VIEW.equals(action)) {
+            throw new IllegalArgumentException("intent_action_not_allowed");
+        }
+        intent.setAction(Intent.ACTION_VIEW);
+        intent.addCategory(Intent.CATEGORY_BROWSABLE);
+        intent.setComponent(null);
+        intent.setSelector(null);
+        intent.setFlags(0);
+        requireSafeIntentData(intent.getData());
+        String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+        intent.removeExtra("browser_fallback_url");
+        try {
+            startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException error) {
+            return openHttpFallback(fallbackUrl);
+        }
+    }
+
+    private boolean openHttpFallback(@Nullable String rawUrl) {
+        if (rawUrl == null || rawUrl.length() > 8192) return false;
+        Uri fallback = Uri.parse(rawUrl);
+        String scheme = fallback.getScheme();
+        if (!("http".equalsIgnoreCase(scheme)
+                || "https".equalsIgnoreCase(scheme))) {
+            return false;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, fallback));
+            return true;
+        } catch (ActivityNotFoundException error) {
+            return false;
+        }
+    }
+
+    private static void requireSafeIntentData(@Nullable Uri data) {
+        if (data == null || data.getScheme() == null) {
+            throw new IllegalArgumentException("intent_data_required");
+        }
+        String scheme = data.getScheme();
+        if ("file".equalsIgnoreCase(scheme)
+                || "content".equalsIgnoreCase(scheme)
+                || "javascript".equalsIgnoreCase(scheme)
+                || "data".equalsIgnoreCase(scheme)
+                || "blob".equalsIgnoreCase(scheme)
+                || "about".equalsIgnoreCase(scheme)) {
+            throw new IllegalArgumentException("intent_data_scheme_not_allowed");
+        }
+    }
+
     private Map<String, Object> consumeIncomingFile(Intent intent) throws Exception {
         if (intent == null) return null;
         Uri uri = null;
@@ -426,6 +602,20 @@ public class MainActivity extends FlutterActivity {
         activityAttached = false;
         activityResumed = false;
         windowFocused = false;
+        runtimeExportDestroyed = true;
+        if (runtimeExportChannel != null) {
+            runtimeExportChannel.setMethodCallHandler(null);
+            runtimeExportChannel = null;
+        }
+        for (MethodChannel.Result result : pendingRuntimeExportResults) {
+            result.error(
+                    "runtime_export_activity_destroyed",
+                    "Activity was destroyed before Runtime export completed",
+                    null
+            );
+        }
+        pendingRuntimeExportResults.clear();
+        runtimeExportExecutor.shutdownNow();
         if (webRtcAppMediaNativeHost != null) {
             webRtcAppMediaNativeHost.dispose();
             webRtcAppMediaNativeHost = null;

@@ -1377,7 +1377,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '4.2.0');
+    expect((openApiJson['info'] as Map)['version'], '4.3.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );

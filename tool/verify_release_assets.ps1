@@ -23,11 +23,83 @@ $localizationRoot = Join-Path $repoRoot (
 )
 $localizationManifestPath = Join-Path $localizationRoot 'manifest.json'
 $appResourceSourceCatalogRelativePath = 'assets/app/App.json'
+$developerWorkspaceRelativePaths = @(
+  'assets/playmesh-library/public/developer/workspace.html',
+  'assets/playmesh-library/public/developer/workspace.css',
+  'assets/playmesh-library/public/developer/workspace.js'
+)
+$defaultExportKeyRelativePath = 'assets/runtime-export/playmesh-default-export.p12'
+$defaultExportKeyPath = Join-Path $repoRoot (
+  $defaultExportKeyRelativePath -replace '/', '\'
+)
 $legacyGdevelopWebIdeSourcesRelativePath = 'assets/app/GdevelopWebIDE.json'
 $legacyGdevelopWebIdeSourcesPath = Join-Path $repoRoot (
   $legacyGdevelopWebIdeSourcesRelativePath -replace '/', '\'
 )
+$runtimeBasePackageFileNames = [Collections.Generic.HashSet[string]]::new(
+  [StringComparer]::OrdinalIgnoreCase
+)
+foreach ($runtimeBasePackageFileName in @(
+    'playmesh-runtime-arm.apk',
+    'playmesh-runtime-x86.apk',
+    'playmesh-runtime-win.zip',
+    'playmesh-runtime-crypto.dll')) {
+  $null = $runtimeBasePackageFileNames.Add($runtimeBasePackageFileName)
+}
 $utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
+$runtimePrivateKeyMarkers = $null
+
+function Get-RuntimePrivateKeyMarkers {
+  if ($null -ne $script:runtimePrivateKeyMarkers) {
+    return $script:runtimePrivateKeyMarkers
+  }
+  $markers = [Collections.Generic.List[string]]::new()
+  $null = $markers.Add('-----BEGIN PRIVATE KEY-----')
+  $binaryEncoding = [Text.Encoding]::GetEncoding(28591)
+  $privateKeyRoot = Join-Path $repoRoot 'runtime\crypto'
+  if (Test-Path -LiteralPath $privateKeyRoot -PathType Container) {
+    foreach ($privateKeyFile in Get-ChildItem -LiteralPath $privateKeyRoot `
+        -File -Filter '*-runtime-private.pem') {
+      $pemText = [IO.File]::ReadAllText($privateKeyFile.FullName)
+      $match = [Regex]::Match(
+        $pemText,
+        '-----BEGIN PRIVATE KEY-----\s*(?<body>[A-Za-z0-9+/=\s]+?)\s*-----END PRIVATE KEY-----',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+      )
+      if (-not $match.Success) {
+        throw "Runtime private key is not a PKCS#8 PEM file: $($privateKeyFile.FullName)"
+      }
+      $null = $markers.Add($pemText.Trim())
+      $der = [Convert]::FromBase64String(
+        ($match.Groups['body'].Value -replace '\s', '')
+      )
+      $null = $markers.Add($binaryEncoding.GetString($der))
+    }
+  }
+  $script:runtimePrivateKeyMarkers = @($markers)
+  return $script:runtimePrivateKeyMarkers
+}
+
+function Test-RuntimePrivateKeyScanCandidate {
+  param([Parameter(Mandatory = $true)][string]$Relative)
+
+  $normalized = $Relative -replace '\\', '/'
+  return $normalized -match '(?i)(?:\.so|\.dll|\.exe|\.dylib|\.pem)$'
+}
+
+function Assert-NoRuntimePrivateKeyMaterialInBytes {
+  param(
+    [Parameter(Mandatory = $true)][byte[]]$Bytes,
+    [Parameter(Mandatory = $true)][string]$Description
+  )
+
+  $contents = [Text.Encoding]::GetEncoding(28591).GetString($Bytes)
+  foreach ($marker in Get-RuntimePrivateKeyMarkers) {
+    if ($contents.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) {
+      throw "$Description contains Runtime private-key material."
+    }
+  }
+}
 
 function Get-StrictUtf8Text {
   param([Parameter(Mandatory = $true)][string]$Path)
@@ -294,6 +366,9 @@ function Get-SourceSnapshot {
   foreach ($relative in $localizationFiles) {
     $relativeFiles.Add($relative)
   }
+  foreach ($relative in $developerWorkspaceRelativePaths) {
+    $relativeFiles.Add($relative)
+  }
   $relativeFiles.Add($appResourceSourceCatalogRelativePath)
   $relativeFiles = @($relativeFiles | Sort-Object -Unique)
   $entries = [Collections.Generic.List[object]]::new()
@@ -336,6 +411,63 @@ function Get-StreamSha256 {
     return ([BitConverter]::ToString($algorithm.ComputeHash($Stream)) -replace '-', '').ToLowerInvariant()
   } finally {
     $algorithm.Dispose()
+  }
+}
+
+function Assert-AllowedFlutterAssetRelativePath {
+  param([Parameter(Mandatory = $true)][string]$Relative)
+
+  $normalized = ($Relative -replace '\\', '/').TrimStart('/')
+  $forbiddenRoot = $normalized -match (
+    '(?i)(?:^|/)(?:resources/runtime|runtime/resource)(?:/|$)'
+  )
+  $leafName = ($normalized -split '/')[-1]
+  if ($forbiddenRoot -or $runtimeBasePackageFileNames.Contains($leafName)) {
+    throw "Packaged main App contains a forbidden Runtime-only artifact: $normalized"
+  }
+}
+
+function Assert-NoBundledRuntimeBasePackagesInDirectory {
+  param([Parameter(Mandatory = $true)][string]$ArtifactPath)
+
+  foreach ($file in Get-ChildItem -LiteralPath $ArtifactPath -Recurse -File) {
+    $relative = $file.FullName.Substring($ArtifactPath.Length + 1) -replace '\\', '/'
+    Assert-AllowedFlutterAssetRelativePath -Relative $relative
+    if (Test-RuntimePrivateKeyScanCandidate -Relative $relative) {
+      Assert-NoRuntimePrivateKeyMaterialInBytes `
+        -Bytes ([IO.File]::ReadAllBytes($file.FullName)) `
+        -Description "Packaged main App file $relative"
+    }
+  }
+}
+
+function Assert-NoBundledRuntimeBasePackagesInArchive {
+  param([Parameter(Mandatory = $true)]$Archive)
+
+  foreach ($entry in $Archive.Entries) {
+    $entryPath = $entry.FullName -replace '\\', '/'
+    Assert-AllowedFlutterAssetRelativePath -Relative $entryPath
+    if (-not (Test-RuntimePrivateKeyScanCandidate -Relative $entryPath)) {
+      continue
+    }
+    if ($entry.Length -gt 512MB) {
+      throw "Packaged native entry is too large for private-key validation: $entryPath"
+    }
+    $stream = $entry.Open()
+    try {
+      $memory = [IO.MemoryStream]::new()
+      try {
+        $stream.CopyTo($memory)
+        $bytes = $memory.ToArray()
+      } finally {
+        $memory.Dispose()
+      }
+    } finally {
+      $stream.Dispose()
+    }
+    Assert-NoRuntimePrivateKeyMaterialInBytes `
+      -Bytes $bytes `
+      -Description "Packaged main App entry $entryPath"
   }
 }
 
@@ -397,7 +529,15 @@ for ($index = 0; $index -lt @($expected.files).Count; $index++) {
 }
 
 $artifactPath = [IO.Path]::GetFullPath($Artifact)
+if (-not (Test-Path -LiteralPath $defaultExportKeyPath -PathType Leaf)) {
+  throw "Default Runtime export signing key is missing: $defaultExportKeyPath"
+}
+$defaultExportKeyHash = (
+  Get-FileHash -LiteralPath $defaultExportKeyPath -Algorithm SHA256
+).Hash.ToLowerInvariant()
+$defaultExportKeyBytes = (Get-Item -LiteralPath $defaultExportKeyPath).Length
 if (Test-Path -LiteralPath $artifactPath -PathType Container) {
+  Assert-NoBundledRuntimeBasePackagesInDirectory -ArtifactPath $artifactPath
   foreach ($prefix in @('data\flutter_assets', 'assets\flutter_assets')) {
     $legacyCandidate = Join-Path $artifactPath (
       "$prefix\$($legacyGdevelopWebIdeSourcesRelativePath -replace '/', '\')"
@@ -419,10 +559,31 @@ if (Test-Path -LiteralPath $artifactPath -PathType Container) {
       throw "Packaged release asset differs from source: $($file.path)"
     }
   }
+  $packagedDefaultExportKey = $null
+  foreach ($prefix in @('data\flutter_assets', 'assets\flutter_assets')) {
+    $candidate = Join-Path $artifactPath (
+      "$prefix\$($defaultExportKeyRelativePath -replace '/', '\')"
+    )
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      $packagedDefaultExportKey = $candidate
+      break
+    }
+  }
+  if ($null -eq $packagedDefaultExportKey) {
+    throw "Packaged release is missing the default Runtime export signing key: $defaultExportKeyRelativePath"
+  }
+  $packagedDefaultExportKeyHash = (
+    Get-FileHash -LiteralPath $packagedDefaultExportKey -Algorithm SHA256
+  ).Hash.ToLowerInvariant()
+  if ($packagedDefaultExportKeyHash -cne $defaultExportKeyHash -or
+      (Get-Item -LiteralPath $packagedDefaultExportKey).Length -ne $defaultExportKeyBytes) {
+    throw "Packaged default Runtime export signing key differs from source: $defaultExportKeyRelativePath"
+  }
 } else {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $archive = [IO.Compression.ZipFile]::OpenRead($artifactPath)
   try {
+    Assert-NoBundledRuntimeBasePackagesInArchive -Archive $archive
     $legacyEntry = Get-PackagedEntry `
       -Archive $archive `
       -Relative $legacyGdevelopWebIdeSourcesRelativePath
@@ -443,6 +604,22 @@ if (Test-Path -LiteralPath $artifactPath -PathType Container) {
       if ($hash -cne $file.sha256 -or $entry.Length -ne [int64]$file.bytes) {
         throw "Packaged release asset differs from source: $($file.path)"
       }
+    }
+    $packagedDefaultExportKey = Get-PackagedEntry `
+      -Archive $archive `
+      -Relative $defaultExportKeyRelativePath
+    if ($null -eq $packagedDefaultExportKey) {
+      throw "Packaged release is missing the default Runtime export signing key: $defaultExportKeyRelativePath"
+    }
+    $keyStream = $packagedDefaultExportKey.Open()
+    try {
+      $packagedDefaultExportKeyHash = Get-StreamSha256 -Stream $keyStream
+    } finally {
+      $keyStream.Dispose()
+    }
+    if ($packagedDefaultExportKeyHash -cne $defaultExportKeyHash -or
+        $packagedDefaultExportKey.Length -ne $defaultExportKeyBytes) {
+      throw "Packaged default Runtime export signing key differs from source: $defaultExportKeyRelativePath"
     }
   } finally {
     $archive.Dispose()

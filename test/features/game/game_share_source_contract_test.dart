@@ -4,19 +4,100 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('分享页只呈现用户配置的本地游戏源名称', () {
+  test('主 App 适配器只把服务器名称与延迟交给共享分享面板', () {
     final source = File('lib/features/game/game_page.dart').readAsStringSync();
+    final projection = _sourceSection(
+      source,
+      'PlaymeshSharePanelModel _buildSharePanelModel(BuildContext context)',
+      'PlaymeshSharePanelStrings _buildSharePanelStrings(',
+    );
 
     expect(source, isNot(contains('share.source.official_name')));
     expect(source, isNot(contains('declaration.displayNameFor')));
     expect(source, isNot(contains('declaration.author')));
-    expect(source, contains('probe.source.name'));
-    expect(source, contains('source.source.name'));
+    expect(projection, contains('name: probe.source.name'));
+    expect(
+      projection,
+      contains('latencyMilliseconds: probe.elapsed.inMilliseconds'),
+    );
+    expect(projection, isNot(contains('probe.source.host')));
+    expect(projection, isNot(contains('publicBaseUrl')));
+    for (final technicalLabel in const <String>[
+      'game.source_address',
+      'game.relay_address',
+      'game.relay_latency',
+      'game.connection_status',
+      'game.source_homepage',
+    ]) {
+      expect(source, isNot(contains(technicalLabel)));
+    }
+  });
+
+  test('主 App 服务器目录仍保留按需加载、刷新、选择与断开行为', () {
+    final source = _gamePageSource();
+    final pageBuild = _sourceSection(
+      source,
+      'Widget build(BuildContext context)',
+      'void _handleSystemBack()',
+    );
+    final loadServers = _sourceSection(
+      source,
+      'Future<void> _loadRelaySources()',
+      'Future<void> _connectRelay(',
+    );
+    final selectServer = _sourceSection(
+      source,
+      'Future<void> _selectSharePanelServer(String id)',
+      'int? _sharePanelLinkIndex(',
+    );
+
+    expect(pageBuild, contains('onInternetOpened: ()'));
+    expect(pageBuild, contains('return _loadRelaySources()'));
+    expect(pageBuild, contains('onServerSelected: _selectSharePanelServer'));
+    expect(pageBuild, contains('onServerRefresh: _loadRelaySources'));
+    expect(pageBuild, contains('onServerDisconnected: _disconnectRelay'));
+    expect(
+      loadServers,
+      contains('sort((left, right) => left.elapsed.compareTo(right.elapsed))'),
+    );
+    expect(selectServer, contains('probe.source.id == id'));
+    expect(selectServer, contains('await _connectRelay(probe)'));
+  });
+
+  test('Windows 复制完整链接，移动端调用系统分享且展示 ID 不含 URL 查询参数', () {
+    final source = _gamePageSource();
+    final pageBuild = _sourceSection(
+      source,
+      'Widget build(BuildContext context)',
+      'void _handleSystemBack()',
+    );
+    final linkProjection = _sourceSection(
+      source,
+      'PlaymeshShareLink _toSharePanelLink(',
+      'void _selectSharePanelLanLink(',
+    );
+    final action = _sourceSection(
+      source,
+      'Future<void> _actOnSharePanelLink(PlaymeshShareLink link)',
+      'Future<void> _selectSharePanelServer(',
+    );
+
+    expect(pageBuild, contains('TargetPlatform.windows'));
+    expect(pageBuild, contains('PlaymeshShareActionMode.copy'));
+    expect(pageBuild, contains('PlaymeshShareActionMode.share'));
+    expect(linkProjection, contains('id: id'));
+    expect(linkProjection, isNot(contains('id: link.url')));
+    expect(action, contains('Clipboard.setData'));
+    expect(action, contains('SharePlus.instance.share'));
+    expect(action, contains('ShareParams(text: link.url.toString())'));
   });
 
   test('App 分享覆盖层幂等聚焦、关闭节流并恢复游戏 DOM 焦点', () {
     final pageSource = File(
       'lib/features/game/game_page.dart',
+    ).readAsStringSync();
+    final sharePanelSource = File(
+      'packages/playmesh_share_ui/lib/src/share_panel.dart',
     ).readAsStringSync();
     final appUiSource = File(
       'lib/core/game_sdk/features/app/app_ui_feature.dart',
@@ -25,9 +106,16 @@ void main() {
       'lib/core/game_sdk/features/game/game_runtime_feature.dart',
     ).readAsStringSync();
 
-    expect(pageSource, contains("Key('game-share-close')"));
-    expect(pageSource, contains('SingleActivator(LogicalKeyboardKey.escape)'));
+    expect(
+      pageSource,
+      contains('GlobalKey<PlaymeshSharePanelState> _shareOverlayKey'),
+    );
     expect(pageSource, contains('requestCloseFocus()'));
+    expect(sharePanelSource, contains("Key('game-share-close')"));
+    expect(
+      sharePanelSource,
+      contains('SingleActivator(LogicalKeyboardKey.escape)'),
+    );
     expect(pageSource, contains('Duration(milliseconds: 800)'));
     expect(pageSource, contains("'rate_limited'"));
     expect(
@@ -81,14 +169,8 @@ void main() {
       contains('StandaloneGameShareAccessProvider(soloBridge!)'),
     );
     expect(createCoordinator, contains('MultiplayerGameShareAccessProvider('));
-    expect(
-      createCoordinator,
-      contains('hostNickname: _currentNickname'),
-    );
-    expect(
-      createCoordinator,
-      contains('hostNicknameProvider: () =>'),
-    );
+    expect(createCoordinator, contains('hostNickname: _currentNickname'));
+    expect(createCoordinator, contains('hostNicknameProvider: () =>'));
     expect(
       createCoordinator,
       contains('bridge.connection.currentPlayer.nickname'),
@@ -151,10 +233,18 @@ void main() {
       'Widget build(BuildContext context)',
       'void _handleSystemBack()',
     );
-    final lanPanel = _sourceSection(
+    final projection = _sourceSection(
       source,
-      'Widget _buildLan(double panelWidth)',
-      'Widget _buildServer(double panelWidth)',
+      'PlaymeshSharePanelModel _buildSharePanelModel(BuildContext context)',
+      'PlaymeshSharePanelStrings _buildSharePanelStrings(',
+    );
+    final sharedPanel = File(
+      'packages/playmesh_share_ui/lib/src/share_panel.dart',
+    ).readAsStringSync();
+    final sharedLanPanel = _sourceSection(
+      sharedPanel,
+      'Widget _buildLan(BuildContext context)',
+      'Widget _buildInternet(BuildContext context)',
     );
 
     expect(ensureShare, contains("if (error.code == 'discovery_unavailable')"));
@@ -167,15 +257,16 @@ void main() {
     expect(ensureShare, isNot(contains('_stopShare()')));
     expect(ensureShare, isNot(contains('coordinator.close()')));
 
-    expect(pageBuild, contains('_shareState?.snapshot.lanLinks'));
+    expect(pageBuild, contains('_buildSharePanelModel(context)'));
     expect(
-      pageBuild,
+      projection,
       contains("context.tr('game.nearby_discovery_unavailable')"),
     );
-    expect(lanPanel, contains('final addresses = _ShareAddressList('));
-    expect(lanPanel, contains('links: widget.links'));
-    expect(lanPanel, contains('if (widget.publicationError != null)'));
-    expect(lanPanel, contains('addresses,'));
+    expect(projection, contains('lanLinks.isNotEmpty'));
+    expect(projection, contains('lanError: lanError'));
+    expect(sharedLanPanel, contains('if (widget.model.lanError != null)'));
+    expect(sharedLanPanel, contains('if (widget.model.lanLinks.isNotEmpty)'));
+    expect(sharedLanPanel, contains('_LinkPresentation('));
 
     for (final locale in const ['zh-CN', 'en-US']) {
       final messages =
@@ -223,7 +314,7 @@ void main() {
     final exitGame = _sourceSection(
       source,
       'Future<void> _performExitGame({required bool toLibrary})',
-      'enum _SharePanelTab',
+      'class _FullscreenNotice',
     );
 
     expect(hideShare, isNot(contains('_stopShare')));
@@ -264,58 +355,58 @@ void main() {
       'Widget build(BuildContext context)',
       'void _handleSystemBack()',
     );
-    final qrCard = _sourceSection(
+    final projection = _sourceSection(
       source,
-      'Widget _qrCard(GameShareLink? link, double size)',
-      'String _relayStatusLabel(',
+      'PlaymeshShareLink _toSharePanelLink(',
+      'void _selectSharePanelLanLink(',
+    );
+    final sharedPanel = File(
+      'packages/playmesh_share_ui/lib/src/share_panel.dart',
+    ).readAsStringSync();
+    final qrCard = _sourceSection(
+      sharedPanel,
+      'class _ShareQr extends StatelessWidget',
+      'class _ShareLinkTile extends StatelessWidget',
     );
 
-    expect(pageBuild, contains('_shareState?.snapshot.lanLinks'));
-    expect(pageBuild, contains('_shareState?.snapshot.wanLink'));
+    expect(pageBuild, contains('_buildSharePanelModel(context)'));
+    expect(
+      projection,
+      contains('qrPngBytes: Uint8List.fromList(link.pngBytes)'),
+    );
     expect(qrCard, contains('Image.memory('));
-    expect(qrCard, contains('Uint8List.fromList(link.pngBytes)'));
-    expect(qrCard, isNot(contains('QrImageView')));
-    expect(qrCard, isNot(contains('QrCode')));
+    expect(qrCard, contains('final bytes = link.qrPngBytes'));
   });
 
   test('无 LAN 最终态不显示二维码加载动画', () {
-    final source = _gamePageSource();
+    final source = File(
+      'packages/playmesh_share_ui/lib/src/share_panel.dart',
+    ).readAsStringSync();
     final lanPanel = _sourceSection(
       source,
-      'Widget _buildLan(double panelWidth)',
-      'Widget _buildServer(double panelWidth)',
-    );
-    final emptyLanBranch = _sourceSection(
-      lanPanel,
-      'if (widget.links.isEmpty)',
-      'final compact =',
+      'Widget _buildLan(BuildContext context)',
+      'Widget _buildInternet(BuildContext context)',
     );
 
-    expect(emptyLanBranch, contains('return Padding('));
-    expect(emptyLanBranch, contains('_ShareAddressList('));
+    expect(lanPanel, contains('if (widget.model.lanLinks.isEmpty'));
     expect(
-      emptyLanBranch,
-      isNot(contains('CircularProgressIndicator')),
+      lanPanel,
+      contains('_SectionMessage(message: widget.strings.noLanLinks)'),
       reason: '通道启动完成但无 LAN 地址是终态，不能呈现永久加载动画',
     );
     expect(
-      lanPanel.indexOf('if (widget.links.isEmpty)'),
-      lessThan(lanPanel.indexOf('final qr = _qrCard(')),
-      reason: '空地址分支必须在二维码分支之前返回',
+      lanPanel.indexOf('if (widget.model.lanLinks.isEmpty'),
+      lessThan(lanPanel.indexOf('if (widget.model.lanLinks.isNotEmpty)')),
+      reason: '空地址和链接呈现必须是互斥终态',
     );
   });
 
   test('无 LAN 发布失败提示不声称链接已可用', () {
     final source = _gamePageSource();
-    final pageBuild = _sourceSection(
+    final projection = _sourceSection(
       source,
-      'Widget build(BuildContext context)',
-      'void _handleSystemBack()',
-    );
-    final publicationErrorProjection = _sourceSection(
-      pageBuild,
-      'publicationError:',
-      'players:',
+      'PlaymeshSharePanelModel _buildSharePanelModel(BuildContext context)',
+      'PlaymeshSharePanelStrings _buildSharePanelStrings(',
     );
 
     final zhMessages =
@@ -337,9 +428,7 @@ void main() {
     final enMessage =
         enMessages['game.nearby_discovery_unavailable']! as String;
 
-    final distinguishesEmptyLan = publicationErrorProjection.contains(
-      'lanLinks',
-    );
+    final distinguishesEmptyLan = projection.contains('lanLinks.isNotEmpty');
     final nearbyMessageIsNeutral =
         !zhMessage.contains('分享链接已可用') &&
         !enMessage.toLowerCase().contains('share links are ready');

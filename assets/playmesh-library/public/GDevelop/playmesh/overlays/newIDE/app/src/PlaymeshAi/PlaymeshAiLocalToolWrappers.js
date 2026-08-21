@@ -11,6 +11,11 @@ import { enumerateAllInstructions } from '../InstructionOrExpression/EnumerateIn
 import { enumerateAllExpressions } from '../InstructionOrExpression/EnumerateExpressions';
 import { enumerateEventsMetadata } from '../EventsSheet/EnumerateEventsMetadata';
 import { formatExpressionCall } from '../EventsSheet/ParameterFields/GenericExpressionField/FormatExpressionCall';
+import {
+  getPlaymeshBehaviorsRegistry,
+  getPlaymeshExtension,
+  getPlaymeshExtensionsRegistry,
+} from '../PlaymeshCatalog/PlaymeshCatalogSource';
 import { playmeshAiRuntimeDebuggerTools } from './PlaymeshAiRuntimeDebuggerTools';
 import { createPlaymeshAiPiskelToolWrappers } from './PlaymeshAiPiskelTool';
 import { createPlaymeshAiJfxrYarnTools } from './PlaymeshAiJfxrYarnTools';
@@ -33,6 +38,21 @@ import type {
   ResourceSearchAndInstallOptions,
   ResourceSearchAndInstallResult,
 } from '../EditorFunctions';
+import type {
+  BehaviorShortHeader,
+  ExtensionShortHeader,
+} from '../Utils/GDevelopServices/Extension';
+
+type PlaymeshAiCapabilitySearchEntry = {|
+  summary: PlaymeshAiObject,
+  searchText: string,
+|};
+
+type PlaymeshAiCapabilityFunctionSummaries = {|
+  actions: Array<PlaymeshAiObject>,
+  conditions: Array<PlaymeshAiObject>,
+  expressions: Array<PlaymeshAiObject>,
+|};
 
 export type PlaymeshAiPlanItem = {|
   step: string,
@@ -917,16 +937,281 @@ const withInstalledState = ({
   installed: isCapabilityInstalled({ project, capability }),
 });
 
+const LOCAL_PLAYMESH_EXTENSION_BASE_PATH =
+  '/playmesh/GDevelop/playmesh/extensions/';
+
+const stringValue = (value /*: mixed */) /*: string */ =>
+  typeof value === 'string' ? value : '';
+
+const stringValues = (value /*: mixed */) /*: Array<string> */ =>
+  Array.isArray(value)
+    ? value.filter(item => typeof item === 'string')
+    : [];
+
+const isPlaymeshLocalExtensionHeader = (
+  value /*: mixed */
+) /*: boolean */ => {
+  const header = asObject(value);
+  return !!(
+    header &&
+    typeof header.url === 'string' &&
+    header.url.startsWith(LOCAL_PLAYMESH_EXTENSION_BASE_PATH)
+  );
+};
+
+const capabilitySearchEntryFromHeader = ({
+  header,
+  type,
+} /*: {|
+  header: mixed,
+  type: 'extension' | 'behavior',
+|} */) /*: ?PlaymeshAiCapabilitySearchEntry */ => {
+  const record = asObject(header);
+  if (!record) return null;
+  const name = stringValue(record.name);
+  const ownerExtension =
+    type === 'extension' ? name : stringValue(record.extensionName);
+  if (!name || !ownerExtension) return null;
+  const stableId =
+    type === 'extension' ? name : `${ownerExtension}::${name}`;
+  const canonicalName = stringValue(record.fullName) || name;
+  const canonicalSummary =
+    stringValue(record.shortDescription) || stringValue(record.description);
+  const category = stringValue(record.category) || 'General';
+  const tags = stringValues(record.tags);
+  return {
+    summary: {
+      stableId,
+      type,
+      canonicalName,
+      localizedName: canonicalName,
+      canonicalSummary,
+      localizedSummary: canonicalSummary,
+      ownerExtension,
+      category,
+    },
+    searchText: [
+      stableId,
+      canonicalName,
+      canonicalSummary,
+      ownerExtension,
+      category,
+      ...tags,
+    ]
+      .join('\n')
+      .toLowerCase(),
+  };
+};
+
+const loadEditorCapabilitySearchEntries = async () /*: Promise<Array<PlaymeshAiCapabilitySearchEntry>> */ => {
+  const [extensionsRegistry, behaviorsRegistry] = await Promise.all([
+    getPlaymeshExtensionsRegistry(),
+    getPlaymeshBehaviorsRegistry(),
+  ]);
+  const entries = [];
+  extensionsRegistry.headers.forEach(header => {
+    const entry = capabilitySearchEntryFromHeader({
+      header,
+      type: 'extension',
+    });
+    if (entry) entries.push(entry);
+  });
+  behaviorsRegistry.headers.forEach(header => {
+    const entry = capabilitySearchEntryFromHeader({
+      header,
+      type: 'behavior',
+    });
+    if (entry) entries.push(entry);
+  });
+  entries.sort((left, right) => {
+    const leftName = stringValue(left.summary.canonicalName).toLowerCase();
+    const rightName = stringValue(right.summary.canonicalName).toLowerCase();
+    const byName = leftName.localeCompare(rightName, 'en');
+    return byName !== 0
+      ? byName
+      : stringValue(left.summary.stableId).localeCompare(
+          stringValue(right.summary.stableId),
+          'en'
+        );
+  });
+  return entries;
+};
+
+const findLocalExtensionShortHeader = async (
+  extensionName /*: string */
+) /*: Promise<?ExtensionShortHeader> */ => {
+  const registry = await getPlaymeshExtensionsRegistry();
+  return (
+    registry.headers.find(
+      header =>
+        header.name === extensionName &&
+        isPlaymeshLocalExtensionHeader(header)
+    ) || null
+  );
+};
+
+const findLocalBehaviorShortHeader = async ({
+  extensionName,
+  behaviorName,
+} /*: {|
+  extensionName: string,
+  behaviorName: string,
+|} */) /*: Promise<?BehaviorShortHeader> */ => {
+  const registry = await getPlaymeshBehaviorsRegistry();
+  return (
+    registry.headers.find(
+      header =>
+        header.extensionName === extensionName &&
+        header.name === behaviorName &&
+        isPlaymeshLocalExtensionHeader(header)
+    ) || null
+  );
+};
+
+const summarizeCapabilityFunctions = (
+  value /*: mixed */
+) /*: PlaymeshAiCapabilityFunctionSummaries */ => {
+  const actions /*: Array<PlaymeshAiObject> */ = [];
+  const conditions /*: Array<PlaymeshAiObject> */ = [];
+  const expressions /*: Array<PlaymeshAiObject> */ = [];
+  if (!Array.isArray(value)) return { actions, conditions, expressions };
+  value.forEach(item => {
+    const record = asObject(item);
+    const name = record ? stringValue(record.name) : '';
+    if (!record || !name || record.private === true) return;
+    const summary /*: PlaymeshAiObject */ = {
+      name,
+      canonicalName: stringValue(record.fullName) || name,
+      summary: stringValue(record.description),
+    };
+    switch (record.functionType) {
+      case 'Action':
+      case 'ActionWithOperator':
+        actions.push(summary);
+        break;
+      case 'Condition':
+        conditions.push(summary);
+        break;
+      case 'Expression':
+      case 'StringExpression':
+        expressions.push(summary);
+        break;
+      case 'ExpressionAndCondition':
+        conditions.push(summary);
+        expressions.push(summary);
+        break;
+    }
+  });
+  return { actions, conditions, expressions };
+};
+
+const localCapabilityDetails = async ({
+  type,
+  stableId,
+} /*: {|
+  type: 'extension' | 'behavior',
+  stableId: string,
+|} */) /*: Promise<?PlaymeshAiObject> */ => {
+  const separator = stableId.indexOf('::');
+  const extensionName =
+    type === 'extension'
+      ? stableId
+      : separator > 0
+      ? stableId.slice(0, separator)
+      : '';
+  const behaviorName =
+    type === 'behavior' && separator > 0
+      ? stableId.slice(separator + 2)
+      : '';
+  if (!extensionName || (type === 'behavior' && !behaviorName)) return null;
+  const extensionHeader = await findLocalExtensionShortHeader(extensionName);
+  if (!extensionHeader) return null;
+  const serializedExtension = await getPlaymeshExtension(extensionHeader);
+  const extension = asObject(serializedExtension);
+  if (!extension) {
+    throw new PlaymeshAiLocalToolError('capability_response_invalid');
+  }
+  const behaviorHeader =
+    type === 'behavior'
+      ? await findLocalBehaviorShortHeader({ extensionName, behaviorName })
+      : null;
+  if (type === 'behavior' && !behaviorHeader) return null;
+  const entry = capabilitySearchEntryFromHeader({
+    header: type === 'extension' ? extensionHeader : behaviorHeader,
+    type,
+  });
+  if (!entry) {
+    throw new PlaymeshAiLocalToolError('capability_response_invalid');
+  }
+  const behavior =
+    type === 'behavior' && Array.isArray(extension.eventsBasedBehaviors)
+      ? extension.eventsBasedBehaviors
+          .map(item => asObject(item))
+          .find(item => item && item.name === behaviorName) || null
+      : null;
+  if (type === 'behavior' && !behavior) {
+    throw new PlaymeshAiLocalToolError('capability_response_invalid');
+  }
+  const dependencies /*: Array<PlaymeshAiObject> */ = [];
+  if (Array.isArray(extension.requiredExtensions)) {
+    extension.requiredExtensions.forEach(item => {
+      const dependency = asObject(item);
+      if (!dependency) return;
+      const name = stringValue(dependency.extensionName);
+      if (!name) return;
+      const minimumVersion = stringValue(dependency.extensionVersion);
+      dependencies.push({
+        type: 'extension',
+        stableId: name,
+        ...(minimumVersion ? { minimumVersion } : {}),
+      });
+    });
+  }
+  if (
+    behaviorHeader &&
+    Array.isArray(behaviorHeader.allRequiredBehaviorTypes)
+  ) {
+    behaviorHeader.allRequiredBehaviorTypes.forEach(requiredType => {
+      if (typeof requiredType !== 'string' || !requiredType) return;
+      dependencies.push({ type: 'behavior', stableId: requiredType });
+    });
+  }
+  const functions = summarizeCapabilityFunctions(
+    behavior ? behavior.eventsFunctions : extension.eventsFunctions
+  );
+  const objectType = behavior
+    ? stringValue(behavior.objectType) ||
+      stringValue(behaviorHeader && behaviorHeader.objectType)
+    : '';
+  return {
+    ...entry.summary,
+    dependencies,
+    applicableObjectTypes: objectType ? [objectType] : [],
+    conditions: functions.conditions,
+    actions: functions.actions,
+    expressions: functions.expressions,
+    source: {
+      kind: 'playmesh-local-extension',
+      path: extensionHeader.url,
+      tier: extensionHeader.tier,
+      cache: 'bundled',
+    },
+  };
+};
+
 const getCapabilityDetails = async ({
   type,
   stableId,
 } /*: {|
   type: 'extension' | 'behavior',
   stableId: string,
-|} */) /*: Promise<PlaymeshAiObject> */ =>
-  capabilityRecord(
+|} */) /*: Promise<PlaymeshAiObject> */ => {
+  const localCapability = await localCapabilityDetails({ type, stableId });
+  if (localCapability) return localCapability;
+  return capabilityRecord(
     await requestCapabilityJson(capabilityEndpoint({ type, stableId }))
   );
+};
 
 const dependencyReference = (
   value /*: mixed */
@@ -994,6 +1279,21 @@ const artifactRequest = (
 const downloadSerializedExtension = async (
   capability /*: PlaymeshAiObject */
 ) /*: Promise<PlaymeshAiObject> */ => {
+  const source = asObject(capability.source);
+  if (source && source.kind === 'playmesh-local-extension') {
+    const extensionName = requireOwnerExtensionName(capability);
+    const extensionHeader = await findLocalExtensionShortHeader(extensionName);
+    if (!extensionHeader) {
+      throw new PlaymeshAiLocalToolError('capability_artifact_unavailable');
+    }
+    const extension = asObject(
+      await getPlaymeshExtension(extensionHeader)
+    );
+    if (!extension || extension.name !== extensionName) {
+      throw new PlaymeshAiLocalToolError('capability_artifact_unavailable');
+    }
+    return extension;
+  }
   let response;
   try {
     response = await fetch('/dev/api/gdevelop/catalog/artifact', {
@@ -1569,50 +1869,61 @@ export const createPlaymeshAiLocalToolWrappers = ({
       if (typeof query !== 'string') {
         throw new PlaymeshAiLocalToolError('invalid_capability_query');
       }
-      const parameters = new URLSearchParams({
-        query,
-        page: String(call.arguments.page || 1),
-        pageSize: String(call.arguments.pageSize || 10),
-      });
+      const page = call.arguments.page || 1;
+      const pageSize = call.arguments.pageSize || 10;
       if (
-        call.arguments.kind === 'behavior' ||
-        call.arguments.kind === 'extension'
+        !Number.isSafeInteger(page) ||
+        page < 1 ||
+        !Number.isSafeInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > 50
       ) {
-        parameters.set('kind', call.arguments.kind);
+        throw new PlaymeshAiLocalToolError('invalid_capability_query');
       }
-      if (
-        typeof call.arguments.category === 'string' &&
-        call.arguments.category
-      ) {
-        parameters.set('category', call.arguments.category);
-      }
+      const normalizedQuery = query.trim().toLowerCase();
+      const normalizedCategory =
+        typeof call.arguments.category === 'string'
+          ? call.arguments.category.trim().toLowerCase()
+          : '';
+      const requestedKind = call.arguments.kind;
       try {
-        const envelope = await requestCapabilityJson(
-          `/dev/api/gdevelop/catalog/capabilities?${parameters.toString()}`
-        );
-        const rawItems = envelope.items;
-        if (!Array.isArray(rawItems)) {
-          throw new PlaymeshAiLocalToolError('capability_response_invalid');
-        }
-        const items = rawItems.map(rawItem => {
-          const capability = asObject(rawItem);
-          if (!capability) {
-            throw new PlaymeshAiLocalToolError('capability_response_invalid');
+        const matches = (await loadEditorCapabilitySearchEntries()).filter(
+          entry => {
+            const capabilityType = entry.summary.type;
+            if (
+              (requestedKind === 'behavior' ||
+                requestedKind === 'extension') &&
+              capabilityType !== requestedKind
+            ) {
+              return false;
+            }
+            if (
+              normalizedCategory &&
+              stringValue(entry.summary.category).toLowerCase() !==
+                normalizedCategory
+            ) {
+              return false;
+            }
+            return (
+              !normalizedQuery || entry.searchText.includes(normalizedQuery)
+            );
           }
-          return withInstalledState({ project, capability });
-        });
+        );
+        const start = (page - 1) * pageSize;
+        const items = matches
+          .slice(start, start + pageSize)
+          .map(entry =>
+            withInstalledState({ project, capability: entry.summary })
+          );
         return finished({
           call,
           success: true,
           output: {
             status: 'available',
-            requestId:
-              typeof envelope.requestId === 'string'
-                ? envelope.requestId
-                : null,
-            page: envelope.page,
-            pageSize: envelope.pageSize,
-            total: envelope.total,
+            requestId: null,
+            page,
+            pageSize,
+            total: matches.length,
             items,
           },
         });

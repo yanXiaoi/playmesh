@@ -478,15 +478,24 @@ const normalizeLocalTags = (value: mixed): Array<string> => {
       : value === undefined
       ? []
       : null;
-  if (!tags || tags.some(tag => typeof tag !== 'string')) {
+  if (!tags) {
     throw new PlaymeshCatalogError(
       'invalid_extension',
       '本地 Playmesh 扩展标签无效。'
     );
   }
+  const stringTags: Array<string> = tags.map((tag: mixed) => {
+    if (typeof tag !== 'string') {
+      throw new PlaymeshCatalogError(
+        'invalid_extension',
+        '本地 Playmesh 扩展标签无效。'
+      );
+    }
+    return tag;
+  });
   return Array.from(
     new Set(
-      tags
+      stringTags
         .map(tag => tag.trim().toLowerCase())
         .filter(Boolean)
     )
@@ -619,23 +628,24 @@ const decodeLocalExtensionIndex = (
     '本地扩展索引不是 JSON 对象。'
   );
   const keys = Object.keys(record).sort();
+  const extensions = record.extensions;
   if (
     record.schemaVersion !== 1 ||
     keys.length !== 2 ||
     keys[0] !== 'extensions' ||
     keys[1] !== 'schemaVersion' ||
-    !Array.isArray(record.extensions) ||
-    record.extensions.length < 1 ||
-    record.extensions.length > LOCAL_EXTENSION_MAXIMUM_COUNT
+    !Array.isArray(extensions) ||
+    extensions.length < 1 ||
+    extensions.length > LOCAL_EXTENSION_MAXIMUM_COUNT
   ) {
     throw new PlaymeshCatalogError(
       'invalid_catalog',
       '本地扩展索引结构无效。'
     );
   }
-  const seenPaths = new Set();
-  const declaredNames = new Set();
-  return record.extensions.map((value: mixed) => {
+  const seenPaths: Set<string> = new Set();
+  const declaredNames: Set<string> = new Set();
+  return extensions.map((value: mixed) => {
     const entry = requireRecord(value, '本地扩展索引项无效。');
     const entryKeys = Object.keys(entry).sort();
     if (
@@ -708,8 +718,18 @@ const decodeLocalPlaymeshExtension = (
   expectedName?: string
 ): PlaymeshCatalogJsonObject => {
   const decodedExtension = decodeJsonValue(value);
-  const record = asMixedRecord(decodedExtension);
-  const name = record ? record.name : null;
+  if (
+    !decodedExtension ||
+    typeof decodedExtension !== 'object' ||
+    Array.isArray(decodedExtension)
+  ) {
+    throw new PlaymeshCatalogError(
+      'invalid_extension',
+      '本地扩展正文名称无效或与索引不一致。'
+    );
+  }
+  const record: PlaymeshCatalogJsonObject = decodedExtension;
+  const name = record.name;
   if (
     typeof name !== 'string' ||
     !/^[A-Za-z][A-Za-z0-9_]*$/.test(name) ||
@@ -771,6 +791,17 @@ const createLocalPlaymeshExtensionHeader = (
       '本地 Playmesh 扩展作者列表无效。'
     );
   }
+  const normalizedAuthorIds: Array<string> = Array.isArray(authorIds)
+    ? authorIds.map((authorId: mixed) => {
+        if (typeof authorId !== 'string') {
+          throw new PlaymeshCatalogError(
+            'invalid_extension',
+            '本地 Playmesh 扩展作者列表无效。'
+          );
+        }
+        return authorId;
+      })
+    : [];
   const changelog = readLocalRecordArray(
     record.changelog,
     '本地 Playmesh 扩展变更记录'
@@ -820,7 +851,7 @@ const createLocalPlaymeshExtensionHeader = (
   const sourceUrl = `${LOCAL_EXTENSION_PUBLIC_BASE_PATH}${sourcePath}`;
   return {
     tier: 'reviewed',
-    authorIds: authorIds || [],
+    authorIds: normalizedAuthorIds,
     extensionNamespace: readOptionalLocalString(record, 'extensionNamespace'),
     fullName: readOptionalLocalString(
       record,
@@ -1379,7 +1410,7 @@ const loadLocalPlaymeshExtensionStores = ({
           };
         })
       );
-      const names = new Set();
+      const names: Set<string> = new Set();
       stores.forEach(store => {
         const foldedName = store.header.name.toLowerCase();
         if (names.has(foldedName)) {
@@ -1624,7 +1655,12 @@ const collectLocalRequiredBehaviorTypes = (
       );
     }
     const requiredType = extraInformation[0];
-    if (!requiredType || collected.includes(requiredType)) continue;
+    if (
+      typeof requiredType !== 'string' ||
+      !requiredType ||
+      collected.includes(requiredType)
+    )
+      continue;
     collected.push(requiredType);
     const ownPrefix = `${extensionName}::`;
     if (!requiredType.startsWith(ownPrefix)) continue;

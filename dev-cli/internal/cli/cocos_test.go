@@ -81,7 +81,7 @@ func TestInitCocosCreatesIsolatedProjectAndExtension(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(previous) })
 
 	input := strings.NewReader(
-		"com.example.cocos-arena\n" + strings.Repeat("\n", 8),
+		"com.example.cocos_arena\n" + strings.Repeat("\n", 8),
 	)
 	if err := commandInitFrom(context.Background(), []string{"cocos"}, input); err != nil {
 		t.Fatal(err)
@@ -450,7 +450,7 @@ func cocosTestPackage(t *testing.T) []byte {
 	writer := zip.NewWriter(&buffer)
 	for path, value := range map[string]string{
 		"main.json": `{
-		  "id":"com.example.cocos-arena",
+		  "id":"com.example.cocos_arena",
 		  "name":"Cocos Arena",
 		  "version":"1.0.0",
 		  "sdkVersion":"4.1.0",

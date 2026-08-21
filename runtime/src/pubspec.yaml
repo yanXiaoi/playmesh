@@ -1,0 +1,45 @@
+name: playmesh_runtime
+description: Playmesh standalone cross-platform game runtime template.
+publish_to: none
+
+version: 1.0.0+3
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  archive: 3.6.1
+  crypto: ^3.0.7
+  cryptography: ^2.9.0
+  file_selector: ^1.1.0
+  flutter_fullscreen: ^1.2.0
+  http: ^1.5.0
+  mobile_scanner: ^7.2.1
+  path_provider: ^2.1.6
+  playmesh_share_ui:
+    path: ../../packages/playmesh_share_ui
+  qr: 3.0.2
+  qr_flutter: 4.1.0
+  share_plus: ^13.2.1
+  speech_to_text: ^7.4.0
+  url_launcher: ^6.3.2
+  vibration: ^3.2.0
+  web_socket_channel: 3.0.3
+  webview_flutter: ^4.13.0
+  webview_flutter_android: ^4.13.0
+  webview_flutter_windows:
+    path: ../../third_party/webview_flutter_windows
+  window_manager: ^0.5.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/runtime/
+    - assets/playmesh-library/public/sdk/v1/

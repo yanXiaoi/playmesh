@@ -7,6 +7,7 @@ import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/app_webview_bridge.dart';
 import '../../core/game_sdk/webview_sdk_navigation_queue.dart';
+import '../../core/game_web/game_web_external_navigation.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/developer/developer_run_controller.dart';
@@ -21,6 +22,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
     this.bridge,
     this.appBridge,
     this.appSdkInputTakenOver = true,
+    this.gameExternalNavigationEnabled = false,
     this.onNavigationStarted,
     this.onReloadReady,
     this.onRunJavaScriptReady,
@@ -36,6 +38,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
   final bool appSdkInputTakenOver;
+  final bool gameExternalNavigationEnabled;
   final VoidCallback? onNavigationStarted;
   final ValueChanged<Future<void> Function()?>? onReloadReady;
   final ValueChanged<Future<void> Function(String)>? onRunJavaScriptReady;
@@ -64,6 +67,8 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   StreamSubscription<LoadingState>? _loadingStateSubscription;
   StreamSubscription<bool>? _focusChangedSubscription;
   StreamSubscription<String>? _bridgeSubscription;
+  StreamSubscription<WebviewExternalNavigationRequest>?
+  _externalNavigationSubscription;
   late final WebViewSdkNavigationQueue _sdkMessages;
 
   @override
@@ -93,6 +98,15 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       }
 
       await _controller.initialize();
+      if (widget.gameExternalNavigationEnabled) {
+        _externalNavigationSubscription = _controller
+            .onExternalNavigationRequested
+            .listen((request) {
+              final uri = parseGameWebViewExternalUri(request.url);
+              if (uri != null) unawaited(_openGameExternalNavigation(uri));
+            });
+        await _controller.setExternalNavigationEnabled(true);
+      }
       _focusChangedSubscription = _controller.onFocusChanged.listen((focused) {
         if (!focused || !widget.appSdkInputTakenOver) return;
         _initialFocusGranted = true;
@@ -216,6 +230,12 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       );
     } on Object catch (error) {
       debugPrint('向 Windows 游戏 WebView 发送 SDK 消息失败: $error');
+    }
+  }
+
+  Future<void> _openGameExternalNavigation(Uri uri) async {
+    if (!await openGameWebViewExternalUri(uri)) {
+      debugPrint('系统未能处理 Windows 游戏外部链接: $uri');
     }
   }
 
@@ -355,6 +375,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
     unawaited(_loadingStateSubscription?.cancel());
     unawaited(_focusChangedSubscription?.cancel());
     unawaited(_bridgeSubscription?.cancel());
+    unawaited(_externalNavigationSubscription?.cancel());
     unawaited(_controller.dispose());
     super.dispose();
   }

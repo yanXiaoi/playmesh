@@ -1,0 +1,46 @@
+{
+  "version": "v1.0.0-build2",
+  "platform": {
+    "android": {
+      "x86": {
+        "sha256": "48fc4f274ba5610f8bc9479dc8a0f504ad71ab46587cf9f042869df929614343",
+        "downloads": [
+          {
+            "name": "Github",
+            "url": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/runtime/playmesh-runtime-x86.apk"
+          },
+          {
+            "name": "临时源",
+            "url": "http://8.137.106.103:1000/playmesh/resources/runtime/playmesh-runtime-x86.apk"
+          }
+        ]
+      },
+      "arm": {
+        "sha256": "9d5e9c62bb978a4e0a3eae7c41048ed6dae87b2aec55648e0ac134bcb7257fec",
+        "downloads": [
+          {
+            "name": "Github",
+            "url": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/runtime/playmesh-runtime-arm.apk"
+          },
+          {
+            "name": "临时源",
+            "url": "http://8.137.106.103:1000/playmesh/resources/runtime/playmesh-runtime-arm.apk"
+          }
+        ]
+      }
+    },
+    "windows": {
+      "sha256": "25aeed2d1b08cf9df5887a7a701c0a08b1b25c0c1f0f35b17f4e884fe07b3735",
+      "downloads": [
+        {
+          "name": "Github",
+          "url": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/runtime/playmesh-runtime-win.zip"
+        },
+        {
+          "name": "临时源",
+          "url": "http://8.137.106.103:1000/playmesh/resources/runtime/playmesh-runtime-win.zip"
+        }
+      ]
+    }
+  }
+}

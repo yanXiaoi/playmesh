@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "package": {
+    "asset": "assets/runtime/game.pmp",
+    "codec": "aes-gcm-v1",
+    "keyId": "win-rsa-oaep-sha256-v1:10SbA_plmguDhuFby9uK26FJKk1MlcRKTbpH8QQipFo:fDI9Dw287xdkiQNfTlBAMcbaPQ_yO4wwETX5bPMVavLPPodLLl2F_6oDVUFL0jFpjq5SMrTABMWaROd483VX2jeCOmwjnoh_7NRKqVRfWtTqusPmowfIujfbl-O7wo3ETaJzonjCw0F2HupxvCWQjFfRYH7ZI4MkXJV9gAVcoz8w3wsOpGePndHUToQvxPdsK-imhZDkDDxOs47dlSpVEztEUo6g6p0KtNGZxuVNKwX4q5kuZ_RfZXbT5WnX5v65vyRY32TjPUMfyseutRumKZOqRDqPZxMtd7uz7XjG1mcdaOimIL9Pbi9RcVk7cCa1Zq6ecViEgzXCWO5uy6kPvkJT9qrViOeyv4rpFBjlX6WUIUx8lj22uuyokeoJ2FUtvUUlNI7ydKX-ZAAcGzx5s0QUpDIBNV6efcISWHEKimOFZDGKSR4lp04kWctp1KAUzj3ZRkOS1NP7WG3UgV_AHdbJfxlrBLZXqvQ8V7s_EpslbzQycEP44xMtE_pE73RE"
+  }
+}

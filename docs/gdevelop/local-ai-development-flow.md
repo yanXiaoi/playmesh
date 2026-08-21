@@ -258,6 +258,10 @@ GDevelop 版本的 EditorFunctions 与少量本地 wrapper 组成；工具名、
   读取前提前撤销。
 - wrapper 不得返回新的 `createdProject` 替换活动工程。
 
+能力搜索读取编辑器已经合并的官方目录和 Playmesh 本地扩展目录，保持大小写不敏感的连续
+子串匹配、精确类别过滤和原有分页语义。本地扩展的详情与安装继续通过同源固定目录读取，
+官方扩展的详情与制品下载仍走 App 目录接口；搜索结果不得据此猜测或拼接未验证的稳定 ID。
+
 `add_scene_events` 的 `GDevelopEventPayload 1.0.0` 只接受官方 `AiGeneratedEventChange` DTO，
 不接受裸 `EventsList` 或自造 placement。浏览器在调用前验证外层字段、sceneName、体积、深度、
 生成事件 JSON、对象/行为/资源引用以及敏感内容，然后把 `payload.changes` 交给官方事件应用

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "playmesh-external-editor-i18n",
+  "version": "1.0.0",
+  "targetDirectory": "newIDE/app/public/external/playmesh-i18n",
+  "overlay": {
+    "treeSha256": "183aa366212118c6daba55cc65669d2cb9001d7a20cf8cdd3eee7ef1a6cf6d46",
+    "fileCount": 1
+  }
+}

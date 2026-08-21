@@ -29,8 +29,7 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
        assert(connectTimeout > Duration.zero),
        assert(idleTimeout > Duration.zero),
        assert(reserveBytes >= 0),
-       _client = client ?? HttpClient(),
-       _allowHttpForTesting = false {
+       _client = client ?? HttpClient() {
     _client.autoUncompress = false;
   }
 
@@ -42,8 +41,7 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
     this.idleTimeout = const Duration(seconds: 30),
     this.reserveBytes = 0,
     this.availableBytes,
-  }) : _client = client ?? HttpClient(),
-       _allowHttpForTesting = true {
+  }) : _client = client ?? HttpClient() {
     _client.autoUncompress = false;
   }
 
@@ -53,7 +51,6 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
   final int reserveBytes;
   final Future<int?> Function(String rootPath)? availableBytes;
   final HttpClient _client;
-  final bool _allowHttpForTesting;
   var _closed = false;
 
   @override
@@ -225,7 +222,6 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
         }
       }
       final response = await request.close().timeout(connectTimeout);
-      _validateRedirects(spec.endpoint.url, response.redirects);
       if (existingBytes > 0 && response.statusCode == 416) {
         await _cancelResponse(response);
         return const _TransferOutcome(retryFresh: true, usedResume: false);
@@ -343,12 +339,6 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
   }
 
   void _validateSpec(VerifiedDownloadSpec spec) {
-    if (!_isAllowedUri(spec.endpoint.url)) {
-      throw const VerifiedDownloadException(
-        kind: VerifiedDownloadFailureKind.invalidUrl,
-        diagnostic: 'download_url_must_be_https',
-      );
-    }
     if (spec.size <= 0 || spec.size > maxDownloadBytes) {
       throw const VerifiedDownloadException(
         kind: VerifiedDownloadFailureKind.quota,
@@ -360,20 +350,6 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
         kind: VerifiedDownloadFailureKind.invalidResponse,
         diagnostic: 'download_invalid_sha256',
       );
-    }
-  }
-
-  void _validateRedirects(Uri initial, List<RedirectInfo> redirects) {
-    var base = initial;
-    for (final redirect in redirects) {
-      final destination = base.resolveUri(redirect.location);
-      if (!_isAllowedUri(destination)) {
-        throw const VerifiedDownloadException(
-          kind: VerifiedDownloadFailureKind.invalidUrl,
-          diagnostic: 'download_redirect_must_be_https',
-        );
-      }
-      base = destination;
     }
   }
 
@@ -396,10 +372,6 @@ class IoVerifiedResumableDownloader implements VerifiedResumableDownloader {
       );
     }
   }
-
-  bool _isAllowedUri(Uri uri) =>
-      uri.host.isNotEmpty &&
-      (uri.scheme == 'https' || (_allowHttpForTesting && uri.scheme == 'http'));
 
   Future<bool> _matches(File file, VerifiedDownloadSpec spec) async =>
       await file.length() == spec.size && await _sha256(file) == spec.sha256;

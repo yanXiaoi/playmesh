@@ -22,6 +22,10 @@ const objectSummarySource = wrapperSource.slice(
 );
 assert.doesNotMatch(objectSummarySource, /\.(?:slice|splice)\(/);
 wrapperSource = wrapperSource
+  .replace(
+    /import \{\s*getPlaymeshBehaviorsRegistry,\s*getPlaymeshExtension,\s*getPlaymeshExtensionsRegistry,\s*\} from '\.\.\/PlaymeshCatalog\/PlaymeshCatalogSource';\r?\n/,
+    ''
+  )
   .replace(/^import .*;\r?\n/gm, '')
   .replace(
     '// @flow',

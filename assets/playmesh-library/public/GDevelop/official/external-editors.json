@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "gdevelopVersion": "5.6.276",
+  "editors": [
+    {
+      "name": "piskel",
+      "version": "5.5.228",
+      "officialArchiveSha256": "b161dc74582e428a6d210cd1b74f052ca4aab301d0d522e0be87bdb4962d0fb7",
+      "treeSha256": "2cf692601332ba62b4592de3f7c5d31d7a9fa07770cb96f4fb838cb7ee7f3f86",
+      "fileCount": 125
+    },
+    {
+      "name": "jfxr",
+      "version": "5.0.0-beta55",
+      "officialArchiveSha256": "8ac12b557c2ddba958c6f0d3e0c5df8cf3369a65262dcb90cf5c8a7a7d20bdf6",
+      "treeSha256": "355f193b1bb53c2667b0a9bfaf03456465879c8a7e4520fcff8bbeabaf4d9900",
+      "fileCount": 6
+    },
+    {
+      "name": "yarn",
+      "version": "5.0.134",
+      "officialArchiveSha256": "ba8558cad00ec9b18cf3c6fd8647f8c1478ca67c894bca94a152a3740af209cc",
+      "treeSha256": "d518a78769dbedebe2f7be7637536f6d6e1730e7ea80097816d2b89124f331d1",
+      "fileCount": 29
+    }
+  ]
+}

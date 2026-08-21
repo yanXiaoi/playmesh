@@ -8,6 +8,7 @@
   const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
   const ID_SUFFIX_LENGTH = 10;
   const GAME_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+  const NEW_PROJECT_GAME_ID_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_]*\.)+[A-Za-z][A-Za-z0-9_]*$/;
   const ANDROID_PACKAGE_PATTERN = /^(?:[a-z][a-z\d_]*\.)+[a-z][a-z\d_]*$/;
   const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
   const HTML_ENTRY_PATTERN = /^(?:[^/?#]+\/)*[^/?#]+\.html(?:\?(?:%[0-9A-Fa-f]{2}|[^%\s#])+)?$/i;
@@ -58,6 +59,14 @@
       typeof value === 'string' &&
       value.length < 255 &&
       ANDROID_PACKAGE_PATTERN.test(value)
+    );
+  }
+
+  function isValidNewProjectGameId(value) {
+    return (
+      typeof value === 'string' &&
+      value.length <= 64 &&
+      NEW_PROJECT_GAME_ID_PATTERN.test(value)
     );
   }
 
@@ -243,6 +252,7 @@
     ICON_FILENAME: 'icon.png',
     generateGameId,
     isAndroidPackageName,
+    isValidNewProjectGameId,
     buildGameManifest,
     validateGameManifest,
     assertGameManifest,

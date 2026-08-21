@@ -79,6 +79,7 @@ class DeveloperProjectDraft {
     this.tags = const [],
     this.requiredCapabilities = const [],
     this.controllerRequiredCapabilities = const [],
+    this.requireAndroidApplicationId = false,
   });
 
   final String id;
@@ -95,6 +96,11 @@ class DeveloperProjectDraft {
   final List<String> tags;
   final List<String> requiredCapabilities;
   final List<String> controllerRequiredCapabilities;
+
+  /// Set only by the source workspace's create-project endpoint. Keeping the
+  /// default legacy policy prevents copy/import/visual-development paths from
+  /// silently changing their existing identity contract.
+  final bool requireAndroidApplicationId;
 }
 
 class DeveloperFileDiff {
@@ -338,6 +344,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       name: draft.name,
       author: draft.author,
       lastModifiedAt: draft.lastModifiedAt,
+      requireAndroidApplicationId: draft.requireAndroidApplicationId,
     );
     final description = draft.description.trim();
     if (description.length > 500) {
@@ -389,6 +396,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       gameId: id,
       name: name,
       kind: PlaymeshProjectKind.source,
+      requireAndroidApplicationId: draft.requireAndroidApplicationId,
       initialize: (staging) async {
         await _copyProjectTemplate(staging);
         final manifestFile = _resolveFile(staging, 'main.json');
@@ -1421,11 +1429,14 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     required String name,
     required String author,
     required DateTime lastModifiedAt,
+    bool requireAndroidApplicationId = false,
   }) {
-    final identity = ProjectProvisioningService.validateIdentity(
-      gameId: id,
-      name: name,
-    );
+    final identity = requireAndroidApplicationId
+        ? ProjectProvisioningService.validateNewSourceIdentity(
+            gameId: id,
+            name: name,
+          )
+        : ProjectProvisioningService.validateIdentity(gameId: id, name: name);
     final normalizedId = identity.gameId;
     final normalizedName = identity.name;
     final normalizedAuthor = author.trim();

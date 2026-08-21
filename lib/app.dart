@@ -20,11 +20,14 @@ import 'core/network/lan_game_discovery_service.dart';
 import 'core/developer/developer_background_host.dart';
 import 'core/developer/developer_channel.dart';
 import 'core/developer/developer_game_catalog_publisher.dart';
+import 'core/developer/developer_installation_package_service_io.dart';
 import 'core/developer/developer_project_catalog.dart';
 import 'core/developer/developer_run_controller.dart';
 import 'core/developer/developer_web_gateway_contract.dart';
 import 'core/platform/app_platform.dart';
 import 'core/profile/user_profile_store.dart';
+import 'core/runtime_distribution/runtime_package_manager.dart';
+import 'core/runtime_export/runtime_native_exporter.dart';
 import 'core/platform/incoming_file_service.dart';
 import 'core/services/go_core_runtime.dart';
 import 'core/services/go_core_status_service.dart';
@@ -214,6 +217,16 @@ class _PlaymeshAppState extends State<PlaymeshApp>
       _statusProvider = injectedProvider;
       _ownsRuntime = false;
     } else {
+      final installationPackageService =
+          FileDeveloperInstallationPackageService(
+            runtimePackages: createRuntimePackageManager(),
+            nativeExporter: createRuntimeNativeExporter(),
+            relayServerCatalog:
+                GameCatalogDeveloperInstallationPackageRelayServerCatalog(
+                  _catalogController,
+                ),
+            packageTransfer: _packageTransfer,
+          );
       _runtime = GoCoreRuntime.bundled(
         developerProjectCatalog: _developerCatalog,
         developerRunController: _developerRuns,
@@ -221,6 +234,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
         developerProjectPublisher: GameCatalogDeveloperProjectPublisher(
           _catalogController,
         ),
+        developerInstallationPackageService: installationPackageService,
         developerWorkspaceLocalizationBridge:
             _developerWorkspaceLocalizationBridge,
         developerBackgroundNotificationLocalizationProvider:

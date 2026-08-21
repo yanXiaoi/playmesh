@@ -143,7 +143,7 @@
 <div id="projectModal" class="modal" role="dialog" aria-modal="true" data-i18n-aria-label="workspace.create_project_title"><div class="dialog project-dialog">
   <div class="dialog-head"><strong data-i18n="workspace.create_project_title"></strong><button data-close="projectModal" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
   <form id="projectForm" class="project-form">
-    <label><span data-i18n="workspace.project_id"></span><div class="input-action"><input id="projectId" name="projectId" data-initial-focus required pattern="[a-z0-9]+([.-][a-z0-9]+)+" data-i18n-placeholder="workspace.project_id_placeholder" autocomplete="off" spellcheck="false"><button id="randomProjectId" type="button" data-i18n-title="workspace.random_project_id" data-i18n-aria-label="workspace.random_project_id"><svg class="lucide" aria-hidden="true"><use href="#rotate-ccw"></use></svg></button></div></label>
+    <label><span data-i18n="workspace.project_id"></span><div class="input-action"><input id="projectId" name="projectId" data-initial-focus required maxlength="64" pattern="[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+" aria-describedby="projectIdHelp" data-i18n-placeholder="workspace.project_id_placeholder" autocomplete="off" spellcheck="false"><button id="randomProjectId" type="button" data-i18n-title="workspace.random_project_id" data-i18n-aria-label="workspace.random_project_id"><svg class="lucide" aria-hidden="true"><use href="#rotate-ccw"></use></svg></button></div><small id="projectIdHelp" data-i18n="workspace.project_id_android_help"></small></label>
     <label><span data-i18n="workspace.name"></span><input id="projectName" name="projectName" required maxlength="80" data-i18n-placeholder="workspace.project_name_placeholder" autocomplete="off"></label>
     <label class="project-description wide"><span data-i18n="workspace.description"></span><textarea id="projectDescription" name="projectDescription" maxlength="500" rows="3" data-i18n-placeholder="workspace.project_description_placeholder" autocomplete="off"></textarea></label>
     <label><span data-i18n="workspace.game_mode"></span><select id="projectMode" name="projectMode"><option value="multiplayer" data-i18n="workspace.multiplayer_game"></option><option value="solo" data-i18n="workspace.solo_game"></option></select></label>
@@ -214,7 +214,51 @@
   <div class="export-body"><div class="export-options">
     <button id="exportSource" class="export-option" type="button" data-initial-focus><svg class="lucide" aria-hidden="true"><use href="#file-archive"></use></svg><strong data-i18n="workspace.export_source"></strong></button>
     <button id="uploadToPublishSource" class="export-option" type="button"><svg class="lucide" aria-hidden="true"><use href="#upload"></use></svg><strong data-i18n="workspace.upload_to_publish_source"></strong></button>
+    <button id="exportInstallationPackage" class="export-option" type="button"><svg class="lucide" aria-hidden="true"><use href="#smartphone"></use></svg><strong data-i18n="workspace.export_installation_package"></strong></button>
   </div></div>
+</div></div>
+
+<div id="packageExportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="packageExportTitle"><div class="dialog package-export-dialog">
+  <div class="dialog-head"><strong id="packageExportTitle" data-i18n="workspace.package_export_title"></strong><button id="closePackageExport" type="button" data-i18n-title="workspace.close" data-i18n-aria-label="workspace.close"><svg class="lucide" aria-hidden="true"><use href="#x"></use></svg></button></div>
+  <form id="packageExportForm" class="package-export-body">
+    <fieldset class="package-export-target-fieldset"><legend data-i18n="workspace.package_export_target"></legend><div id="packageExportTargets" class="package-export-targets">
+      <label class="package-export-target" data-package-export-target="android-arm64">
+        <input type="radio" name="packageExportTarget" value="android-arm64" data-initial-focus>
+        <span class="package-export-target-content"><span class="package-export-target-head"><svg class="lucide" aria-hidden="true"><use href="#smartphone"></use></svg><strong data-i18n="workspace.package_export_target_android_arm64"></strong><span class="package-export-status-dot" aria-hidden="true"></span></span><dl><div><dt data-i18n="workspace.package_export_installed"></dt><dd data-package-export-field="installed"></dd></div><div><dt data-i18n="workspace.package_export_download_available"></dt><dd data-package-export-field="downloadAvailable"></dd></div><div><dt data-i18n="workspace.package_export_runtime_version"></dt><dd data-package-export-field="runtimeVersion" translate="no"></dd></div><div><dt data-i18n="workspace.package_export_status"></dt><dd data-package-export-field="status"></dd></div></dl></span>
+      </label>
+      <label class="package-export-target" data-package-export-target="android-x86_64">
+        <input type="radio" name="packageExportTarget" value="android-x86_64">
+        <span class="package-export-target-content"><span class="package-export-target-head"><svg class="lucide" aria-hidden="true"><use href="#smartphone"></use></svg><strong data-i18n="workspace.package_export_target_android_x86_64"></strong><span class="package-export-status-dot" aria-hidden="true"></span></span><dl><div><dt data-i18n="workspace.package_export_installed"></dt><dd data-package-export-field="installed"></dd></div><div><dt data-i18n="workspace.package_export_download_available"></dt><dd data-package-export-field="downloadAvailable"></dd></div><div><dt data-i18n="workspace.package_export_runtime_version"></dt><dd data-package-export-field="runtimeVersion" translate="no"></dd></div><div><dt data-i18n="workspace.package_export_status"></dt><dd data-package-export-field="status"></dd></div></dl></span>
+      </label>
+      <label class="package-export-target" data-package-export-target="windows-x64">
+        <input type="radio" name="packageExportTarget" value="windows-x64">
+        <span class="package-export-target-content"><span class="package-export-target-head"><svg class="lucide" aria-hidden="true"><use href="#file-archive"></use></svg><strong data-i18n="workspace.package_export_target_windows_x64"></strong><span class="package-export-status-dot" aria-hidden="true"></span></span><dl><div><dt data-i18n="workspace.package_export_installed"></dt><dd data-package-export-field="installed"></dd></div><div><dt data-i18n="workspace.package_export_download_available"></dt><dd data-package-export-field="downloadAvailable"></dd></div><div><dt data-i18n="workspace.package_export_runtime_version"></dt><dd data-package-export-field="runtimeVersion" translate="no"></dd></div><div><dt data-i18n="workspace.package_export_status"></dt><dd data-package-export-field="status"></dd></div></dl></span>
+      </label>
+    </div><div class="package-export-runtime-actions"><label class="package-export-refresh"><input id="packageExportRefreshRuntime" name="packageExportRefreshRuntime" type="checkbox"><span><strong data-i18n="workspace.package_export_refresh_runtime"></strong><small data-i18n="workspace.package_export_refresh_runtime_help"></small></span></label></div></fieldset>
+    <section class="package-export-settings" aria-labelledby="packageExportSettingsTitle"><h3 id="packageExportSettingsTitle" data-i18n="workspace.package_export_settings"></h3>
+      <div class="package-export-relay-field">
+        <span id="packageExportRelayLabel" class="package-export-setting-label" data-i18n="workspace.package_export_relay_server"></span>
+        <div id="packageExportRelayPicker" class="package-export-relay-picker">
+          <button id="packageExportRelayTrigger" class="package-export-relay-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="packageExportRelayMenu" aria-labelledby="packageExportRelayLabel packageExportRelayValue">
+            <span class="package-export-relay-mark" aria-hidden="true"></span><span class="package-export-relay-summary"><strong id="packageExportRelayValue" data-i18n="workspace.package_export_relay_none"></strong><small id="packageExportRelayAddress" data-i18n="workspace.package_export_relay_none_help"></small></span><svg class="lucide" aria-hidden="true"><use href="#chevron-down"></use></svg>
+          </button>
+          <div id="packageExportRelayMenu" class="package-export-relay-menu" hidden>
+            <label class="package-export-relay-search"><svg class="lucide" aria-hidden="true"><use href="#search"></use></svg><input id="packageExportRelaySearch" type="search" role="searchbox" autocomplete="off" spellcheck="false" aria-controls="packageExportRelayList" data-i18n-placeholder="workspace.package_export_relay_search" data-i18n-aria-label="workspace.package_export_relay_search"></label>
+            <div id="packageExportRelayList" class="package-export-relay-list" role="listbox" aria-labelledby="packageExportRelayLabel"></div>
+            <div id="packageExportRelayEmpty" class="package-export-relay-empty" role="status" hidden></div>
+          </div>
+        </div>
+        <small data-i18n="workspace.package_export_relay_server_help"></small>
+      </div>
+      <label id="packageExportCustomRelayField" class="package-export-custom-relay" for="packageExportRelayServer" hidden><span data-i18n="workspace.package_export_relay_custom"></span><input id="packageExportRelayServer" name="packageExportRelayServer" type="url" inputmode="url" maxlength="2048" autocomplete="off" spellcheck="false" data-i18n-placeholder="workspace.package_export_relay_server_placeholder"><small data-i18n="workspace.package_export_relay_custom_help"></small></label>
+    </section>
+    <div id="packageExportStatus" class="package-export-result" role="status" aria-live="polite" data-i18n="workspace.package_export_select_target"></div>
+    <div id="packageExportProgress" class="package-export-progress" role="status" aria-live="polite" hidden>
+      <div class="package-export-progress-copy"><strong id="packageExportProgressStage" data-i18n="workspace.package_export_progress_preparing"></strong><span id="packageExportProgressValue"></span></div>
+      <progress id="packageExportProgressBar" max="100" value="0" data-i18n-aria-label="workspace.package_export_progress_label"></progress>
+    </div>
+    <div class="package-export-actions"><button id="cancelPackageExport" type="button" data-i18n="workspace.cancel"></button><button id="packageExportSubmit" type="submit" class="primary" disabled data-i18n="workspace.package_export_action"></button></div>
+  </form>
 </div></div>
 
 <div id="publishModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="publishTitle"><div class="dialog publish-dialog">

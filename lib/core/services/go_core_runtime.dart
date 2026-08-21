@@ -2,6 +2,7 @@ import '../developer/developer_channel.dart';
 import '../developer/developer_capability_test_service.dart';
 import '../developer/developer_ai_prompt_templates.dart';
 import '../developer/developer_background_host.dart';
+import '../developer/developer_installation_package_service.dart';
 import '../developer/developer_project_catalog.dart';
 import '../developer/developer_preferences.dart';
 import '../developer/developer_run_controller.dart';
@@ -38,6 +39,7 @@ class GoCoreRuntime
     this.developerCapabilityTests,
     this.developerAuthorProvider,
     this.developerProjectPublisher,
+    this.developerInstallationPackageService,
     this.developerWorkspaceLocalizationBridge,
     this._developerBackgroundNotificationLocalizationProvider,
     DeveloperBackgroundHost? developerBackgroundHost,
@@ -64,6 +66,7 @@ class GoCoreRuntime
     DeveloperCapabilityTestService? developerCapabilityTests,
     String Function()? developerAuthorProvider,
     DeveloperProjectPublisher? developerProjectPublisher,
+    DeveloperInstallationPackageService? developerInstallationPackageService,
     DeveloperWorkspaceLocalizationBridge? developerWorkspaceLocalizationBridge,
     DeveloperBackgroundNotificationLocalizationProvider?
     developerBackgroundNotificationLocalizationProvider,
@@ -84,6 +87,7 @@ class GoCoreRuntime
       developerCapabilityTests: developerCapabilityTests,
       developerAuthorProvider: developerAuthorProvider,
       developerProjectPublisher: developerProjectPublisher,
+      developerInstallationPackageService: developerInstallationPackageService,
       developerWorkspaceLocalizationBridge:
           developerWorkspaceLocalizationBridge,
       developerBackgroundNotificationLocalizationProvider:
@@ -103,6 +107,8 @@ class GoCoreRuntime
   final DeveloperCapabilityTestService? developerCapabilityTests;
   final String Function()? developerAuthorProvider;
   final DeveloperProjectPublisher? developerProjectPublisher;
+  final DeveloperInstallationPackageService?
+  developerInstallationPackageService;
   DeveloperWorkspaceLocalizationBridge? developerWorkspaceLocalizationBridge;
   final DeveloperPreferences _developerPreferences;
   DeveloperBackgroundNotificationLocalizationProvider?
@@ -183,6 +189,7 @@ class GoCoreRuntime
         capabilityTests: developerCapabilityTests,
         currentAuthor: developerAuthorProvider,
         projectPublisher: developerProjectPublisher,
+        installationPackageService: developerInstallationPackageService,
         localizationBridge: developerWorkspaceLocalizationBridge,
         viewAvailability: _developerBackgroundHost.viewAvailability,
         gdevelopWebIdeSource: gdevelopWebIdeSource,
@@ -481,6 +488,7 @@ class GoCoreRuntime
   Future<void> _close() async {
     await host.stop();
     await disableDeveloperMode();
+    await developerInstallationPackageService?.close();
     _gdevelopWebIdeManager.close();
     await _statusService?.close();
     _statusService = null;

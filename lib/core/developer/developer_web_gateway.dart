@@ -4,6 +4,7 @@ import 'developer_preview_service.dart';
 import 'foundation/developer_ai_approval.dart';
 import 'developer_background_host.dart';
 import 'developer_project_catalog.dart';
+import 'developer_installation_package_service.dart';
 import 'developer_run_controller.dart';
 import 'gdevelop_web_ide_source.dart';
 import 'gdevelop_project_config_controller.dart';
@@ -34,6 +35,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
   DeveloperProjectPublisher? projectPublisher,
+  DeveloperInstallationPackageService? installationPackageService,
   DeveloperWorkspaceLocalizationBridge? localizationBridge,
   String Function()? currentAuthor,
   DeveloperViewAvailabilityProvider? viewAvailability,
@@ -62,6 +64,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
     capabilityTests: capabilityTests,
     packageTransfer: packageTransfer,
     projectPublisher: projectPublisher,
+    installationPackageService: installationPackageService,
     localizationBridge: localizationBridge,
     currentAuthor: currentAuthor,
     viewAvailability: viewAvailability,

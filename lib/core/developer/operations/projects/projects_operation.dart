@@ -7,7 +7,11 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
     'type': 'object',
     'required': ['id', 'name'],
     'properties': {
-      'id': {'type': 'string'},
+      'id': {
+        'type': 'string',
+        'maxLength': 64,
+        'pattern': r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$',
+      },
       'name': {'type': 'string'},
       'description': {'type': 'string'},
       'orientation': {
@@ -122,6 +126,7 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
         controllerRequiredCapabilities: _stringValues(
           body['controllerRequiredCapabilities'],
         ),
+        requireAndroidApplicationId: true,
       ),
     );
     developerEventHub.emit({

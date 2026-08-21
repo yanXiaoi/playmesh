@@ -86,7 +86,7 @@ Playmesh 不提供独立的 App 文件编辑器。电脑浏览器与 App 内置 
 
 本地历史位于 `packages/{gameId}/cache/developer/local-history/`，采用初始基线加逐时间操作的变更后快照。连续编辑按 5 分钟滚动窗口合并，工作区可按文件、文件夹或整个项目查看 Diff，并将指定范围恢复为某次操作的变更前或变更后状态。恢复整个项目时 `main.json` 始终由平台保留。
 
-新建项目可选择单机或联机，项目 ID 输入框旁可一键生成符合反向域名格式的随机 ID。单机骨架使用 `modes: ["solo"]`、`displayModes: ["multi_screen"]` 和玩家 `1/1`，不生成控制器与 Authority 入口；联机骨架根据显示模式生成普通多屏或单屏多人结构。AI 修改后先调用 `/dev/api/projects/{projectId}/validate`，只有不存在 `error` 诊断时才能运行。已运行项目可通过工作区“重启”按钮或 `POST /dev/api/projects/{projectId}/run/restart` 重载游戏运行时，并保留当前分享信息。
+新建项目可选择单机或联机。源码工作区的“新建项目”和 Developer CLI 的 `init` 要求项目 ID 直接满足 Android applicationId 规则：至少两个点分段，每段以 ASCII 字母开头，其余只能使用 ASCII 字母、数字或下划线，最长 64 个字符；输入框旁可一键生成符合该规则的随机 ID。该限制只作用于这两个新建入口，复制、导入、GDevelop 和旧项目仍沿用既有 gameId 兼容规则。单机骨架使用 `modes: ["solo"]`、`displayModes: ["multi_screen"]` 和玩家 `1/1`，不生成控制器与 Authority 入口；联机骨架根据显示模式生成普通多屏或单屏多人结构。AI 修改后先调用 `/dev/api/projects/{projectId}/validate`，只有不存在 `error` 诊断时才能运行。已运行项目可通过工作区“重启”按钮或 `POST /dev/api/projects/{projectId}/run/restart` 重载游戏运行时，并保留当前分享信息。
 
 需要重置调试存档时，先退出正在运行的游戏，再使用工作区“清理游戏数据”按钮。该操作只删除当前项目的 `data/`，不会清理 `cache/`、项目源码或开发历史。
 
@@ -174,7 +174,7 @@ console.log(ready.main.sdkVersion, playmesh.app.runtime.getLocale());
 `playmesh-app.js`。Game SDK `4.1.0` 在 `playmesh.main.*` 提供所有平台一致的游戏
 声明、会话、玩家、角色、联机、生命周期和存储 API，共享结果来自 Authority；App SDK
 `3.3.0` 在 `playmesh.app.*` 只提供当前终端的平台环境、身份、设备能力、权限、
-输入、性能、本机 Console 日志、locale 和覆盖层。面向游戏代码的唯一全局对象是
+输入、性能、本机 Console 日志、locale、外部 HTTP(S) 链接打开和覆盖层。面向游戏代码的唯一全局对象是
 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在。`playmesh.main.ready` 内部先
 等待 `playmesh.app.ready`，再完成 Game 域初始化；根 `playmesh.ready` 是唯一例外，
@@ -182,6 +182,11 @@ console.log(ready.main.sdkVersion, playmesh.app.runtime.getLocale());
 均不兼容、不保留。普通浏览器的 `playmesh.app.isAvailable()` 为 `false`，但统一
 网页覆盖层仍可使用。性能浮层唯一由 App SDK 创建，Game SDK 不创建浏览器性能
 panel。App SDK 不复制游戏状态，游戏也不得手动设置玩家 ID。
+
+需要从用户点击等真实操作打开外部网页时，使用
+`playmesh.app.resource.openExternal(url)`。App WebView 会交给系统默认浏览器，普通
+浏览器会新开窗口；只接受 `http:`/`https:`。SDK 不提供任意本地文件打开接口：网页
+`File`/`Blob` 没有可交给外部浏览器的本机路径，游戏也不能借此访问宿主文件系统。
 
 大屏公共显示端的 `player` 为 `null`。页面必须允许该值为空，不能把 Authority 自动加入玩家集合。
 

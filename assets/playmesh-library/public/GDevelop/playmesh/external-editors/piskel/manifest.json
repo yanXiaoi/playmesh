@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "name": "piskel",
+  "derivedVersion": "5.5.228-playmesh.1",
+  "base": {
+    "gdevelopExternalEditorVersion": "5.5.228",
+    "officialArchiveSha256": "b161dc74582e428a6d210cd1b74f052ca4aab301d0d522e0be87bdb4962d0fb7",
+    "officialTreeSha256": "2cf692601332ba62b4592de3f7c5d31d7a9fa07770cb96f4fb838cb7ee7f3f86"
+  },
+  "locales": [
+    {
+      "id": "en",
+      "fallback": null,
+      "messageCount": 285,
+      "catalog": "playmesh-i18n/locales/en.js"
+    },
+    {
+      "id": "zh-CN",
+      "fallback": "en",
+      "messageCount": 285,
+      "catalog": "playmesh-i18n/locales/zh-CN.js"
+    }
+  ],
+  "coverage": {
+    "staticSurfaces": [
+      "drawing-toolbar",
+      "preview",
+      "layers",
+      "transformations",
+      "palettes",
+      "preferences",
+      "resize",
+      "save",
+      "import",
+      "export",
+      "backups",
+      "keyboard-shortcuts",
+      "performance-and-browser-dialogs"
+    ],
+    "runtimeSurfaces": [
+      "tool-tooltips-by-tool-id",
+      "shortcut-descriptions-by-shortcut-id",
+      "template-rendering-by-template-id",
+      "known-confirm-and-prompt-messages",
+      "known-notifications"
+    ],
+    "excluded": [
+      "removed-online-gallery",
+      "removed-public-gif-upload"
+    ],
+    "neverTranslate": [
+      "sprite-names",
+      "frame-names",
+      "layer-names",
+      "palette-names",
+      "file-names",
+      "resource-paths",
+      "user-descriptions",
+      "user-entered-text"
+    ]
+  },
+  "overlay": {
+    "treeSha256": "4645bc0aab78b48524d7b65ffb1cffb263841e29e231d475326d377fb902af99",
+    "fileCount": 3
+  }
+}

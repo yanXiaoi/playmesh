@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "extensions": [
+    {
+      "name": "Playmesh",
+      "path": "Playmesh.json"
+    }
+  ]
+}

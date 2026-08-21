@@ -241,17 +241,6 @@ function main() {
     ],
     ["_joinErrorKey!", joinErrorKeys],
     [
-      "_relayErrorCode!",
-      [
-        "game.relay_catalog_unavailable",
-        "game.relay_load_failed_safe",
-        "game.relay_not_declared",
-        "game.relay_transport_unsupported",
-        "game.relay_version_unsupported_safe",
-        "game.relay_connect_failed_safe",
-      ],
-    ],
-    [
       "enabled ? 'game.fullscreen_enter_failed' : 'game.fullscreen_exit_failed'",
       ["game.fullscreen_enter_failed", "game.fullscreen_exit_failed"],
     ],

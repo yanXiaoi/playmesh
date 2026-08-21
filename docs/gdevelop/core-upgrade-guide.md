@@ -367,9 +367,10 @@ Release、不调用 GitHub/Gitee API，也不执行 stage、commit、push。不�
 ```
 
 根对象只允许 `sha256`、`version`、`size`、`downloads`，线路项只允许 `name`、`url`；旧
-`sha` 字段、MD5、未知字段、重复线路、带凭据或非 HTTPS URL 均失败。`size` 是最终 ZIP
-文件的精确字节数，不是解压大小；`downloads` 的名称、顺序、URL 及用户配置结构必须逐项
-原样保留。构建与打包脚本不得猜测、增加、删除或改写下载线路。
+`sha` 字段、MD5、未知字段和重复线路均失败。URL 字段只校验为非空、首尾无空白的字符串，
+不限制协议、凭据或 Fragment；HTTP/HTTPS 下载自动跟随最多 5 次重定向且不复查跳转目标。
+`size` 是最终 ZIP 文件的精确字节数，不是解压大小；`downloads` 的名称、顺序、URL 及用户
+配置结构必须逐项原样保留。构建与打包脚本不得猜测、增加、删除或改写下载线路。
 
 包准备后记录：
 

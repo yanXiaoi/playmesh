@@ -62,7 +62,9 @@ class NamedDownloadEndpointList {
           !normalizedNames.add(name.toLowerCase())) {
         throw FormatException('$field[$index].name is unsafe or duplicated');
       }
-      final url = strictCanonicalHttpsUri(item['url'], '$field[$index].url');
+      final url = Uri.parse(
+        strictJsonString(item['url'], '$field[$index].url'),
+      );
       if (!normalizedUrls.add(url.toString())) {
         throw FormatException('$field[$index].url is duplicated');
       }
@@ -103,20 +105,4 @@ String strictJsonString(Object? source, String field) {
     throw FormatException('$field must be a non-empty trimmed string');
   }
   return source;
-}
-
-Uri strictCanonicalHttpsUri(Object? source, String field) {
-  final value = strictJsonString(source, field);
-  final uri = Uri.tryParse(value);
-  if (uri == null ||
-      uri.scheme != 'https' ||
-      uri.host.isEmpty ||
-      uri.userInfo.isNotEmpty ||
-      uri.hasFragment ||
-      uri.toString() != value) {
-    throw FormatException(
-      '$field must be a canonical HTTPS URL without credentials or fragment',
-    );
-  }
-  return uri;
 }

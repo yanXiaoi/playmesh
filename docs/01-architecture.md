@@ -861,12 +861,28 @@ SDK 只返回 locale 字符串，不向游戏暴露
 
 工作区不在浏览器持久化最近打开的项目。项目列表与活动运行项目由 App Gateway 返回；网页只在当前页面会话内保留临时选择，再次进入时使用 App 活动项目或列表首项。顶部只保留项目、运行、保存、导出和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
 
-“导出”先呈现两个同级选择。“导出源码”先保存当前文本缓冲区，再直接复用
+“导出”先呈现“导出源码”“上传到发布源”“安装包导出”三个同级选择。“导出源码”先保存当前文本缓冲区，再直接复用
 `GET /dev/api/projects/{projectId}/package` 生成 Playmesh 项目包；普通浏览器通过同源
 下载链接交付，App WebView 则通过 GDevelop 已使用的同一原生保存钩子和宿主服务发送经过
 白名单校验的同源包地址，由宿主携带当前 Developer Token 流式写入系统保存目标；项目包
 不在 WebView 内聚合 ZIP，也不 POST 到 GDevelop Blob 暂存接口。“上传到发布源”继续进入既有候选源选择、完整校验、单包导出、
-并行上传、SSE 状态和失败源重试链路。
+并行上传、SSE 状态和失败源重试链路。“安装包导出”选择 Android ARM64、Android
+x86_64 或 Windows x64 中的一个目标；导出设置区只含一个可选中转服务器，Runtime
+重新下载控制属于目标维护。主 App 不打包 Runtime 底包：服务从 `App.json` 的 `export`
+源加载 Runtime 清单，缺失时按目标下载并校验 SHA-256，已有文件默认复用，也可显式重新
+下载。三个固定底包只以 `playmesh-library/runtime/packages/` 对应文件是否存在判断安装，
+便于测试期手工复制。
+
+安装包后端使用正式 `package_exports.options/create/download/release` Operation。Android
+导出从预编译 APK 注入 Runtime 公钥封装的加密游戏包、图标、名称、格式化 gameId 包名、版本和可选中转配置，
+最后在进程内签名；Windows 导出同样从预编译 Runtime ZIP 注入 RSA-OAEP + AES-GCM 的
+PME1 游戏载荷，并在同一纯 Go 导出链中把主 EXE 重命名为游戏名称，替换图标，将
+FileDescription、ProductName 与版本资源同步为游戏清单值。Windows Runtime 不使用可变的
+ProductName 作为持久化身份，而是在 Roaming AppData 下按 gameId 的 SHA-256 建立独立数据
+目录；因此同名游戏不会共享数据，游戏改名也不会迁移或丢失昵称、存档。两个平台的公开导出层只调用私有 Go provider，Runtime 解密端分别编入平台
+私钥，不把私钥、AES key 或密码实现暴露给 Dart/C++/Java。创建阶段通过
+SSE 报告 Runtime 下载字节、校验、游戏包构建与原生导出进度。生成物与源码包共用同一个
+浏览器下载/App 原生保存函数，WebView 不读取完整 Blob。
 
 浏览器响应和 WebView 原生保存建议名都复用游戏包统一命名函数，保持
 `{游戏名称}-v{版本}.zip`。浏览器使用 UTF-8 `Content-Disposition`；WebView 宿主通过既有

@@ -54,7 +54,22 @@ const (
 	capabilityPlatformHTML    capabilityPlatform = "HTML"
 )
 
-var projectIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)+$`)
+const maxNewProjectIDLength = 64
+
+var projectIDPattern = regexp.MustCompile(
+	`^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$`,
+)
+
+func validateNewProjectID(value string) error {
+	if len(value) > maxNewProjectIDLength || !projectIDPattern.MatchString(value) {
+		return errors.New(
+			"必须是 Android applicationId 格式：至少两段，以点分隔；" +
+				"每段以英文字母开头，且只能包含英文字母、数字和下划线；" +
+				"最长 64 个字符",
+		)
+	}
+	return nil
+}
 
 func createProjectAtWithDefaults(
 	ctx context.Context,
@@ -170,10 +185,7 @@ func promptCreateProjectWithDefaults(
 		defaults.ID = generatedID
 	}
 	id, err := promptValidated(reader, "项目 ID", defaults.ID, func(value string) error {
-		if !projectIDPattern.MatchString(value) {
-			return errors.New("必须是小写反向域名格式，例如 com.example.my-game")
-		}
-		return nil
+		return validateNewProjectID(value)
 	})
 	if err != nil {
 		return createProjectRequest{}, err
@@ -382,7 +394,7 @@ func randomProjectID() (string, error) {
 	for index := range bytes {
 		bytes[index] = alphabet[int(bytes[index])%len(alphabet)]
 	}
-	return "com.playmesh.game-" + string(bytes), nil
+	return "com.playmesh.game.g" + string(bytes), nil
 }
 
 func ensureCreateDestination(root string) error {

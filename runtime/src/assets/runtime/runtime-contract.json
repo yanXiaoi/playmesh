@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "android": {
+    "packageKeyScheme": "android-rsa-oaep-sha256-v1",
+    "publicKeySha256": "g_DV1Ub-F7SOKEBYYi5j1AEwkY9wIUIWSzN_N28z-d8"
+  },
+  "windows": {
+    "packageKeyScheme": "win-rsa-oaep-sha256-v1",
+    "publicKeySha256": "10SbA_plmguDhuFby9uK26FJKk1MlcRKTbpH8QQipFo"
+  }
+}

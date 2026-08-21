@@ -6,6 +6,39 @@ import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
 void main() {
+  group('gameWindowsExecutableFileName', () {
+    test('替换 Win32 非法字符并移除尾随点和空格', () {
+      expect(
+        gameWindowsExecutableFileName('Bad<Name>: /\\|?*. '),
+        'Bad_Name__ _____.exe',
+      );
+      expect(gameWindowsExecutableFileName('...'), 'game.exe');
+    });
+
+    test('避开带扩展名仍然保留的 Windows 设备名', () {
+      expect(gameWindowsExecutableFileName('CON'), 'game-CON.exe');
+      expect(gameWindowsExecutableFileName('nul.txt'), 'game-nul.txt.exe');
+      expect(gameWindowsExecutableFileName('Com1'), 'game-Com1.exe');
+      expect(gameWindowsExecutableFileName('LPT³.log'), 'game-LPT³.log.exe');
+      expect(gameWindowsExecutableFileName('COM10'), 'COM10.exe');
+    });
+
+    test('避开固定 core 伴随程序但允许复用模板入口名', () {
+      expect(
+        gameWindowsExecutableFileName('playmesh-core'),
+        'game-playmesh-core.exe',
+      );
+      expect(
+        gameWindowsExecutableFileName('PLAYMESH-CORE'),
+        'game-PLAYMESH-CORE.exe',
+      );
+      expect(
+        gameWindowsExecutableFileName('playmesh-runtime'),
+        'playmesh-runtime.exe',
+      );
+    });
+  });
+
   test('分享文件使用安全名称、唯一路径并在下次创建前清理', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-share-');
     addTearDown(() => root.delete(recursive: true));

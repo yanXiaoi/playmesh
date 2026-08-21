@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../../models/game_id.dart';
 
 const String playmeshNativeFileSaveChannel = 'PlaymeshNativeFileSave';
+const int developerNativeFileSaveMaxSafeSize = 9007199254740991;
 
 /// 仅由 Playmesh 原生 WebView 宿主注入。普通浏览器不会安装这些钩子，
 /// 因此会继续使用网页自身的 `<a download>` 下载路径。
@@ -38,25 +39,41 @@ const String playmeshNativeFileSaveScript = r'''
     configurable: false,
     enumerable: false,
   });
-  const saveDownload = ({ url, filename } = {}) => {
+  const saveDownload = ({ url, filename, mimeType, size } = {}) => {
     const requestId = nextRequestId();
     const blobDownload = typeof url === "string" && url.startsWith("blob:");
     return Promise.resolve().then(async () => {
       if (!blobDownload) {
         const target = new URL(url, global.location.href);
+        const sourcePackage = /^\/dev\/api\/projects\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/package$/.test(target.pathname);
+        const installationPackage = /^\/dev\/api\/projects\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/package-exports\/[A-Za-z0-9_-]{20,64}$/.test(target.pathname);
         if (
           target.origin !== global.location.origin ||
           target.search ||
           target.hash ||
-          !/^\/dev\/api\/projects\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/package$/.test(target.pathname)
+          (!sourcePackage && !installationPackage)
         ) {
           throw new Error("Project package URL is not allowed");
+        }
+        if (installationPackage) {
+          if (
+            typeof filename !== "string" || !filename.trim() || filename.length > 512 ||
+            (mimeType !== "application/vnd.android.package-archive" && mimeType !== "application/zip") ||
+            !Number.isSafeInteger(size) || size <= 0
+          ) {
+            throw new Error("Installation package metadata is invalid");
+          }
         }
         report({
           kind: "download",
           requestId,
           protocolVersion: 1,
           downloadPath: target.pathname,
+          ...(installationPackage ? {
+            filename: filename.trim(),
+            mimeType,
+            size,
+          } : {}),
         });
         return;
       }
@@ -187,18 +204,19 @@ final class DeveloperNativeFileSaveMessage {
         if (payload['protocolVersion'] != 1) return null;
         final transferId = payload['transferId']?.toString() ?? '';
         final downloadPath = payload['downloadPath']?.toString() ?? '';
-        final filename = payload['filename']?.toString().trim() ?? '';
+        final rawFilename = payload['filename'];
+        final filename = rawFilename is String ? rawFilename.trim() : '';
         final mimeType = payload['mimeType']?.toString().trim() ?? '';
         final sizeValue = payload['size'];
         final size = sizeValue is int ? sizeValue : null;
         if (!RegExp(r'^[A-Za-z0-9_-]{20,64}$').hasMatch(transferId) ||
             downloadPath != '/dev/api/gdevelop/native-file-saves/$transferId' ||
-            filename.isEmpty ||
-            filename.length > 512 ||
+            !_isSafeDownloadFilename(filename) ||
             mimeType.isEmpty ||
             mimeType.length > 128 ||
             size == null ||
-            size <= 0) {
+            size <= 0 ||
+            size > developerNativeFileSaveMaxSafeSize) {
           return null;
         }
         return DeveloperNativeFileSaveMessage._(
@@ -216,12 +234,35 @@ final class DeveloperNativeFileSaveMessage {
         final packageUri = parseDeveloperProjectPackageDownloadPath(
           downloadPath,
         );
-        if (packageUri == null) return null;
+        final installationUri = parseDeveloperInstallationPackageDownloadPath(
+          downloadPath,
+        );
+        if (packageUri == null && installationUri == null) return null;
+        String? filename;
+        String? mimeType;
+        int? size;
+        if (installationUri != null) {
+          final rawFilename = payload['filename'];
+          filename = rawFilename is String ? rawFilename.trim() : '';
+          mimeType = payload['mimeType']?.toString().trim() ?? '';
+          final sizeValue = payload['size'];
+          size = sizeValue is int ? sizeValue : null;
+          if (!_isSafeDownloadFilename(filename) ||
+              (mimeType != 'application/vnd.android.package-archive' &&
+                  mimeType != 'application/zip') ||
+              size == null ||
+              size <= 0 ||
+              size > developerNativeFileSaveMaxSafeSize) {
+            return null;
+          }
+        }
         return DeveloperNativeFileSaveMessage._(
           kind: DeveloperNativeFileSaveMessageKind.download,
           requestId: requestId,
           downloadPath: downloadPath,
-          mimeType: 'application/zip',
+          filename: filename,
+          mimeType: mimeType ?? 'application/zip',
+          size: size,
         );
       default:
         return null;
@@ -247,7 +288,33 @@ Uri? parseDeveloperProjectPackageDownloadPath(String value) {
   return uri;
 }
 
+Uri? parseDeveloperInstallationPackageDownloadPath(String value) {
+  final uri = Uri.tryParse(value);
+  if (uri == null ||
+      uri.hasScheme ||
+      uri.hasAuthority ||
+      uri.hasQuery ||
+      uri.hasFragment ||
+      uri.pathSegments.length != 6 ||
+      uri.pathSegments[0] != 'dev' ||
+      uri.pathSegments[1] != 'api' ||
+      uri.pathSegments[2] != 'projects' ||
+      !isValidPlaymeshGameId(uri.pathSegments[3]) ||
+      uri.pathSegments[4] != 'package-exports' ||
+      !RegExp(r'^[A-Za-z0-9_-]{20,64}$').hasMatch(uri.pathSegments[5])) {
+    return null;
+  }
+  return uri;
+}
+
 String _boundedField(Object? value, {required String fallback}) {
   final text = value?.toString() ?? '';
   return RegExp(r'^[a-z0-9_.-]{1,80}$').hasMatch(text) ? text : fallback;
 }
+
+bool _isSafeDownloadFilename(String value) =>
+    value.isNotEmpty &&
+    value.length <= 512 &&
+    !value.contains(RegExp(r'[\\/\u0000-\u001f\u007f]')) &&
+    value != '.' &&
+    value != '..';

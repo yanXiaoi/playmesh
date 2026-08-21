@@ -28,8 +28,10 @@ playmesh-cli init
 ```
 
 不带平台参数的 `init` 会先用数字选择 JavaScript 或 TypeScript，再填写项目 ID、名称、
-模式、方向、玩家和能力选项，通过现有 Developer API 创建项目。所有默认选项都会
-显示，直接回车采用默认值。
+模式、方向、玩家和能力选项，通过现有 Developer API 创建项目。新项目 ID 必须直接
+满足 Android applicationId 规则：至少两个点分段，每段以 ASCII 字母开头，其余只能
+使用 ASCII 字母、数字或下划线，最长 64 个字符。所有默认选项都会显示，直接回车采用
+默认值；该规则不追溯修改 CLI `get` 获取的旧项目 ID。
 
 CLI 2.0 统一生成：
 

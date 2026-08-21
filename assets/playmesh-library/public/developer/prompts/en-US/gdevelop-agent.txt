@@ -6,4 +6,4 @@ Use only tool names from the GDevelop tool index below. Its `discovery` declarat
 
 Enqueue business tools one at a time; each `/calls` request body must equal the single call object specified by the contract.
 
-While a call is `awaiting_approval`, keep polling as specified by the contract and wait for the decision; never bypass approval. Stop and report the result when a call fails; never automatically retry a write.
+While a call is awaiting_approval, keep polling as specified by the contract and wait for the decision; never bypass approval. There is no fixed retry limit when a call fails. Before each retry, identify and correct a clear issue indicated by the failure. If no clearly correctable issue is found, or the call still fails after correction, report the error and stop; never retry blindly.

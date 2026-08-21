@@ -14,6 +14,7 @@ import '../../core/game_sdk/game_sdk_bridge.dart';
 import '../../core/game_sdk/sdk_feature_registry.dart';
 import '../../core/game_sdk/webview_message_queue.dart';
 import '../../core/game_web/android_webview_file_selector.dart';
+import '../../core/game_web/game_web_external_navigation.dart';
 import '../../core/game_web/game_web_gateway_contract.dart';
 import '../../core/game_web/game_join_coordinator.dart';
 import '../../core/game_web/game_share_link_snapshot.dart';
@@ -253,12 +254,36 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
                 );
               },
             )
+            ..addJavaScriptChannel(
+              playmeshGameExternalNavigationChannel,
+              onMessageReceived: (message) {
+                final uri = parseGameWebViewExternalNavigationMessage(
+                  message.message,
+                );
+                if (uri != null) unawaited(_openExternalNavigation(uri));
+              },
+            )
             ..setNavigationDelegate(
               NavigationDelegate(
+                onNavigationRequest: _handleNavigationRequest,
                 onPageStarted: (_) {
                   _handleNavigationStarted();
+                  unawaited(
+                    _runJavaScript(playmeshGameWindowOpenScript).catchError((
+                      Object error,
+                    ) {
+                      debugPrint('安装远程 Android 游戏外部导航脚本失败: $error');
+                    }),
+                  );
                 },
                 onPageFinished: (_) {
+                  unawaited(
+                    _runJavaScript(playmeshGameWindowOpenScript).catchError((
+                      Object error,
+                    ) {
+                      debugPrint('确认远程 Android 游戏外部导航脚本失败: $error');
+                    }),
+                  );
                   unawaited(
                     _messageQueue
                         .resume()
@@ -300,6 +325,26 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       appSdkReceiveScript(message),
       generation: generation,
     );
+  }
+
+  NavigationDecision _handleNavigationRequest(NavigationRequest request) {
+    if (!request.isMainFrame) return NavigationDecision.navigate;
+    switch (classifyGameWebViewNavigation(request.url)) {
+      case GameWebViewNavigationDisposition.navigate:
+        return NavigationDecision.navigate;
+      case GameWebViewNavigationDisposition.prevent:
+        return NavigationDecision.prevent;
+      case GameWebViewNavigationDisposition.openExternal:
+        final uri = parseGameWebViewExternalUri(request.url);
+        if (uri != null) unawaited(_openExternalNavigation(uri));
+        return NavigationDecision.prevent;
+    }
+  }
+
+  Future<void> _openExternalNavigation(Uri uri) async {
+    if (!await openGameWebViewExternalUri(uri)) {
+      debugPrint('系统未能处理远程游戏外部链接: $uri');
+    }
   }
 
   bool _recordHardwareUserActivation(KeyEvent event) {
@@ -482,6 +527,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         entryUri: _launchUri,
         title: context.tr('game.remote_title'),
         appBridge: appBridge,
+        gameExternalNavigationEnabled: true,
         onNavigationStarted: _handleNavigationStarted,
         onRunJavaScriptReady: (runJavaScript) {
           _runWindowsJavaScript = runJavaScript;

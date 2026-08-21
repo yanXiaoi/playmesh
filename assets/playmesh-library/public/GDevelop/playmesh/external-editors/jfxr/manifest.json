@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "name": "jfxr",
+  "derivedVersion": "5.0.0-beta55-playmesh.1",
+  "base": {
+    "gdevelopExternalEditorVersion": "5.0.0-beta55",
+    "officialArchiveSha256": "8ac12b557c2ddba958c6f0d3e0c5df8cf3369a65262dcb90cf5c8a7a7d20bdf6",
+    "officialTreeSha256": "355f193b1bb53c2667b0a9bfaf03456465879c8a7e4520fcff8bbeabaf4d9900"
+  },
+  "locales": [
+    {
+      "id": "en",
+      "fallback": null,
+      "catalog": "playmesh-i18n/locales/en.js",
+      "messageCount": 135
+    },
+    {
+      "id": "zh-CN",
+      "fallback": "en",
+      "catalog": "playmesh-i18n/locales/zh-CN.js",
+      "messageCount": 135
+    }
+  ],
+  "coverage": {
+    "staticSurfaces": [
+      "transport-header",
+      "playback-toolbar",
+      "file-toolbar",
+      "preset-toolbar",
+      "parameter-sections",
+      "waveform-controls",
+      "status-bars"
+    ],
+    "runtimeSurfaces": [
+      "preset-names",
+      "parameter-labels",
+      "parameter-descriptions",
+      "parameter-state-labels",
+      "render-status",
+      "dynamic-button-titles"
+    ],
+    "excluded": [
+      "removed-donation-form",
+      "removed-online-navigation",
+      "removed-google-analytics"
+    ],
+    "neverTranslate": [
+      "sound-names",
+      "serialized-sound-data",
+      "numeric-parameter-values",
+      "units",
+      "resource-names",
+      "file-names",
+      "resource-paths",
+      "user-entered-text"
+    ]
+  },
+  "overlay": {
+    "treeSha256": "a17884e0d9c102acb5bc16bd4daf547900828ba486f89de5277c387641ec2bba",
+    "fileCount": 3
+  }
+}

@@ -12,16 +12,13 @@ EndpointDocumentHttpClient createEndpointDocumentHttpClient() =>
 
 class IoEndpointDocumentHttpClient implements EndpointDocumentHttpClient {
   IoEndpointDocumentHttpClient({HttpClient? client})
-    : _client = client ?? HttpClient(),
-      _allowHttpForTesting = false;
+    : _client = client ?? HttpClient();
 
   @visibleForTesting
   IoEndpointDocumentHttpClient.allowHttpForTesting({HttpClient? client})
-    : _client = client ?? HttpClient(),
-      _allowHttpForTesting = true;
+    : _client = client ?? HttpClient();
 
   final HttpClient _client;
-  final bool _allowHttpForTesting;
   var _closed = false;
 
   @override
@@ -36,13 +33,6 @@ class IoEndpointDocumentHttpClient implements EndpointDocumentHttpClient {
         diagnostic: 'client_closed',
       );
     }
-    if (!_isAllowedUri(url)) {
-      throw const EndpointDocumentLoadException(
-        kind: EndpointDocumentFailureKind.invalidUrl,
-        diagnostic: 'document_url_must_be_https',
-      );
-    }
-
     HttpClientRequest? request;
     try {
       final operation = () async {
@@ -51,17 +41,6 @@ class IoEndpointDocumentHttpClient implements EndpointDocumentHttpClient {
         request!.maxRedirects = 5;
         request!.headers.set(HttpHeaders.acceptHeader, 'application/json');
         final response = await request!.close();
-        var redirectBase = url;
-        for (final redirect in response.redirects) {
-          final destination = redirectBase.resolveUri(redirect.location);
-          if (!_isAllowedUri(destination)) {
-            throw const EndpointDocumentLoadException(
-              kind: EndpointDocumentFailureKind.invalidUrl,
-              diagnostic: 'document_redirect_must_be_https',
-            );
-          }
-          redirectBase = destination;
-        }
         if (response.statusCode != HttpStatus.ok) {
           await _cancelResponse(response);
           throw EndpointDocumentLoadException(
@@ -149,10 +128,6 @@ class IoEndpointDocumentHttpClient implements EndpointDocumentHttpClient {
     _closed = true;
     _client.close(force: true);
   }
-
-  bool _isAllowedUri(Uri uri) =>
-      uri.host.isNotEmpty &&
-      (uri.scheme == 'https' || (_allowHttpForTesting && uri.scheme == 'http'));
 
   bool _isDnsFailure(SocketException error) {
     if (error.address == null) return true;

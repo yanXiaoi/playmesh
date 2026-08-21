@@ -63,3 +63,6 @@ app.*.map.json
 /GDevelop-*/
 /work/
 /runtime/crypto/
+/runtime/src/tool/
+/runtime/src/test/
+/runtime/resource/

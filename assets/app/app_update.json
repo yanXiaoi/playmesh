@@ -1,11 +1,15 @@
 {
-  "version": "5.6.276",
+  "version": "4.2.0",
   "releaseNotes": "修复了一些问题",
   "windows": {
     "downloads": [
       {
         "name": "GitHub",
-        "url": ""
+        "url": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/app/playmesh.zip"
+      },
+      {
+        "name": "临时源",
+        "url": "http://8.137.106.103:1000/playmesh/resources/app/playmesh.zip"
       }
     ]
   },
@@ -13,7 +17,11 @@
     "downloads": [
       {
         "name": "GitHub",
-        "url": ""
+        "url": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/app/playmesh.apk"
+      },
+      {
+        "name": "临时源",
+        "url": "http://8.137.106.103:1000/playmesh/resources/app/playmesh.apk"
       }
     ]
   }

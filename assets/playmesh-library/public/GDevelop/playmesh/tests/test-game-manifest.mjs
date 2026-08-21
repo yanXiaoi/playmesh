@@ -109,6 +109,37 @@ assert.equal(
   manifestApi.isAndroidPackageName('com.playmesh.game-aaaaaaaaaa'),
   false
 );
+const newProjectIdFixture = JSON.parse(
+  await readFile(
+    path.resolve(repositoryRoot, 'test/fixtures/new_project_game_id.json'),
+    'utf8'
+  )
+);
+for (const value of newProjectIdFixture.valid) {
+  assert.equal(manifestApi.isValidNewProjectGameId(value), true, value);
+}
+for (const value of newProjectIdFixture.invalid) {
+  assert.equal(manifestApi.isValidNewProjectGameId(value), false, value);
+}
+const boundaryProjectId =
+  newProjectIdFixture.boundary.prefix +
+  newProjectIdFixture.boundary.segmentCharacter.repeat(
+    newProjectIdFixture.maxLength -
+      newProjectIdFixture.boundary.prefix.length
+  );
+assert.equal(manifestApi.isValidNewProjectGameId(boundaryProjectId), true);
+assert.equal(
+  manifestApi.isValidNewProjectGameId(
+    boundaryProjectId + newProjectIdFixture.boundary.segmentCharacter
+  ),
+  false
+);
+assert.equal(
+  manifestApi.isValidNewProjectGameId(
+    manifestApi.generateGameId({ profile: 'android', randomValues: fill(2) })
+  ),
+  true
+);
 
 const controllerPath = path.resolve(
   testDirectory,

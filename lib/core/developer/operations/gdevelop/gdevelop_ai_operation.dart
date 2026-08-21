@@ -958,8 +958,8 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
       ..writeln()
       ..writeln(
         localized(
-          '仅可调用本合同明确列出的接口。',
-          'Call only the endpoints explicitly listed in this contract.',
+          '可调用的接口仅包括上述 4 个会话控制接口，以及第 1 项返回的精确工具详情中明确声明的工具专用接口。调用专用接口时，必须严格遵循详情中的 method、path、body 和 requiredHeaders；例如 binaryStaging 声明的 PUT .../resource-staging/{contentHash}。不得猜测或探测其他接口。',
+          'The allowed endpoints are limited to the four session-control endpoints above and tool-specific endpoints explicitly declared by the exact tool details returned by item 1. Follow the declared method, path, body, and requiredHeaders exactly; for example, PUT .../resource-staging/{contentHash} declared by binaryStaging. Do not guess or probe any other endpoint.',
         ),
       )
       ..writeln(

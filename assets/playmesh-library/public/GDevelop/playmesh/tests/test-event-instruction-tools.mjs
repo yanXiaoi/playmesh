@@ -66,6 +66,12 @@ source = source
     'const formatExpressionCall = (...args) => globalThis.__formatExpressionCall(...args);'
   )
   .replace(
+    /import \{\s*getPlaymeshBehaviorsRegistry,\s*getPlaymeshExtension,\s*getPlaymeshExtensionsRegistry,\s*\} from '\.\.\/PlaymeshCatalog\/PlaymeshCatalogSource';/,
+    `const getPlaymeshBehaviorsRegistry = async () => ({ headers: [] });
+const getPlaymeshExtension = async () => ({});
+const getPlaymeshExtensionsRegistry = async () => ({ headers: [] });`
+  )
+  .replace(
     "import { playmeshAiRuntimeDebuggerTools } from './PlaymeshAiRuntimeDebuggerTools';",
     'const playmeshAiRuntimeDebuggerTools = { wrappers: {} };'
   )

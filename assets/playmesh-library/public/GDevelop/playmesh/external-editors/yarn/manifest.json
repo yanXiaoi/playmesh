@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "name": "yarn",
+  "derivedVersion": "5.0.134-playmesh.1",
+  "base": {
+    "gdevelopExternalEditorVersion": "5.0.134",
+    "officialArchiveSha256": "ba8558cad00ec9b18cf3c6fd8647f8c1478ca67c894bca94a152a3740af209cc",
+    "officialTreeSha256": "d518a78769dbedebe2f7be7637536f6d6e1730e7ea80097816d2b89124f331d1"
+  },
+  "locales": [
+    {
+      "id": "en",
+      "fallback": null,
+      "catalog": "playmesh-i18n/locales/en.js",
+      "messageCount": 112
+    },
+    {
+      "id": "zh-CN",
+      "fallback": "en",
+      "catalog": "playmesh-i18n/locales/zh-CN.js",
+      "messageCount": 112
+    }
+  ],
+  "coverage": {
+    "staticSurfaces": [
+      "transport-header",
+      "search-toolbar",
+      "file-menu",
+      "node-editor-toolbar",
+      "editor-statistics",
+      "settings-dialog",
+      "story-language-label",
+      "spellcheck-availability"
+    ],
+    "runtimeSurfaces": [
+      "confirmation-dialogs",
+      "validation-dialogs",
+      "save-status-dialogs",
+      "markup-conversion-dialogs",
+      "speech-availability-dialogs"
+    ],
+    "excluded": [
+      "removed-github-gist-actions",
+      "removed-twitter-embeds",
+      "removed-random-quote-service",
+      "unavailable-non-english-dictionaries"
+    ],
+    "neverTranslate": [
+      "story-language-values",
+      "story-node-titles",
+      "story-node-bodies",
+      "story-node-tags",
+      "playtest-dialogue",
+      "resource-names",
+      "file-names",
+      "resource-paths",
+      "user-entered-text"
+    ]
+  },
+  "overlay": {
+    "treeSha256": "b7b48cfed012c73f4f28c354975978004c22a519bd4da3f5e69441cad9602aa9",
+    "fileCount": 3
+  }
+}

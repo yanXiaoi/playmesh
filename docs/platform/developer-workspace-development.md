@@ -8,7 +8,7 @@
 Agent API、项目文件与本地历史。游戏作者使用说明见
 [网页开发者通道](../game/web-dev-channel.md)。
 
-当前未发布 Developer API / OpenAPI 版本为 `4.2.0`。开发资源会话与外部工程接入变更见
+当前未发布 Developer API / OpenAPI 版本为 `4.3.0`。开发资源会话与外部工程接入变更见
 [Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
@@ -60,7 +60,7 @@ lib/core/developer/operations/{domain}/
 
 ## 当前完整 Operation 注册表
 
-下表记录 Developer API `4.2.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
+下表记录 Developer API `4.3.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
 真正用于路由的是“HTTP method + path 模板”，operation ID 用于响应头、OpenAPI、
 操作目录、审批和诊断，不参与路径命中。
 
@@ -72,7 +72,7 @@ lib/core/developer/operations/{domain}/
 | 清单与能力声明 | `GET /dev/api/projects/{projectId}/manifest` → `manifest.read`<br>`PUT /dev/api/projects/{projectId}/manifest` → `manifest.update`<br>`GET /dev/api/projects/{projectId}/capabilities` → `project_capabilities.read`<br>`PUT /dev/api/projects/{projectId}/capabilities` → `project_capabilities.update` |
 | 文件与目录 | `GET /dev/api/projects/{projectId}/files` → `files.list`<br>`GET /dev/api/projects/{projectId}/file` → `files.read`<br>`PUT /dev/api/projects/{projectId}/file` → `files.write`<br>`PATCH /dev/api/projects/{projectId}/file` → `files.patch`<br>`DELETE /dev/api/projects/{projectId}/file` → `files.delete`<br>`GET /dev/api/projects/{projectId}/asset` → `files.read_asset`<br>`GET /dev/api/projects/{projectId}/diff` → `files.diff`<br>`POST /dev/api/projects/{projectId}/directory` → `directories.create`<br>`DELETE /dev/api/projects/{projectId}/directory` → `directories.delete`<br>`POST /dev/api/projects/{projectId}/file-operations` → `files.manage` |
 | 批量变更与历史 | `POST /dev/api/projects/{projectId}/file-changes/preview` → `file_changes.preview`<br>`POST /dev/api/projects/{projectId}/file-changes/apply` → `file_changes.apply`<br>`GET /dev/api/projects/{projectId}/local-history` → `history.list`<br>`GET /dev/api/projects/{projectId}/local-history/diff` → `history.diff`<br>`POST /dev/api/projects/{projectId}/local-history/restore` → `history.restore` |
-| 包与发布 | `POST /dev/api/packages/import` → `packages.import`<br>`GET /dev/api/projects/{projectId}/package` → `packages.export_project`<br>`GET /dev/api/projects/{projectId}/publish` → `projects.publish_sources`<br>`POST /dev/api/projects/{projectId}/publish` → `projects.publish` |
+| 包与发布 | `POST /dev/api/packages/import` → `packages.import`<br>`GET /dev/api/projects/{projectId}/package` → `packages.export_project`<br>`GET /dev/api/projects/{projectId}/package-exports` → `package_exports.options`<br>`POST /dev/api/projects/{projectId}/package-exports` → `package_exports.create`<br>`GET /dev/api/projects/{projectId}/package-exports/{exportId}` → `package_exports.download`<br>`DELETE /dev/api/projects/{projectId}/package-exports/{exportId}` → `package_exports.release`<br>`GET /dev/api/projects/{projectId}/publish` → `projects.publish_sources`<br>`POST /dev/api/projects/{projectId}/publish` → `projects.publish` |
 | 运行时 | `GET /dev/api/run` → `runtime.active`<br>`GET /dev/api/projects/{projectId}/run` → `runtime.status`<br>`POST /dev/api/projects/{projectId}/run` → `runtime.start`<br>`POST /dev/api/projects/{projectId}/run/restart` → `runtime.restart`<br>`POST /dev/api/projects/{projectId}/run/stop` → `runtime.stop`<br>`GET /dev/api/projects/{projectId}/development` → `runtime.development.status`<br>`POST /dev/api/projects/{projectId}/development` → `runtime.development.start`<br>`DELETE /dev/api/projects/{projectId}/development` → `runtime.development.stop`<br>`POST /dev/api/projects/{projectId}/webview/javascript` → `runtime.webview.execute_javascript`<br>`GET /dev/api/events` → `events.subscribe`<br>`GET /dev/api/logs` → `runtime.logs` |
 | 平台能力 | `GET /dev/api/capabilities` → `capabilities.list`<br>`GET /dev/api/capability-tests` → `capability_tests.list`<br>`POST /dev/api/capability-tests` → `capability_tests.run`<br>`POST /dev/api/capability-tests/instances` → `capability_tests.instances.create`<br>`POST /dev/api/capability-tests/instances/{instanceId}/invoke` → `capability_tests.instances.invoke`<br>`DELETE /dev/api/capability-tests/instances/{instanceId}` → `capability_tests.instances.dispose` |
 | AI 与提示词 | `GET /dev/api/operations` → `operations.list`<br>`GET /dev/api/ai-context` → `operations.context`<br>`GET /dev/api/projects/{projectId}/chat-prompt.txt` → `prompts.project.chat`<br>`GET /dev/api/projects/{projectId}/agent-prompt.txt` → `prompts.project.agent`<br>`GET /dev/api/ai-prompt-templates` → `prompts.templates.list`<br>`PUT /dev/api/ai-prompt-templates/{templateId}` → `prompts.templates.save`<br>`DELETE /dev/api/ai-prompt-templates/{templateId}` → `prompts.templates.reset`<br>`GET /dev/api/ai-approvals` → `ai_approvals.list`<br>`POST /dev/api/ai-approvals/{approvalId}` → `ai_approvals.decide` |
@@ -447,14 +447,57 @@ App 统一的 `workspace.*` 词条。
 ### 导出与多源发布
 
 Workspace 顶部保留既有 `#publish` 与移动端 `#publishFromMenu` DOM ID，但用户可见名称为
-“导出”。打开后先显示两个可键盘操作的同级选项；选项只显示动作名称，不重复陈述下游
+“导出”。打开后先显示三个可键盘操作的同级选项；选项只显示动作名称，不重复陈述下游
 保存或校验流程：
 
 - “导出源码”先保存当前未保存文本，再请求
   `GET /dev/api/projects/{projectId}/package`。这是既有 `packages.export_project`
   Operation，继续使用 `GamePackageTransferService` 的宽松导出，用于正常备份，也允许取回
   待修复项目；不得为这一 UI 新增第二个 Operation 或改变 CLI 依赖的宽松语义。
+- “安装包导出”进入独立的 `package_exports.*` Operation：用户只选择一个
+  `android-arm64`、`android-x86_64` 或 `windows-x64` 目标。导出设置区提供可搜索的
+  当前可用中转服务器列表，并保留“不内置”和“使用自定义地址”两种选择；选择已配置服务器时，
+  工作区将其 Catalog 地址与读取 Token 组合为 Runtime publicURL。重新下载 Runtime 是目标
+  底包维护动作，不属于游戏导出设置。
 - “上传到发布源”进入原有发布源候选、校验、提交、状态与失败重试界面。
+
+安装包 Runtime 不得进入主 App 的 Flutter assets。固定安装位置是
+`<playmesh-library>/runtime/packages/` 下的 `playmesh-runtime-arm.apk`、
+`playmesh-runtime-x86.apk` 与 `playmesh-runtime-win.zip`；`installed` 只表示对应文件存在，
+因此测试期可以手工复制。文件不存在或用户选择重新下载时，服务必须按
+`assets/app/App.json` 的 `export` 源依次读取 Runtime `update.json`，再按目标选择下载线路，
+流式下载并只以声明的 SHA-256 验证，成功后原子替换固定文件。已存在且未要求重新下载时
+直接复用，不访问远端；重新下载失败必须保留旧文件。
+
+`resources/runtime/update.json` 对每个目标只声明一次平台级 SHA-256，再列出共享该摘要的
+下载线路，不能在每条线路内重复或覆盖摘要：
+
+```json
+{
+  "sha256": "<64 位小写 SHA-256>",
+  "downloads": [
+    { "name": "GitHub", "url": "https://..." },
+    { "name": "临时源", "url": "http://..." }
+  ]
+}
+```
+
+三份底包发布后填写实际 URL。清单层不限制 URL 协议、凭据或 Fragment；HTTP/HTTPS 请求
+自动跟随最多 5 次重定向且不复查跳转目标。空 URL 不得在界面中误报为可下载，无法请求的
+地址在实际下载时失败。无论选择哪条线路，最终文件都必须通过该目标唯一的 SHA-256 校验。
+
+安装包创建请求正文固定为
+`{target, refreshRuntime, relayServer}`，不接受额外字段。`relayServer` 只能是一个
+`http`/`https` URL 或 `null`，由导出服务写入 Runtime 游戏载荷（Android 与 Windows 均为
+平台 Runtime 公钥封装的 PME1 加密）；游戏项目不能自行携带
+Runtime 私有配置覆盖它。客户端可用 `X-Playmesh-Package-Export-Request-ID` 关联
+`package_export.progress` SSE；事件按 `projectId + requestId + target` 隔离，阶段覆盖
+准备、Runtime 检查/真实下载字节/校验、游戏包构建、原生导出以及唯一完成或失败终态。
+
+生成物通过 `package_exports.download` 流式交付并通过 `package_exports.release` 释放。
+源码包与安装包必须共用同一个 `saveOrDownloadExport`：普通浏览器直接使用同源
+`<a download>`，App WebView 只把白名单同源 URL、文件名、MIME 与精确长度交给既有
+`__playmeshSaveBlobDownload` 原生保存桥；网页不得读取完整 Blob 或 ArrayBuffer。
 
 源码包下载名必须复用 `gamePackageFileName` / `gamePackageShareFileName` 的单一规则，保持为
 `{游戏名称}-v{版本}.zip`；浏览器从 `/package` 的 UTF-8 `Content-Disposition` 取得名称，

@@ -196,7 +196,13 @@ if ($buildWindows) {
   Copy-Item -LiteralPath $apkSignerSidecar `
     -Destination (Join-Path $windowsBundle 'playmesh-apksign.exe') `
     -Force
-  foreach ($noticeName in @('APKSIG-GO-LICENSE.txt', 'APKSIG-GO-NOTICE.txt')) {
+  foreach ($noticeName in @(
+      'APKSIG-GO-LICENSE.txt',
+      'APKSIG-GO-NOTICE.txt',
+      'WINRES-LICENSE.txt',
+      'NFNT-RESIZE-LICENSE.txt',
+      'GOLANG-X-IMAGE-LICENSE.txt',
+      'GOLANG-X-IMAGE-PATENTS.txt')) {
     $noticeSource = Join-Path $repoRoot "build\go-core\windows\$noticeName"
     if (-not (Test-Path -LiteralPath $noticeSource -PathType Leaf)) {
       throw "Windows APK signer attribution is missing: $noticeSource"
@@ -222,11 +228,16 @@ if ($buildWindows) {
         'playmesh-apksign.exe',
         'APKSIG-GO-LICENSE.txt',
         'APKSIG-GO-NOTICE.txt',
+        'WINRES-LICENSE.txt',
+        'NFNT-RESIZE-LICENSE.txt',
+        'GOLANG-X-IMAGE-LICENSE.txt',
+        'GOLANG-X-IMAGE-PATENTS.txt',
         'LICENSE',
         'flutter_windows.dll',
         'WebView2Loader.dll',
         'data/app.so',
-        'data/icudtl.dat')) {
+        'data/icudtl.dat',
+        'data/flutter_assets/assets/runtime-export/playmesh-default-export.p12')) {
       if ($entryNames -notcontains $requiredEntry) {
         throw "Windows ZIP is missing a runtime entry: $requiredEntry"
       }

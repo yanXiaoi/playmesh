@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "installed": [
+    "capability.media.camera",
+    "capability.media.microphone",
+    "capability.device.midi",
+    "capability.device.vibration",
+    "capability.sensor.pose6d",
+    "media.webrtc",
+    "service.lan.qr"
+  ],
+  "modules": [
+    {
+      "id": "capability.media.camera",
+      "platforms": ["android", "windows"],
+      "capabilities": ["media.camera"],
+      "mediaProtocols": [],
+      "androidPermissions": ["android.permission.CAMERA"],
+      "removableApkEntries": [],
+      "postBuildPrunable": false,
+      "dependencies": [],
+      "alwaysRetained": false
+    },
+    {
+      "id": "capability.media.microphone",
+      "platforms": ["android", "windows"],
+      "capabilities": ["media.microphone"],
+      "mediaProtocols": [],
+      "androidPermissions": ["android.permission.RECORD_AUDIO"],
+      "removableApkEntries": [],
+      "postBuildPrunable": false,
+      "dependencies": [],
+      "alwaysRetained": false
+    },
+    {
+      "id": "capability.device.midi",
+      "platforms": ["android"],
+      "capabilities": ["device.midi"],
+      "mediaProtocols": [],
+      "androidPermissions": [],
+      "removableApkEntries": [],
+      "postBuildPrunable": false,
+      "dependencies": [],
+      "alwaysRetained": false
+    },
+    {
+      "id": "capability.device.vibration",
+      "platforms": ["android"],
+      "capabilities": ["device.vibration"],
+      "mediaProtocols": [],
+      "androidPermissions": ["android.permission.VIBRATE"],
+      "removableApkEntries": [],
+      "postBuildPrunable": false,
+      "dependencies": [],
+      "alwaysRetained": false
+    },
+    {
+      "id": "capability.sensor.pose6d",
+      "platforms": ["android"],
+      "capabilities": ["sensor.pose6d"],
+      "mediaProtocols": [],
+      "androidPermissions": ["android.permission.CAMERA"],
+      "removableApkEntries": [
+        "lib/{abi}/libarcore_sdk_c.so",
+        "lib/{abi}/libarcore_sdk_jni.so"
+      ],
+      "postBuildPrunable": true,
+      "dependencies": ["media.webrtc"],
+      "alwaysRetained": false
+    },
+    {
+      "id": "media.webrtc",
+      "platforms": ["android"],
+      "capabilities": [],
+      "mediaProtocols": ["webrtc"],
+      "androidPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "removableApkEntries": [
+        "lib/{abi}/libjingle_peerconnection_so.so"
+      ],
+      "postBuildPrunable": true,
+      "dependencies": [],
+      "alwaysRetained": false
+    },
+    {
+      "id": "service.lan.qr",
+      "platforms": ["android"],
+      "capabilities": [],
+      "mediaProtocols": [],
+      "androidPermissions": ["android.permission.CAMERA"],
+      "removableApkEntries": [
+        "lib/{abi}/libbarhopper_v3.so",
+        "lib/{abi}/libimage_processing_util_jni.so",
+        "lib/{abi}/libsurface_util_jni.so"
+      ],
+      "postBuildPrunable": false,
+      "dependencies": [],
+      "alwaysRetained": true
+    }
+  ]
+}

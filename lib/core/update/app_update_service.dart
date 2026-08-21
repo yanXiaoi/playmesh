@@ -149,7 +149,7 @@ final class AppUpdateService implements AppUpdateChecker {
 
   @override
   Future<bool> openDownload(AppUpdateDownload download) async {
-    if (_closed || !_isSafeExternalUrl(download.endpoint.url)) return false;
+    if (_closed) return false;
     try {
       return await _urlLauncher(download.endpoint.url);
     } on Object catch (error) {
@@ -209,12 +209,6 @@ final class AppUpdateService implements AppUpdateChecker {
     }
     return normalized;
   }
-
-  static bool _isSafeExternalUrl(Uri url) =>
-      url.scheme == 'https' &&
-      url.host.isNotEmpty &&
-      url.userInfo.isEmpty &&
-      !url.hasFragment;
 }
 
 final class _LoadedAppUpdateManifest {

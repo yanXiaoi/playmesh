@@ -134,6 +134,30 @@ let swapAccepted = true;
 let importedResourceFile = null;
 let installedExtensionNames = new Set();
 const externalEditorToolOptions = [];
+const localPlaymeshHeader = {
+  name: 'Playmesh',
+  fullName: 'Playmesh SDK',
+  shortDescription: 'Use the bundled Playmesh SDK.',
+  category: 'Network',
+  tags: ['playmesh', 'sdk'],
+  url: '/playmesh/GDevelop/playmesh/extensions/Playmesh.json',
+  tier: 'reviewed',
+};
+const localPlaymeshExtension = {
+  name: 'Playmesh',
+  fullName: 'Playmesh SDK',
+  version: '2.0.0',
+  gdevelopVersion: '>=5.6.276',
+  eventsFunctions: [
+    {
+      name: 'IsAvailable',
+      fullName: 'Playmesh is available',
+      description: 'Check whether the SDK is available.',
+      functionType: 'Condition',
+    },
+  ],
+  eventsBasedBehaviors: [],
+};
 const wrapperDependencies = {
   swapAsset: () => swapAccepted,
   PixiResourcesLoader: {},
@@ -162,6 +186,14 @@ const wrapperDependencies = {
   enumerateAllExpressions: () => [],
   enumerateEventsMetadata: () => [],
   formatExpressionCall: () => '',
+  getPlaymeshExtensionsRegistry: async () => ({
+    headers: [localPlaymeshHeader],
+  }),
+  getPlaymeshBehaviorsRegistry: async () => ({ headers: [] }),
+  getPlaymeshExtension: async header => {
+    assert.equal(header, localPlaymeshHeader);
+    return structuredClone(localPlaymeshExtension);
+  },
   playmeshAiRuntimeDebuggerTools: { wrappers: {} },
   createPlaymeshAiPiskelToolWrappers: options => {
     externalEditorToolOptions.push(['piskel', options]);
@@ -189,6 +221,9 @@ wrappersSource = wrappersSource.replace(
     enumerateAllExpressions,
     enumerateEventsMetadata,
     formatExpressionCall,
+    getPlaymeshExtensionsRegistry,
+    getPlaymeshBehaviorsRegistry,
+    getPlaymeshExtension,
     playmeshAiRuntimeDebuggerTools,
     createPlaymeshAiPiskelToolWrappers,
     createPlaymeshAiJfxrYarnTools,
@@ -330,6 +365,42 @@ resourceRegistry.dispose();
 assert.deepEqual(revokedObjectUrls, [importedResourceFile]);
 await assert.rejects(fetch(importedResourceFile));
 
+const capabilityProject = {
+  hasEventsFunctionsExtensionNamed: name => installedExtensionNames.has(name),
+  getCurrentPlatform: () => ({ isExtensionLoaded: () => false }),
+};
+const capabilityWrappers = wrappersModule.createPlaymeshAiLocalToolWrappers();
+const localSearch = await capabilityWrappers.search_gdevelop_capabilities({
+  call: {
+    callId: 'local-search-call-1',
+    arguments: { query: 'Playmesh', kind: 'extension' },
+  },
+  project: capabilityProject,
+});
+assert.equal(localSearch.result.success, true);
+assert.equal(localSearch.result.output.status, 'available');
+assert.equal(localSearch.result.output.total, 1);
+assert.equal(localSearch.result.output.items[0].stableId, 'Playmesh');
+assert.equal(localSearch.result.output.items[0].installed, false);
+const localDetails = await capabilityWrappers.get_gdevelop_capability_details({
+  call: {
+    callId: 'local-details-call-1',
+    arguments: { type: 'extension', stable_id: 'Playmesh' },
+  },
+  project: capabilityProject,
+});
+assert.equal(localDetails.result.success, true);
+assert.equal(localDetails.result.output.status, 'available');
+assert.equal(localDetails.result.output.capability.stableId, 'Playmesh');
+assert.equal(
+  localDetails.result.output.capability.source.kind,
+  'playmesh-local-extension'
+);
+assert.deepEqual(
+  localDetails.result.output.capability.conditions.map(item => item.name),
+  ['IsAvailable']
+);
+
 const originalFetch = globalThis.fetch;
 const extensionLifecycle = [];
 try {
@@ -365,10 +436,7 @@ try {
     }
     throw new Error(`Unexpected extension fixture URL: ${url}`);
   };
-  const extensionProject = {
-    hasEventsFunctionsExtensionNamed: name => installedExtensionNames.has(name),
-    getCurrentPlatform: () => ({ isExtensionLoaded: () => false }),
-  };
+  const extensionProject = capabilityProject;
   const extensionWrappers = wrappersModule.createPlaymeshAiLocalToolWrappers();
   const extensionResult = await extensionWrappers.install_gdevelop_extension({
     call: {
@@ -386,6 +454,25 @@ try {
     ['will', ['ProbeExtension']],
     ['apply', ['ProbeExtension']],
     ['installed', ['ProbeExtension']],
+  ]);
+  extensionLifecycle.length = 0;
+  const localExtensionResult = await extensionWrappers.install_gdevelop_extension({
+    call: {
+      callId: 'extension-call-2',
+      arguments: { type: 'extension', stable_id: 'Playmesh' },
+    },
+    project: extensionProject,
+    runnerOptions: {
+      onWillInstallExtension: names => extensionLifecycle.push(['will', names]),
+      onExtensionInstalled: names =>
+        extensionLifecycle.push(['installed', names]),
+    },
+  });
+  assert.equal(localExtensionResult.result.success, true);
+  assert.deepEqual(extensionLifecycle, [
+    ['will', ['Playmesh']],
+    ['apply', ['Playmesh']],
+    ['installed', ['Playmesh']],
   ]);
 } finally {
   globalThis.fetch = originalFetch;

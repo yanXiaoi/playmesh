@@ -24,6 +24,7 @@ import 'developer_capability_test_service.dart';
 import 'developer_channel.dart';
 import 'developer_event_hub.dart';
 import 'developer_background_host.dart';
+import 'developer_installation_package_service.dart';
 import 'developer_project_catalog.dart';
 import 'developer_run_controller.dart';
 import 'developer_web_gateway_contract.dart';
@@ -105,6 +106,7 @@ part 'operations/gdevelop/gdevelop_ai_operation.dart';
 part 'operations/gdevelop/gdevelop_ai_events_operation.dart';
 part 'operations/packages/package_import_operation.dart';
 part 'operations/packages/project_package_operation.dart';
+part 'operations/packages/project_installation_package_operation.dart';
 part 'operations/publishing/project_publish_operation.dart';
 part 'operations/projects/data_operation.dart';
 part 'operations/projects/manifest_operation.dart';
@@ -137,6 +139,7 @@ final _developerOperationRegistry = _DeveloperOperationRegistry(const [
   _ProjectCopyOperation(),
   _PackageImportOperation(),
   _ProjectPackageOperation(),
+  _ProjectInstallationPackageOperation(),
   _ProjectPublishOperation(),
   _CapabilityRegistryOperation(),
   _CapabilityTestsOperation(),
@@ -194,6 +197,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
   DeveloperCapabilityTestService? capabilityTests,
   GamePackageTransferService? packageTransfer,
   DeveloperProjectPublisher? projectPublisher,
+  DeveloperInstallationPackageService? installationPackageService,
   DeveloperWorkspaceLocalizationBridge? localizationBridge,
   String Function()? currentAuthor,
   DeveloperViewAvailabilityProvider? viewAvailability,
@@ -345,6 +349,7 @@ Future<DeveloperWebGateway> startDeveloperWebGateway({
       capabilityTests: capabilityTests ?? DeveloperCapabilityTestService(),
       packageTransfer: resolvedPackageTransfer,
       projectPublisher: projectPublisher,
+      installationPackageService: installationPackageService,
       localizationBridge: localizationBridge,
       currentAuthor: currentAuthor,
       viewAvailability:
@@ -386,6 +391,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
     required this.capabilityTests,
     required this.packageTransfer,
     required this.projectPublisher,
+    required this.installationPackageService,
     required this.localizationBridge,
     required this.currentAuthor,
     required this.viewAvailability,
@@ -428,6 +434,7 @@ class _IoDeveloperWebGateway implements DeveloperWebGateway {
   final DeveloperCapabilityTestService capabilityTests;
   final GamePackageTransferService packageTransfer;
   final DeveloperProjectPublisher? projectPublisher;
+  final DeveloperInstallationPackageService? installationPackageService;
   final DeveloperWorkspaceLocalizationBridge? localizationBridge;
   final String Function()? currentAuthor;
   final DeveloperViewAvailabilityProvider viewAvailability;

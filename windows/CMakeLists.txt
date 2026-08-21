@@ -83,6 +83,77 @@ add_custom_command(
 add_custom_target(playmesh_go_core ALL DEPENDS "${GO_CORE_BINARY}")
 add_dependencies(${BINARY_NAME} playmesh_go_core)
 
+# Build the Runtime export/APK signing sidecar through the repository script so
+# CMake and release packaging share the same checksum-pinned apksig-go module
+# validation and repository-owned attribution files. This target is intentionally
+# part of the main App only; the separate runtime/src Windows project does not
+# include it.
+find_program(POWERSHELL_EXECUTABLE NAMES pwsh.exe powershell.exe REQUIRED)
+set(PLAYMESH_GO_BUILD_SCRIPT
+  "${CMAKE_SOURCE_DIR}/../tool/build_go_core.ps1")
+set(PLAYMESH_APKSIGN_OUTPUT_DIR
+  "${CMAKE_SOURCE_DIR}/../build/go-core/windows")
+set(PLAYMESH_APKSIGN_BINARY
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/playmesh-apksign.exe")
+set(PLAYMESH_APKSIGN_LICENSE
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/APKSIG-GO-LICENSE.txt")
+set(PLAYMESH_APKSIGN_NOTICE
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/APKSIG-GO-NOTICE.txt")
+set(PLAYMESH_WINRES_LICENSE
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/WINRES-LICENSE.txt")
+set(PLAYMESH_NFNT_RESIZE_LICENSE
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/NFNT-RESIZE-LICENSE.txt")
+set(PLAYMESH_GOLANG_X_IMAGE_LICENSE
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/GOLANG-X-IMAGE-LICENSE.txt")
+set(PLAYMESH_GOLANG_X_IMAGE_PATENTS
+  "${PLAYMESH_APKSIGN_OUTPUT_DIR}/GOLANG-X-IMAGE-PATENTS.txt")
+set(PLAYMESH_APKSIGN_SOURCE_LICENSE
+  "${CMAKE_SOURCE_DIR}/../third_party/licenses/apksig-go/LICENSE")
+set(PLAYMESH_APKSIGN_SOURCE_NOTICE
+  "${CMAKE_SOURCE_DIR}/../third_party/licenses/apksig-go/NOTICE")
+set(PLAYMESH_WINRES_SOURCE_LICENSE
+  "${CMAKE_SOURCE_DIR}/../third_party/licenses/winres/LICENSE")
+set(PLAYMESH_NFNT_RESIZE_SOURCE_LICENSE
+  "${CMAKE_SOURCE_DIR}/../third_party/licenses/nfnt-resize/LICENSE")
+set(PLAYMESH_GOLANG_X_IMAGE_SOURCE_LICENSE
+  "${CMAKE_SOURCE_DIR}/../third_party/licenses/golang-x-image/LICENSE")
+set(PLAYMESH_GOLANG_X_IMAGE_SOURCE_PATENTS
+  "${CMAKE_SOURCE_DIR}/../third_party/licenses/golang-x-image/PATENTS")
+set(PLAYMESH_EXPORTER_ATTRIBUTIONS
+  "${PLAYMESH_APKSIGN_LICENSE}"
+  "${PLAYMESH_APKSIGN_NOTICE}"
+  "${PLAYMESH_WINRES_LICENSE}"
+  "${PLAYMESH_NFNT_RESIZE_LICENSE}"
+  "${PLAYMESH_GOLANG_X_IMAGE_LICENSE}"
+  "${PLAYMESH_GOLANG_X_IMAGE_PATENTS}")
+set(PLAYMESH_EXPORTER_SOURCE_ATTRIBUTIONS
+  "${PLAYMESH_APKSIGN_SOURCE_LICENSE}"
+  "${PLAYMESH_APKSIGN_SOURCE_NOTICE}"
+  "${PLAYMESH_WINRES_SOURCE_LICENSE}"
+  "${PLAYMESH_NFNT_RESIZE_SOURCE_LICENSE}"
+  "${PLAYMESH_GOLANG_X_IMAGE_SOURCE_LICENSE}"
+  "${PLAYMESH_GOLANG_X_IMAGE_SOURCE_PATENTS}")
+add_custom_command(
+  OUTPUT
+    "${PLAYMESH_APKSIGN_BINARY}"
+    ${PLAYMESH_EXPORTER_ATTRIBUTIONS}
+  COMMAND "${POWERSHELL_EXECUTABLE}"
+    -NoProfile -ExecutionPolicy Bypass
+    -File "${PLAYMESH_GO_BUILD_SCRIPT}"
+    -Target windows-apksign
+  DEPENDS
+    ${GO_CORE_SOURCES}
+    "${PLAYMESH_GO_BUILD_SCRIPT}"
+    ${PLAYMESH_EXPORTER_SOURCE_ATTRIBUTIONS}
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/.."
+  COMMENT "Building bundled Playmesh Runtime exporter and APK signer"
+  VERBATIM
+)
+add_custom_target(playmesh_apksign ALL DEPENDS
+  "${PLAYMESH_APKSIGN_BINARY}"
+  ${PLAYMESH_EXPORTER_ATTRIBUTIONS})
+add_dependencies(${BINARY_NAME} playmesh_apksign)
+
 # Developer CLI 与桌面 App 一起构建，安装在 Go Core 同级目录。
 set(PLAYMESH_CLI_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../dev-cli")
 set(PLAYMESH_CLI_BINARY "${CMAKE_BINARY_DIR}/playmesh-cli.exe")
@@ -195,6 +266,15 @@ install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(PROGRAMS "${GO_CORE_BINARY}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(PROGRAMS "${PLAYMESH_APKSIGN_BINARY}"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(FILES
+  ${PLAYMESH_EXPORTER_ATTRIBUTIONS}
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(PROGRAMS "${PLAYMESH_CLI_BINARY}" DESTINATION "${CMAKE_INSTALL_PREFIX}"

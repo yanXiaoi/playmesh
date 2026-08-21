@@ -1,0 +1,434 @@
+[
+  {
+    "code": "media.camera",
+    "name": "摄像头",
+    "description": "允许游戏通过标准 Web API 访问摄像头，并为后续原生摄像头能力保留独立适配入口。",
+    "apiVersion": "1.0.0",
+    "supportedPlatforms": [
+      "WINDOWS",
+      "ANDROID"
+    ],
+    "optionsSchema": {
+      "type": "object"
+    },
+    "methods": [],
+    "events": []
+  },
+  {
+    "code": "media.microphone",
+    "name": "麦克风与语音转文字",
+    "description": "允许标准 Web API 使用麦克风，并提供跨平台原生语音转文字。",
+    "apiVersion": "1.1.0",
+    "supportedPlatforms": [
+      "WINDOWS",
+      "ANDROID"
+    ],
+    "optionsSchema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "methods": [
+      {
+        "name": "toText",
+        "description": "按指定语言和时限启动一次短语音识别；listenFor、pauseFor 的单位为秒。",
+        "requiresUserActivation": true,
+        "argumentsSchema": {
+          "type": "object",
+          "required": [
+            "localeId",
+            "listenFor",
+            "pauseFor"
+          ],
+          "properties": {
+            "localeId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "listenFor": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300
+            },
+            "pauseFor": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            }
+          },
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "required": [
+            "started"
+          ],
+          "properties": {
+            "started": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "textOnSoundLevelChange",
+        "description": "识别期间输入声音级别变化；level 由系统识别器提供，通常表示分贝值。",
+        "dataSchema": {
+          "type": "object",
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "textOnResult",
+        "description": "返回语音识别的部分、中间或最终结果以及候选文本。",
+        "dataSchema": {
+          "type": "object",
+          "required": [
+            "recognizedWords",
+            "finalResult",
+            "resultType",
+            "confidence",
+            "hasConfidenceRating",
+            "alternates"
+          ],
+          "properties": {
+            "recognizedWords": {
+              "type": "string"
+            },
+            "finalResult": {
+              "type": "boolean"
+            },
+            "resultType": {
+              "type": "string",
+              "enum": [
+                "partial",
+                "intermediate",
+                "finalResult"
+              ]
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "hasConfidenceRating": {
+              "type": "boolean"
+            },
+            "alternates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "recognizedWords",
+                  "recognizedPhrases",
+                  "confidence",
+                  "hasConfidenceRating"
+                ],
+                "properties": {
+                  "recognizedWords": {
+                    "type": "string"
+                  },
+                  "recognizedPhrases": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "confidence": {
+                    "type": "number"
+                  },
+                  "hasConfidenceRating": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  {
+    "code": "device.midi",
+    "name": "MIDI",
+    "description": "允许游戏通过标准 Web MIDI API 请求 MIDI SysEx，并为后续原生 MIDI 能力保留独立适配入口。",
+    "apiVersion": "1.0.0",
+    "supportedPlatforms": [
+      "ANDROID"
+    ],
+    "optionsSchema": {
+      "type": "object"
+    },
+    "methods": [],
+    "events": []
+  },
+  {
+    "code": "device.vibration",
+    "name": "震动反馈",
+    "description": "通过 vibration 插件触发或取消当前设备的跨平台震动。",
+    "apiVersion": "2.0.0",
+    "supportedPlatforms": [
+      "ANDROID"
+    ],
+    "optionsSchema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "methods": [
+      {
+        "name": "vibrate",
+        "description": "触发震动；支持默认震动、时长、振幅、波形、强度、重复、iOS 锐度和预设参数。",
+        "requiresUserActivation": false,
+        "argumentsSchema": {
+          "type": "object",
+          "properties": {
+            "duration": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 500
+            },
+            "pattern": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "default": []
+            },
+            "repeat": {
+              "type": "integer",
+              "minimum": -1,
+              "default": -1
+            },
+            "intensities": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "default": []
+            },
+            "amplitude": {
+              "type": "integer",
+              "minimum": -1,
+              "maximum": 255,
+              "default": -1
+            },
+            "sharpness": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.5
+            },
+            "preset": {
+              "type": "string",
+              "enum": [
+                "singleShortBuzz",
+                "doubleBuzz",
+                "tripleBuzz",
+                "longAlarmBuzz",
+                "pulseWave",
+                "progressiveBuzz",
+                "rhythmicBuzz",
+                "gentleReminder",
+                "quickSuccessAlert",
+                "zigZagAlert",
+                "softPulse",
+                "emergencyAlert",
+                "heartbeatVibration",
+                "countdownTimerAlert",
+                "rapidTapFeedback",
+                "dramaticNotification",
+                "urgentBuzzWave"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "null"
+        }
+      },
+      {
+        "name": "cancel",
+        "description": "取消当前仍在进行或重复的震动。",
+        "requiresUserActivation": false,
+        "argumentsSchema": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "null"
+        }
+      }
+    ],
+    "events": []
+  },
+  {
+    "code": "sensor.pose6d",
+    "name": "空间位姿",
+    "description": "通过终端空间跟踪输出米制 XYZ 位置和 XYZW 四元数，并可按需创建摄像头媒体源。",
+    "apiVersion": "1.0.0",
+    "supportedPlatforms": [
+      "ANDROID"
+    ],
+    "optionsSchema": {
+      "type": "object",
+      "properties": {
+        "rateHz": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 30
+        }
+      },
+      "additionalProperties": false
+    },
+    "methods": [
+      {
+        "name": "recenter",
+        "description": "把当前可用位姿作为本实例原点；尚未跟踪时使用下一次有效位姿。",
+        "requiresUserActivation": false,
+        "argumentsSchema": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "null"
+        }
+      },
+      {
+        "name": "openVideo",
+        "description": "创建一个由 playmesh.app.media.open() 按需消费的实时视频源。",
+        "requiresUserActivation": false,
+        "argumentsSchema": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 160,
+              "maximum": 3840
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 120,
+              "maximum": 2160
+            },
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
+          },
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "required": [
+            "type",
+            "version",
+            "id",
+            "kind",
+            "protocol",
+            "live"
+          ]
+        }
+      },
+      {
+        "name": "createVideoSource",
+        "description": "openVideo 的兼容别名；返回同一种受控实时视频源。",
+        "requiresUserActivation": false,
+        "argumentsSchema": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 160,
+              "maximum": 3840
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 120,
+              "maximum": 2160
+            },
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
+          },
+          "additionalProperties": false
+        },
+        "resultSchema": {
+          "type": "object",
+          "required": [
+            "type",
+            "version",
+            "id",
+            "kind",
+            "protocol",
+            "live"
+          ]
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "pose",
+        "description": "当前终端相对于本实例原点的空间位姿。",
+        "dataSchema": {
+          "type": "object",
+          "required": [
+            "captureTimestampNs",
+            "trackingState",
+            "position",
+            "rotation"
+          ],
+          "properties": {
+            "captureTimestampNs": {
+              "type": "string"
+            },
+            "trackingState": {
+              "type": "string",
+              "enum": [
+                "tracking",
+                "paused",
+                "stopped"
+              ]
+            },
+            "position": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "rotation": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          }
+        }
+      }
+    ]
+  }
+]

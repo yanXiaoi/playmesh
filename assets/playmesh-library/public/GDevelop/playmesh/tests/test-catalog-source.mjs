@@ -5,10 +5,23 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(testDirectory, '../../../../../..');
 const sourcePath = path.resolve(
   testDirectory,
   '../overlays/newIDE/app/src/PlaymeshCatalog/PlaymeshCatalogSource.js'
 );
+const brandIconBytes = await readFile(
+  path.join(
+    repositoryRoot,
+    'assets',
+    'playmesh-library',
+    'public',
+    'developer',
+    'playmesh-logo.png'
+  )
+);
+const brandIconDataUri =
+  `data:image/png;base64,${brandIconBytes.toString('base64')}`;
 let moduleSource = await readFile(sourcePath, 'utf8');
 
 const removeFlowTypeDeclarations = value => {
@@ -856,8 +869,10 @@ const playmeshLocalExtension = {
   fullName: 'Playmesh SDK',
   gdevelopVersion: '>=5.6.276',
   helpPath: '/extensions/Playmesh',
+  iconUrl: brandIconDataUri,
   metadata: { nested: { stable: true } },
   name: 'Playmesh',
+  previewIconUrl: brandIconDataUri,
   requiredExtensions: [],
   shortDescription: 'Use the installed Playmesh SDK.',
   tags: 'playmesh, sdk, native',
@@ -888,7 +903,10 @@ const utilityLocalExtension = {
       events: [],
     },
   ],
+  iconUrl: 'https://example.invalid/untrusted-icon.png',
   name: 'LocalUtility',
+  previewIconUrl:
+    'data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9ImFsZXJ0KDEpIi8+',
   requiredExtensions: [],
   shortDescription: 'Second local extension.',
   tags: ['playmesh'],
@@ -918,6 +936,12 @@ assert.deepEqual(extensionRegistry.views.default.firstIds, [
 ]);
 assert.equal(extensionRegistry.headers[0].tier, 'reviewed');
 assert.equal(extensionRegistry.headers[0].eventsFunctionsCount, 1);
+assert.equal(extensionRegistry.headers[0].previewIconUrl, brandIconDataUri);
+assert.equal(
+  extensionRegistry.headers[1].previewIconUrl,
+  '',
+  'the local catalog must reject SVG and remote extension icons'
+);
 assert.equal(
   extensionRegistry.version,
   '0.0.1-playmesh+local.Playmesh.1.2.3.LocalUtility.2.0.0'
@@ -961,6 +985,8 @@ const localHeader = await catalogSource.getPlaymeshExtensionHeader({
 });
 assert.equal(localHeader.name, 'Playmesh');
 assert.equal(localHeader.tier, 'reviewed');
+assert.equal(localHeader.previewIconUrl, brandIconDataUri);
+assert.equal(localHeader.iconUrl, brandIconDataUri);
 assert.equal(
   localHeader.url,
   '/playmesh/GDevelop/playmesh/extensions/Playmesh.json'

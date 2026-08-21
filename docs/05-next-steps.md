@@ -45,9 +45,12 @@ App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏�
 
 当前文件导出入口固定在源代码开发工作区：原“发布”改为“导出”，其下“导出源码”
 直接复用既有 `/package` 宽松备份 Operation；普通浏览器下载，App WebView 由原生宿主
-流式保存。“上传到发布源”仍执行完整校验和既有多源发布流程。游戏详情只负责查看、开始、
-清理数据和删除，不再提供导出。该调整不新增 Developer Operation，也不改变 CLI 依赖的
-损坏项目修复语义。
+流式保存。“上传到发布源”仍执行完整校验和既有多源发布流程；“安装包导出”通过新增的
+`package_exports.*` Operation 选择 Android ARM64、Android x86_64 或 Windows x64，
+按需下载/复用固定 Runtime 底包，Android 与 Windows 都通过私有 Go provider 注入
+RSA-OAEP + AES-GCM 的 PME1 加密游戏载荷，并在载荷内写入可选中转服务器后生成 APK 或
+Windows ZIP。安装包与源码包共用浏览器下载/App 原生保存链。游戏详情只负责查看、开始、清理数据
+和删除，不再提供导出；既有 `/package` 与 CLI 损坏项目修复语义不变。
 
 ```text
 外部 CLI dev

@@ -3,7 +3,8 @@
 ## 范围与边界
 
 本功能只检查并展示 App 更新，不下载、不校验安装包、不安装，也不在 App 内打开下载页。
-用户选择下载线路后，App 只把经过校验的 HTTPS 地址交给系统默认浏览器。
+用户选择下载线路后，App 把清单声明的地址交给系统默认浏览器；清单层不限制协议、凭据或
+Fragment，也不改写 URL。
 
 打包资源只有统一资源渠道目录 `assets/app/App.json`。`assets/app/app_update.json` 只是远端
 动态数据格式示例，不进入 Flutter 资源清单，也不作为运行时回退数据。
@@ -37,8 +38,9 @@
 - `App.json` 是 `{name, <resourceKey>: <manifest URL>, ...}` 渠道数组；资源键不设白名单，
   后续可以直接增加其他资源的远端 JSON 入口。
 - App 更新只读取 `app` 字段，缺少该字段的渠道跳过；其他资源字段和值不在这条链路校验。
-- 投影出的 App 清单源最多 16 项，名称、URL 不允许重复；清单源和下载线路只接受无凭据、
-  无 Fragment 的 canonical HTTPS URL。
+- 投影出的 App 清单源最多 16 项，名称、URL 不允许重复；URL 字段只要求是非空、首尾无
+  空白的字符串，不再执行 HTTPS、凭据或 Fragment 策略校验。网络客户端支持 HTTP/HTTPS，
+  自动跟随最多 5 次重定向且不复查跳转目标；无法请求的地址在实际访问时按网络失败处理。
 - 远端版本使用严格 `MAJOR.MINOR.PATCH`，并复用项目 `SemanticVersion` 比较。
 - 远端清单只接受 `version`、`releaseNotes` 和已支持的平台字段；未知字段拒绝。
 - 平台字段只包含 `downloads`，下载线路继续复用 `NamedDownloadEndpointList` 的数量、名称
@@ -59,7 +61,7 @@
 
 ## 验证入口
 
-- `test/core/update/app_update_models_test.dart`：清单模型、未知字段和 HTTPS 边界。
+- `test/core/update/app_update_models_test.dart`：清单模型、未知字段和 HTTP 链接语义。
 - `test/core/update/app_update_service_test.dart`：并发请求、坏源隔离、最大版本优先、平台
   选择顺序和外部浏览器调用。
 - `test/features/settings/settings_page_test.dart`：版本号、更新说明、线路名称、延迟和浏览器

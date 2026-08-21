@@ -23,6 +23,7 @@ typedef DeveloperNativeShareFile =
       Rect? sharePositionOrigin,
     );
 typedef DeveloperNativeTemporaryDirectory = Future<Directory> Function();
+typedef DeveloperNativeBackupFileDelete = Future<void> Function(File file);
 
 enum DeveloperNativeShareDisposition { accepted, cancelled, unavailable }
 
@@ -35,19 +36,26 @@ final class DeveloperNativeFileSaveServiceIo
     DeveloperNativeSaveLocationPicker? saveLocationPicker,
     DeveloperNativeShareFile? shareFile,
     DeveloperNativeTemporaryDirectory? temporaryDirectory,
+    DeveloperNativeBackupFileDelete? backupFileDelete,
     HttpClient Function()? httpClientFactory,
     DateTime Function()? clock,
+    bool? shareOnMobile,
   }) : _saveLocationPicker = saveLocationPicker ?? _defaultSaveLocationPicker,
        _shareFile = shareFile ?? _defaultShareFile,
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
+       _backupFileDelete = backupFileDelete ?? _defaultBackupFileDelete,
        _httpClientFactory = httpClientFactory ?? HttpClient.new,
-       _clock = clock ?? DateTime.now;
+       _clock = clock ?? DateTime.now,
+       _useMobileShare =
+           shareOnMobile ?? (Platform.isAndroid || Platform.isIOS);
 
   final DeveloperNativeSaveLocationPicker _saveLocationPicker;
   final DeveloperNativeShareFile _shareFile;
   final DeveloperNativeTemporaryDirectory _temporaryDirectory;
+  final DeveloperNativeBackupFileDelete _backupFileDelete;
   final HttpClient Function() _httpClientFactory;
   final DateTime Function() _clock;
+  final bool _useMobileShare;
 
   @override
   Future<DeveloperNativeFileSaveResult> save({
@@ -56,22 +64,30 @@ final class DeveloperNativeFileSaveServiceIo
     Rect? sharePositionOrigin,
   }) async {
     final staged = message.kind == DeveloperNativeFileSaveMessageKind.ready;
+    final installationPackage =
+        message.kind == DeveloperNativeFileSaveMessageKind.download &&
+        message.downloadPath != null &&
+        parseDeveloperInstallationPackageDownloadPath(message.downloadPath!) !=
+            null;
     if ((!staged &&
             message.kind != DeveloperNativeFileSaveMessageKind.download) ||
         message.downloadPath == null ||
         message.mimeType == null ||
-        (staged && (message.filename == null || message.size == null))) {
+        ((staged || installationPackage) &&
+            (message.filename == null || message.size == null))) {
       throw const FormatException('原生保存消息不是可下载消息');
     }
     final transferUri = workspaceUri.resolve(message.downloadPath!);
     if (staged) {
       _validateTransferUri(workspaceUri, transferUri);
+    } else if (installationPackage) {
+      _validateInstallationPackageUri(workspaceUri, transferUri);
     } else {
       _validateProjectPackageUri(workspaceUri, transferUri);
     }
     final token = workspaceUri.queryParameters['token']?.trim() ?? '';
     if (token.isEmpty) throw const FormatException('开发者会话 Token 缺失');
-    final filename = staged
+    final filename = staged || installationPackage
         ? message.filename!
         : await _projectPackageFilename(
             workspaceUri: workspaceUri,
@@ -80,7 +96,7 @@ final class DeveloperNativeFileSaveServiceIo
           );
 
     try {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (_useMobileShare) {
         return await _shareOnMobile(
           message: message,
           filename: filename,
@@ -96,7 +112,9 @@ final class DeveloperNativeFileSaveServiceIo
         token: token,
       );
     } finally {
-      if (staged) await _release(transferUri, token);
+      if (staged || installationPackage) {
+        await _release(transferUri, token);
+      }
     }
   }
 
@@ -121,6 +139,7 @@ final class DeveloperNativeFileSaveServiceIo
       '${destination.path}.playmesh-part-'
       '${message.transferId ?? message.requestId}',
     );
+    File? backup;
     try {
       await _download(
         transferUri,
@@ -128,16 +147,29 @@ final class DeveloperNativeFileSaveServiceIo
         partial,
         expectedLength: message.size,
       );
-      if (await destination.exists()) await destination.delete();
+      if (await destination.exists()) {
+        backup = File(
+          '${destination.path}.playmesh-backup-'
+          '${message.transferId ?? message.requestId}',
+        );
+        if (await backup.exists()) await backup.delete();
+        await destination.rename(backup.path);
+      }
       await partial.rename(destination.path);
-      return DeveloperNativeFileSaveResult(
-        DeveloperNativeFileSaveOutcome.saved,
-        path: destination.path,
-      );
     } on Object {
       if (await partial.exists()) await partial.delete();
+      if (backup != null &&
+          !await destination.exists() &&
+          await backup.exists()) {
+        await backup.rename(destination.path);
+      }
       rethrow;
     }
+    if (backup != null) await _cleanupCommittedBackup(backup);
+    return DeveloperNativeFileSaveResult(
+      DeveloperNativeFileSaveOutcome.saved,
+      path: destination.path,
+    );
   }
 
   Future<DeveloperNativeFileSaveResult> _shareOnMobile({
@@ -153,9 +185,10 @@ final class DeveloperNativeFileSaveServiceIo
     );
     await root.create(recursive: true);
     await _cleanupStaleMobileFiles(root);
+    final operationDirectory = await root.createTemp('save-');
+    final extension = _filenameExtension(filename);
     final destination = File(
-      '${root.path}${Platform.pathSeparator}'
-      '${message.transferId ?? message.requestId}-$filename',
+      '${operationDirectory.path}${Platform.pathSeparator}payload.$extension',
     );
     try {
       await _download(
@@ -171,7 +204,7 @@ final class DeveloperNativeFileSaveServiceIo
         sharePositionOrigin,
       );
       if (disposition == DeveloperNativeShareDisposition.cancelled) {
-        if (await destination.exists()) await destination.delete();
+        await _deleteDirectoryBestEffort(operationDirectory);
         return const DeveloperNativeFileSaveResult(
           DeveloperNativeFileSaveOutcome.cancelled,
         );
@@ -183,8 +216,20 @@ final class DeveloperNativeFileSaveServiceIo
         path: destination.path,
       );
     } on Object {
-      if (await destination.exists()) await destination.delete();
+      await _deleteDirectoryBestEffort(operationDirectory);
       rethrow;
+    }
+  }
+
+  Future<void> _cleanupCommittedBackup(File backup) async {
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        if (!await backup.exists()) return;
+        await _backupFileDelete(backup);
+        return;
+      } on Object {
+        if (attempt == 0) await Future<void>.delayed(Duration.zero);
+      }
     }
   }
 
@@ -305,10 +350,10 @@ final class DeveloperNativeFileSaveServiceIo
   Future<void> _cleanupStaleMobileFiles(Directory root) async {
     final cutoff = _clock().subtract(const Duration(days: 1));
     await for (final entity in root.list(followLinks: false)) {
-      if (entity is! File) continue;
+      if (entity is! File && entity is! Directory) continue;
       try {
-        if ((await entity.lastModified()).isBefore(cutoff)) {
-          await entity.delete();
+        if ((await entity.stat()).modified.isBefore(cutoff)) {
+          await entity.delete(recursive: entity is Directory);
         }
       } on Object {
         // 尽力清理：接收方此时仍可能持有内容 URI。
@@ -324,6 +369,16 @@ Future<FileSaveLocation?> _defaultSaveLocationPicker(
   suggestedName: suggestedName,
   acceptedTypeGroups: acceptedTypeGroups,
 );
+
+Future<void> _defaultBackupFileDelete(File file) => file.delete();
+
+Future<void> _deleteDirectoryBestEffort(Directory directory) async {
+  try {
+    if (await directory.exists()) await directory.delete(recursive: true);
+  } on Object {
+    // 后续过期清理仍会处理未能立即移除的移动端临时目录。
+  }
+}
 
 Future<DeveloperNativeShareDisposition> _defaultShareFile(
   File file,
@@ -374,5 +429,16 @@ void _validateProjectPackageUri(Uri workspaceUri, Uri packageUri) {
       packageUri.hasQuery ||
       packageUri.hasFragment) {
     throw const FormatException('项目包下载地址不属于当前开发者网关');
+  }
+}
+
+void _validateInstallationPackageUri(Uri workspaceUri, Uri packageUri) {
+  if (packageUri.scheme != workspaceUri.scheme ||
+      packageUri.host != workspaceUri.host ||
+      packageUri.port != workspaceUri.port ||
+      parseDeveloperInstallationPackageDownloadPath(packageUri.path) == null ||
+      packageUri.hasQuery ||
+      packageUri.hasFragment) {
+    throw const FormatException('安装包下载地址不属于当前开发者网关');
   }
 }

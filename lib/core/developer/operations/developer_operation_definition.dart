@@ -2,7 +2,7 @@ const developerAiChannelHeader = 'X-Playmesh-AI-Channel';
 
 enum DeveloperOperationRisk { low, medium, high }
 
-enum DeveloperOperationParameterLocation { path, query }
+enum DeveloperOperationParameterLocation { path, query, header }
 
 class DeveloperOperationParameter {
   const DeveloperOperationParameter({

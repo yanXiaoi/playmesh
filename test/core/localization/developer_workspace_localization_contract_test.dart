@@ -202,15 +202,30 @@ void main() {
         'id="uploadToPublishSource" class="export-option" type="button"',
       ),
     );
+    expect(
+      html,
+      contains(
+        'id="exportInstallationPackage" class="export-option" '
+        'type="button"',
+      ),
+    );
     expect(html, contains('data-i18n="workspace.export_source"'));
     expect(html, contains('data-i18n="workspace.upload_to_publish_source"'));
+    expect(html, contains('data-i18n="workspace.export_installation_package"'));
     expect(html, isNot(contains('workspace.export_intro')));
     expect(html, isNot(contains('workspace.export_source_description')));
     expect(
       html,
       isNot(contains('workspace.upload_to_publish_source_description')),
     );
-    expect(html, isNot(contains('<small')));
+    final exportChooserStart = html.indexOf('<div id="exportModal"');
+    final packageExportStart = html.indexOf('<div id="packageExportModal"');
+    expect(exportChooserStart, isNonNegative);
+    expect(packageExportStart, greaterThan(exportChooserStart));
+    expect(
+      html.substring(exportChooserStart, packageExportStart),
+      isNot(contains('<small')),
+    );
     expect(html, contains('id="publishModal" class="modal"'));
     expect(html, contains('id="publishForm" class="publish-body"'));
 
@@ -219,27 +234,45 @@ void main() {
     final exportEnd = script.indexOf('\n', exportStart);
     final exportSource = script.substring(exportStart, exportEnd);
     expect(exportSource, contains("endpoint('package','')"));
+    expect(exportSource, contains('await saveOrDownloadExport('));
+    expect(exportSource, contains('await waitForExportFeedback()'));
+    expect(exportSource, isNot(contains('__playmeshSaveBlobDownload')));
+    expect(exportSource, isNot(contains('startBrowserPackageDownload')));
+    expect(exportSource, isNot(contains('fetch(')));
+    expect(exportSource, isNot(contains('.blob(')));
+
+    final deliveryStart = script.indexOf(
+      'async function saveOrDownloadExport(',
+    );
+    final deliveryEnd = script.indexOf(
+      'async function exportProjectSource()',
+      deliveryStart,
+    );
+    expect(deliveryStart, isNonNegative);
+    expect(deliveryEnd, greaterThan(deliveryStart));
+    final deliverySource = script.substring(deliveryStart, deliveryEnd);
     expect(
-      exportSource,
+      deliverySource,
       contains("typeof globalThis.__playmeshSaveBlobDownload==='function'"),
     );
     expect(
-      exportSource,
-      contains(
-        'await globalThis.__playmeshSaveBlobDownload({url:downloadUrl})',
-      ),
+      deliverySource,
+      contains('await globalThis.__playmeshSaveBlobDownload(request)'),
     );
-    expect(exportSource, contains('await waitForExportFeedback()'));
-    expect(exportSource, contains('await waitForExportFeedback(180)'));
-    expect(exportSource, contains('await waitForExportFeedback(450)'));
-    expect(exportSource, contains('startBrowserPackageDownload(downloadUrl)'));
-    expect(exportSource, isNot(contains('fetch(')));
-    expect(exportSource, isNot(contains('.blob(')));
+    expect(deliverySource, contains('await waitForExportFeedback(180)'));
+    expect(deliverySource, contains('await waitForExportFeedback(450)'));
+    expect(
+      deliverySource,
+      contains('startBrowserPackageDownload(url,filename)'),
+    );
+    expect(deliverySource, isNot(contains('fetch(')));
+    expect(deliverySource, isNot(contains('.blob(')));
+    expect(deliverySource, isNot(contains('arrayBuffer(')));
     expect(
       script,
       contains(
-        "function startBrowserPackageDownload(downloadUrl){const link="
-        "document.createElement('a');link.href=downloadUrl;link.download='';"
+        "function startBrowserPackageDownload(downloadUrl,filename=''){const link="
+        "document.createElement('a');link.href=downloadUrl;link.download=filename;"
         'link.hidden=true;document.body.append(link)',
       ),
     );
@@ -271,7 +304,7 @@ void main() {
     );
     expect(css, contains('.export-option {'));
     expect(css, contains('grid-template-rows: 44px auto;'));
-    expect(css, contains('grid-template-columns: repeat(2, minmax(0, 1fr));'));
+    expect(css, contains('grid-template-columns: repeat(3, minmax(0, 1fr));'));
     expect(css, contains('height: auto;'));
     expect(css, contains('justify-items: stretch;'));
     expect(css, contains('.export-option strong {'));
@@ -285,6 +318,477 @@ void main() {
         "busy?tr('workspace.export_processing'):tr('workspace.export_source')",
       ),
     );
+  });
+
+  test('Workspace installation export uses the direct artifact contract', () {
+    final html = File('$developerRoot/workspace.html').readAsStringSync();
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+    final css = File('$developerRoot/workspace.css').readAsStringSync();
+    final zh = _readMessages('$localizationRoot/locales/zh-CN/app.json');
+    final en = _readMessages('$localizationRoot/locales/en-US/app.json');
+
+    expect(
+      html,
+      contains(
+        'id="packageExportModal" class="modal" role="dialog" '
+        'aria-modal="true" aria-labelledby="packageExportTitle"',
+      ),
+    );
+    expect(html, contains('id="packageExportForm"'));
+    for (final target in const [
+      'android-arm64',
+      'android-x86_64',
+      'windows-x64',
+    ]) {
+      expect(
+        RegExp(
+          'data-package-export-target="$target"[\\s\\S]*?'
+          'name="packageExportTarget" value="$target"',
+        ).hasMatch(html),
+        isTrue,
+        reason: 'The target ID must cross the frontend API unchanged.',
+      );
+    }
+    for (final field in const [
+      'installed',
+      'downloadAvailable',
+      'runtimeVersion',
+      'status',
+    ]) {
+      expect(html, contains('data-package-export-field="$field"'));
+    }
+    expect(
+      html,
+      contains(
+        'id="packageExportRelayTrigger" class="package-export-relay-trigger" '
+        'type="button" aria-haspopup="listbox" aria-expanded="false" '
+        'aria-controls="packageExportRelayMenu"',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportRelayMenu" class="package-export-relay-menu" '
+        'hidden',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportRelaySearch" type="search" role="searchbox" '
+        'autocomplete="off" spellcheck="false" '
+        'aria-controls="packageExportRelayList"',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportRelayList" class="package-export-relay-list" '
+        'role="listbox" aria-labelledby="packageExportRelayLabel"',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportCustomRelayField" '
+        'class="package-export-custom-relay" '
+        'for="packageExportRelayServer" hidden',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportRelayServer" name="packageExportRelayServer" '
+        'type="url" inputmode="url" maxlength="2048"',
+      ),
+    );
+    expect(html, contains('id="packageExportRefreshRuntime"'));
+    final runtimeActionsStart = html.indexOf(
+      '<div class="package-export-runtime-actions">',
+    );
+    final settingsStart = html.indexOf(
+      '<section class="package-export-settings"',
+    );
+    final settingsEnd = html.indexOf('</section>', settingsStart);
+    expect(runtimeActionsStart, isNonNegative);
+    expect(settingsStart, greaterThan(runtimeActionsStart));
+    expect(settingsEnd, greaterThan(settingsStart));
+    final runtimeActionsSource = html.substring(
+      runtimeActionsStart,
+      settingsStart,
+    );
+    final settingsSource = html.substring(settingsStart, settingsEnd);
+    expect(runtimeActionsSource, contains('id="packageExportRefreshRuntime"'));
+    expect(settingsSource, contains('id="packageExportRelayServer"'));
+    expect(settingsSource, contains('id="packageExportRelayPicker"'));
+    expect(settingsSource, isNot(contains('id="packageExportRefreshRuntime"')));
+    expect(settingsSource, isNot(contains('packageExportRelayServerId')));
+    expect(
+      RegExp('<label(?:\\s|>)').allMatches(settingsSource).length,
+      2,
+      reason: 'Only the relay search and custom URL require form labels.',
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportStatus" class="package-export-result" '
+        'role="status" aria-live="polite"',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportProgress" class="package-export-progress" '
+        'role="status" aria-live="polite" hidden',
+      ),
+    );
+    expect(
+      html,
+      contains(
+        'id="packageExportProgressBar" max="100" value="0" '
+        'data-i18n-aria-label="workspace.package_export_progress_label"',
+      ),
+    );
+    for (final stage in const [
+      'preparing',
+      'runtime_check',
+      'runtime_download',
+      'runtime_verified',
+      'package_build',
+      'native_export',
+      'completed',
+      'failed',
+    ]) {
+      final key = 'workspace.package_export_progress_$stage';
+      expect(zh[key], isNotEmpty, reason: 'Missing zh-CN progress key: $key');
+      expect(en[key], isNotEmpty, reason: 'Missing en-US progress key: $key');
+    }
+    for (final key in const [
+      'workspace.package_export_progress_label',
+      'workspace.package_export_progress_runtime_download_bytes',
+      'workspace.package_export_progress_runtime_download_received',
+    ]) {
+      expect(zh[key], isNotEmpty, reason: 'Missing zh-CN progress key: $key');
+      expect(en[key], isNotEmpty, reason: 'Missing en-US progress key: $key');
+    }
+    for (final key in const [
+      'workspace.package_export_relay_custom',
+      'workspace.package_export_relay_custom_help',
+      'workspace.package_export_relay_custom_option_help',
+      'workspace.package_export_relay_custom_required',
+      'workspace.package_export_relay_empty',
+      'workspace.package_export_relay_latency',
+      'workspace.package_export_relay_no_results',
+      'workspace.package_export_relay_none',
+      'workspace.package_export_relay_none_help',
+      'workspace.package_export_relay_search',
+      'workspace.package_export_relay_server',
+      'workspace.package_export_relay_server_help',
+      'workspace.package_export_relay_server_placeholder',
+    ]) {
+      expect(zh[key], isNotEmpty, reason: 'Missing zh-CN relay key: $key');
+      expect(en[key], isNotEmpty, reason: 'Missing en-US relay key: $key');
+    }
+
+    expect(script, contains("packageExportRelaySelection='none'"));
+    expect(
+      script,
+      contains("packageExportRelayOption('none',noneName"),
+      reason: 'The picker must always offer an explicit no-relay choice.',
+    );
+    expect(
+      script,
+      contains("packageExportRelayOption('server:'+server.id,server.name"),
+      reason: 'Configured servers must be selected through their stable ID.',
+    );
+    expect(
+      script,
+      contains("packageExportRelayOption('custom',customName"),
+      reason: 'Browser workspaces must retain the custom relay URL choice.',
+    );
+    expect(
+      script,
+      contains(
+        "query=q('packageExportRelaySearch').value.trim()"
+        '.toLocaleLowerCase()',
+      ),
+      reason: 'The relay picker must filter from its search box.',
+    );
+    expect(
+      script,
+      contains('if(matches(server.name,server.address,latency))'),
+      reason: 'Configured relays are searchable by name, address, and latency.',
+    );
+    expect(
+      script,
+      contains(
+        "q('packageExportRelaySearch').oninput="
+        'renderPackageExportRelayOptions',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "if(value!=='none'&&value!=='custom'&&"
+        '!packageExportRelayServer(value))return',
+      ),
+      reason: 'Only none, configured, and custom relay choices are accepted.',
+    );
+    expect(
+      script,
+      contains(
+        "const parsed=new URL(address);if(!['http:','https:'].includes("
+        'parsed.protocol)',
+      ),
+      reason: 'Configured relay addresses must be parsed as HTTP(S) URLs.',
+    );
+    expect(
+      script,
+      contains(
+        "if(tokenValue)parsed.searchParams.set('token',tokenValue);"
+        'url=parsed.toString()',
+      ),
+      reason: 'The frontend composes the configured address and token safely.',
+    );
+    expect(
+      script,
+      contains('records.push({id,name,address,latencyMs,url})'),
+      reason: 'The token-bearing URL and display address must stay distinct.',
+    );
+    expect(
+      script,
+      contains(
+        "q('packageExportCustomRelayField').hidden=!custom;"
+        "q('packageExportRelayServer').required=custom",
+      ),
+      reason: 'Only the custom choice exposes and requires the URL input.',
+    );
+
+    final optionKeyStart = script.indexOf(
+      'function handlePackageExportRelayOptionKeydown(',
+    );
+    final searchKeyStart = script.indexOf(
+      'function handlePackageExportRelaySearchKeydown(',
+      optionKeyStart,
+    );
+    final searchKeyEnd = script.indexOf(
+      'function setInstallationExportChooserBusy(',
+      searchKeyStart,
+    );
+    expect(optionKeyStart, isNonNegative);
+    expect(searchKeyStart, greaterThan(optionKeyStart));
+    expect(searchKeyEnd, greaterThan(searchKeyStart));
+    final relayEscapeHandlers = [
+      script.substring(optionKeyStart, searchKeyStart),
+      script.substring(searchKeyStart, searchKeyEnd),
+    ];
+    final triggerKeyStart = script.indexOf(
+      "q('packageExportRelayTrigger').onkeydown=",
+    );
+    final triggerKeyEnd = script.indexOf(
+      "q('packageExportRelaySearch').oninput=",
+      triggerKeyStart,
+    );
+    expect(triggerKeyStart, isNonNegative);
+    expect(triggerKeyEnd, greaterThan(triggerKeyStart));
+    relayEscapeHandlers.add(script.substring(triggerKeyStart, triggerKeyEnd));
+    for (final source in relayEscapeHandlers) {
+      expect(source, contains("event.key==='Escape'"));
+      expect(source, contains('event.stopPropagation()'));
+      expect(source, contains('closePackageExportRelayMenu(true)'));
+      expect(
+        source,
+        isNot(contains('closePackageExportModal')),
+        reason: 'Escape in the open picker closes only the picker.',
+      );
+    }
+
+    expect(
+      RegExp(
+        "api\\(endpoint\\('package-exports',''\\)",
+      ).allMatches(script).length,
+      greaterThanOrEqualTo(2),
+      reason: 'GET options and POST create share the fixed collection URL.',
+    );
+    expect(
+      script,
+      contains(
+        "body={target,refreshRuntime:q('packageExportRefreshRuntime').checked,"
+        'relayServer:relayValue||null}',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "api(endpoint('package-exports',''),{method:'POST',headers:"
+        '{[packageExportProgressRequestHeader]:progressRequestId},'
+        'body:JSON.stringify(body)})',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        'saveOrDownloadExport({url:artifact.downloadPath,'
+        'filename:artifact.filename,mimeType:artifact.mimeType,'
+        'size:artifact.size,onStart:',
+      ),
+    );
+    expect(
+      RegExp(r'\bsaveOrDownloadExport\(').allMatches(script).length,
+      3,
+      reason: 'One helper definition must serve source and package export.',
+    );
+
+    final submitStart = script.indexOf(
+      'async function submitPackageExport(event)',
+    );
+    final submitEnd = script.indexOf(
+      'function formatPublishBytes',
+      submitStart,
+    );
+    expect(submitStart, isNonNegative);
+    expect(submitEnd, greaterThan(submitStart));
+    final submitSource = script.substring(submitStart, submitEnd);
+    expect(
+      submitSource,
+      contains(
+        "const selectedRelay=packageExportRelayServer("
+        'packageExportRelaySelection),custom='
+        "packageExportRelaySelection==='custom',relayValue="
+        "selectedRelay?.url||(custom?q('packageExportRelayServer').value.trim():"
+        "'')",
+      ),
+      reason: 'Configured and custom choices converge on one relay URL.',
+    );
+    expect(
+      submitSource,
+      contains(
+        "body={target,refreshRuntime:q('packageExportRefreshRuntime').checked,"
+        'relayServer:relayValue||null}',
+      ),
+    );
+    expect(
+      submitSource,
+      isNot(contains('relayServerId')),
+      reason:
+          'POST create accepts only relayServer, never a browser-picked ID.',
+    );
+    expect(submitSource, isNot(contains('.blob(')));
+    expect(submitSource, isNot(contains('response.arrayBuffer(')));
+    expect(submitSource, isNot(contains('__playmeshSaveBlobDownload')));
+    expect(submitSource, isNot(contains('startBrowserPackageDownload')));
+    expect(
+      script,
+      contains(
+        "packageExportProgressRequestHeader='X-Playmesh-Package-Export-Request-ID'",
+      ),
+    );
+    expect(
+      submitSource,
+      contains('response.headers.get(packageExportProgressRequestHeader)'),
+    );
+    expect(
+      script,
+      contains('data.progressRequestId!==expectedProgressRequestId'),
+    );
+    expect(script, contains('data.projectId!==expectedProjectId'));
+    expect(
+      script,
+      contains("events.addEventListener('package_export.progress'"),
+    );
+    for (final isolationCheck in const [
+      'data.projectId!==active.projectId',
+      'data.requestId!==active.requestId',
+      'data.target!==active.target',
+    ]) {
+      expect(
+        script,
+        contains(isolationCheck),
+        reason: 'Unrelated progress events must be ignored.',
+      );
+    }
+    expect(script, contains("data?.type!=='package_export.progress'"));
+    expect(
+      script,
+      contains("bar.removeAttribute('value')"),
+      reason: 'Unknown Runtime totals must use native indeterminate progress.',
+    );
+    expect(script, contains('received/total*100'));
+    expect(
+      script,
+      contains("active.terminal=stage==='completed'||stage==='failed'"),
+    );
+    expect(script, contains("!/^[A-Za-z0-9_-]{20,64}\$/.test(exportId)"));
+    expect(
+      script,
+      contains(
+        "mimeType!=='application/vnd.android.package-archive'&&"
+        "mimeType!=='application/zip'",
+      ),
+    );
+    expect(
+      script,
+      contains(r'\u0000-\u001f\u007f'),
+      reason: 'Artifact filenames must reject controls and DEL.',
+    );
+    expect(script, contains('!Number.isSafeInteger(size)||size<1'));
+    expect(
+      script,
+      contains("function startBrowserPackageDownload(downloadUrl,filename='')"),
+    );
+    final browserDownloadStart = script.indexOf(
+      'function startBrowserPackageDownload',
+    );
+    final browserDownloadEnd = script.indexOf(
+      'async function saveOrDownloadExport',
+      browserDownloadStart,
+    );
+    final browserDownloadSource = script.substring(
+      browserDownloadStart,
+      browserDownloadEnd,
+    );
+    expect(browserDownloadSource, contains('link.href=downloadUrl'));
+    expect(browserDownloadSource, contains('link.download=filename'));
+    expect(browserDownloadSource, isNot(contains('fetch(')));
+    expect(browserDownloadSource, isNot(contains('URL.createObjectURL')));
+    final deliveryStart = script.indexOf(
+      'async function saveOrDownloadExport(',
+    );
+    final deliveryEnd = script.indexOf(
+      'async function exportProjectSource()',
+      deliveryStart,
+    );
+    expect(deliveryStart, isNonNegative);
+    expect(deliveryEnd, greaterThan(deliveryStart));
+    final deliverySource = script.substring(deliveryStart, deliveryEnd);
+    for (final forbidden in const [
+      'fetch(',
+      '.blob(',
+      'arrayBuffer(',
+      'URL.createObjectURL',
+    ]) {
+      expect(
+        deliverySource,
+        isNot(contains(forbidden)),
+        reason: 'Exports must pass the artifact URL through without a Blob.',
+      );
+    }
+
+    expect(css, contains('.package-export-targets {'));
+    expect(css, contains('.package-export-target {'));
+    expect(css, contains('min-height: var(--target-size);'));
+    expect(css, contains('.package-export-result {'));
+    expect(css, contains('.package-export-progress {'));
+    expect(css, contains('.package-export-progress.completed {'));
+    expect(css, contains('.package-export-progress.failed {'));
+    expect(css, contains('.package-export-relay-picker {'));
+    expect(css, contains('.package-export-relay-trigger {'));
+    expect(css, contains('.package-export-relay-menu {'));
+    expect(css, contains('.package-export-relay-search {'));
+    expect(css, contains('.package-export-relay-list {'));
+    expect(css, contains('.package-export-relay-option {'));
+    expect(css, contains('.package-export-custom-relay[hidden] {'));
+    expect(css, contains('.package-export-actions {'));
   });
 
   test('Opening a file keeps the existing project tree in place', () {
@@ -806,6 +1310,20 @@ void main() {
       script,
       contains("bindModalKeyboard(modal,null,{escapeCloses:false})"),
       reason: 'Escape must not resolve or bypass the AI approval decision.',
+    );
+    expect(
+      script,
+      contains("if(modal.id==='packageExportModal')"),
+      reason: 'The package export modal must use the shared Escape contract.',
+    );
+    expect(
+      script,
+      contains('bindModalKeyboard(modal,closePackageExportModal)'),
+    );
+    expect(
+      script,
+      contains('modal.__playmeshReturnFocus=returnFocus'),
+      reason: 'Switching modals must still return focus to the export trigger.',
     );
     expect(
       html,

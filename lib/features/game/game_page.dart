@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:playmesh_share_ui/playmesh_share_ui.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/catalog/game_catalog_models.dart';
 import '../../core/catalog/online_game_catalog.dart';
@@ -111,8 +111,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   int _runtimeGeneration = 0;
   int _configurationGeneration = 0;
-  final GlobalKey<_ShareOverlayState> _shareOverlayKey =
-      GlobalKey<_ShareOverlayState>();
+  final GlobalKey<PlaymeshSharePanelState> _shareOverlayKey =
+      GlobalKey<PlaymeshSharePanelState>();
   late final GameOrientationController _orientationController;
   Future<void> _orientationOperation = Future<void>.value();
   Object? _fullscreenError;
@@ -423,44 +423,37 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
               ),
             if (_shareVisible)
               Positioned.fill(
-                child: _ShareOverlay(
-                  key: _shareOverlayKey,
-                  joinCode: _bridge?.connection.snapshot.joinCode,
-                  links:
-                      _shareState?.snapshot.lanLinks ?? const <GameShareLink>[],
-                  selectedLink: _selectedShareLink,
-                  loading: _shareState?.channel == ShareChannelState.starting,
-                  error: _shareErrorCode == null
-                      ? null
-                      : context.tr('game.share_unavailable'),
-                  publicationError:
-                      _publicationErrorCode == null ||
-                          (_shareState?.snapshot.lanLinks.isEmpty ?? true)
-                      ? null
-                      : context.tr('game.nearby_discovery_unavailable'),
-                  players:
-                      _bridge?.connection.snapshot.players ??
-                      const <GameSessionPlayer>[],
-                  relaySources: _relaySources,
-                  relaySourcesLoading: _relaySourcesLoading,
-                  relayConnecting:
-                      _shareState?.relayStatus ==
-                      RelayConnectionStatus.connecting,
-                  relaySource: _relaySource,
-                  relayLink: _shareState?.snapshot.wanLink,
-                  relayStatus:
-                      _shareState?.relayStatus ??
-                      RelayConnectionStatus.disconnected,
-                  relayError: _relayErrorCode == null
-                      ? null
-                      : context.tr(_relayErrorCode!),
-                  onClose: _hideShare,
-                  onSelectLink: (link) {
-                    setState(() => _selectedShareLink = link);
-                  },
-                  onLoadRelaySources: _loadRelaySources,
-                  onConnectRelay: _connectRelay,
-                  onDisconnectRelay: _disconnectRelay,
+                child: ColoredBox(
+                  color: const Color(0xc7000000),
+                  child: SafeArea(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: PlaymeshSharePanel(
+                          key: _shareOverlayKey,
+                          model: _buildSharePanelModel(context),
+                          strings: _buildSharePanelStrings(context),
+                          actionMode:
+                              !kIsWeb &&
+                                  defaultTargetPlatform ==
+                                      TargetPlatform.windows
+                              ? PlaymeshShareActionMode.copy
+                              : PlaymeshShareActionMode.share,
+                          onClose: _hideShare,
+                          onSelectLanLink: _selectSharePanelLanLink,
+                          onLinkAction: _actOnSharePanelLink,
+                          onInternetOpened: () {
+                            if (_relaySource == null) {
+                              return _loadRelaySources();
+                            }
+                          },
+                          onServerSelected: _selectSharePanelServer,
+                          onServerRefresh: _loadRelaySources,
+                          onServerDisconnected: _disconnectRelay,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
           ],
@@ -1374,6 +1367,154 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     });
   }
 
+  PlaymeshSharePanelModel _buildSharePanelModel(BuildContext context) {
+    final snapshot = _shareState?.snapshot;
+    final lanLinks = snapshot?.lanLinks ?? const <GameShareLink>[];
+    final internetLink = snapshot?.wanLink;
+    final relayConnecting =
+        _shareState?.relayStatus == RelayConnectionStatus.connecting;
+    final selectedLanIndex = lanLinks.indexWhere(
+      (link) => link.url == _selectedShareLink?.url,
+    );
+    final players =
+        _bridge?.connection.snapshot.players ?? const <GameSessionPlayer>[];
+    final joinCode = _bridge?.connection.snapshot.joinCode;
+    final relayError = _sharePanelRelayError(context);
+    final lanError = _shareErrorCode != null
+        ? context.tr('game.share_unavailable')
+        : _publicationErrorCode != null && lanLinks.isNotEmpty
+        ? context.tr('game.nearby_discovery_unavailable')
+        : null;
+    return PlaymeshSharePanelModel(
+      title: joinCode == null
+          ? context.tr('game.share_title')
+          : context.tr('game.join_code_title', arguments: {'code': joinCode}),
+      lanLinks: List<PlaymeshShareLink>.generate(
+        lanLinks.length,
+        (index) => _toSharePanelLink(lanLinks[index], id: 'lan-$index'),
+        growable: false,
+      ),
+      selectedLanLinkId: selectedLanIndex < 0 ? null : 'lan-$selectedLanIndex',
+      internetLinks: internetLink == null
+          ? const <PlaymeshShareLink>[]
+          : <PlaymeshShareLink>[
+              _toSharePanelLink(internetLink, id: 'internet-0'),
+            ],
+      selectedInternetLinkId: internetLink == null ? null : 'internet-0',
+      participants: players
+          .map(
+            (player) => PlaymeshShareParticipant(
+              id: player.id,
+              name: player.nickname,
+              connected: player.connected,
+            ),
+          )
+          .toList(growable: false),
+      serverCatalog: PlaymeshShareServerCatalog(
+        options: _relaySources
+            .map(
+              (probe) => PlaymeshShareServerOption(
+                id: probe.source.id,
+                name: probe.source.name,
+                latencyMilliseconds: probe.elapsed.inMilliseconds,
+                enabled: probe.supportsGameRelay,
+              ),
+            )
+            .toList(growable: false),
+        selectedId: _relaySource?.source.id,
+        loading: _relaySourcesLoading,
+        errorMessage: relayError,
+        searchEnabled: true,
+        selectionEnabled: !relayConnecting,
+        refreshEnabled: !relayConnecting && !_relaySourcesLoading,
+      ),
+      lanLoading: _shareState?.channel == ShareChannelState.starting,
+      lanError: lanError,
+      internetLoading: relayConnecting,
+    );
+  }
+
+  PlaymeshSharePanelStrings _buildSharePanelStrings(BuildContext context) {
+    return PlaymeshSharePanelStrings(
+      closeTooltip: context.tr('game.share_close'),
+      lanTab: context.tr('game.share_lan'),
+      internetTab: context.tr('game.share_internet'),
+      roomTab: context.tr('game.share_room'),
+      lanHint: context.tr('game.share_lan_hint'),
+      internetHint: context.tr('game.share_internet_hint'),
+      roomHint: context.tr('game.share_room_hint'),
+      noLanLinks: context.tr('game.share_no_lan_addresses'),
+      noInternetLinks: context.tr('game.share_no_internet_link'),
+      noPlayers: context.tr('game.room_empty'),
+      serverSearchHint: context.tr('game.relay_search'),
+      noServers: context.tr('game.relay_empty'),
+      refreshServersTooltip: context.tr('game.relay_refresh_latency'),
+      disconnectServer: context.tr('game.server_disconnect'),
+      shareLinkTooltip: context.tr('common.share'),
+      copyLinkTooltip: context.tr('game.share_link_copy'),
+      qrSemantics: context.tr('game.share_qr_semantics'),
+      playerOnline: context.tr('game.player_online'),
+      playerOffline: context.tr('game.player_disconnected'),
+    );
+  }
+
+  String? _sharePanelRelayError(BuildContext context) {
+    return switch (_relayErrorCode) {
+      null => null,
+      'game.relay_catalog_unavailable' => context.tr(
+        'game.relay_catalog_unavailable',
+      ),
+      'game.relay_load_failed_safe' => context.tr(
+        'game.relay_load_failed_safe',
+      ),
+      _ => context.tr('game.relay_connect_failed_safe'),
+    };
+  }
+
+  PlaymeshShareLink _toSharePanelLink(
+    GameShareLink link, {
+    required String id,
+  }) {
+    return PlaymeshShareLink(
+      id: id,
+      url: link.url,
+      qrPngBytes: Uint8List.fromList(link.pngBytes),
+    );
+  }
+
+  void _selectSharePanelLanLink(String id) {
+    final index = _sharePanelLinkIndex(id, prefix: 'lan-');
+    final lanLinks = _shareState?.snapshot.lanLinks ?? const <GameShareLink>[];
+    if (index == null || index >= lanLinks.length) return;
+    setState(() => _selectedShareLink = lanLinks[index]);
+  }
+
+  Future<void> _actOnSharePanelLink(PlaymeshShareLink link) async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      await Clipboard.setData(ClipboardData(text: link.url.toString()));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.tr('game.share_link_copied'))),
+      );
+      return;
+    }
+    await SharePlus.instance.share(ShareParams(text: link.url.toString()));
+  }
+
+  Future<void> _selectSharePanelServer(String id) async {
+    final probe = _relaySources
+        .where((probe) => probe.source.id == id)
+        .firstOrNull;
+    if (probe == null) return;
+    await _connectRelay(probe);
+  }
+
+  int? _sharePanelLinkIndex(String id, {required String prefix}) {
+    if (!id.startsWith(prefix)) return null;
+    final index = int.tryParse(id.substring(prefix.length));
+    return index != null && index >= 0 ? index : null;
+  }
+
   Future<void> _stopShare() async {
     _shareOpenOperation = null;
     final subscription = _shareStateSubscription;
@@ -1478,769 +1619,6 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     } on Object catch (error) {
       debugPrint('Failed to close the game session after exit: $error');
     }
-  }
-}
-
-enum _SharePanelTab { lan, server, room }
-
-class _ShareOverlay extends StatefulWidget {
-  const _ShareOverlay({
-    super.key,
-    required this.joinCode,
-    required this.links,
-    required this.selectedLink,
-    required this.loading,
-    required this.error,
-    required this.publicationError,
-    required this.players,
-    required this.relaySources,
-    required this.relaySourcesLoading,
-    required this.relayConnecting,
-    required this.relaySource,
-    required this.relayLink,
-    required this.relayStatus,
-    required this.relayError,
-    required this.onClose,
-    required this.onSelectLink,
-    required this.onLoadRelaySources,
-    required this.onConnectRelay,
-    required this.onDisconnectRelay,
-  });
-
-  final String? joinCode;
-  final List<GameShareLink> links;
-  final GameShareLink? selectedLink;
-  final bool loading;
-  final String? error;
-  final String? publicationError;
-  final List<GameSessionPlayer> players;
-  final List<OnlineGameSourceProbe> relaySources;
-  final bool relaySourcesLoading;
-  final bool relayConnecting;
-  final OnlineGameSourceProbe? relaySource;
-  final GameShareLink? relayLink;
-  final RelayConnectionStatus relayStatus;
-  final String? relayError;
-  final Future<void> Function() onClose;
-  final ValueChanged<GameShareLink> onSelectLink;
-  final Future<void> Function() onLoadRelaySources;
-  final Future<void> Function(OnlineGameSourceProbe) onConnectRelay;
-  final Future<void> Function() onDisconnectRelay;
-
-  @override
-  State<_ShareOverlay> createState() => _ShareOverlayState();
-}
-
-class _ShareOverlayState extends State<_ShareOverlay> {
-  static const _relayPageSize = 5;
-
-  final FocusNode _closeFocusNode = FocusNode(debugLabel: 'game-share-close');
-  _SharePanelTab _tab = _SharePanelTab.lan;
-  String _search = '';
-  int _page = 1;
-
-  void requestCloseFocus() {
-    if (_closeFocusNode.canRequestFocus) {
-      _closeFocusNode.requestFocus();
-    }
-  }
-
-  @override
-  void dispose() {
-    _closeFocusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            unawaited(widget.onClose()),
-      },
-      child: ColoredBox(
-        color: const Color(0xc7000000),
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, viewport) {
-              final panelWidth = min(720.0, max(0.0, viewport.maxWidth - 20));
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: 720,
-                      maxHeight: max(120.0, viewport.maxHeight - 20),
-                    ),
-                    child: Theme(
-                      data: Theme.of(context),
-                      child: Material(
-                        color: colorScheme.surface,
-                        borderRadius: BorderRadius.circular(8),
-                        clipBehavior: Clip.antiAlias,
-                        child: SizedBox(
-                          width: panelWidth,
-                          child: SingleChildScrollView(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    20,
-                                    10,
-                                    8,
-                                    8,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          widget.joinCode == null
-                                              ? context.tr('game.share_title')
-                                              : context.tr(
-                                                  'game.join_code_title',
-                                                  arguments: {
-                                                    'code': widget.joinCode,
-                                                  },
-                                                ),
-                                          style:
-                                              const TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w800,
-                                              ).copyWith(
-                                                color: colorScheme.onSurface,
-                                              ),
-                                        ),
-                                      ),
-                                      IconButton(
-                                        key: const Key('game-share-close'),
-                                        focusNode: _closeFocusNode,
-                                        autofocus: true,
-                                        tooltip: context.tr('game.share_close'),
-                                        color: colorScheme.onSurface,
-                                        onPressed: () =>
-                                            unawaited(widget.onClose()),
-                                        icon: const Icon(Icons.close),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Divider(height: 1),
-                                _buildTabs(),
-                                const Divider(height: 1),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 160),
-                                  child: KeyedSubtree(
-                                    key: ValueKey(_tab),
-                                    child: switch (_tab) {
-                                      _SharePanelTab.lan => _buildLan(
-                                        panelWidth,
-                                      ),
-                                      _SharePanelTab.server => _buildServer(
-                                        panelWidth,
-                                      ),
-                                      _SharePanelTab.room => _buildRoom(),
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabs() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        children: [
-          _tabButton(
-            _SharePanelTab.lan,
-            Icons.lan_outlined,
-            context.tr('game.share_lan'),
-          ),
-          const SizedBox(width: 8),
-          _tabButton(
-            _SharePanelTab.server,
-            Icons.public_outlined,
-            context.tr('game.share_server'),
-          ),
-          const SizedBox(width: 8),
-          _tabButton(
-            _SharePanelTab.room,
-            Icons.groups_outlined,
-            context.tr(
-              'game.room_status_count',
-              arguments: {
-                'count': widget.players
-                    .where((player) => player.connected)
-                    .length,
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tabButton(_SharePanelTab value, IconData icon, String label) {
-    final selected = _tab == value;
-    final colorScheme = Theme.of(context).colorScheme;
-    return Expanded(
-      child: Material(
-        color: selected
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () {
-            setState(() => _tab = value);
-            if (value == _SharePanelTab.server && widget.relaySource == null) {
-              unawaited(widget.onLoadRelaySources());
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 18),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLan(double panelWidth) {
-    if (widget.loading) {
-      return const SizedBox(
-        height: 240,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (widget.error != null) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          widget.error!,
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-      );
-    }
-    if (widget.links.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: _ShareAddressList(
-          links: widget.links,
-          selectedLink: null,
-          onSelectLink: widget.onSelectLink,
-        ),
-      );
-    }
-    final compact = panelWidth < 590;
-    final qr = _qrCard(
-      widget.selectedLink,
-      min(compact ? 168.0 : 214.0, max(48.0, panelWidth - 64)),
-    );
-    final addresses = _ShareAddressList(
-      links: widget.links,
-      selectedLink: widget.selectedLink,
-      onSelectLink: widget.onSelectLink,
-    );
-    if (compact) {
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(child: qr),
-            const SizedBox(height: 16),
-            if (widget.publicationError != null) ...[
-              Text(
-                widget.publicationError!,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-              const SizedBox(height: 12),
-            ],
-            addresses,
-          ],
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          qr,
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (widget.publicationError != null) ...[
-                  Text(
-                    widget.publicationError!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                addresses,
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildServer(double panelWidth) {
-    final source = widget.relaySource;
-    if (source != null) {
-      return _buildConnectedServer(source, panelWidth);
-    }
-    final query = _search.trim().toLowerCase();
-    final filtered = widget.relaySources
-        .where((probe) {
-          final haystack = [
-            probe.source.name,
-            probe.source.host.toString(),
-          ].join('\n').toLowerCase();
-          return query.isEmpty || haystack.contains(query);
-        })
-        .toList(growable: false);
-    final pageCount = max(1, (filtered.length / _relayPageSize).ceil());
-    final page = _page.clamp(1, pageCount);
-    final start = min(filtered.length, (page - 1) * _relayPageSize);
-    final visible = filtered
-        .skip(start)
-        .take(_relayPageSize)
-        .toList(growable: false);
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(
-                    isDense: true,
-                    prefixIcon: const Icon(Icons.search),
-                    hintText: context.tr('game.relay_search'),
-                    border: const OutlineInputBorder(),
-                  ),
-                  onChanged: (value) => setState(() {
-                    _search = value;
-                    _page = 1;
-                  }),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: context.tr('game.relay_refresh_latency'),
-                onPressed: widget.relaySourcesLoading
-                    ? null
-                    : () => unawaited(widget.onLoadRelaySources()),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (widget.relaySourcesLoading)
-            const SizedBox(
-              height: 180,
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (widget.relayError != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 36),
-              child: Text(
-                context.tr(
-                  'game.relay_load_failed',
-                  arguments: {'error': widget.relayError},
-                ),
-                textAlign: TextAlign.center,
-              ),
-            )
-          else if (visible.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 48),
-              child: Text(
-                context.tr('game.relay_empty'),
-                textAlign: TextAlign.center,
-              ),
-            )
-          else
-            for (final probe in visible) _relaySourceTile(probe),
-          if (!widget.relaySourcesLoading && filtered.isNotEmpty)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: context.tr('common.previous_page'),
-                  onPressed: page <= 1
-                      ? null
-                      : () => setState(() => _page = page - 1),
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Text('$page / $pageCount'),
-                IconButton(
-                  tooltip: context.tr('common.next_page'),
-                  onPressed: page >= pageCount
-                      ? null
-                      : () => setState(() => _page = page + 1),
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _relaySourceTile(OnlineGameSourceProbe probe) {
-    final declaration = probe.declaration!;
-    final homepage = declaration.homepage;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: ListTile(
-        title: Text(
-          probe.source.name,
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${probe.source.host} · ${probe.elapsed.inMilliseconds} ms'),
-            if (homepage != null)
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: () => unawaited(
-                  launchUrl(homepage, mode: LaunchMode.externalApplication),
-                ),
-                icon: const Icon(Icons.open_in_new, size: 15),
-                label: Text(context.tr('game.source_homepage')),
-              ),
-          ],
-        ),
-        trailing: FilledButton(
-          onPressed: widget.relayConnecting
-              ? null
-              : () => unawaited(widget.onConnectRelay(probe)),
-          child: Text(context.tr('game.connect')),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildConnectedServer(
-    OnlineGameSourceProbe source,
-    double panelWidth,
-  ) {
-    final declaration = source.declaration!;
-    final invitation = widget.relayLink;
-    final compact = panelWidth < 590;
-    final details = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          source.source.name,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          context.tr(
-            'game.source_address',
-            arguments: {'address': source.source.host},
-          ),
-        ),
-        Text(
-          context.tr(
-            'game.relay_address',
-            arguments: {'address': declaration.relay!.publicBaseUrl},
-          ),
-        ),
-        Text(
-          context.tr(
-            'game.relay_latency',
-            arguments: {'latency': source.elapsed.inMilliseconds},
-          ),
-        ),
-        Text(
-          context.tr(
-            'game.connection_status',
-            arguments: {'status': _relayStatusLabel(widget.relayStatus)},
-          ),
-        ),
-        if (widget.relayError != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            widget.relayError.toString(),
-            style: const TextStyle(color: Colors.redAccent),
-          ),
-        ],
-        if (invitation != null) ...[
-          const SizedBox(height: 12),
-          SelectableText(
-            invitation.url.toString(),
-            style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => _copyLink(context, invitation.url),
-            icon: const Icon(Icons.copy),
-            label: Text(context.tr('game.server_join_link_copy')),
-          ),
-        ],
-        const SizedBox(height: 8),
-        FilledButton.tonalIcon(
-          onPressed: widget.relayConnecting
-              ? null
-              : () => unawaited(widget.onDisconnectRelay()),
-          icon: const Icon(Icons.link_off),
-          label: Text(context.tr('game.server_disconnect')),
-        ),
-      ],
-    );
-    final qr = _qrCard(
-      invitation,
-      min(compact ? 168.0 : 214.0, max(48.0, panelWidth - 64)),
-    );
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: compact
-          ? Column(children: [qr, const SizedBox(height: 16), details])
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                qr,
-                const SizedBox(width: 20),
-                Expanded(child: details),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildRoom() {
-    final connected = widget.players.where((player) => player.connected).length;
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            context.tr(
-              'game.room_player_summary',
-              arguments: {
-                'connected': connected,
-                'joined': widget.players.length,
-              },
-            ),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 10),
-          if (widget.players.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 48),
-              child: Text(
-                context.tr('game.room_empty'),
-                textAlign: TextAlign.center,
-              ),
-            )
-          else
-            for (final player in widget.players)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                elevation: 0,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: ListTile(
-                  leading: CircleAvatar(
-                    child: Icon(
-                      player.connected
-                          ? Icons.person
-                          : Icons.person_off_outlined,
-                    ),
-                  ),
-                  title: Text(
-                    player.nickname,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(_playerSourceLabel(player.source)),
-                  trailing: Text(
-                    player.connected
-                        ? context.tr('game.player_online')
-                        : context.tr('game.player_disconnected'),
-                  ),
-                ),
-              ),
-        ],
-      ),
-    );
-  }
-
-  Widget _qrCard(GameShareLink? link, double size) {
-    if (link == null) {
-      return SizedBox(
-        width: size + 20,
-        height: size + 20,
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Image.memory(
-        Uint8List.fromList(link.pngBytes),
-        width: size,
-        height: size,
-        filterQuality: FilterQuality.none,
-        semanticLabel: context.tr('game.share_qr_semantics'),
-      ),
-    );
-  }
-
-  String _relayStatusLabel(RelayConnectionStatus status) => switch (status) {
-    RelayConnectionStatus.connecting => context.tr(
-      'game.connection_connecting',
-    ),
-    RelayConnectionStatus.connected => context.tr('game.connection_connected'),
-    RelayConnectionStatus.retrying => context.tr('game.connection_retrying'),
-    RelayConnectionStatus.disconnected => context.tr(
-      'game.connection_disconnected',
-    ),
-  };
-
-  String _playerSourceLabel(String source) => switch (source) {
-    'server' => context.tr('game.player_source_server'),
-    'lan_app' => context.tr('game.player_source_lan_app'),
-    'lan_html' => context.tr('game.player_source_lan_html'),
-    _ => source,
-  };
-
-  void _copyLink(BuildContext context, Uri link) {
-    unawaited(Clipboard.setData(ClipboardData(text: link.toString())));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(context.tr('game.join_link_copied'))),
-    );
-  }
-}
-
-class _ShareAddressList extends StatelessWidget {
-  const _ShareAddressList({
-    required this.links,
-    required this.selectedLink,
-    required this.onSelectLink,
-  });
-
-  final List<GameShareLink> links;
-  final GameShareLink? selectedLink;
-  final ValueChanged<GameShareLink> onSelectLink;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          context.tr('game.available_addresses'),
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        if (links.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Text(
-              context.tr('game.share_no_lan_addresses'),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        for (final link in links)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Material(
-              color: link.url == selectedLink?.url
-                  ? Theme.of(context).colorScheme.primaryContainer
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-              child: ListTile(
-                key: ValueKey('share-link-${link.url.host}'),
-                contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-                leading: Icon(
-                  link.url == selectedLink?.url
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_off,
-                ),
-                title: Text(link.url.host),
-                subtitle: SelectableText(
-                  link.url.toString(),
-                  style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
-                ),
-                trailing: IconButton(
-                  tooltip: context.tr('game.share_link_copy'),
-                  onPressed: () {
-                    unawaited(
-                      Clipboard.setData(
-                        ClipboardData(text: link.url.toString()),
-                      ),
-                    );
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(context.tr('game.share_link_copied')),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.copy),
-                ),
-                onTap: () => onSelectLink(link),
-              ),
-            ),
-          ),
-        Text(
-          context.tr('game.share_address_description'),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    );
   }
 }
 
