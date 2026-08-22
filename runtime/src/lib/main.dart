@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_fullscreen/flutter_fullscreen.dart';
 import 'package:flutter/services.dart';
 import 'package:playmesh_share_ui/playmesh_share_ui.dart';
+import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -60,7 +61,6 @@ final class RuntimeBootstrapPage extends StatefulWidget {
 final class _RuntimeBootstrapPageState extends State<RuntimeBootstrapPage> {
   RuntimeLaunch? _launch;
   Object? _error;
-  String _phase = '正在准备 Runtime…';
   bool _initializing = false;
 
   @override
@@ -76,7 +76,6 @@ final class _RuntimeBootstrapPageState extends State<RuntimeBootstrapPage> {
       final launch = await RuntimeLaunch.create(
         onProgress: (phase) {
           debugPrint('[Runtime Bootstrap] $phase');
-          if (mounted) setState(() => _phase = phase);
         },
       );
       if (!mounted) {
@@ -97,7 +96,6 @@ final class _RuntimeBootstrapPageState extends State<RuntimeBootstrapPage> {
     if (_initializing) return;
     setState(() {
       _error = null;
-      _phase = '正在重新启动 Runtime…';
     });
     unawaited(_initialize());
   }
@@ -138,18 +136,7 @@ final class _RuntimeBootstrapPageState extends State<RuntimeBootstrapPage> {
     }
     final launch = _launch;
     if (launch == null) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 18),
-              Text(_phase),
-            ],
-          ),
-        ),
-      );
+      return const Scaffold(body: PlaymeshLoadingView());
     }
     return RuntimeGamePage(launch: launch);
   }
@@ -335,6 +322,7 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
     lanHost: _lanHost,
     onOpenSharePanel: _openSharePanel,
     onInputTakeover: () => _inputTakenOver.value = true,
+    autoApproveCapabilities: widget.launch.package.autoApproveCapabilities,
     onExit: _exitRuntime,
     onNicknameChanged: widget.launch.identity.updateNickname,
     onLocalNicknameUpdate: _updateLocalNickname,
@@ -420,50 +408,61 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
     final actionMode = Platform.isWindows
         ? PlaymeshShareActionMode.copy
         : PlaymeshShareActionMode.share;
+    var selectedLanLinkId = presentation.model.selectedLanLinkId;
     try {
       await showDialog<void>(
         context: context,
-        builder: (dialogContext) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 20,
-          ),
-          clipBehavior: Clip.none,
-          backgroundColor: Colors.transparent,
-          child: PlaymeshSharePanel(
-            model: presentation.model,
-            strings: strings,
-            actionMode: actionMode,
-            onClose: () => Navigator.of(dialogContext).pop(),
-            onLinkAction: (link) async {
-              final url = presentation.linkForId(link.id);
-              if (url == null) return;
-              try {
-                if (Platform.isWindows) {
-                  await Clipboard.setData(ClipboardData(text: url.toString()));
-                  if (mounted) {
-                    ScaffoldMessenger.of(context)
-                      ..hideCurrentSnackBar()
-                      ..showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            runtimeShareLinkCopiedMessage(
-                              useChinese: useChinese,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => Dialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 20,
+            ),
+            clipBehavior: Clip.none,
+            backgroundColor: Colors.transparent,
+            child: PlaymeshSharePanel(
+              model: selectedLanLinkId == null
+                  ? presentation.model
+                  : presentation.selectLanLink(selectedLanLinkId!),
+              strings: strings,
+              actionMode: actionMode,
+              onClose: () => Navigator.of(dialogContext).pop(),
+              onSelectLanLink: (id) {
+                if (presentation.linkForId(id) == null) return;
+                setDialogState(() => selectedLanLinkId = id);
+              },
+              onLinkAction: (link) async {
+                final url = presentation.linkForId(link.id);
+                if (url == null) return;
+                try {
+                  if (Platform.isWindows) {
+                    await Clipboard.setData(
+                      ClipboardData(text: url.toString()),
+                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              runtimeShareLinkCopiedMessage(
+                                useChinese: useChinese,
+                              ),
                             ),
+                            duration: const Duration(seconds: 2),
                           ),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
+                        );
+                    }
+                    return;
                   }
-                  return;
+                  await SharePlus.instance.share(
+                    ShareParams(text: url.toString()),
+                  );
+                } on Object catch (error) {
+                  debugPrint('Runtime 分享链接操作失败: $error');
                 }
-                await SharePlus.instance.share(
-                  ShareParams(text: url.toString()),
-                );
-              } on Object catch (error) {
-                debugPrint('Runtime 分享链接操作失败: $error');
-              }
-            },
+              },
+            ),
           ),
         ),
       );

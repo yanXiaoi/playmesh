@@ -38,7 +38,7 @@ void main() {
     expect(find.text('源代码开发'), findsOneWidget);
     expect(find.text('可视化开发'), findsOneWidget);
     expect(find.text('开启开发者模式后显示工作区地址、二维码与打开按钮。'), findsOneWidget);
-    expect(find.textContaining('基于开源 GDevelop 5'), findsOneWidget);
+    expect(find.textContaining('基于开源 GDevelop 5'), findsNothing);
   });
 
   testWidgets('visual development opens its offline third-party notices', (
@@ -55,6 +55,7 @@ void main() {
     await tester.tap(find.text('可视化开发'));
     await tester.pumpAndSettle();
 
+    expect(find.textContaining('非官方修改版'), findsNothing);
     final noticesButton = find.byKey(GameCreationPage.gdevelopNoticesButtonKey);
     await tester.ensureVisible(noticesButton);
     await tester.tap(noticesButton);
@@ -62,7 +63,8 @@ void main() {
 
     expect(find.byType(Dialog), findsOneWidget);
     expect(find.text('开源与第三方声明'), findsWidgets);
-    expect(find.text('installed notices'), findsOneWidget);
+    expect(find.textContaining('installed notices'), findsOneWidget);
+    expect(find.textContaining('非官方修改版'), findsOneWidget);
     expect(find.textContaining('5.6.269'), findsWidgets);
     expect(find.textContaining(List.filled(64, 'b').join()), findsOneWidget);
   });
@@ -82,27 +84,19 @@ void main() {
 
       expect(provider.boundPort, defaultDeveloperPort);
       expect(provider.enabledToken, 'my-dev-token');
-      expect(
-        find.text(
-          'http://192.168.1.10:16666/dev/devpath/workspace?token=my-dev-token',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('192.168.1.10'), findsOneWidget);
+      expect(find.textContaining('token=my-dev-token'), findsNothing);
 
       await tester.drag(find.byType(ListView), const Offset(0, -180));
       await tester.pumpAndSettle();
       await tester.tap(find.text('可视化开发'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text(
-          'http://192.168.1.10:16666/dev/devpath/gdevelop/?token=my-dev-token',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('192.168.1.10'), findsOneWidget);
+      expect(find.textContaining('token=my-dev-token'), findsNothing);
       expect(find.text('打开 GDevelop'), findsOneWidget);
       expect(find.byType(DeveloperWorkspaceQrCode), findsOneWidget);
-      expect(find.text('WebIDE 内核管理'), findsOneWidget);
+      expect(find.text('安装与管理'), findsOneWidget);
       expect(
         find.text(
           'http://192.168.1.10:16666/dev/devpath/workspace?token=my-dev-token',
@@ -134,13 +128,9 @@ void main() {
       expect(provider.gdevelopWorkspaceLinkCalls, greaterThan(0));
       expect(find.text('打开 GDevelop'), findsOneWidget);
       expect(find.byType(DeveloperWorkspaceQrCode), findsOneWidget);
-      expect(
-        find.text(
-          'http://192.168.1.10:16666/dev/devpath/gdevelop/?token=persisted-dev-token',
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('WebIDE 内核管理'), findsOneWidget);
+      expect(find.text('192.168.1.10'), findsOneWidget);
+      expect(find.textContaining('token=persisted-dev-token'), findsNothing);
+      expect(find.text('安装与管理'), findsOneWidget);
     },
   );
 
@@ -173,6 +163,57 @@ void main() {
     expect(find.text('打开 GDevelop'), findsOneWidget);
     expect(find.byType(DeveloperWorkspaceQrCode), findsOneWidget);
     expect(find.textContaining('visual gateway unavailable'), findsNothing);
+  });
+
+  testWidgets('closing and reopening GDevelop refreshes its bootstrap URL', (
+    tester,
+  ) async {
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = previousPlatform);
+    final provider = _FakeDeveloperProvider(rotatingGdevelopBootstrap: true);
+    await tester.pumpWidget(
+      localizedTestApp(home: GameCreationPage(developerProvider: provider)),
+    );
+    await _pumpAsync(tester);
+    await tester.tap(find.byKey(GameCreationPage.developerSwitchKey));
+    await _pumpAsync(tester);
+    await tester.drag(find.byType(ListView), const Offset(0, -180));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('可视化开发'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('打开 GDevelop'));
+    final callsBeforeFirstOpen = provider.gdevelopWorkspaceLinkCalls;
+    await tester.tap(find.text('打开 GDevelop'));
+    await tester.pumpAndSettle();
+    expect(provider.gdevelopWorkspaceLinkCalls, callsBeforeFirstOpen + 1);
+    var workspace = tester.widget<DeveloperWorkspacePage>(
+      find.byType(DeveloperWorkspacePage),
+    );
+    expect(
+      workspace.workspaceUri.queryParameters['editorBootstrap'],
+      'bootstrap_${provider.gdevelopWorkspaceLinkCalls}',
+    );
+
+    Navigator.of(tester.element(find.byType(DeveloperWorkspacePage))).pop();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('打开 GDevelop'));
+    final callsBeforeSecondOpen = provider.gdevelopWorkspaceLinkCalls;
+    await tester.tap(find.text('打开 GDevelop'));
+    await tester.pumpAndSettle();
+    expect(provider.gdevelopWorkspaceLinkCalls, callsBeforeSecondOpen + 1);
+    workspace = tester.widget<DeveloperWorkspacePage>(
+      find.byType(DeveloperWorkspacePage),
+    );
+    expect(
+      workspace.workspaceUri.queryParameters['editorBootstrap'],
+      'bootstrap_${provider.gdevelopWorkspaceLinkCalls}',
+    );
+
+    Navigator.of(tester.element(find.byType(DeveloperWorkspacePage))).pop();
+    await tester.pumpAndSettle();
+    debugDefaultTargetPlatformOverride = previousPlatform;
   });
 
   testWidgets('visual IP selection updates QR and copy keeps visual route', (
@@ -245,6 +286,7 @@ void main() {
   testWidgets('source QR encodes the exact LAN URI including token', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     await tester.pumpWidget(
       localizedTestApp(
         home: GameCreationPage(developerProvider: _FakeDeveloperProvider()),
@@ -265,6 +307,18 @@ void main() {
           .toString(),
       'http://192.168.1.10:16666/dev/devpath/workspace?token=qr-exact-token',
     );
+    expect(
+      find.descendant(
+        of: find.byType(DeveloperWorkspaceLinks),
+        matching: find.textContaining('qr-exact-token'),
+      ),
+      findsNothing,
+    );
+    expect(
+      tester.getSemantics(find.byType(DeveloperWorkspaceQrCode)).toString(),
+      isNot(contains('qr-exact-token')),
+    );
+    semantics.dispose();
   });
 
   testWidgets('copy keeps the exact LAN URI including IP and token', (
@@ -432,19 +486,20 @@ void main() {
       await tester.tap(find.text('可视化开发'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.byKey(GameCreationPage.gdevelopLocalInstallButtonKey),
-        findsOneWidget,
-      );
-      await tester.dragUntilVisible(
-        find.text('本地清单'),
-        find.byType(ListView),
-        const Offset(0, -180),
-      );
+      final manage = find.byKey(GameCreationPage.gdevelopManageButtonKey);
+      expect(manage, findsOneWidget);
+      expect(find.text('本地清单'), findsNothing);
+      await tester.tap(manage);
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('gdevelop-install-dialog')), findsOneWidget);
+      expect(find.text('本地清单'), findsNothing);
+      await tester.tap(find.text('在线安装'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('gdevelop-next-button')));
+      await _pumpAsync(tester);
       expect(find.text('本地清单'), findsOneWidget);
       expect(find.text('打开 GDevelop'), findsNothing);
-      expect(find.textContaining('开启开发者模式后即可显示地址'), findsOneWidget);
+      expect(find.textContaining('开启开发者模式后即可显示地址'), findsNothing);
     },
   );
 
@@ -469,22 +524,22 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('可视化开发'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(GameCreationPage.gdevelopManageButtonKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('从本地 ZIP 安装'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('gdevelop-next-button')));
+      await tester.pumpAndSettle();
       final localInstall = find.byKey(
         GameCreationPage.gdevelopLocalInstallButtonKey,
       );
-      await tester.dragUntilVisible(
-        localInstall,
-        find.byType(ListView),
-        const Offset(0, -180),
-      );
-      await tester.pumpAndSettle();
-      await tester.pumpAndSettle();
       await tester.tap(localInstall);
       await tester.pumpAndSettle();
 
       expect(pickerCalls, 1);
       expect(provider.localPackageCalls, 0);
       expect(provider.visualAvailable, isFalse);
+      expect(find.byKey(const Key('gdevelop-install-dialog')), findsOneWidget);
     },
   );
 
@@ -515,41 +570,10 @@ void main() {
     await tester.tap(find.text('可视化开发'));
     await tester.pumpAndSettle();
 
-    final localInstall = find.byKey(
-      GameCreationPage.gdevelopLocalInstallButtonKey,
-    );
-    await tester.dragUntilVisible(
-      localInstall,
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
-    expect(find.text('请先关闭开发者模式，再安装、升级或修复 WebIDE；当前版本未被覆盖。'), findsOneWidget);
-    expect(tester.widget<OutlinedButton>(localInstall).onPressed, isNull);
-
-    await tester.dragUntilVisible(
-      find.text('本地清单'),
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('本地清单'));
-    await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.text('本地 ZIP'),
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('本地 ZIP'));
-    await tester.pump();
-    final remoteInstall = find.byKey(GameCreationPage.gdevelopInstallButtonKey);
-    await tester.dragUntilVisible(
-      remoteInstall,
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(remoteInstall).onPressed, isNull);
+    final manage = find.byKey(GameCreationPage.gdevelopManageButtonKey);
+    expect(tester.widget<OutlinedButton>(manage).onPressed, isNull);
+    expect(find.byKey(const Key('gdevelop-install-dialog')), findsNothing);
+    expect(find.text('请先关闭开发者模式，再安装、升级或修复 WebIDE；当前版本未被覆盖。'), findsNothing);
 
     await tester.dragUntilVisible(
       find.byKey(GameCreationPage.developerSwitchKey),
@@ -560,14 +584,16 @@ void main() {
     await tester.tap(find.byKey(GameCreationPage.developerSwitchKey));
     await _pumpAsync(tester);
     await tester.dragUntilVisible(
-      localInstall,
+      manage,
       find.byType(ListView),
       const Offset(0, -180),
     );
     await tester.pumpAndSettle();
 
-    expect(tester.widget<OutlinedButton>(localInstall).onPressed, isNotNull);
-    expect(find.text('请先关闭开发者模式，再安装、升级或修复 WebIDE；当前版本未被覆盖。'), findsNothing);
+    expect(tester.widget<OutlinedButton>(manage).onPressed, isNotNull);
+    await tester.tap(manage);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('gdevelop-install-dialog')), findsOneWidget);
   });
 
   testWidgets(
@@ -592,7 +618,7 @@ void main() {
 
       expect(find.byType(ListView), findsOneWidget);
       expect(
-        find.byKey(GameCreationPage.gdevelopLocalInstallButtonKey),
+        find.byKey(GameCreationPage.gdevelopManageButtonKey),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
@@ -664,32 +690,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(provider.manifestCalls, 0, reason: '未选择清单源前不得读取网络清单');
-    await tester.dragUntilVisible(
-      find.text('本地清单'),
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
+    await tester.tap(find.byKey(GameCreationPage.gdevelopManageButtonKey));
+    await tester.pumpAndSettle();
+    expect(find.text('本地清单'), findsNothing);
+    await tester.tap(find.text('在线安装'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('gdevelop-next-button')));
+    await _pumpAsync(tester);
+    expect(find.byKey(const Key('gdevelop-back-button')), findsOneWidget);
     await tester.pumpAndSettle();
     await tester.tap(find.text('本地清单'));
-    await tester.pumpAndSettle();
+    await _pumpAsync(tester);
     expect(provider.manifestCalls, 1);
+    await tester.tap(find.byKey(const Key('gdevelop-next-button')));
+    await _pumpAsync(tester);
     expect(find.text('本地 ZIP'), findsOneWidget);
 
-    await tester.dragUntilVisible(
-      find.text('本地 ZIP'),
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
-    await tester.pumpAndSettle();
     await tester.tap(find.text('本地 ZIP'));
-    await tester.pump();
-    final repair = find.byKey(GameCreationPage.gdevelopRepairButtonKey);
-    await tester.dragUntilVisible(
-      repair,
-      find.byType(ListView),
-      const Offset(0, -180),
-    );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('gdevelop-next-button')));
+    await tester.pumpAndSettle();
+    final repair = find.byKey(GameCreationPage.gdevelopRepairButtonKey);
     expect(repair, findsOneWidget);
     await tester.tap(repair);
     await tester.pumpAndSettle();
@@ -714,16 +735,17 @@ void main() {
     await tester.tap(find.byKey(GameCreationPage.developerSwitchKey));
     await _pumpAsync(tester);
 
-    final selectedTile = tester.widget<ListTile>(
-      find.byWidgetPredicate((widget) => widget is ListTile && widget.selected),
+    final selectedTile = tester.widget<Material>(
+      find.byKey(
+        const ValueKey<String>('developer-workspace-link-192.168.1.10'),
+      ),
     );
     final colors = PlaymeshTheme.dark().colorScheme;
-    expect(selectedTile.selectedTileColor, colors.secondaryContainer);
-    expect(selectedTile.selectedColor, colors.onSecondaryContainer);
+    expect(selectedTile.color, colors.secondaryContainer);
   });
 
   testWidgets(
-    'shows interface address type and risk while keeping 198.18 selectable',
+    'shows only IP choices while keeping QR selection and copy actions',
     (tester) async {
       final privateEndpoint = _lan(Uri.parse('http://10.80.0.4:16666/dev'));
       final benchmarkEndpoint = LanEndpointCandidate(
@@ -748,11 +770,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Wi-Fi · 私有 IPv4 · 常用局域网地址'), findsOneWidget);
-      expect(
-        find.textContaining('vEthernet (WSL) · 基准测试 IPv4 · 需确认网络路由'),
-        findsOneWidget,
-      );
+      expect(find.text('10.80.0.4'), findsOneWidget);
+      expect(find.text('198.18.0.1'), findsOneWidget);
+      expect(find.textContaining('Wi-Fi'), findsNothing);
+      expect(find.textContaining('vEthernet'), findsNothing);
+      expect(find.textContaining('IPv4'), findsNothing);
+      expect(find.textContaining('http://'), findsNothing);
+      expect(find.byTooltip('复制工作区链接'), findsNWidgets(2));
       expect(
         tester
             .widget<DeveloperWorkspaceQrCode>(
@@ -795,6 +819,7 @@ class _FakeDeveloperProvider
     this.distributionAvailable = false,
     this.gdevelopWorkspaceLinkError,
     this.extraVisualEndpoint,
+    this.rotatingGdevelopBootstrap = false,
   });
 
   final int preferredPort;
@@ -803,6 +828,7 @@ class _FakeDeveloperProvider
   final bool distributionAvailable;
   Object? gdevelopWorkspaceLinkError;
   final LanEndpointCandidate? extraVisualEndpoint;
+  final bool rotatingGdevelopBootstrap;
   var gdevelopWorkspaceLinkCalls = 0;
   int? boundPort;
   String? enabledToken;
@@ -888,8 +914,16 @@ class _FakeDeveloperProvider
     if (!visualAvailable) return const [];
     return [
       _lan(
-        Uri.parse(
-          'http://192.168.1.10:${boundPort ?? session.port}${session.gdevelopWorkspacePath}?token=${session.token}',
+        Uri(
+          scheme: 'http',
+          host: '192.168.1.10',
+          port: boundPort ?? session.port,
+          path: session.gdevelopWorkspacePath,
+          queryParameters: {
+            'token': session.token,
+            if (rotatingGdevelopBootstrap)
+              'editorBootstrap': 'bootstrap_$gdevelopWorkspaceLinkCalls',
+          },
         ),
       ),
       ?extraVisualEndpoint,
@@ -926,7 +960,9 @@ class _FakeDeveloperProvider
     version: '5.6.269',
     archiveSha256: List.filled(64, 'a').join(),
     noticesSha256: List.filled(64, 'b').join(),
-    contents: 'installed notices',
+    contents:
+        'installed notices\n'
+        'Playmesh 可视化编辑器是基于 GDevelop 开源技术的非官方修改版。',
   );
 
   @override

@@ -140,7 +140,7 @@ func TestUploadRateLimitRunsBeforeReadingRequestBody(t *testing.T) {
 	retryAfter, err := time.ParseDuration(
 		secondResult.Header().Get("Retry-After") + "s",
 	)
-	if err != nil || retryAfter <= time.Second || retryAfter > 30*time.Second {
+	if err != nil || retryAfter < time.Second || retryAfter > 2*time.Second {
 		t.Fatalf(
 			"上传限流 Retry-After = %q, err = %v",
 			secondResult.Header().Get("Retry-After"),

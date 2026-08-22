@@ -7,6 +7,7 @@ import 'package:playmesh/core/developer/developer_event_hub.dart';
 import 'package:playmesh/core/developer/developer_installation_package_service.dart';
 import 'package:playmesh/core/developer/developer_project_catalog.dart';
 import 'package:playmesh/core/developer/developer_web_gateway.dart';
+import 'package:playmesh/core/download/endpoint_probe_contract.dart';
 import 'package:playmesh/models/game_summary.dart';
 import 'package:playmesh/models/local_game_entry.dart';
 
@@ -55,7 +56,7 @@ void main() {
 
       expect(response.statusCode, HttpStatus.ok, reason: response.body);
       final catalogDocument = jsonDecode(response.body) as Map;
-      expect(catalogDocument['catalogVersion'], '4.4.0');
+      expect(catalogDocument['catalogVersion'], '5.0.0');
       final operations = catalogDocument['operations'] as List;
       Map<String, Object?> operation(String id) => Map<String, Object?>.from(
         operations.singleWhere((item) => (item as Map)['id'] == id) as Map,
@@ -85,11 +86,23 @@ void main() {
         create['requestBodySchema']! as Map,
       );
       expect(schema['additionalProperties'], isFalse);
-      expect(schema['required'], ['target', 'refreshRuntime', 'relayServer']);
+      expect(schema['required'], [
+        'target',
+        'refreshRuntime',
+        'runtimeDownloadId',
+        'autoApproveCapabilities',
+        'relayServer',
+      ]);
       final properties = Map<String, Object?>.from(
         schema['properties']! as Map,
       );
-      expect(properties.keys, ['target', 'refreshRuntime', 'relayServer']);
+      expect(properties.keys, [
+        'target',
+        'refreshRuntime',
+        'runtimeDownloadId',
+        'autoApproveCapabilities',
+        'relayServer',
+      ]);
       expect(properties, isNot(contains('relayServerId')));
       final target = Map<String, Object?>.from(properties['target']! as Map);
       expect(target['enum'], [
@@ -99,6 +112,18 @@ void main() {
       ]);
       expect(
         Map<String, Object?>.from(properties['refreshRuntime']! as Map)['type'],
+        'boolean',
+      );
+      expect(
+        Map<String, Object?>.from(
+          properties['runtimeDownloadId']! as Map,
+        )['type'],
+        ['string', 'null'],
+      );
+      expect(
+        Map<String, Object?>.from(
+          properties['autoApproveCapabilities']! as Map,
+        )['type'],
         'boolean',
       );
       expect(
@@ -123,7 +148,7 @@ void main() {
       );
     });
 
-    test('options 返回三个底包的本地和下载状态', () async {
+    test('options 首次只返回三个底包的本地状态', () async {
       final response = await client.get(
         base.resolve('/dev/api/projects/demo/package-exports'),
         headers: _authorization(token),
@@ -137,6 +162,7 @@ void main() {
       final body = jsonDecode(response.body) as Map;
       expect(body['projectId'], 'demo');
       expect(body['available'], isTrue);
+      expect(body['scope'], 'local');
       final targets = body['targets'] as List;
       expect(
         targets.map((item) => (item as Map)['id']),
@@ -146,12 +172,59 @@ void main() {
         targets.first,
         allOf(
           containsPair('installed', true),
-          containsPair('downloadAvailable', true),
-          containsPair('updateAvailable', true),
-          containsPair('runtimeVersion', '1.0.0'),
+          containsPair('downloadAvailable', false),
+          containsPair('updateAvailable', false),
+          containsPair('runtimeOptionsLoaded', false),
+          containsPair('runtimeDownloads', isEmpty),
         ),
       );
-      expect(body['relayServers'], [
+      expect(body, isNot(contains('relayServers')));
+      expect(service.inspectLocalTargetsCount, 1);
+      expect(service.inspectRuntimeTargetCount, 0);
+      expect(service.probeRuntimeTargetDownloadsCount, 0);
+      expect(service.inspectRelayServersCount, 0);
+    });
+
+    test('options 只在指定 scope 后读取线路、测速和中转服务器', () async {
+      final runtimeResponse = await client.get(
+        base.resolve(
+          '/dev/api/projects/demo/package-exports'
+          '?scope=runtime&target=android-arm64',
+        ),
+        headers: _authorization(token),
+      );
+      expect(runtimeResponse.statusCode, HttpStatus.ok);
+      final runtimeBody = jsonDecode(runtimeResponse.body) as Map;
+      expect(runtimeBody['scope'], 'runtime');
+      expect(runtimeBody['target'], containsPair('runtimeOptionsLoaded', true));
+      expect((runtimeBody['target'] as Map)['runtimeDownloads'], hasLength(1));
+      expect(service.inspectRuntimeTargetCount, 1);
+      expect(service.probeRuntimeTargetDownloadsCount, 0);
+
+      final probesResponse = await client.get(
+        base.resolve(
+          '/dev/api/projects/demo/package-exports'
+          '?scope=probes&target=android-arm64&source=${'c' * 64}',
+        ),
+        headers: _authorization(token),
+      );
+      expect(probesResponse.statusCode, HttpStatus.ok);
+      final probesBody = jsonDecode(probesResponse.body) as Map;
+      expect(probesBody['scope'], 'probes');
+      expect(probesBody['targetId'], 'android-arm64');
+      expect(probesBody['sourceId'], 'c' * 64);
+      expect(probesBody['runtimeDownloads'], hasLength(1));
+      expect(service.probeRuntimeTargetDownloadsCount, 1);
+      expect(service.probedRuntimeSourceIds, ['c' * 64]);
+
+      final relaysResponse = await client.get(
+        base.resolve('/dev/api/projects/demo/package-exports?scope=relays'),
+        headers: _authorization(token),
+      );
+      expect(relaysResponse.statusCode, HttpStatus.ok);
+      final relaysBody = jsonDecode(relaysResponse.body) as Map;
+      expect(relaysBody['scope'], 'relays');
+      expect(relaysBody['relayServers'], [
         {
           'id': 'source-relay-primary',
           'name': 'Primary Relay',
@@ -160,8 +233,28 @@ void main() {
           'latencyMs': 23,
         },
       ]);
-      expect(service.inspectCount, 1);
       expect(service.inspectRelayServersCount, 1);
+      expect(service.inspectLocalTargetsCount, 0);
+    });
+
+    test('options 拒绝无目标测速和本地 scope 携带目标', () async {
+      for (final path in [
+        '/dev/api/projects/demo/package-exports?scope=probes',
+        '/dev/api/projects/demo/package-exports'
+            '?scope=probes&target=android-arm64',
+        '/dev/api/projects/demo/package-exports'
+            '?scope=probes&target=android-arm64&source=unsafe',
+        '/dev/api/projects/demo/package-exports'
+            '?scope=local&target=android-arm64',
+      ]) {
+        final response = await client.get(
+          base.resolve(path),
+          headers: _authorization(token),
+        );
+        expect(response.statusCode, HttpStatus.badRequest);
+      }
+      expect(service.inspectLocalTargetsCount, 0);
+      expect(service.probeRuntimeTargetDownloadsCount, 0);
     });
 
     test('create 透传单个中转地址并可流式下载和显式释放', () async {
@@ -175,6 +268,8 @@ void main() {
         body: jsonEncode({
           'target': developerInstallationPackageTargetAndroidArm64,
           'refreshRuntime': true,
+          'runtimeDownloadId': 'a' * 64,
+          'autoApproveCapabilities': true,
           'relayServer': 'http://8.137.106.103:16668?token=666666',
         }),
       );
@@ -191,6 +286,8 @@ void main() {
       expect(service.createRequests, hasLength(1));
       expect(service.createRequests.single.targetId, 'android-arm64');
       expect(service.createRequests.single.refreshRuntime, isTrue);
+      expect(service.createRequests.single.runtimeDownloadId, 'a' * 64);
+      expect(service.createRequests.single.autoApproveCapabilities, isTrue);
       expect(
         service.createRequests.single.relayServer,
         Uri.parse('http://8.137.106.103:16668?token=666666'),
@@ -281,6 +378,8 @@ void main() {
           body: jsonEncode({
             'target': developerInstallationPackageTargetAndroidArm64,
             'refreshRuntime': false,
+            'runtimeDownloadId': null,
+            'autoApproveCapabilities': false,
             'relayServer': 'https://relay.example.test?token=private-token',
           }),
         );
@@ -350,6 +449,8 @@ void main() {
           body: jsonEncode({
             'target': developerInstallationPackageTargetWindowsX64,
             'refreshRuntime': false,
+            'runtimeDownloadId': null,
+            'autoApproveCapabilities': false,
             'relayServer': null,
           }),
         );
@@ -382,6 +483,8 @@ void main() {
           body: jsonEncode({
             'target': developerInstallationPackageTargetWindowsX64,
             'refreshRuntime': false,
+            'runtimeDownloadId': null,
+            'autoApproveCapabilities': false,
             'relayServer': null,
           }),
         );
@@ -405,23 +508,45 @@ void main() {
         {
           'target': developerInstallationPackageTargetAndroidArm64,
           'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
           'relayServer': null,
           'unexpected': true,
         },
         {
           'target': developerInstallationPackageTargetAndroidArm64,
           'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
           'relayServer': null,
           'relayServerId': 'source-relay-primary',
         },
         {
           'target': developerInstallationPackageTargetAndroidArm64,
           'refreshRuntime': 'false',
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
           'relayServer': null,
         },
         {
           'target': 'android-arm32',
           'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
+          'relayServer': null,
+        },
+        {
+          'target': developerInstallationPackageTargetAndroidArm64,
+          'refreshRuntime': true,
+          'runtimeDownloadId': 'unsafe-download-id',
+          'autoApproveCapabilities': false,
+          'relayServer': null,
+        },
+        {
+          'target': developerInstallationPackageTargetAndroidArm64,
+          'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': 'true',
           'relayServer': null,
         },
       ];
@@ -455,6 +580,8 @@ void main() {
         body: jsonEncode({
           'target': developerInstallationPackageTargetWindowsX64,
           'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
           'relayServer': 'https://relay.example.com/private/path?token=x',
         }),
       );
@@ -474,6 +601,8 @@ void main() {
         body: jsonEncode({
           'target': developerInstallationPackageTargetAndroidX86_64,
           'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
           'relayServer': null,
         }),
       );
@@ -522,6 +651,8 @@ void main() {
         body: jsonEncode({
           'target': developerInstallationPackageTargetWindowsX64,
           'refreshRuntime': false,
+          'runtimeDownloadId': null,
+          'autoApproveCapabilities': false,
           'relayServer': null,
         }),
       );
@@ -564,12 +695,16 @@ final class _CreateRequest {
     required this.game,
     required this.targetId,
     required this.refreshRuntime,
+    required this.runtimeDownloadId,
+    required this.autoApproveCapabilities,
     required this.relayServer,
   });
 
   final GameSummary game;
   final String targetId;
   final bool refreshRuntime;
+  final String? runtimeDownloadId;
+  final bool autoApproveCapabilities;
   final Uri? relayServer;
 }
 
@@ -584,48 +719,120 @@ final class _FakeInstallationPackageService
   final releasedIds = <String>[];
   final artifacts = <String, DeveloperInstallationPackageArtifact>{};
   var inspectCount = 0;
+  var inspectLocalTargetsCount = 0;
+  var inspectRuntimeTargetCount = 0;
+  var probeRuntimeTargetDownloadsCount = 0;
+  final probedRuntimeSourceIds = <String>[];
   var inspectRelayServersCount = 0;
   var closeCount = 0;
+
+  List<DeveloperInstallationPackageTargetStatus> _targetStatuses() => [
+    DeveloperInstallationPackageTargetStatus(
+      id: developerInstallationPackageTargetAndroidArm64,
+      platform: 'android',
+      architecture: 'arm64-v8a',
+      runtimeFilename: 'playmesh-runtime-arm.apk',
+      installed: true,
+      downloadAvailable: true,
+      updateAvailable: true,
+      runtimeDownloads: [
+        DeveloperInstallationPackageRuntimeDownload(
+          id: 'a' * 64,
+          name: 'Primary Runtime Download',
+          address: Uri.parse('https://runtime.example.test/arm.apk'),
+          manifestSourceId: 'c' * 64,
+          manifestSourceName: 'Primary Runtime Manifest',
+          manifestSourceAddress: Uri.parse(
+            'https://runtime.example.test/update.json',
+          ),
+          probeState: EndpointProbeState.reachable,
+          latencyMs: 18,
+        ),
+      ],
+      runtimeVersion: '1.0.0',
+      sizeBytes: 4096,
+    ),
+    DeveloperInstallationPackageTargetStatus(
+      id: developerInstallationPackageTargetAndroidX86_64,
+      platform: 'android',
+      architecture: 'x86_64',
+      runtimeFilename: 'playmesh-runtime-x86.apk',
+      installed: false,
+      downloadAvailable: true,
+      updateAvailable: false,
+      runtimeDownloads: [
+        DeveloperInstallationPackageRuntimeDownload(
+          id: 'b' * 64,
+          name: 'Mirror Runtime Download',
+          address: Uri.parse('https://runtime.example.test/x86.apk'),
+          manifestSourceId: 'c' * 64,
+          manifestSourceName: 'Primary Runtime Manifest',
+          manifestSourceAddress: Uri.parse(
+            'https://runtime.example.test/update.json',
+          ),
+          probeState: EndpointProbeState.timeout,
+        ),
+      ],
+      runtimeVersion: '1.0.0',
+      sizeBytes: 4096,
+    ),
+    DeveloperInstallationPackageTargetStatus(
+      id: developerInstallationPackageTargetWindowsX64,
+      platform: 'windows',
+      architecture: 'x64',
+      runtimeFilename: 'playmesh-runtime-win.zip',
+      installed: true,
+      downloadAvailable: false,
+      updateAvailable: false,
+      runtimeVersion: '1.0.0',
+      sizeBytes: 3072,
+    ),
+  ];
+
+  @override
+  Future<List<DeveloperInstallationPackageTargetStatus>>
+  inspectLocalTargets() async {
+    inspectLocalTargetsCount += 1;
+    return [
+      for (final status in _targetStatuses())
+        DeveloperInstallationPackageTargetStatus(
+          id: status.id,
+          platform: status.platform,
+          architecture: status.architecture,
+          runtimeFilename: status.runtimeFilename,
+          installed: status.installed,
+          downloadAvailable: false,
+          updateAvailable: false,
+          sizeBytes: status.sizeBytes,
+        ),
+    ];
+  }
 
   @override
   Future<List<DeveloperInstallationPackageTargetStatus>>
   inspectTargets() async {
     inspectCount += 1;
-    return const [
-      DeveloperInstallationPackageTargetStatus(
-        id: developerInstallationPackageTargetAndroidArm64,
-        platform: 'android',
-        architecture: 'arm64-v8a',
-        runtimeFilename: 'playmesh-runtime-arm.apk',
-        installed: true,
-        downloadAvailable: true,
-        updateAvailable: true,
-        runtimeVersion: '1.0.0',
-        sizeBytes: 4096,
-      ),
-      DeveloperInstallationPackageTargetStatus(
-        id: developerInstallationPackageTargetAndroidX86_64,
-        platform: 'android',
-        architecture: 'x86_64',
-        runtimeFilename: 'playmesh-runtime-x86.apk',
-        installed: false,
-        downloadAvailable: true,
-        updateAvailable: false,
-        runtimeVersion: '1.0.0',
-        sizeBytes: 4096,
-      ),
-      DeveloperInstallationPackageTargetStatus(
-        id: developerInstallationPackageTargetWindowsX64,
-        platform: 'windows',
-        architecture: 'x64',
-        runtimeFilename: 'playmesh-runtime-win.zip',
-        installed: true,
-        downloadAvailable: false,
-        updateAvailable: false,
-        runtimeVersion: '1.0.0',
-        sizeBytes: 3072,
-      ),
-    ];
+    return _targetStatuses();
+  }
+
+  @override
+  Future<DeveloperInstallationPackageTargetStatus> inspectRuntimeTarget(
+    String targetId,
+  ) async {
+    inspectRuntimeTargetCount += 1;
+    return _targetStatuses().singleWhere((target) => target.id == targetId);
+  }
+
+  @override
+  Future<List<DeveloperInstallationPackageRuntimeDownload>>
+  probeRuntimeTargetDownloads(String targetId, String manifestSourceId) async {
+    probeRuntimeTargetDownloadsCount += 1;
+    probedRuntimeSourceIds.add(manifestSourceId);
+    return _targetStatuses()
+        .singleWhere((target) => target.id == targetId)
+        .runtimeDownloads
+        .where((download) => download.manifestSourceId == manifestSourceId)
+        .toList(growable: false);
   }
 
   @override
@@ -648,6 +855,8 @@ final class _FakeInstallationPackageService
     required GameSummary game,
     required String targetId,
     required bool refreshRuntime,
+    String? runtimeDownloadId,
+    bool autoApproveCapabilities = false,
     Uri? relayServer,
     DeveloperInstallationPackageProgressCallback? onProgress,
   }) async {
@@ -656,6 +865,8 @@ final class _FakeInstallationPackageService
         game: game,
         targetId: targetId,
         refreshRuntime: refreshRuntime,
+        runtimeDownloadId: runtimeDownloadId,
+        autoApproveCapabilities: autoApproveCapabilities,
         relayServer: relayServer,
       ),
     );

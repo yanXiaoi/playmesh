@@ -341,18 +341,18 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `4.2.1+29` | `pubspec.yaml` |
+| Playmesh App | `4.3.0+30` | `pubspec.yaml` |
 | Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
 | Game SDK | `4.1.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
 | App Bridge SDK | `3.3.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
-| Developer API / OpenAPI | `4.4.0` | Developer Gateway、安装包导出与临时开发资源会话契约 |
+| Developer API / OpenAPI | `5.0.0` | Developer Gateway、安装包导出与临时开发资源会话契约 |
 | Developer CLI | `2.0.0` | `dev-cli/`、adapter.Adapter、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `3.0.0` | `/apps/info`、根相对入口、包校验、版本化下载、图标与上传声明 |
 | Relay 协议 | `3.0.0` | 根相对邀请入口、App 端点加密邀请与 Go Server 中转协议 |
 
 该矩阵描述当前代码与生成契约；发布状态和历史版本见
-`docs/version/README.md`、`docs/version/4.2.1.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+`docs/version/README.md`、`docs/version/4.3.0.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `dev/run` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段并与目标 App 精确核对，禁止手工声明不一致版本。CLI 2.0 只接受根 `playmesh-cli.json`；发布内容隔离在 `playmesh/package/`，SDK/类型隔离在 `playmesh/sdk/`，上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根 `icon.png` 和必需物理 `app/`。`outputDirectory` 和入口都相对于外层 `packageRoot/app/`；首段 `app` 合法，例如入口 `app/index.html` 对应物理 `packageRoot/app/app/index.html` 和运行时 `/app/index.html`。项目平台差异只能通过唯一 `adapter.Registry` 中的 `Adapter` 实现，公共命令不得按 Cocos/语言复制分支或维护第二份适配器实例表。
@@ -531,11 +531,20 @@ Go Core 只做通用中转，不承载任何具体游戏规则。创建会话时
 
 游戏包可以按需使用 `app/static/js/service/` 目录或 `service.js` 入口组织上述权威逻辑，此目录和文件名是推荐约定，不是强制目录。该逻辑应在 Authority Runtime 中执行，不应被 Go Core 直接解析。SDK 应提供当前客户端角色、`authorityClientId`、玩家成员快照、Authority 连接状态和权威状态版本号；大屏公共显示端的当前玩家必须为 `null`。
 
-每个多人游戏运行时最多由 SDK 管理两条物理 WebSocket：原有 Session WS 负责 JSON 会话、权威动作和状态同步；Binary WS 在首次调用 `playmesh.main.binary` 时按需创建，复用当前会话凭证，并在游戏退出、Session WS 断开或 Authority 退出时由平台统一释放。游戏代码和 `service.js` 不得直接创建、保存或操作任何 Core WebSocket。
+每个多人游戏运行时最多由 SDK 管理两条物理 WebSocket：原有 Session WS 负责 JSON 会话、权威动作和状态同步；Binary WS 在首次调用 `playmesh.main.binary` 或 `playmesh.main.rpc` 时按需创建，复用当前会话凭证，并在游戏退出、Session WS 断开或 Authority 退出时由平台统一释放。游戏代码和 `service.js` 不得直接创建、保存或操作任何 Core WebSocket。
 
 一条 Binary WS 复用多个逻辑 Channel，Channel ID 同时是加入令牌。只有 Authority 可以创建和关闭 Channel，创建后 Authority 自动加入；其他玩家只能凭 ID 加入。`playmesh.main.binary.authorityPlayerId` 固定为 `"authority"`。所有参与方统一使用 `send(targetPlayerId, data)` 单发、`send(targetPlayerIds, data)` 多发、`send(data)` 广播；`sendLatest(targetPlayerId 或 targetPlayerIds, data)` 发送定向最新帧，`sendLatest(data)` 发送最新广播，不增加 Authority 专用发送签名。
 
 Channel `mode` 只有 `authority` 与 `relay`。`relay` 直接转发原始字节；`authority` 中非 Authority 消息先交给 Authority 的 `onForward`，其上下文始终提供去重后的 `targetPlayerIds` 数组，一次多目标发送只审核一次；返回 `void` 原样通过、返回 `Uint8Array` 替换后通过、抛错则拒绝。Authority 自己发送时直接投递，不能再次进入审核形成循环。带目标的 `sendLatest` 只替换同一 Channel、发送者和规范化目标集下尚未发送或尚未开始审核的旧帧，单参数 `sendLatest(data)` 对广播做相同合并；Authority JavaScript 处理器一旦开始执行，旧新审核都必须继续并各自处理结果。
+
+`playmesh.main.rpc` 必须使用同一条已认证 Binary WS 上的内部 RPC 帧，不得退回
+`game.submitAction`、`authority.result` 或其他 JSON 信封，也不得为每个 path 创建公开
+Channel。客户端只有异步 `request(path, data, options?)`；`onRequest(path, handler)`
+只能由 Authority 调用，Core 后台只向固定 Authority 投递并只接受该连接的响应。
+handler 可以返回任意受支持的可传输值或 Promise：JSON 兼容值、`undefined`、`Blob`、
+`File`、`ArrayBuffer`、`Uint8Array`；函数、DOM、循环引用和其他类实例必须拒绝。
+Core 不解析业务 payload，只校验会话身份、path、单帧大小、每局/每玩家挂起数量、总挂起
+字节和 100～60000 ms 超时。客户端超时不等于取消已开始的 Authority handler。
 
 权威处理函数通过 `playmesh.main.authority.onService` 注册，返回目标玩家 ID 列表：一个 ID 表示定向回复，多个 ID 表示回复多个玩家，当前所有在线玩家 ID 表示广播，空列表表示不发送。Go Core 根据目标列表执行路由，但不参与游戏业务判断。游戏逻辑只能使用 SDK 注入的 `playerId`、角色和成员快照，不能使用或伪造底层连接对象。`onWs` 不属于普通游戏开发 API。
 
@@ -554,7 +563,7 @@ Go Core 只校验连接、会话、角色、凭证、消息格式、大小、频
 - 权威服务只广播必要的状态变化或固定频率快照，不重复广播未变化的大对象。
 - 权威状态必须带 `revision` 或等价版本号，客户端丢失中间状态后可以请求最新快照。
 - SDK 应记录动作从提交到权威确认的耗时，便于区分本机 JS 处理、App 桥接、Go 转发和局域网传输问题。
-- Binary WS 单帧上限为 4 MiB，单次定向发送最多 1024 个去重目标，单连接允许每秒 2000 帧和 64 MiB 入站流量，出站队列上限为 32 MiB，每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。这些是局域网防失控边界，不是建议业务速率。多目标 payload 只能上行一次并由 Core 扇出；广播目标由 Core 按 Channel 当前在线成员展开并排除发送者。可靠帧达到上限时必须返回错误，连续状态应优先使用 `sendLatest` 合并尚未发送的状态帧。
+- Binary WS 单帧上限为 4 MiB，单次定向发送最多 1024 个去重目标，单连接允许每秒 2000 帧和 64 MiB 入站流量，出站队列上限为 32 MiB，每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。内部 RPC 每局最多挂起 256 项、每个发送者最多 32 项、总 payload 最多 32 MiB，请求超时为 100～60000 ms；SDK 单值编码上限为 `4 MiB - 64 KiB`。这些是局域网防失控边界，不是建议业务速率。多目标 payload 只能上行一次并由 Core 扇出；广播目标由 Core 按 Channel 当前在线成员展开并排除发送者。可靠帧达到上限时必须返回错误，连续状态应优先使用 `sendLatest` 合并尚未发送的状态帧。
 
 ## 完成定义
 

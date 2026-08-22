@@ -60,6 +60,20 @@ for (const field of ['stage', 'operation', 'status', 'code', 'requestId']) {
 }
 assert.match(catalog, /onImportingChange\(true\)/);
 assert.match(catalog, /onOpenProject\(\{/);
+const exampleImportIndex = catalog.indexOf(
+  'fileMetadata = await importPlaymeshExample'
+);
+const importCatchIndex = catalog.indexOf('} catch (rawError)', exampleImportIndex);
+const officialOpenIndex = catalog.indexOf('await onOpenProject', exampleImportIndex);
+assert.ok(exampleImportIndex >= 0);
+assert.ok(
+  importCatchIndex > exampleImportIndex && officialOpenIndex > importCatchIndex,
+  'the Playmesh import catch must end before the official project opener starts'
+);
+assert.doesNotMatch(
+  catalog.slice(exampleImportIndex, importCatchIndex),
+  /onOpenProject/
+);
 assert.match(catalog, /examplesContributors/);
 assert.match(catalog, /examplesCopyright/);
 assert.match(catalog, /examplesRightsNotice/);

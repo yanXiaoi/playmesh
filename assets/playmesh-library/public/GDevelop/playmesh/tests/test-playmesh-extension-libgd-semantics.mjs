@@ -33,9 +33,9 @@ const expectedLibGdFiles = Object.freeze({
     size: 3391975,
   }),
 });
-const expectedFunctionCount = 386;
-const expectedPublicFunctionCount = 349;
-const expectedAsyncFunctionCount = 129;
+const expectedFunctionCount = 400;
+const expectedPublicFunctionCount = 360;
+const expectedAsyncFunctionCount = 138;
 
 // These are runtime/editor identifiers, not translatable labels. Keep this
 // baseline independent from Playmesh.json so changing the extension body
@@ -153,6 +153,7 @@ const expectedCommands = Object.freeze([
   'playmesh.main.player.getCurrent',
   'playmesh.main.player.setNickname',
   'playmesh.main.game.submitAction',
+  'playmesh.main.rpc.request',
   'playmesh.main.binary.createChannel',
   'playmesh.main.binary.joinChannel',
   'playmesh.main.sync.startAuthority',
@@ -178,6 +179,11 @@ const expectedCommands = Object.freeze([
   'playmesh.app.isAvailable',
   'playmesh.app.identity.getCurrent',
   'playmesh.app.runtime.getLocale',
+  'playmesh.app.storage.getBucket',
+  'PlaymeshAppStorageBucket.getData',
+  'PlaymeshAppStorageBucket.setData',
+  'PlaymeshAppStorageBucket.removeData',
+  'PlaymeshAppStorageBucket.clearData',
   'playmesh.app.performance.getFps',
   'playmesh.app.performance.getLatency',
   'playmesh.app.performance.getLatencyDiagnostics',
@@ -234,6 +240,7 @@ const expectedCommands = Object.freeze([
   'PlaymeshCapabilityHandle.addEventListener',
   'PlaymeshCapabilityHandle.onError',
   'playmesh.main.authority.onService',
+  'playmesh.main.rpc.onRequest',
   'PlaymeshBinaryChannel.onForward',
 ]);
 
@@ -511,6 +518,7 @@ const appSdkGroupRoot = 'App SDK（原生 SDK）';
 const expectedGroupTree = {
   [mainSdkGroupRoot]: [
     '权威端',
+    '请求响应',
     '二进制通信',
     '游戏',
     '游戏信息',
@@ -531,6 +539,7 @@ const expectedGroupTree = {
     '媒体会话',
     '性能',
     '运行环境',
+    '存储',
     '界面',
     '摄像头',
     '麦克风与语音转文字',
@@ -550,7 +559,7 @@ assert.equal(
     (count, leaves) => count + leaves.length,
     0
   ),
-  35
+  37
 );
 const actualGroupTree = new Map();
 for (const eventsFunction of publicFunctions) {
@@ -624,6 +633,7 @@ const isAppSdkPath = value =>
   value.startsWith('playmesh.app.') ||
   value.startsWith('PlaymeshCapabilityHandle.') ||
   value.startsWith('PlaymeshAppMediaSession.') ||
+  value.startsWith('PlaymeshAppStorageBucket.') ||
   value.startsWith('PlaymeshLanGame.');
 const selectedCommands = [];
 const selectedProperties = [];
@@ -672,14 +682,14 @@ const declaredCommands = [
   ...readSurfaceArray('subscribe'),
   ...readSurfaceArray('handler'),
 ];
-assert.equal(expectedCommands.length, 90);
+assert.equal(expectedCommands.length, 97);
 assert.deepEqual(
   declaredCommands,
   expectedCommands,
-  'the 90 stable SDK command paths or their declared order changed'
+  'the 97 stable SDK command paths or their declared order changed'
 );
-assert.equal(new Set(expectedCommands).size, 90);
-assert.equal(selectedCommands.length, 90, 'command selector entries changed');
+assert.equal(new Set(expectedCommands).size, 97);
+assert.equal(selectedCommands.length, 97, 'command selector entries changed');
 assert.deepEqual(
   [...new Set(selectedCommands)].sort(),
   [...expectedCommands].sort(),
@@ -713,10 +723,10 @@ assert.deepEqual(
   'libGD property selectors must expose the exact readable surface'
 );
 const allSdkSelectors = [...selectedCommands, ...selectedProperties];
-assert.equal(allSdkSelectors.length, 107);
-assert.equal(new Set(allSdkSelectors).size, 107, 'SDK selector paths must be unique');
-assert.equal(allSdkSelectors.filter(isMainSdkPath).length, 49);
-assert.equal(allSdkSelectors.filter(isAppSdkPath).length, 58);
+assert.equal(allSdkSelectors.length, 114);
+assert.equal(new Set(allSdkSelectors).size, 114, 'SDK selector paths must be unique');
+assert.equal(allSdkSelectors.filter(isMainSdkPath).length, 51);
+assert.equal(allSdkSelectors.filter(isAppSdkPath).length, 63);
 
 serializedExtensions.delete();
 project.delete();
@@ -724,5 +734,5 @@ project.delete();
 process.stdout.write(
   'Playmesh extension passed locked GDevelop 5.6.276 libGD/editor semantics ' +
     `(${extension.eventsFunctions.length} functions, ${asyncFunctionCount} async, ` +
-    '107 stable SDK selectors).\n'
+    '114 stable SDK selectors).\n'
 );

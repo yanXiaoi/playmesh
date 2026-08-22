@@ -184,6 +184,7 @@ final class RuntimeGamePackage {
     required this.manifest,
     required this.config,
     this.relayServer,
+    this.autoApproveCapabilities = false,
   });
 
   static const maxFiles = 20000;
@@ -237,6 +238,11 @@ final class RuntimeGamePackage {
     final relayServer = rawRelayServer == null
         ? null
         : parseRuntimeRelayServer(rawRelayServer as String);
+    final rawAutoApproveCapabilities =
+        packageRuntime['autoApproveCapabilities'] ?? false;
+    if (rawAutoApproveCapabilities is! bool) {
+      throw const FormatException('Runtime 自动同意能力授权配置必须是布尔值');
+    }
     if (!files.containsKey(manifest.gameEntry)) {
       throw FormatException('游戏入口不存在: ${manifest.gameEntry}');
     }
@@ -253,6 +259,7 @@ final class RuntimeGamePackage {
       manifest: manifest,
       config: config,
       relayServer: relayServer,
+      autoApproveCapabilities: rawAutoApproveCapabilities,
     );
   }
 
@@ -260,6 +267,7 @@ final class RuntimeGamePackage {
   final RuntimeGameManifest manifest;
   final RuntimeConfig config;
   final Uri? relayServer;
+  final bool autoApproveCapabilities;
 
   Uint8List? readWebFile(String relativePath) => files[relativePath];
 }

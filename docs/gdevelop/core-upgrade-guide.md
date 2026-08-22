@@ -13,6 +13,9 @@
 [GDevelop 功能修改与可重放开发手册](feature-development-guide.md)。本手册只处理官方 tag、
 commit、libGD 或 GDJS 基线变化。
 
+本手册服从 [GDevelop 开发总规范](development-standards.md)。升级只允许把已经批准的精确
+seam 重放到新上游，不能借兼容新版之名扩大 Playmesh 对官方后续处理的所有权。
+
 ## 统一入口：一个官方 ZIP、一条流水线
 
 当前手册记录升级流水线的完整内部合同和故障排查步骤。正常升级只填写一个值：官方精确
@@ -48,6 +51,12 @@ node assets/playmesh-library/public/GDevelop/playmesh/scripts/webide-pipeline.mj
 - Playmesh 自有代码只维护在 `playmesh/overlays`、`public/developer` 或生成/准备脚本中。
 - 所有官方源修改必须由 `apply-source-policy.mjs` 按顺序、带文件路径、Git Blob SHA 和唯一
   源片段断言重放。任何断言失配都应停止升级。
+- 每项官方在线服务替换必须落在经审计的精确 service/backend/I/O seam；禁止用全局
+  `ApiConfigs`、主机名正则或无效域名批量改写官方端点。
+- Playmesh 得到外部输入后必须把真实 project、context、callbacks 和 options 交给官方函数，
+  保持官方调用顺序；不得使用假 context、空 hook 或局部状态替代官方会话。
+- 官方处理完成后不得追加二次校验、修复、补注册、额外写入、再次导入或 fallback；官方成功
+  结果与失败的 `output`、`message`、错误类型和修改状态都必须完整传播。
 - 升级前必须核对现有合同与 ownership。若目标官方 GDevelop 已提供等价功能或修复同一
   bug，必须撤销 Playmesh 对应补丁，不得在官方实现上继续叠加。按顺序移除
   `apply-source-policy` 变换、overlay 文件或接缝、对应测试的 Playmesh ownership，再以官方
@@ -149,9 +158,8 @@ libGD/GDJS 与工具链均属于增量缓存，不得在常规构建结束时删
 
 - `upstream.tag`、`upstream.commit`、`upstream.sourceArchive`；
 - 单调递增的 `playmeshRevision`；
-- ZIP 固定由上游版本派生命名为 `GDevelop-webide-v{upstreamVersion}.zip`。当前基线必须
-  精确使用 `GDevelop-webide-v5.6.276.zip`；不得使用 `pm10`、`pm15`、`unknown-hash` 等
-  临时 revision 或未知哈希名称；
+- ZIP 固定由上游版本派生命名为 `GDevelop-webide-v{upstreamVersion}.zip`；不得使用临时
+  revision 或未知哈希名称；
 - `resources/GDevelop/update.json` 暂时保持上一份已验证内容，不能提前写入新版本、哈希或
   大小。
 
@@ -175,6 +183,8 @@ node assets/playmesh-library/public/GDevelop/playmesh/scripts/apply-source-polic
 | 唯一源片段出现多次 | 补丁锚点失去唯一性；缩小到稳定上下文，仍必须精确命中一次 |
 | 路径不存在 | 查明官方模块迁移；更新路径、import 和验证脚本，不能复制旧文件强行补位 |
 | React 生命周期/Hook 冲突 | 适配新版组件边界，保持官方状态流和清理顺序 |
+| 官方 context/callback 形状变化 | 从新版真实 owner 重新透传，不得以假对象、空函数或旧版局部副本补位 |
+| 官方失败结果变化 | 保留新版官方错误形状并更新透传合同，不得统一压缩成 Playmesh 通用错误 |
 | Flow/TypeScript/import 冲突 | 使用新版真实类型和导出；不得用 `any`、`FlowFixMe` 或关闭检查绕过 |
 | libGD/GDJS 资源失败 | 回到精确上游依赖和非零文件验证；必要时给准备脚本传入同版本已校验资源 |
 | 运行时测试失配 | 判断官方语义是否变化，先补契约测试，再调整 Playmesh adapter |
@@ -212,7 +222,7 @@ manifest 派生检查项；源码重放验证还会双向比较 Playmesh-owned �
 
 ## 5. 逐项重新审计功能边界
 
-版本升级必须重新走完下列 23 项，不能只凭首页可打开判定成功：
+版本升级必须重新走完下列 26 项，不能只凭首页可打开判定成功：
 
 1. App 语言在首次进入前设置 GDevelop 官方语言。
 2. GDevelop 会话内临时切换语言时，发布、历史、多人、AI 和项目配置文案同步更新。
@@ -253,7 +263,14 @@ manifest 派生检查项；源码重放验证还会双向比较 Playmesh-owned �
 22. AI Chat/Agent 只在活动 `gdProject` 上调用官方 EditorFunctions/EventPayload，修改后触发
     官方 dirty/刷新回调；AI 不保存工程、不写 History/current/revision、不生成提交证据，也不
     替用户撤销或恢复。
-23. 所有 Gateway、目录、示例和网络软依赖失败时，用户仍可本地创建、打开、编辑和保存。
+23. 每项官方在线服务替换都有独立的精确 service/backend/I/O seam；源码与产物中不存在全局
+    `ApiConfigs`、host 正则或无效域名批量改写。
+24. 扩展安装、工程导入、事件应用和其他官方编辑器路径都使用真实 project、context、callbacks、
+    options 与官方调用顺序；官方处理后没有 Playmesh 二次校验、修复、补注册、额外写入、再次
+    导入或 fallback。
+25. 官方成功和失败结果经过 WebIDE、Gateway、Chat/Agent 或 App 边界后仍保留原始 `output`、
+    `message`、错误类型和修改状态；Playmesh 只为自身外部 I/O 失败生成自己的错误。
+26. 所有 Gateway、目录、示例和网络软依赖失败时，用户仍可本地创建、打开、编辑和保存。
 
 任何一项的官方调用点发生变化，都应把新的路径、类型或事件合同补进自动测试和对应文档。
 
@@ -265,6 +282,9 @@ manifest 派生检查项；源码重放验证还会双向比较 Playmesh-owned �
 - `npm test` 的相关官方测试（使用非交互/单次运行参数）；
 - `npm run build` 的生产构建；
 - 构建产物中关键 JS、CSS、WASM、图标和 runtime 文件非零且可引用。
+- 源码和构建产物对全局端点改写做负向扫描，并证明每项线上替换只命中批准的精确 seam；
+- 使用真实官方 context/callback 运行扩展安装、事件和导入路径，证明官方后续处理没有第二套
+  校验/修复，官方失败诊断在完整传输链中不丢失；
 
 在 Playmesh 仓库中运行全部
 `assets/playmesh-library/public/GDevelop/playmesh/tests/test-*.mjs`，并运行根目录 `tool/` 中
@@ -325,11 +345,9 @@ URL，`userDecision` 固定为 `not-required`；latest、父提交、master 最�
 均不允许。还必须将两个文件与同版本官方发行包交叉核对，并把 SHA-256、字节数及 JS/WASM
 导出配对结果写入缓存身份、构建证明和 schema 3 marker。
 
-当前 `v5.6.276` 基线使用该 tag 精确 commit 的官方 `libGD.js` 与 `libGD.wasm` 产物，
-`libGdProvenance.sourceKind` 必须是 `official-exact-commit-artifact`。5.6.269 曾使用的 legacy
-prepared 例外仅属于已结束的历史审计，不得在当前或后续内核升级中复用。脚本不扫描候选目录、
-不猜测来源，也不在失败时回退；来源与 build 均需完成摘要、大小、WASM 编译和 JS 引用导出配对
-检查，并将证明写入 build provenance 与 schema 3 marker。
+`libGdProvenance.sourceKind` 必须是 `official-exact-commit-artifact`。脚本不扫描候选目录、不猜测
+来源，也不在失败时回退；来源与 build 均需完成摘要、大小、WASM 编译和 JS 引用导出配对检查，
+并将证明写入 build provenance 与 schema 3 marker。
 
 ```text
 node assets/playmesh-library/public/GDevelop/playmesh/scripts/package-webide-release.mjs --action package --prepared <prepared-output>
@@ -338,8 +356,7 @@ node assets/playmesh-library/public/GDevelop/playmesh/scripts/package-webide-rel
 
 脚本只从 `webide-lock.json.upstream.tag` 派生上游版本，并强制校验 ZIP 资产名。
 每次核心升级成功后，正式 ZIP 必须保存到仓库工作区
-`resources/GDevelop/GDevelop-webide-v{upstreamVersion}.zip`；当前固定路径为
-`resources/GDevelop/GDevelop-webide-v5.6.276.zip`。ZIP 根直接包含 `index.html`，不得再套一层
+`resources/GDevelop/GDevelop-webide-v{upstreamVersion}.zip`。ZIP 根直接包含 `index.html`，不得再套一层
 `gdevelop-webide/` 目录，否则 App 解压到 `official/` 后无法直接启动。归档按规范路径排序、
 使用固定时间与权限写入，并拒绝符号链接、ZIP32 越界、source map 和缺失关键文件。
 
@@ -357,19 +374,21 @@ Release、不调用 GitHub/Gitee API，也不执行 stage、commit、push。不�
 ```json
 {
   "sha256": "<64 位小写 SHA-256>",
-  "version": "5.6.276",
+  "version": "<upstreamVersion>",
   "size": 123,
   "downloads": [
     { "name": "GitHub", "url": "https://..." },
-    { "name": "Gitee", "url": "https://..." }
+    { "name": "临时源", "url": "http://..." }
   ]
 }
 ```
 
 根对象只允许 `sha256`、`version`、`size`、`downloads`，线路项只允许 `name`、`url`；旧
 `sha` 字段、MD5、未知字段和重复线路均失败。公开线路必须是首尾无空白、无用户名或密码的
-绝对 HTTPS URL；本地测试线路只有在显式使用 `--allow-pending-downloads true` 验证时才可
-保持空字符串。`size` 是最终 ZIP 文件的精确字节数，不是解压大小；`downloads` 的名称、顺序、
+绝对 HTTP 或 HTTPS URL；HTTP 是维护者明确允许的传输降级，无法防止链路窃听或篡改。只有
+从可信渠道取得的清单才能让 `sha256` 校验建立内容信任；清单和 ZIP 均经 HTTP 获取时，攻击者
+可同时替换二者。本地测试线路只有在显式使用 `--allow-pending-downloads true` 验证时才可保持
+空字符串。`size` 是最终 ZIP 文件的精确字节数，不是解压大小；`downloads` 的名称、顺序、
 URL 及用户配置结构必须逐项原样保留。构建与打包脚本不得猜测、增加、删除或改写下载线路；
 线路配置需要调整时，必须由维护者在打包前显式修改清单。
 
@@ -438,6 +457,7 @@ Node GDevelop tests: <passed>/<total>
 Go/Flutter/SDK gates: PASS/FAIL/SKIPPED(reason)
 Windows/App WebView/mobile landscape: PASS/FAIL
 Official-client migration and generic zero-injection: PASS/FAIL
+Official downstream boundary and error pass-through: PASS/FAIL
 Multiplayer two-device E2E: PASS/FAIL
 Windows early-bootstrap host reply: PASS/FAIL
 Known limitations: <list>

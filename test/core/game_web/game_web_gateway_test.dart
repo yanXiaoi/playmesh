@@ -137,30 +137,12 @@ void main() {
       key: 'checkpoint',
       headers: {'Cookie': opened.cookie},
     );
-    expect(remoteInitial.statusCode, HttpStatus.ok);
-    final remoteSet = await sendStandardJsonBucketRequest(
-      baseUri: base,
-      requestId: 'remote-browser-set-0001',
-      gameId: storage.gameId,
-      operation: 'set',
-      bucket: 'save',
-      key: 'checkpoint',
-      value: 11,
-      expectedRevision: standardJsonBucketRevision(remoteInitial),
-      headers: {'Cookie': opened.cookie},
+    expect(remoteInitial.statusCode, HttpStatus.forbidden);
+    expect(
+      ((jsonDecode(remoteInitial.body) as Map)['error'] as Map)['code'],
+      'not_authority',
     );
-    expect(remoteSet.statusCode, HttpStatus.ok);
-    final remoteGet = await sendStandardJsonBucketRequest(
-      baseUri: base,
-      requestId: 'remote-browser-get-0001',
-      gameId: storage.gameId,
-      operation: 'get',
-      bucket: 'save',
-      key: 'checkpoint',
-      headers: {'Cookie': opened.cookie},
-    );
-    expect(remoteGet.statusCode, HttpStatus.ok);
-    expect(standardJsonBucketValue(remoteGet), 11);
+    expect(await storage.getData('save', 'checkpoint'), isNull);
 
     final spoofedAppController = await http.get(
       opened.entryUri.replace(
@@ -245,13 +227,11 @@ void main() {
       headers: const {'X-Playmesh-Share-Token': 'share-token'},
       body: <int>[1, 2, 255, 4],
     );
-    expect(upload.statusCode, HttpStatus.created);
-    final uploadBody = jsonDecode(upload.body) as Map<String, Object?>;
-    final uploadedUrl = uploadBody['url']! as String;
-    expect(uploadedUrl, matches(RegExp(r'^/bucket/replays/[0-9]{13,}\.bin$')));
-    final download = await http.get(base.resolve(uploadedUrl));
-    expect(download.statusCode, HttpStatus.ok);
-    expect(download.bodyBytes, <int>[1, 2, 255, 4]);
+    expect(upload.statusCode, HttpStatus.forbidden);
+    expect(
+      ((jsonDecode(upload.body) as Map)['error'] as Map)['code'],
+      'not_authority',
+    );
     expect(
       (await http.get(base.resolve('/bucket/replays'))).statusCode,
       HttpStatus.notFound,
@@ -261,7 +241,7 @@ void main() {
     expect(missing.statusCode, HttpStatus.notFound);
   });
 
-  test('RemoteGamePage 回环 tunnel 透明保留邀请 Cookie 与标准存储路由', () async {
+  test('RemoteGamePage 回环 tunnel 即使 Cookie 有效也不能访问 Main Bucket', () async {
     final root = await Directory.systemTemp.createTemp(
       'playmesh-web-storage-tunnel-',
     );
@@ -318,30 +298,12 @@ void main() {
       key: 'checkpoint',
       headers: {'Cookie': opened.cookie},
     );
-    expect(tunnelInitial.statusCode, HttpStatus.ok);
-    final tunnelSet = await sendStandardJsonBucketRequest(
-      baseUri: tunnel.localBaseUri,
-      requestId: 'remote-tunnel-set-0001',
-      gameId: storage.gameId,
-      operation: 'set',
-      bucket: 'save',
-      key: 'checkpoint',
-      value: 19,
-      expectedRevision: standardJsonBucketRevision(tunnelInitial),
-      headers: {'Cookie': opened.cookie},
+    expect(tunnelInitial.statusCode, HttpStatus.forbidden);
+    expect(
+      ((jsonDecode(tunnelInitial.body) as Map)['error'] as Map)['code'],
+      'not_authority',
     );
-    expect(tunnelSet.statusCode, HttpStatus.ok);
-    final tunnelGet = await sendStandardJsonBucketRequest(
-      baseUri: tunnel.localBaseUri,
-      requestId: 'remote-tunnel-get-0001',
-      gameId: storage.gameId,
-      operation: 'get',
-      bucket: 'save',
-      key: 'checkpoint',
-      headers: {'Cookie': opened.cookie},
-    );
-    expect(tunnelGet.statusCode, HttpStatus.ok);
-    expect(standardJsonBucketValue(tunnelGet), 19);
+    expect(await storage.getData('save', 'checkpoint'), isNull);
   });
 
   test('局域网 App 通过受控 Upgrade 透明访问当前 Core', () async {

@@ -5698,8 +5698,8 @@ await assertOfficialSourceFile({
 await patchFile({
   relativePath: 'newIDE/app/src/MainFrame/EditorContainers/BaseEditor.js',
   expectedGitBlobSha: '3bdede2fb3a37676bc901e4e43eb83fecc55fa66',
-  transform: content =>
-    replaceExactly(
+  transform: content => {
+    let next = replaceExactly(
       content,
       `  onOpenRecentFile: (file: FileMetadataAndStorageProviderName) => Promise<void>,`,
       `  onOpenRecentFile: (
@@ -5707,6 +5707,65 @@ await patchFile({
     options?: {| ignorePersistedEditorTabs?: boolean |}
       ) => Promise<void>,`,
       'allow an explicit App project selection to skip Origin-specific tab restore'
+    );
+    next = replaceExactly(
+      next,
+      `import { type PreviewDebuggerServer } from '../../ExportAndShare/PreviewLauncher.flow';`,
+      `import { type PreviewDebuggerServer } from '../../ExportAndShare/PreviewLauncher.flow';
+import { type EventsFunctionsExtensionsState } from '../../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';`,
+      'type the real extension registry context forwarded to Playmesh AI'
+    );
+    return replaceExactly(
+      next,
+      `  hotReloadPreviewButtonProps: HotReloadPreviewButtonProps,
+  onRestartInGameEditor: (reason: string) => void,`,
+      `  hotReloadPreviewButtonProps: HotReloadPreviewButtonProps,
+  eventsFunctionsExtensionsState: EventsFunctionsExtensionsState,
+  onPreviewOrRefresh: () => Promise<void>,
+  onRestartInGameEditor: (reason: string) => void,`,
+      'forward the official extension context and preview callback through the editor seam'
+    );
+  },
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/src/MainFrame/EditorTabsPane.js',
+  expectedGitBlobSha: '2914b8c522097260bbf3e10bfde7a1f00603d6ce',
+  transform: content =>
+    replaceExactly(
+      content,
+      `                    previewDebuggerServer,
+                    hotReloadPreviewButtonProps,
+                    onRestartInGameEditor,`,
+      `                    previewDebuggerServer,
+                    hotReloadPreviewButtonProps,
+                    eventsFunctionsExtensionsState,
+                    onPreviewOrRefresh: hasPreviewsRunning
+                      ? launchHotReloadPreview
+                      : launchNewPreview,
+                    onRestartInGameEditor,`,
+      'forward the same official preview or refresh callback used by the toolbar'
+    ),
+});
+
+await patchFile({
+  relativePath: 'newIDE/app/src/MainFrame/PoppedOutEditorContainerWindow.js',
+  expectedGitBlobSha: 'df76c570ce2b967a506ab96060cc14481dd518b7',
+  transform: content =>
+    replaceExactly(
+      content,
+      `                        hotReloadPreviewButtonProps:
+                          props.hotReloadPreviewButtonProps,
+                        onRestartInGameEditor: props.onRestartInGameEditor,`,
+      `                        hotReloadPreviewButtonProps:
+                          props.hotReloadPreviewButtonProps,
+                        eventsFunctionsExtensionsState:
+                          props.eventsFunctionsExtensionsState,
+                        onPreviewOrRefresh: props.hasPreviewsRunning
+                          ? props.launchHotReloadPreview
+                          : props.launchNewPreview,
+                        onRestartInGameEditor: props.onRestartInGameEditor,`,
+      'forward the same official extension context and preview callback in popped-out editors'
     ),
 });
 
@@ -7170,8 +7229,41 @@ await patchFile({
       content,
       "import { retryIfFailed } from '../../Utils/RetryIfFailed';",
       `import { retryIfFailed } from '../../Utils/RetryIfFailed';
-import { presentPlaymeshExternalDownloadFailure } from '../../PlaymeshCatalog/PlaymeshExternalDownloadErrorPresenter';`,
-      'install extensions through the shared Playmesh external failure presenter'
+import { acquirePlaymeshExtensionArtifacts } from '../../PlaymeshCatalog/PlaymeshExternalDownloadErrorPresenter';`,
+      'acquire extension artifacts through the precise Playmesh download seam'
+    );
+    next = replaceExactly(
+      next,
+      `  importedSerializedExtensions: Array<SerializedExtension>,
+|};`,
+      `  importedSerializedExtensions: Array<SerializedExtension>,
+  reason?: 'asset' | 'extension' | 'behavior',
+|};`,
+      'carry an optional catalog entry reason only to the external download seam'
+    );
+    next = replaceExactly(
+      next,
+      `  importedSerializedExtensions,
+}: InstallRequiredExtensionsArgs): Promise<void> => {`,
+      `  importedSerializedExtensions,
+  reason = 'asset',
+}: InstallRequiredExtensionsArgs): Promise<void> => {`,
+      'read the catalog entry reason at the external download seam with asset compatibility'
+    );
+    next = replaceExactly(
+      next,
+      `  const downloadedSerializedExtensions = await Promise.all(
+    neededExtensions.map(extensionShortHeader =>
+      retryIfFailed({ times: 3 }, () => getExtension(extensionShortHeader))
+    )
+  );`,
+      `  const downloadedSerializedExtensions = await acquirePlaymeshExtensionArtifacts({
+    extensionShortHeaders: neededExtensions,
+    acquire: extensionShortHeader =>
+      retryIfFailed({ times: 3 }, () => getExtension(extensionShortHeader)),
+    reason,
+  });`,
+      'handle only extension artifact acquisition errors before official installation'
     );
     next = replaceExactly(
       next,
@@ -7185,36 +7277,31 @@ import { presentPlaymeshExternalDownloadFailure } from '../../PlaymeshCatalog/Pl
       importedSerializedExtensions,
     });
     return true;`,
-      `    try {
-      await installRequiredExtensions({
-        requiredExtensionInstallation,
-        shouldUpdateExtension: extensionUpdateAction === 'update',
-        eventsFunctionsExtensionsState,
-        project,
-        onWillInstallExtension,
-        onExtensionInstalled,
-        importedSerializedExtensions,
-      });
-      return true;
-    } catch (rawError) {
-      // Asset installation already owns a richer aggregate error dialog. The
-      // extension and behavior entry points share this one download boundary.
-      if (reason === 'asset') throw rawError;
-      presentPlaymeshExternalDownloadFailure({
-        rawError,
-        stage:
-          reason === 'behavior'
-            ? 'behavior_extension_download'
-            : 'extension_download',
-        operation: 'gdevelop.catalog.artifact.acquire',
-        errorId:
-          reason === 'behavior'
-            ? 'download-behavior-extension-error'
-            : 'download-extension-error',
-      });
-      return false;
-    }`,
-      'show one sanitized actionable modal for extension and behavior downloads'
+      `    await installRequiredExtensions({
+      requiredExtensionInstallation,
+      shouldUpdateExtension: extensionUpdateAction === 'update',
+      eventsFunctionsExtensionsState,
+      project,
+      onWillInstallExtension,
+      onExtensionInstalled,
+      importedSerializedExtensions,
+      reason,
+    });
+    return true;`,
+      'forward the catalog reason without catching the official install lifecycle'
+    );
+    next = replaceExactly(
+      next,
+      `          onWillInstallExtension,
+          onExtensionInstalled,
+          importedSerializedExtensions,
+        });`,
+      `          onWillInstallExtension,
+          onExtensionInstalled,
+          importedSerializedExtensions,
+          reason: 'extension',
+        });`,
+      'identify imported extension dependency acquisition at the exact download seam'
     );
     return next;
   },
@@ -7250,25 +7337,31 @@ await patchFile({
   transform: content => {
     let next = replaceExactly(
       content,
-      "import { Trans } from '@lingui/macro';",
-      "import { t, Trans } from '@lingui/macro';",
-      'behavior install translated progress and error messages'
-    );
-    next = replaceExactly(
-      next,
       "import { showMessageBox } from '../UI/Messages/MessageBox';",
-      "import { showMessageBox } from '../UI/Messages/MessageBox';\nimport AlertMessage from '../UI/AlertMessage';\nimport { presentPlaymeshExternalDownloadFailure } from '../PlaymeshCatalog/PlaymeshExternalDownloadErrorPresenter';",
-      'behavior install visible feedback imports'
+      "import { showMessageBox } from '../UI/Messages/MessageBox';\nimport AlertMessage from '../UI/AlertMessage';",
+      'show official behavior installation progress without owning its lifecycle'
     );
     next = replaceExactly(
       next,
-      "import { type BehaviorShortHeader } from '../Utils/GDevelopServices/Extension';",
-      `import {
-  getExtensionsRegistry,
-  type BehaviorShortHeader,
-  type ExtensionShortHeader,
-} from '../Utils/GDevelopServices/Extension';`,
-      'behavior install can load the owning extension registry independently'
+      `  useInstallExtension,
+  getExtensionHeader,
+} from '../AssetStore/ExtensionStore/InstallExtension';`,
+      `  useInstallExtension,
+  getExtensionHeader,
+  ensureExtensionsRegistryLoaded,
+} from '../AssetStore/ExtensionStore/InstallExtension';`,
+      'reuse the pinned official session-aware extension registry loader'
+    );
+    next = replaceExactly(
+      next,
+      `  const {
+    translatedExtensionShortHeadersByName: extensionShortHeadersByName,
+  } = React.useContext(ExtensionStoreContext);`,
+      `  const {
+    translatedExtensionShortHeadersByName: extensionShortHeadersByName,
+    fetchExtensionsAndFilters,
+  } = React.useContext(ExtensionStoreContext);`,
+      'read the actual extension store session context used by the dialog'
     );
     next = replaceExactly(
       next,
@@ -7287,20 +7380,13 @@ await patchFile({
         extensionShortHeadersByName,
         behaviorShortHeader.extensionName
       );`,
-      `      // The behavior and extension catalogs are loaded independently. A user
-      // can open this dialog before ever opening the extension store, in which
-      // case its React context is still empty. Resolve installation inputs from
-      // the canonical registry so behavior installation never depends on an
-      // unrelated dialog having been opened first.
-      const extensionRegistry = await getExtensionsRegistry();
-      const installExtensionShortHeadersByName: {
-        [name: string]: ExtensionShortHeader,
-      } = {};
-      extensionRegistry.headers.forEach(extensionShortHeader => {
-        installExtensionShortHeadersByName[extensionShortHeader.name] =
-          extensionShortHeadersByName[extensionShortHeader.name] ||
-          extensionShortHeader;
-      });
+      `      // Match the official AI install hook: warm the actual React context,
+      // then use the pinned official loader for the current session. Do not
+      // merge a second registry or manufacture installation inputs here.
+      fetchExtensionsAndFilters();
+      const activeExtensionShortHeadersByName = await ensureExtensionsRegistryLoaded(
+        extensionShortHeadersByName
+      );
       const behaviorShortHeaders: Array<BehaviorShortHeader> = [
         behaviorShortHeader,
       ];
@@ -7309,37 +7395,14 @@ await patchFile({
         {
           requiredExtensions,
           project,
-          extensionShortHeadersByName: installExtensionShortHeadersByName,
+          extensionShortHeadersByName: activeExtensionShortHeadersByName,
         }
       );
       const extensionShortHeader = getExtensionHeader(
-        installExtensionShortHeadersByName,
+        activeExtensionShortHeadersByName,
         behaviorShortHeader.extensionName
       );`,
-      'behavior install resolves owners and dependencies from the canonical registry'
-    );
-    next = replaceExactly(
-      next,
-      `      return wasExtensionInstalled;
-    } finally {
-      setIsInstalling(false);
-    }`,
-      `      return wasExtensionInstalled;
-    } catch (rawError) {
-      presentPlaymeshExternalDownloadFailure({
-        message: i18n._(
-          t\`Unable to download and install the behavior extension and its dependencies. Verify that your internet connection is working or try again later.\`
-        ),
-        rawError,
-        stage: 'behavior_extension_download',
-        operation: 'gdevelop.catalog.artifact.acquire',
-        errorId: 'download-behavior-extension-error',
-      });
-      return false;
-    } finally {
-      setIsInstalling(false);
-    }`,
-      'behavior install failure is visible to the user'
+      'resolve behavior owners and dependencies from the real official session context'
     );
     next = replaceExactly(
       next,
@@ -7375,23 +7438,6 @@ await patchFile({
       'behavior install progress is visible immediately'
     );
     return next;
-  },
-});
-
-await patchFile({
-  relativePath: 'newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js',
-  expectedGitBlobSha: 'cc52e676c4bf4873bb1a0fe6c6568982e1fbd1bb',
-  transform: content => {
-    const hostPattern = /(?<=['`])(?:https|wss):\/\/[^/'`]*(?:gdevelop\.io|gdevelop-app\.com|gd\.games|firebaseio\.com|firebaseapp\.com|appspot\.com)(?=\/|['`])/g;
-    const matches = content.match(hostPattern) || [];
-    if (matches.length < 20) {
-      throw new Error(
-        `Expected at least 20 GDevelop service endpoints, found ${
-          matches.length
-        }`
-      );
-    }
-    return content.replace(hostPattern, 'https://playmesh.invalid');
   },
 });
 

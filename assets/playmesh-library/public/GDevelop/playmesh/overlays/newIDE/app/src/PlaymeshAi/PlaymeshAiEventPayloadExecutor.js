@@ -63,57 +63,54 @@ export const applyPlaymeshAiEventPayload = async ({
       })
   );
   const scene = project.getLayout(eventPayload.sceneName);
-  try {
-    changes.forEach(change => {
-      addUndeclaredVariables({
+  changes.forEach(change => {
+    addUndeclaredVariables({
+      project,
+      scene,
+      undeclaredVariables: change.undeclaredVariables,
+    });
+    Object.keys(change.undeclaredObjectVariables).forEach(objectName => {
+      addObjectUndeclaredVariables({
         project,
         scene,
-        undeclaredVariables: change.undeclaredVariables,
-      });
-      Object.keys(change.undeclaredObjectVariables).forEach(objectName => {
-        addObjectUndeclaredVariables({
-          project,
-          scene,
-          objectName,
-          undeclaredVariables: change.undeclaredObjectVariables[objectName],
-        });
-      });
-      Object.keys(change.missingObjectBehaviors).forEach(objectName => {
-        addMissingObjectBehaviors({
-          project,
-          scene,
-          objectName,
-          missingBehaviors: change.missingObjectBehaviors[objectName],
-        });
+        objectName,
+        undeclaredVariables: change.undeclaredObjectVariables[objectName],
       });
     });
-    const applied = applyEventsChanges(
-      project,
-      scene.getEvents(),
-      officialChanges,
-      call.callId
-    );
-    if (applied.applied > 0) {
-      runnerOptions.onSceneEventsModifiedOutsideEditor({
+    Object.keys(change.missingObjectBehaviors).forEach(objectName => {
+      addMissingObjectBehaviors({
+        project,
         scene,
-        newOrChangedAiGeneratedEventIds: new Set([call.callId]),
+        objectName,
+        missingBehaviors: change.missingObjectBehaviors[objectName],
       });
-    }
-    return {
-      result: {
-        status: 'finished',
-        call_id: call.callId,
-        success: true,
-        output: applied,
-        ...(applied.applied > 0 ? { didModifyProject: true } : {}),
-      },
-      createdProject: null,
-      createdSceneNames: [],
-    };
-  } catch (error /*: mixed */) {
-    if (error instanceof PlaymeshAiLocalToolError) throw error;
-    return fail('event_payload_apply_failed');
+    });
+  });
+  // The pinned official applier and refresh callback own their failures from
+  // this point. Let their diagnostics travel through the executor unchanged.
+  const applied = applyEventsChanges(
+    project,
+    scene.getEvents(),
+    officialChanges,
+    call.callId
+  );
+  if (applied.applied > 0) {
+    runnerOptions.onSceneEventsModifiedOutsideEditor({
+      scene,
+      newOrChangedAiGeneratedEventIds: new Set([call.callId]),
+    });
   }
+  return {
+    result: {
+      status: 'finished',
+      call_id: call.callId,
+      success: true,
+      output: applied,
+      ...(applied.applied > 0 ? { didModifyProject: true } : {}),
+    },
+    createdProject: null,
+    createdSceneNames: [],
+  };
 };
 
 export default applyPlaymeshAiEventPayload;

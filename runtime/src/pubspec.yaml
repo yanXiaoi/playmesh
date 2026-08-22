@@ -2,7 +2,7 @@ name: playmesh_runtime
 description: Playmesh standalone cross-platform game runtime template.
 publish_to: none
 
-version: 1.0.0+3
+version: 1.0.1+4
 
 environment:
   sdk: ^3.12.2
@@ -20,6 +20,8 @@ dependencies:
   path_provider: ^2.1.6
   playmesh_share_ui:
     path: ../../packages/playmesh_share_ui
+  playmesh_ui:
+    path: ../../packages/playmesh_ui
   qr: 3.0.2
   qr_flutter: 4.1.0
   share_plus: ^13.2.1

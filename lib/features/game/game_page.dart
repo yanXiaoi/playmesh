@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:playmesh_share_ui/playmesh_share_ui.dart';
+import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/catalog/game_catalog_models.dart';
@@ -481,9 +482,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
 
   Widget _buildGameRuntime() {
     if (!_sessionReady) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      );
+      return const PlaymeshLoadingView();
     }
     if (_sessionError != null) {
       return _GameStartFailure(

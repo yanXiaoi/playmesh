@@ -608,6 +608,42 @@ playmesh.main.authority.onService(async (action, context) => ({
 
 namespace 只是同一 Authority 页面内的路由标签，不是安全边界。每个处理器仍须使用平台提供的 `context.senderPlayerId`、`context.session` 和 `context.members` 验证权限，不得信任 action 自报身份。规则、分数、答案和胜负应由处理器维护；Go Core 不解析游戏业务。
 
+## Authority RPC
+
+`playmesh.main.rpc` 提供精确 path 的请求/响应。所有客户端都可以调用
+`request(path, data?, options?)`，且调用始终返回 `Promise<any>`；只有固定 Authority
+Client 可以调用 `onRequest(path, handler)` 注册监听。handler 的返回类型为
+`any | Promise<any>`，不是固定 JSON 对象：
+
+```js
+if (playmesh.main.session.isAuthority()) {
+  const off = playmesh.main.rpc.onRequest("/asset/thumbnail", async (data, context) => {
+    validateRequester(context.senderPlayerId);
+    return new File([await renderThumbnail(data.id)], "thumbnail.png", {
+      type: "image/png",
+    });
+  });
+}
+
+const thumbnail = await playmesh.main.rpc.request(
+  "/asset/thumbnail",
+  { id: "cover" },
+  { timeoutMs: 10000 },
+);
+```
+
+path 必须以 `/` 开头、最长 256 字符；各段只允许字母、数字、点、下划线、连字符和
+波浪号。`timeoutMs` 是 100～60000 的整数，默认 10000。支持的可传输值为 JSON 兼容
+值、`undefined`，以及可嵌套的 `Blob`、`File`、`ArrayBuffer` 和 `Uint8Array`；文件名、
+MIME 与 `lastModified` 会一并传递。函数、Symbol、DOM 对象、循环引用、非有限数字和
+其他自定义类实例会以 `rpc_payload_invalid` 拒绝。
+
+RPC 复用现有会话认证的 Binary WebSocket，但使用 SDK 内部帧，不创建公开 Channel，
+也不经过 `game.submitAction`/`authority.result` 的 JSON 链路。Core 只路由不透明 payload，
+同时校验固定 Authority、请求 path、帧大小、并发和超时；非 Authority 不能返回结果。
+单个 SDK 编码 payload 上限为 `4 MiB - 64 KiB`。客户端超时或断线只会结束等待，不会
+撤销已经进入 Authority JavaScript 的 handler；需要幂等的写操作必须由游戏按业务键实现。
+
 ## Binary Channel
 
 `playmesh.main.binary` 用于不适合 JSON 的高频或二进制数据，例如局域网内的位姿、语音片段、压缩快照和自定义序列化状态。SDK 按需建立独立 Binary WebSocket；同一游戏只维护一条该连接，并在其上复用多个相互隔离的逻辑 Channel。游戏不能直接创建 WebSocket、读取 URL/token 或解析平台帧头。

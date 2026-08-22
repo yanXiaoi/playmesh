@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,22 +44,71 @@ func TestSafeRootIconRequiresCompletePngDecode(t *testing.T) {
 	}
 }
 
-func TestParseManifestLimitsTagsToFive(t *testing.T) {
-	_, fiveFindings := parseManifest([]byte(
-		`{"id":"com.example.five","name":"Five","version":"1.0.0",` +
-			`"tags":["one","two","three","four","five"]}`,
-	))
-	if len(fiveFindings) != 0 {
-		t.Fatalf("five tags must be accepted: %v", fiveFindings)
-	}
-
-	_, sixFindings := parseManifest([]byte(
+func TestParseManifestIndexesFiveTagsWithoutRejectingAdditionalTags(t *testing.T) {
+	summary, findings := parseManifest([]byte(
 		`{"id":"com.example.six","name":"Six","version":"1.0.0",` +
 			`"tags":["one","two","three","four","five","six"]}`,
 	))
-	if len(sixFindings) != 1 ||
-		sixFindings[0] != "main.json.tags 最多只能包含 5 个标签" {
-		t.Fatalf("six tags must be rejected: %v", sixFindings)
+	if len(findings) != 0 {
+		t.Fatalf("额外标签不应阻止上传: %v", findings)
+	}
+	if summary.TagsText != "one,two,three,four,five" {
+		t.Fatalf("列表标签索引未安全截取: %q", summary.TagsText)
+	}
+	if !strings.Contains(summary.JSON, `"six"`) {
+		t.Fatalf("原始 Manifest 标签不应丢失: %s", summary.JSON)
+	}
+}
+
+func TestInspectArchiveDoesNotRestrictNonEntryFileTypes(t *testing.T) {
+	_, findings := inspectTestArchive(t, testPackageManifest(), map[string]string{
+		"app/game.exe":      "MZ arbitrary browser download",
+		"app/module.wasm":   "\x00asm",
+		"app/archive.bin":   "arbitrary bytes",
+		"app/source.custom": "custom resource",
+		"app/no-extension":  "extensionless resource",
+	})
+	if len(findings) != 0 {
+		t.Fatalf("非入口文件不应按扩展名或文件类型拒绝: %#v", findings)
+	}
+}
+
+func TestInspectArchiveRequiresUsableDeclaredHTMLGameEntry(t *testing.T) {
+	manifest := testPackageManifest()
+	manifest["entries"] = map[string]any{"game": "pages/home.html?scene=main"}
+	invalid := []struct {
+		name  string
+		files map[string]string
+	}{
+		{name: "missing", files: nil},
+		{name: "empty", files: map[string]string{"app/pages/home.html": " \r\n\t"}},
+		{name: "invalid UTF-8", files: map[string]string{
+			"app/pages/home.html": string([]byte{0xff, 0xfe, 0xfd}),
+		}},
+		{name: "NUL", files: map[string]string{
+			"app/pages/home.html": "<!doctype html>\x00",
+		}},
+	}
+	for _, testCase := range invalid {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, findings := inspectTestArchiveWithoutDefaultEntry(
+				t, manifest, testCase.files,
+			)
+			if !containsFindingText(findings, "entries.game") {
+				t.Fatalf("无效网页入口未被拒绝: %#v", findings)
+			}
+		})
+	}
+
+	_, findings := inspectTestArchiveWithoutDefaultEntry(
+		t,
+		manifest,
+		map[string]string{
+			"app/pages/home.html": "\ufeff  <!doctype html><title>Game</title>",
+		},
+	)
+	if len(findings) != 0 {
+		t.Fatalf("正常 UTF-8 网页文本被拒绝: %#v", findings)
 	}
 }
 
@@ -121,69 +171,16 @@ func TestInspectArchiveAcceptsHTMLManifestEntryQueries(t *testing.T) {
 	}
 }
 
-func TestInspectArchiveRejectsManifestEntryQueryContentRules(t *testing.T) {
+func TestInspectArchiveAppliesRemainingManifestEntryQueryContentRules(t *testing.T) {
 	cases := []struct {
 		name   string
 		entry  string
 		ruleID string
 	}{
 		{
-			name:   "HTTP",
-			entry:  "index.html?target=http://evil.example/game",
-			ruleID: "external-http-ws",
-		},
-		{
-			name:   "HTTPS",
-			entry:  "index.html?target=https://evil.example/game",
-			ruleID: "external-http-ws",
-		},
-		{
-			name:   "WebSocket",
-			entry:  "index.html?target=ws://evil.example/socket",
-			ruleID: "external-http-ws",
-		},
-		{
-			name:   "Secure WebSocket",
-			entry:  "index.html?target=wss://evil.example/socket",
-			ruleID: "external-http-ws",
-		},
-		{
-			name:   "File",
-			entry:  "index.html?target=file://server/share",
-			ruleID: "file-protocol",
-		},
-		{
-			name:   "JavaScript",
-			entry:  "index.html?target=javascript:alert(1)",
-			ruleID: "javascript-url",
-		},
-		{
 			name:   "HTML Data URL",
 			entry:  "index.html?target=data:text/html,<script></script>",
 			ruleID: "html-data-url",
-		},
-		{
-			name:   "百分号编码 HTTPS",
-			entry:  "index.html?target=https%3A%2F%2Fevil.example/game",
-			ruleID: "external-http-ws",
-		},
-		{
-			name: "多重编码 HTTPS",
-			entry: "index.html?target=" +
-				"https%25253A%25252F%25252Fevil.example/game",
-			ruleID: "external-http-ws",
-		},
-		{
-			name: "分段多重编码 HTTPS",
-			entry: "index.html?target=" +
-				"h%2574tps%253A%252F%252Fevil.example/game",
-			ruleID: "external-http-ws",
-		},
-		{
-			name: "其他参数解码为百分号时仍扫描后续外链",
-			entry: "index.html?label=100%2525&target=" +
-				"https%253A%252F%252Fevil.example/game",
-			ruleID: "external-http-ws",
 		},
 	}
 	for _, testCase := range cases {
@@ -207,26 +204,41 @@ func TestInspectArchiveRejectsManifestEntryQueryContentRules(t *testing.T) {
 	}
 }
 
-func TestInspectArchiveScansControllerEntryQuery(t *testing.T) {
+func TestInspectArchiveAcceptsRetiredDefaultContentPatterns(t *testing.T) {
+	_, findings := inspectTestArchive(t, testPackageManifest(), map[string]string{
+		"app/Extensions/Physics3DBehavior/jolt-physics.wasm.js":                    `const localResource = "file://physics-cache";`,
+		"app/msx03fex-2bu1ewi6-gdjs-evtsext__gamepads__onfirstsceneloaded-func.js": `const template = "<iframe src='controller.html'></iframe>";`,
+		"app/pixi-renderers/draco/gltf/draco_wasm_wrapper.js":                      `const decoder = "file://draco/decoder.wasm";`,
+		"app/pixi-renderers/pixi.js":                                               `const link = "javascript:void(0)";`,
+		"app/ResourceLoader.js":                                                    `const fallback = "file://resource-cache";`,
+	})
+	if len(findings) != 0 {
+		t.Fatalf("已取消的默认内容模式不应阻止上传: %#v", findings)
+	}
+}
+
+func TestInspectArchiveAcceptsExternalLinksAndFunctionConstructor(t *testing.T) {
 	manifest := testPackageManifest()
 	manifest["modes"] = []string{"multiplayer"}
 	manifest["displayModes"] = []string{"single_screen_multiplayer"}
 	manifest["entries"] = map[string]any{
-		"game": "index.html",
+		"game": "index.html?target=https%253A%252F%252Fcdn.example/game",
 		"controller": "controller.html?" +
-			"socket=wss%253A%252F%252Fevil.example",
+			"socket=wss%253A%252F%252Frelay.example",
 	}
 	manifest["authority"] = map[string]any{"entry": "authority.js"}
 	_, findings := inspectTestArchive(t, manifest, map[string]string{
-		"app/index.html":      "<!doctype html>",
-		"app/controller.html": "<!doctype html>",
-		"app/authority.js":    "export {};",
+		"app/index.html": "<!doctype html><script " +
+			`src="https://cdn.example/game.js"></script>`,
+		"app/controller.html": "<!doctype html><script " +
+			`src="//cdn.example/controller.js"></script>`,
+		"app/authority.js": "export {};",
+		"app/runtime.js": `const factory = new Function("source", source);` +
+			`const socket = new WebSocket("wss://relay.example");`,
+		"app/style.css": `body{background-image:url("//cdn.example/a.png")}`,
 	})
-	if !containsFindingText(
-		findings,
-		"[external-http-ws]: main.json.entries.controller 查询参数",
-	) {
-		t.Fatalf("控制器入口查询未按 HTML 活动内容扫描: %#v", findings)
+	if len(findings) != 0 {
+		t.Fatalf("外部链接或动态 Function 不应阻止上传: %#v", findings)
 	}
 }
 
@@ -235,45 +247,42 @@ func TestInspectArchiveIgnoresUnknownManifestFieldsDuringContentScan(
 ) {
 	manifest := testPackageManifest()
 	manifest["untrustedExtra"] = "https%253A%252F%252Fevil.example"
-	_, findings := inspectTestArchive(t, manifest, map[string]string{
+	summary, findings := inspectTestArchive(t, manifest, map[string]string{
 		"app/index.html": "<!doctype html>",
 	})
 	if len(findings) != 0 {
 		t.Fatalf("未知 main.json 字段不应参与云分发内容扫描: %#v", findings)
 	}
+	if !strings.Contains(summary.JSON, `"untrustedExtra":"https%253A%252F%252Fevil.example"`) {
+		t.Fatalf("未知 main.json 字段应原样保留: %s", summary.JSON)
+	}
 }
 
-func TestInspectArchiveRejectsUnsafeManifestEntries(t *testing.T) {
+func TestInspectArchiveRejectsUnusableDeclaredGameEntry(t *testing.T) {
 	cases := map[string]string{
-		"根绝对路径":     "/index.html",
-		"平台保留目录":    "playmesh/index.html",
-		"平台保留目录大小写": "BuCkEt/index.html",
-		"百分号编码":     "%70laymesh/index.html",
-		"非编码百分号":    "assets/%zz/index.html",
-		"反斜杠":       `assets\index.html`,
-		"上级点段":      "assets/../index.html",
-		"当前点段":      "assets/./index.html",
-		"空路径段":      "assets//index.html",
-		"空查询参数":     "index.html?",
-		"查询参数无效编码":  "index.html?scene=%zz",
-		"Fragment":  "index.html#game",
-		"外部 URL":    "https://example.com/index.html",
+		"根绝对路径":    "/index.html",
+		"平台保留目录":   "playmesh/index.html",
+		"反斜杠":      `assets\index.html`,
+		"上级点段":     "assets/../index.html",
+		"Fragment": "index.html#game",
+		"非 HTML":   "game.js",
+		"不存在":      "missing.html",
 	}
 	for name, entry := range cases {
 		t.Run(name, func(t *testing.T) {
 			manifest := testPackageManifest()
 			manifest["entries"] = map[string]any{"game": entry}
-			_, findings := inspectTestArchive(t, manifest, map[string]string{
+			_, findings := inspectTestArchiveWithoutDefaultEntry(t, manifest, map[string]string{
 				"app/index.html": "<!doctype html>",
 			})
-			if !containsFinding(findings, "main.json.entries.game") {
-				t.Fatalf("危险入口 %q 未被拒绝: %#v", entry, findings)
+			if !containsFindingText(findings, "entries.game") {
+				t.Fatalf("不可用的主网页入口未被拒绝 %q: %#v", entry, findings)
 			}
 		})
 	}
 }
 
-func TestInspectArchiveRejectsAuthorityEntryQuery(t *testing.T) {
+func TestInspectArchiveDoesNotEnforceAuthorityEntryShape(t *testing.T) {
 	manifest := testPackageManifest()
 	manifest["modes"] = []string{"multiplayer"}
 	manifest["authority"] = map[string]any{
@@ -283,31 +292,17 @@ func TestInspectArchiveRejectsAuthorityEntryQuery(t *testing.T) {
 		"app/index.html":   "<!doctype html>",
 		"app/authority.js": "export {};",
 	})
-	if !containsFinding(
-		findings,
-		"main.json.authority.entry 不允许查询参数",
-	) {
-		t.Fatalf("Authority 查询参数未被拒绝: %#v", findings)
+	if len(findings) != 0 {
+		t.Fatalf("服务端不应按当前 Authority 结构拒绝上传: %#v", findings)
 	}
 }
 
-func TestInspectArchiveRejectsWrongManifestEntryExtensions(t *testing.T) {
+func TestInspectArchiveDoesNotEnforceNonGameEntryExtensions(t *testing.T) {
 	cases := []struct {
-		name         string
-		configure    func(map[string]any)
-		files        map[string]string
-		findingField string
+		name      string
+		configure func(map[string]any)
+		files     map[string]string
 	}{
-		{
-			name: "游戏入口必须是 HTML",
-			configure: func(manifest map[string]any) {
-				manifest["entries"] = map[string]any{"game": "game.js"}
-			},
-			files: map[string]string{
-				"app/game.js": "export {};",
-			},
-			findingField: "main.json.entries.game 必须是 .html 文件",
-		},
 		{
 			name: "控制器入口必须是 HTML",
 			configure: func(manifest map[string]any) {
@@ -324,7 +319,6 @@ func TestInspectArchiveRejectsWrongManifestEntryExtensions(t *testing.T) {
 				"app/controller.js": "export {};",
 				"app/authority.js":  "export {};",
 			},
-			findingField: "main.json.entries.controller 必须是 .html 文件",
 		},
 		{
 			name: "Authority 入口必须是 JavaScript",
@@ -338,7 +332,6 @@ func TestInspectArchiveRejectsWrongManifestEntryExtensions(t *testing.T) {
 				"app/index.html":     "<!doctype html>",
 				"app/authority.html": "<!doctype html>",
 			},
-			findingField: "main.json.authority.entry 必须是 .js 或 .mjs 文件",
 		},
 	}
 	for _, testCase := range cases {
@@ -346,8 +339,8 @@ func TestInspectArchiveRejectsWrongManifestEntryExtensions(t *testing.T) {
 			manifest := testPackageManifest()
 			testCase.configure(manifest)
 			_, findings := inspectTestArchive(t, manifest, testCase.files)
-			if !containsFinding(findings, testCase.findingField) {
-				t.Fatalf("错误入口扩展名未被拒绝: %#v", findings)
+			if len(findings) != 0 {
+				t.Fatalf("服务端不应按当前入口扩展名拒绝上传: %#v", findings)
 			}
 		})
 	}
@@ -379,49 +372,26 @@ func TestInspectArchiveRejectsReservedAppDirectories(t *testing.T) {
 	}
 }
 
-func TestInspectArchiveAcceptsCompatibleAppSDKVersion(t *testing.T) {
-	manifest := testPackageManifest()
-	manifest["appSdkVersion"] = minimumSupportedAppSDKVersion
-
-	_, findings := inspectTestArchive(t, manifest, map[string]string{
-		"app/index.html": "<!doctype html><title>compatible</title>",
-	})
-	if len(findings) != 0 {
-		t.Fatalf("compatible App SDK version should be accepted: %v", findings)
-	}
-}
-
-func TestInspectArchiveRequiresSupportedSDKVersions(t *testing.T) {
+func TestInspectArchiveDoesNotEnforceSDKVersions(t *testing.T) {
 	cases := []struct {
-		name         string
-		field        string
-		value        any
-		remove       bool
-		findingField string
+		name   string
+		field  string
+		value  any
+		remove bool
 	}{
 		{
-			name:         "缺少 Game SDK 版本",
-			field:        "sdkVersion",
-			remove:       true,
-			findingField: "main.json.sdkVersion 必须显式声明为 4.0.0",
+			name: "缺少 Game SDK 版本", field: "sdkVersion", remove: true,
 		},
 		{
-			name:         "旧 Game SDK 版本",
-			field:        "sdkVersion",
-			value:        "3.2.0",
-			findingField: "main.json.sdkVersion 必须显式声明为 4.0.0",
+			name: "未来 Game SDK 版本", field: "sdkVersion", value: "99.0.0",
 		},
 		{
-			name:         "缺少 App SDK 版本",
-			field:        "appSdkVersion",
-			remove:       true,
-			findingField: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
+			name: "缺少 App SDK 版本", field: "appSdkVersion", remove: true,
 		},
 		{
-			name:         "旧 App SDK 版本",
-			field:        "appSdkVersion",
-			value:        "3.1.0",
-			findingField: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
+			name: "非语义 App SDK 版本", field: "appSdkVersion", value: map[string]any{
+				"channel": "next",
+			},
 		},
 	}
 	for _, testCase := range cases {
@@ -435,111 +405,72 @@ func TestInspectArchiveRequiresSupportedSDKVersions(t *testing.T) {
 			_, findings := inspectTestArchive(t, manifest, map[string]string{
 				"app/index.html": "<!doctype html>",
 			})
-			if !containsFinding(findings, testCase.findingField) {
-				t.Fatalf("非当前 SDK 契约未被拒绝: %#v", findings)
+			if len(findings) != 0 {
+				t.Fatalf("SDK 声明不应由上传服务限制: %#v", findings)
 			}
 		})
 	}
 }
 
-func TestInspectArchiveRequiresResolvedManifestEntries(t *testing.T) {
-	t.Run("游戏入口声明", func(t *testing.T) {
-		manifest := testPackageManifest()
-		delete(manifest, "entries")
-		_, findings := inspectTestArchive(t, manifest, map[string]string{
-			"app/index.html": "<!doctype html>",
+func TestInspectArchiveDoesNotEnforceUnrelatedManifestShape(t *testing.T) {
+	cases := []struct {
+		name      string
+		configure func(map[string]any)
+	}{
+		{"多人字段尚未定义", func(manifest map[string]any) {
+			manifest["modes"] = []string{"multiplayer"}
+			delete(manifest, "authority")
+		}},
+		{"未来非入口结构", func(manifest map[string]any) {
+			manifest["players"] = map[string]any{"future": true}
+			manifest["runtime"] = []any{"next"}
+		}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			manifest := testPackageManifest()
+			testCase.configure(manifest)
+			_, findings := inspectTestArchive(t, manifest, nil)
+			if len(findings) != 0 {
+				t.Fatalf("非核心 Manifest 结构不应阻止上传: %#v", findings)
+			}
 		})
-		if !containsFinding(findings, "main.json.entries.game 必须显式声明") {
-			t.Fatalf("缺少游戏入口声明未被拒绝: %#v", findings)
-		}
-	})
+	}
+}
 
-	t.Run("游戏入口文件", func(t *testing.T) {
-		_, findings := inspectTestArchive(t, testPackageManifest(), nil)
-		if !containsFinding(findings, "main.json.entries.game 对应文件不存在") {
-			t.Fatalf("缺少游戏入口文件未被拒绝: %#v", findings)
-		}
-	})
+func TestInspectArchiveDoesNotRejectOptionalMetadataShape(t *testing.T) {
+	manifest := testPackageManifest()
+	manifest["author"] = strings.Repeat("a", 200)
+	manifest["remarks"] = strings.Repeat("r", 3000)
+	manifest["tags"] = []any{
+		strings.Repeat("t", 80), "one", "two", "three", "four", "five", "six",
+	}
+	manifest["players"] = "future-shape"
+	_, findings := inspectTestArchive(t, manifest, nil)
+	if len(findings) != 0 {
+		t.Fatalf("非核心 Manifest 字段不应阻止上传: %#v", findings)
+	}
+}
 
-	t.Run("单屏多人控制器声明", func(t *testing.T) {
-		manifest := testPackageManifest()
-		manifest["modes"] = []string{"multiplayer"}
-		manifest["displayModes"] = []string{"single_screen_multiplayer"}
-		manifest["authority"] = map[string]any{"entry": "authority.js"}
-		_, findings := inspectTestArchive(t, manifest, map[string]string{
-			"app/index.html":   "<!doctype html>",
-			"app/authority.js": "export {};",
+func TestInspectArchiveStillRequiresServerMetadata(t *testing.T) {
+	cases := []struct {
+		field   string
+		finding string
+	}{
+		{"id", "main.json.id 缺失或格式无效"},
+		{"name", "main.json.name 缺失或过长"},
+		{"version", "main.json.version 必须是无前缀的 MAJOR.MINOR.PATCH"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.field, func(t *testing.T) {
+			manifest := testPackageManifest()
+			delete(manifest, testCase.field)
+			_, findings := inspectTestArchive(t, manifest, nil)
+			if !containsFinding(findings, testCase.finding) {
+				t.Fatalf("缺少服务端核心字段 %s 未被拒绝: %#v", testCase.field, findings)
+			}
 		})
-		if !containsFinding(
-			findings,
-			"main.json.entries.controller 必须显式声明",
-		) {
-			t.Fatalf("缺少控制器入口声明未被拒绝: %#v", findings)
-		}
-	})
-
-	t.Run("单屏多人控制器文件", func(t *testing.T) {
-		manifest := testPackageManifest()
-		manifest["modes"] = []string{"multiplayer"}
-		manifest["displayModes"] = []string{"single_screen_multiplayer"}
-		manifest["entries"] = map[string]any{
-			"game":       "index.html",
-			"controller": "controller/index.html",
-		}
-		manifest["authority"] = map[string]any{"entry": "authority.js"}
-		_, findings := inspectTestArchive(t, manifest, map[string]string{
-			"app/index.html":   "<!doctype html>",
-			"app/authority.js": "export {};",
-		})
-		if !containsFinding(
-			findings,
-			"main.json.entries.controller 对应文件不存在",
-		) {
-			t.Fatalf("缺少控制器入口文件未被拒绝: %#v", findings)
-		}
-	})
-
-	t.Run("多人 Authority 声明", func(t *testing.T) {
-		manifest := testPackageManifest()
-		manifest["modes"] = []string{"multiplayer"}
-		_, findings := inspectTestArchive(t, manifest, map[string]string{
-			"app/index.html": "<!doctype html>",
-		})
-		if !containsFinding(findings, "多人游戏缺少 main.json.authority.entry") {
-			t.Fatalf("缺少 Authority 声明未被拒绝: %#v", findings)
-		}
-	})
-
-	t.Run("Authority 入口文件", func(t *testing.T) {
-		manifest := testPackageManifest()
-		manifest["modes"] = []string{"multiplayer"}
-		manifest["authority"] = map[string]any{"entry": "authority.js"}
-		_, findings := inspectTestArchive(t, manifest, map[string]string{
-			"app/index.html": "<!doctype html>",
-		})
-		if !containsFinding(
-			findings,
-			"main.json.authority.entry 对应文件不存在",
-		) {
-			t.Fatalf("缺少 Authority 文件未被拒绝: %#v", findings)
-		}
-	})
-
-	t.Run("非联机模式忽略控制器与 Authority", func(t *testing.T) {
-		manifest := testPackageManifest()
-		manifest["entries"] = map[string]any{
-			"game":       "index.html",
-			"controller": "missing/controller.html",
-		}
-		manifest["authority"] = map[string]any{"entry": "missing/authority.js"}
-		_, findings := inspectTestArchive(t, manifest, map[string]string{
-			"app/index.html": "<!doctype html>",
-		})
-		if containsFinding(findings, "main.json.entries.controller") ||
-			containsFinding(findings, "main.json.authority") {
-			t.Fatalf("非联机模式不应校验控制器或 Authority: %#v", findings)
-		}
-	})
+	}
 }
 
 func TestDeleteStoredFilesRemovesFilesAndIsRetrySafe(t *testing.T) {
@@ -564,8 +495,8 @@ func testPackageManifest() map[string]any {
 		"id":            "com.example.entries",
 		"name":          "Entries",
 		"version":       "1.0.0",
-		"sdkVersion":    requiredGameSDKVersion,
-		"appSdkVersion": requiredAppSDKVersion,
+		"sdkVersion":    "4.1.0",
+		"appSdkVersion": "3.3.0",
 		"entries": map[string]any{
 			"game": "index.html",
 		},
@@ -578,6 +509,25 @@ func inspectTestArchive(
 	files map[string]string,
 ) (manifestSummary, []string) {
 	t.Helper()
+	return inspectTestArchiveWithDefaultEntry(t, manifest, files, true)
+}
+
+func inspectTestArchiveWithoutDefaultEntry(
+	t *testing.T,
+	manifest map[string]any,
+	files map[string]string,
+) (manifestSummary, []string) {
+	t.Helper()
+	return inspectTestArchiveWithDefaultEntry(t, manifest, files, false)
+}
+
+func inspectTestArchiveWithDefaultEntry(
+	t *testing.T,
+	manifest map[string]any,
+	files map[string]string,
+	includeDefaultEntry bool,
+) (manifestSummary, []string) {
+	t.Helper()
 	archivePath := filepath.Join(t.TempDir(), "game.zip")
 	output, err := os.Create(archivePath)
 	if err != nil {
@@ -588,8 +538,20 @@ func inspectTestArchive(
 	if err != nil {
 		t.Fatal(err)
 	}
-	allFiles := make(map[string]string, len(files)+1)
+	allFiles := make(map[string]string, len(files)+2)
 	allFiles["main.json"] = string(manifestBytes)
+	if includeDefaultEntry {
+		if entries, ok := manifest["entries"].(map[string]any); ok {
+			if rawEntry, ok := entries["game"].(string); ok {
+				entryPath, _, _ := strings.Cut(rawEntry, "?")
+				physicalPath := "app/" + entryPath
+				if cleaned, valid := safeArchivePath(physicalPath); valid &&
+					strings.ToLower(path.Ext(cleaned)) == ".html" {
+					allFiles[cleaned] = "<!doctype html><title>Test Game</title>"
+				}
+			}
+		}
+	}
 	for name, content := range files {
 		allFiles[name] = content
 	}

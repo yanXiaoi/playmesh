@@ -13,6 +13,24 @@ final class RuntimeSharePanelPresentation {
   final Map<String, Uri> _linksById;
 
   Uri? linkForId(String id) => _linksById[id];
+
+  PlaymeshSharePanelModel selectLanLink(String id) {
+    final selectedId = model.lanLinks.any((link) => link.id == id) ? id : null;
+    return PlaymeshSharePanelModel(
+      title: model.title,
+      lanLinks: model.lanLinks,
+      selectedLanLinkId: selectedId,
+      internetLinks: model.internetLinks,
+      selectedInternetLinkId: model.selectedInternetLinkId,
+      participants: model.participants,
+      serverCatalog: model.serverCatalog,
+      lanLoading: model.lanLoading,
+      lanError: model.lanError,
+      internetLoading: model.internetLoading,
+      internetError: model.internetError,
+      initialSection: model.initialSection,
+    );
+  }
 }
 
 RuntimeSharePanelPresentation buildRuntimeSharePanelPresentation({

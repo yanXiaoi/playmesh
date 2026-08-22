@@ -22,6 +22,7 @@ import type {
   PlaymeshAiStagedResource,
 } from './PlaymeshAiProtocol';
 import type { FileMetadata } from '../ProjectsStorage';
+import type { EventsFunctionsExtensionsState } from '../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
 import type {
   PlaymeshAiEventPayloadContext,
   PlaymeshAiLocalToolContext,
@@ -65,6 +66,8 @@ type PlaymeshAiExecutorOptions = {
   onProjectModified?: () => mixed,
   onFetchNewlyAddedResources?: () => Promise<void>,
   onNewResourcesAdded?: () => void,
+  eventsFunctionsExtensionsState?: EventsFunctionsExtensionsState,
+  onPreviewOrRefresh?: () => Promise<void>,
   ...,
 };
 type PlaymeshAiExecutionIdentity = {|
@@ -415,6 +418,16 @@ export const normalizePlaymeshAiExecutionOutput = (
   if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
     throw new PlaymeshAiExecutionError('editor_function_output_invalid');
   }
+  if (
+    result &&
+    result.didModifyProject === true &&
+    !('didModifyProject' in normalized)
+  ) {
+    // The official runner keeps this flag beside output. The Gateway wire has
+    // only one business output object, so preserve the flag without replacing
+    // or renaming any official output field.
+    normalized.didModifyProject = true;
+  }
   return normalized;
 };
 
@@ -443,6 +456,68 @@ const readExecutionErrorCode = (
   }
 };
 
+const readDiagnosticString = (
+  value /*: mixed */,
+  key /*: string */
+) /*: ?string */ => {
+  try {
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value[key];
+    return typeof candidate === 'string' && candidate.trim()
+      ? candidate
+      : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const executionFailureFromThrownError = (
+  error /*: mixed */,
+  fallbackCode /*: string */
+) /*: PlaymeshAiExecutionRequest */ => {
+  const code = readExecutionErrorCode(error, fallbackCode);
+  const message =
+    readDiagnosticString(error, 'message') ||
+    'The GDevelop editor function threw an exception.';
+  const errorType = readDiagnosticString(error, 'name') || 'Error';
+  return {
+    success: false,
+    output: { code, message, errorType },
+    errorCode: code,
+    errorMessage: message,
+  };
+};
+
+const executionFailureFromOfficialResult = (
+  result /*: EditorFunctionCallResult */
+) /*: PlaymeshAiExecutionRequest */ => {
+  const output = normalizePlaymeshAiExecutionOutput(result);
+  const nestedError =
+    output.error &&
+    typeof output.error === 'object' &&
+    !Array.isArray(output.error)
+      ? output.error
+      : null;
+  const code =
+    readDiagnosticString(output, 'code') ||
+    readDiagnosticString(output, 'errorCode') ||
+    readDiagnosticString(nestedError, 'code') ||
+    readDiagnosticString(nestedError, 'type') ||
+    'editor_function_reported_failure';
+  const message =
+    readDiagnosticString(output, 'message') ||
+    readDiagnosticString(nestedError, 'message') ||
+    'The GDevelop editor function reported a failure.';
+  return {
+    success: false,
+    output,
+    // These fields describe the transport terminal state. The complete
+    // official output remains above and is never replaced by this context.
+    errorCode: code,
+    errorMessage: message,
+  };
+};
+
 /**
  * One in-page queue invokes the official runner against the exact gdProject
  * owned by the editor. The Gateway receives only the business result.
@@ -458,6 +533,8 @@ export class PlaymeshAiExecutor {
   onProjectModified: () => mixed;
   onFetchNewlyAddedResources: () => Promise<void>;
   onNewResourcesAdded: () => void;
+  eventsFunctionsExtensionsState: ?EventsFunctionsExtensionsState;
+  onPreviewOrRefresh: ?() => Promise<void>;
   executionResults: Map<string, PlaymeshAiPendingExecutionResult>;
   operation: Promise<mixed>;
   disposed: boolean;
@@ -473,6 +550,8 @@ export class PlaymeshAiExecutor {
     onProjectModified = () => {},
     onFetchNewlyAddedResources = async () => {},
     onNewResourcesAdded = () => {},
+    eventsFunctionsExtensionsState,
+    onPreviewOrRefresh,
   } /*: PlaymeshAiExecutorOptions */ = {}) {
     this.client = client;
     this.executeEditorFunction = executeEditorFunction;
@@ -483,6 +562,8 @@ export class PlaymeshAiExecutor {
     this.onProjectModified = onProjectModified;
     this.onFetchNewlyAddedResources = onFetchNewlyAddedResources;
     this.onNewResourcesAdded = onNewResourcesAdded;
+    this.eventsFunctionsExtensionsState = eventsFunctionsExtensionsState;
+    this.onPreviewOrRefresh = onPreviewOrRefresh;
     this.executionResults = sharedExecutionResults;
     this.operation = Promise.resolve();
     this.disposed = false;
@@ -632,6 +713,12 @@ export class PlaymeshAiExecutor {
     options.beforeProjectMutation = beforeProjectMutation;
     options.onFetchNewlyAddedResources = this.onFetchNewlyAddedResources;
     options.onNewResourcesAdded = this.onNewResourcesAdded;
+    if (this.eventsFunctionsExtensionsState) {
+      options.eventsFunctionsExtensionsState = this.eventsFunctionsExtensionsState;
+    }
+    if (this.onPreviewOrRefresh) {
+      options.onPreviewOrRefresh = this.onPreviewOrRefresh;
+    }
     if (toolsContract) options.toolsContract = toolsContract;
     return this.createLocalWrappers(options);
   }
@@ -863,17 +950,17 @@ export class PlaymeshAiExecutor {
           if (!mutationStarted && executionAbortHandle.isAborted()) {
             return cancelledExecutionOutcome(call);
           }
-          const code = readExecutionErrorCode(
+          const execution = executionFailureFromThrownError(
             error,
-            'editor_function_failed'
+            'editor_function_exception'
           );
-          const finished = await this._reportFailure({
+          const finished = await this._finishExecution(
             gameId,
             sessionId,
             call,
-            code,
-            signal: definition.modifiesProject ? undefined : executionSignal,
-          });
+            execution,
+            definition.modifiesProject ? undefined : executionSignal
+          );
           return { status: 'failed', call: finished.call, callId: call.callId };
         }
         let execution /*: PlaymeshAiExecutionRequest */;
@@ -899,16 +986,14 @@ export class PlaymeshAiExecutor {
             );
           } else {
             const result = executed.result;
-            if (
-              !result ||
-              result.status !== 'finished' ||
-              result.success !== true
-            ) {
+            if (!result || result.status !== 'finished') {
               execution = executionFailure(
                 result && result.status === 'aborted'
                   ? 'editor_function_aborted'
-                  : 'editor_function_failed'
+                  : 'editor_function_result_invalid'
               );
+            } else if (result.success !== true) {
+              execution = executionFailureFromOfficialResult(result);
             } else {
               execution = {
                 success: true,

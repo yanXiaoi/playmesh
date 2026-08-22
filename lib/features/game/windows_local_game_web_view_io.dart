@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import '../../core/game_sdk/game_sdk_bridge.dart';
@@ -389,10 +390,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       return _WindowsWebViewFailure(title: widget.title, error: error);
     }
     if (!_ready) {
-      return const ColoredBox(
-        color: Colors.black,
-        child: Center(child: CircularProgressIndicator(color: Colors.white)),
-      );
+      return const PlaymeshLoadingView();
     }
 
     return Webview(_controller, permissionRequested: _handlePermissionRequest);

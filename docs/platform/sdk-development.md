@@ -59,8 +59,8 @@ Bridge 只负责消息解析、上下文构造、统一分发和响应，不重�
 
 | 数据或行为 | 唯一所有者 | 规则 |
 | --- | --- | --- |
-| 游戏声明、`gameId`、会话、玩家、Authority 角色、同步、生命周期、Bucket | `playmesh-main.js` | 只公开 `playmesh.main.*`；所有平台使用相同 API，共享结果由 Authority 主机或受控 Game SDK Bridge 提供 |
-| 平台、App 身份、locale、FPS/延迟、能力注册表、设备可用性、权限、全屏、终端输入 | `playmesh-app.js` | 只公开 `playmesh.app.*`；由当前 Windows/Android/浏览器终端注入，允许每个玩家结果不同 |
+| 游戏声明、`gameId`、会话、玩家、Authority 角色、同步、生命周期、Authority 主机 Bucket | `playmesh-main.js` | 只公开 `playmesh.main.*`；Main Bucket 只能由 Authority 页面调用，宿主 HTTP 网关必须在后台拒绝远程玩家，即使其浏览器会话或分享令牌有效 |
+| 平台、App 身份、locale、FPS/延迟、能力注册表、设备可用性、权限、全屏、终端输入、当前设备 Bucket | `playmesh-app.js` | 只公开 `playmesh.app.*`；由当前 Windows/Android/浏览器终端注入，允许每个玩家结果不同；App Bucket 不通过 Authority 或 Session 共享 |
 | Console 日志拦截、日志缓存和日志覆盖层 | `playmesh-app.js` | 只保留当前页面、当前终端日志，不进入 Game SDK、Session 或 Authority |
 | 菜单、信息、日志和性能覆盖层的 DOM | `playmesh-app.js` | 可读取 Game SDK 数据，但只负责展示和终端交互 |
 
@@ -99,10 +99,13 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 | `playmesh.app.device` | `getPlatform()`、`setFullscreen()`、`onInput()` |
 | `playmesh.app.ui` | `configure()`、`initializeBrowser()`、`showGameSidebar()`、`restartGame()`、`openSharePanel()`、`openRuntimeLogs()`、`enterFullscreen()`、`exitFullscreen()`、`openGameInfo()`、`setPerformanceVisible()`、`togglePerformance()`、`exitGame()` |
 | `playmesh.app.runtime` | `getLocale()` |
+| `playmesh.app.storage` | `getBucket()` |
+| `PlaymeshAppStorageBucket` | `getData()`、`setData()`、`removeData()`、`clearData()` |
 | `playmesh.main.session` | `getCurrent()`、`onStateChange()`、`onPlayerJoin()`、`onPlayerLeave()`、`onPlayerReconnect()`、`isAuthority()`、`start()`、`finish()` |
 | `playmesh.main.player` | `getCurrent()`、`setNickname()` |
 | `playmesh.main.game` | `submitAction()`、`onMessage()`、`onEvent()` |
 | `playmesh.main.authority` | `onService()` |
+| `playmesh.main.rpc` | `request()`、`onRequest()` |
 | `playmesh.main.binary` | `authorityPlayerId`、`createChannel()`、`joinChannel()` |
 | `BinaryChannel` | `id`、`mode`、`send()`、`sendLatest()`、`onMessage()`、`onForward()`、`close()` |
 | `playmesh.main.sync` | `startAuthority()`、`submitAction()`、`submitState()`、`requestSnapshot()`、`getSnapshot()`、`observe()` |
@@ -111,6 +114,26 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 | `playmesh.app.performance` | `reportFrame()`、`getFps()`、`onFps()`、`getLatency()`、`getLatencyDiagnostics()`、`onLatency()`、`setVisible()` |
 | `playmesh.main.storage` | `getBucket()` |
 | `StorageBucket` | `getData()`、`setData()`、`removeData()`、`clearData()`、`upload()` |
+
+`playmesh.main.storage` 与 `playmesh.app.storage` 的调用形态相似，但数据所有权不同：
+Main Bucket 是 Authority 主机持有、且只允许 Authority 页面读写的游戏数据；需要让
+玩家使用其中结果时，Authority 必须通过正常游戏消息投影所需内容，不能让玩家直接读取
+Bucket。App Bucket 只属于调用页面所在的当前设备，其他玩家和其他设备不能通过会话
+读取。两者 Bucket 名称都匹配
+`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，key 都匹配
+`^[A-Za-z0-9._-]{1,128}$`。App WebView 把每个 Bucket 保存为当前设备
+`playmesh-library/data/{游戏名称}/{gameId}/{bucket名称}.json`；游戏名称作为文件段时由
+宿主安全转义，游戏代码不能指定或枚举路径。普通浏览器则直接以 Bucket 名称为
+`localStorage` key。App Bucket 只提供异步 JSON 操作，不提供同步接口、`upload()` 或
+默认跨设备恢复。
+
+`playmesh.main.rpc` 复用已经过会话凭证认证的 Binary WebSocket，并使用 SDK 内部
+RPC 帧直达固定 Authority，不经过 Session WS JSON action，也不创建公开 Binary
+Channel。所有客户端的 `request(path, data, options?)` 都只返回 Promise；只有
+Authority 可以调用 `onRequest(path, handler)`。handler 可直接返回值或返回 Promise。
+公开 `any` 仅代表可传输值：JSON 兼容值以及 `Blob`、`File`、`ArrayBuffer`、
+`Uint8Array`；函数、DOM 对象、循环引用和其他类实例必须在编码前拒绝。Core 只校验
+会话、Authority 身份、path、帧大小、并发和超时，业务 payload 始终作为不透明字节转发。
 
 面向游戏开发者的唯一全局对象是 `window.playmesh`，其根级公开成员严格只有
 `ready`、`main` 与 `app`。`window.playmeshApp` 不存在，公开的 `main`/`app`
@@ -134,6 +157,7 @@ App SDK 内存中；Dart 不接收、保存或上报 FPS/延迟指标。性能�
 ```text
 game.session
 game.binary
+game.rpc
 game.sync
 game.storage-lifecycle
 app.capability
@@ -212,6 +236,17 @@ App UI feature 另提供同步无返回值的
 单向、幂等移除当前文档的 Escape/Menu/Back 监听 disposer；不影响显式
 `showGameSidebar()`、信息/日志覆盖层或已打开层的关闭。平台 UI 配置刷新不能重新绑定，
 WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必须拒绝。
+
+App SDK 的菜单、信息和日志覆盖层必须在自身 Shadow DOM 中显式使用默认系统光标，
+不能继承游戏用于第一人称或第三人称控制的隐藏光标样式。该行为只作用于 SDK 自有覆盖层，
+不得读取或修改游戏 DOM/CSS；覆盖层关闭后直接隐藏，不保存或恢复游戏光标状态，也不在
+Runtime host、Game SDK 或 GDevelop 扩展中增加平行处理。
+
+SDK 自有覆盖层和悬浮菜单按钮产生的鼠标、Pointer、触摸、点击、右键菜单及滚轮事件，
+必须在 closed Shadow DOM 的冒泡边界调用 `stopPropagation()`，不得调用统一的
+`preventDefault()`，以免破坏按钮、滚动和触摸的默认交互。该隔离负责阻止普通冒泡监听把
+菜单输入传给游戏，但不退出或恢复 Pointer Lock，也不能替代游戏对捕获阶段输入监听的暂停；
+需要这些输入模式的游戏仍应通过 `onGameMenuOpen()` / `onGameMenuClose()` 管理自身输入状态。
 
 新增功能时：
 
@@ -450,6 +485,12 @@ Game SDK 提供能力确认与浏览器昵称层；App SDK 提供菜单、信息
 `app.json` 中的 `platform.game.*`；
 SDK Feature、生成的 JavaScript 和浏览器配置不得包含语言表、`zh/en` 分支或另一套
 可见 fallback。
+
+安装包导出可在 Runtime 私有配置中启用自动能力确认。Runtime host 仅在
+`app.bootstrap` 回包中注入 `_playmeshAutoApproveCapabilities`，App SDK 把它转存到私有
+`Symbol` runtime 后立即从 bootstrap 对象删除；Game SDK 在正常能力声明完成后调用既有
+`app.capabilities.confirm`，不复制宿主能力状态，也不增加公开 API、`.d.ts` 字段或网页可见
+配置。未配置时必须保持现有确认界面。
 
 App WebView 链路固定为：
 

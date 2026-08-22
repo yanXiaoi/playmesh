@@ -35,6 +35,82 @@ func TestDefaultStorageBudgetSupportsLargeHTMLGames(t *testing.T) {
 	}
 }
 
+func TestDefaultScannerDoesNotRejectRetiredContentPatterns(t *testing.T) {
+	retired := map[string]struct{}{
+		"external-http-ws":            {},
+		"protocol-relative-attribute": {},
+		"protocol-relative-css":       {},
+		"protocol-relative-script":    {},
+		"function-constructor":        {},
+		"file-protocol":               {},
+		"javascript-url":              {},
+		"embedded-document":           {},
+	}
+	for _, rule := range Default().Scanner.ContentRules {
+		if _, exists := retired[rule.ID]; exists {
+			t.Fatalf("默认扫描器仍包含已取消规则 %q", rule.ID)
+		}
+	}
+}
+
+func TestNormalizeRetiresOnlyExactLegacyContentRules(t *testing.T) {
+	cfg := Default()
+	cfg.Scanner.ContentRules = append(cfg.Scanner.ContentRules,
+		ContentRule{
+			ID: "external-http-ws", Description: "legacy",
+			Pattern: `(?i)(?:https?|wss?)://`, Enabled: true,
+		},
+		ContentRule{
+			ID: "protocol-relative-attribute", Description: "legacy",
+			Pattern: `(?i)(?:src|href|action)\s*=\s*["']//`, Enabled: true,
+		},
+		ContentRule{
+			ID: "protocol-relative-css", Description: "legacy",
+			Pattern: `(?i)url\s*\(\s*["']?//`, Enabled: true,
+		},
+		ContentRule{
+			ID: "protocol-relative-script", Description: "legacy",
+			Pattern: `(?i)["']\s*//[a-z0-9]`, Enabled: true,
+		},
+		ContentRule{
+			ID: "function-constructor", Description: "legacy",
+			Pattern: `(?i)new\s+Function\s*\(`, Enabled: true,
+		},
+		ContentRule{
+			ID: "file-protocol", Description: "legacy",
+			Pattern: `(?i)file://`, Enabled: true,
+		},
+		ContentRule{
+			ID: "javascript-url", Description: "legacy",
+			Pattern: `(?i)javascript\s*:`, Enabled: true,
+		},
+		ContentRule{
+			ID: "embedded-document", Description: "legacy",
+			Pattern: `(?i)<\s*(iframe|object|embed)\b`, Enabled: true,
+		},
+		ContentRule{
+			ID: "operator-custom-link-policy", Description: "custom",
+			Pattern: `https://blocked\.example`, Enabled: true,
+		},
+	)
+	cfg.normalize()
+	for _, rule := range cfg.Scanner.ContentRules {
+		if isRetiredDefaultContentRule(rule) {
+			t.Fatalf("历史默认规则未被迁移删除: %+v", rule)
+		}
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("迁移后配置无效: %v", err)
+	}
+	customFound := false
+	for _, rule := range cfg.Scanner.ContentRules {
+		customFound = customFound || rule.ID == "operator-custom-link-policy"
+	}
+	if !customFound {
+		t.Fatal("部署者自定义内容规则被错误删除")
+	}
+}
+
 func TestValidateRelayPublicBaseURL(t *testing.T) {
 	tests := []struct {
 		name          string

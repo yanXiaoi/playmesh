@@ -481,7 +481,27 @@ void main() {
     expect(source, contains('absorbing: !_appSdkInputTakenOver'));
     expect(
       source,
-      isNot(contains('if (!_appSdkInputTakenOver) {\n      content = Focus(')),
+      matches(
+        RegExp(
+          r'content = Stack\(\s*'
+          r'fit: StackFit\.expand,\s*'
+          r'children: \[\s*'
+          r'content,\s*'
+          r'if \(!_appSdkInputTakenOver\) const PlaymeshLoadingView\(\),\s*'
+          r'\],\s*'
+          r'\);',
+        ),
+      ),
+    );
+    expect(
+      source,
+      isNot(
+        matches(
+          RegExp(
+            r'if \(!_appSdkInputTakenOver\) \{\s*content = (?:Focus|Stack)\(',
+          ),
+        ),
+      ),
     );
   });
 

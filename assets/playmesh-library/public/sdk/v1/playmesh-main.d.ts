@@ -106,6 +106,20 @@ interface PlaymeshAuthorityServiceOptions {
   namespace?: string;
 }
 
+/** Authority RPC 请求配置。 */
+interface PlaymeshRpcRequestOptions {
+  /** 等待 Authority 响应的毫秒数，必须是 100～60000 的整数，默认 10000。 */
+  timeoutMs?: number;
+}
+
+/** Authority RPC handler 收到的可信上下文。 */
+interface PlaymeshRpcContext extends PlaymeshAuthorityContext {
+  /** Core 生成的请求 ID，可用于 Authority 业务日志。 */
+  requestId: string;
+  /** 已通过 SDK 校验的精确监听路径。 */
+  path: string;
+}
+
 /** Binary Channel 的转发方式。`authority` 先由 Authority 审核，`relay` 直接转发。 */
 type PlaymeshBinaryChannelMode = "authority" | "relay";
 
@@ -520,6 +534,23 @@ interface PlaymeshMainApi {
      */
     onService(handler: (action: PlaymeshJson, context: PlaymeshAuthorityContext) => PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined | Promise<PlaymeshAuthorityResult | PlaymeshAuthorityResult[] | null | undefined>, options?: PlaymeshAuthorityServiceOptions): PlaymeshUnsubscribe;
   };
+  /** 由固定 Authority Client 审核和响应的请求/响应通道。 */
+  readonly rpc: {
+    /**
+     * 向 Authority 指定 path 发起异步请求。支持 JSON 兼容值、Blob、File、
+     * ArrayBuffer 和 Uint8Array；Promise 只在 Authority handler 返回结果后完成；
+     * 客户端超时不会撤销已经开始执行的 Authority handler。
+     * @playmesh-completion playmesh.main.rpc.request
+     */
+    request(path: string, data?: any, options?: PlaymeshRpcRequestOptions): Promise<any>;
+    /**
+     * 监听一个精确 RPC path。只有 Authority Client 可以调用；handler 可以同步返回
+     * 可传输值，也可以返回 Promise。
+     * @returns 取消监听函数。
+     * @playmesh-completion playmesh.main.rpc.onRequest
+     */
+    onRequest(path: string, handler: (data: any, context: PlaymeshRpcContext) => any | Promise<any>): PlaymeshUnsubscribe;
+  };
   /** 多人会话内的透明二进制分发。SDK 按需维护一条受平台管控的 Binary WebSocket。 */
   readonly binary: {
     /** Authority 在所有 Binary Channel 中使用的固定玩家 ID。 */
@@ -555,7 +586,7 @@ interface PlaymeshMainApi {
     /** 订阅退出事件；允许返回 Promise，宿主只会有限等待。 @playmesh-completion playmesh.main.lifecycle.onExit */
     onExit(callback: (event: PlaymeshLifecycleEvent) => void | Promise<void>): PlaymeshUnsubscribe;
   };
-  /** Authority 主机上的持久 JSON Bucket。浏览器和加入设备不建立独立副本。 */
+  /** Authority 主机上的持久 Bucket；只有 Authority 页面可读写，宿主后台会拒绝远程玩家。 */
   readonly storage: {
     /** 获取 Bucket；异步方法保持原 64 字符名称规则，同步方法另支持 1～4096 UTF-8 字节的逻辑名。 @playmesh-completion playmesh.main.storage.getBucket */
     getBucket(bucket: string): PlaymeshStorageBucket;
@@ -579,6 +610,26 @@ interface PlaymeshApi {
 /** 游戏页面使用的全局 Playmesh SDK。 */
 declare const playmesh: PlaymeshApi;
 interface Window { playmesh: PlaymeshApi; }
+
+/** 当前设备独占的 App JSON Bucket；不会与 Authority 或其他玩家共享。 */
+interface PlaymeshAppStorageBucket {
+  /** 读取 key；不存在时返回 `null`。 */
+  getData<T = PlaymeshJson>(key: string): Promise<T | null>;
+  /** 在当前设备写入 JSON 值。 */
+  setData(key: string, value: PlaymeshJson): Promise<void>;
+  /** 在当前设备删除一个 key。 */
+  removeData(key: string): Promise<void>;
+  /** 清空当前设备上的当前 Bucket。 */
+  clearData(): Promise<void>;
+}
+
+interface PlaymeshAppApi {
+  /** 当前设备独占的玩家本地 JSON 存储，不通过 Authority 或游戏会话共享。 */
+  readonly storage: {
+    /** 获取本地 Bucket；名称规则与 Main Bucket 相同。 @playmesh-completion playmesh.app.storage.getBucket */
+    getBucket(bucket: string): PlaymeshAppStorageBucket;
+  };
+}
 
 interface PlaymeshAppUiApi {
   /**

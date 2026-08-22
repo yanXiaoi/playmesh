@@ -14,6 +14,7 @@ import '../capabilities/vibration/vibration_capability_plugin.dart';
 import '../capabilities/web_permission/capability_web_permission.dart';
 import '../platform/app_device_service.dart';
 import '../profile/user_profile_store.dart';
+import '../storage/app_local_bucket_store.dart';
 import '../../models/game_summary.dart';
 import '../../models/user_profile.dart';
 
@@ -41,12 +42,16 @@ class AppWebViewBridge {
     this.onNicknameUpdate,
     this.onNicknameChanged,
     this.profileStore = const UserProfileStore(),
+    AppLocalBucketStore? localBucketStore,
     http.Client? httpClient,
   }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
          platformUiConfiguration,
        ),
        _httpClient = httpClient ?? http.Client(),
        _ownsHttpClient = httpClient == null,
+       // 保留宿主注入参数名，同时不扩大 Bridge 的公开状态面。
+       // ignore: prefer_initializing_formals
+       _localBucketStore = localBucketStore,
        showShareAction = showShareAction ?? onOpenSharePanel != null {
     this.mediaRuntime = mediaRuntime ?? createDefaultAppMediaRuntime();
     this.capabilityRegistry =
@@ -80,6 +85,7 @@ class AppWebViewBridge {
   final UserProfileStore profileStore;
   final http.Client _httpClient;
   final bool _ownsHttpClient;
+  final AppLocalBucketStore? _localBucketStore;
   late final CapabilityRegistry capabilityRegistry;
   late final AppMediaRuntime mediaRuntime;
   Map<String, Object?>? _platformUiConfiguration;
@@ -169,6 +175,7 @@ class AppWebViewBridge {
           requestExit: _requestExit,
           syncAvatar: _syncAvatar,
           updateNickname: _updateNickname,
+          localBucketStore: _localBucketStore,
         ),
         SdkCommandEnvelope(
           name: name,

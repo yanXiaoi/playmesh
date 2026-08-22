@@ -208,6 +208,131 @@
     });
   }
 
+  const APP_STORAGE_BUCKET_PATTERN =
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  const APP_STORAGE_KEY_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+
+  function validateAppStorageBucket(bucket) {
+    if (typeof bucket !== "string" ||
+        !APP_STORAGE_BUCKET_PATTERN.test(bucket)) {
+      throw new TypeError(
+        "App Bucket 名称必须以字母或数字开头，只能包含字母、数字、下划线和连字符，且不超过 64 个字符",
+      );
+    }
+  }
+
+  function validateAppStorageKey(key) {
+    if (typeof key !== "string" || !APP_STORAGE_KEY_PATTERN.test(key)) {
+      throw new TypeError(
+        "App Bucket key 只能包含字母、数字、点、下划线和连字符，且长度为 1 至 128",
+      );
+    }
+  }
+
+  function cloneAppStorageJson(value) {
+    try {
+      const encoded = JSON.stringify(value);
+      if (typeof encoded !== "string") throw new TypeError();
+      return JSON.parse(encoded);
+    } catch (_) {
+      throw new TypeError("App Bucket 只能写入 JSON 值");
+    }
+  }
+
+  function browserAppStorage() {
+    const storage = global.localStorage;
+    if (!storage?.getItem || !storage?.setItem || !storage?.removeItem) {
+      throw new Error("当前浏览器不支持 localStorage");
+    }
+    return storage;
+  }
+
+  function readBrowserAppBucket(bucket) {
+    const raw = browserAppStorage().getItem(bucket);
+    if (raw === null) return {};
+    const decoded = JSON.parse(raw);
+    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
+      throw new Error("App Bucket localStorage 根节点必须是对象");
+    }
+    for (const key of Object.keys(decoded)) validateAppStorageKey(key);
+    return decoded;
+  }
+
+  function browserAppStorageCall(operation, bucket, key, value) {
+    const storage = browserAppStorage();
+    if (operation === "get") {
+      const values = readBrowserAppBucket(bucket);
+      return Object.prototype.hasOwnProperty.call(values, key)
+        ? cloneAppStorageJson(values[key])
+        : null;
+    }
+    if (operation === "clear") {
+      storage.removeItem(bucket);
+      return null;
+    }
+    const values = readBrowserAppBucket(bucket);
+    if (operation === "set") {
+      values[key] = cloneAppStorageJson(value);
+    } else if (operation === "remove") {
+      delete values[key];
+    } else {
+      throw new Error(`未知 App Bucket 操作: ${operation}`);
+    }
+    storage.setItem(bucket, JSON.stringify(values));
+    return null;
+  }
+
+  function appStorageCall(operation, bucket, key, value) {
+    if (nativeSender() !== null) {
+      if (operation === "get") {
+        return request("app.storage.get", { bucket, key });
+      }
+      if (operation === "set") {
+        return request("app.storage.set", { bucket, key, value });
+      }
+      if (operation === "remove") {
+        return request("app.storage.remove", { bucket, key });
+      }
+      if (operation === "clear") {
+        return request("app.storage.clear", { bucket });
+      }
+      return Promise.reject(
+        new Error(`未知 App Bucket 操作: ${operation}`),
+      );
+    }
+    try {
+      return Promise.resolve(
+        browserAppStorageCall(operation, bucket, key, value),
+      );
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  const appStorageApi = Object.freeze({
+    getBucket(bucket) {
+      validateAppStorageBucket(bucket);
+      return Object.freeze({
+        getData(key) {
+          validateAppStorageKey(key);
+          return appStorageCall("get", bucket, key);
+        },
+        setData(key, value) {
+          validateAppStorageKey(key);
+          const cloned = cloneAppStorageJson(value);
+          return appStorageCall("set", bucket, key, cloned);
+        },
+        removeData(key) {
+          validateAppStorageKey(key);
+          return appStorageCall("remove", bucket, key);
+        },
+        clearData() {
+          return appStorageCall("clear", bucket);
+        },
+      });
+    },
+  });
+
   const appMediaAdapters = new Map();
   const appMediaSessions = new Map();
 
@@ -573,6 +698,24 @@
   const appUiGameMenuCloseListeners = new Set();
   let appUiGameMenuOpen = false;
   const APP_UI_LOG_LIMIT = 500;
+  const APP_UI_INPUT_EVENTS = Object.freeze([
+    "auxclick",
+    "click",
+    "contextmenu",
+    "dblclick",
+    "mousedown",
+    "mousemove",
+    "mouseup",
+    "pointercancel",
+    "pointerdown",
+    "pointermove",
+    "pointerup",
+    "touchcancel",
+    "touchend",
+    "touchmove",
+    "touchstart",
+    "wheel",
+  ]);
   const initialAppUiOptions =
     global.__PLAYMESH_APP_OPTIONS__ &&
     typeof global.__PLAYMESH_APP_OPTIONS__ === "object"
@@ -1169,6 +1312,15 @@
     });
   }
 
+  function installAppUiInputIsolation(root) {
+    if (!root?.addEventListener) return;
+    for (const type of APP_UI_INPUT_EVENTS) {
+      root.addEventListener(type, (event) => {
+        event?.stopPropagation?.();
+      });
+    }
+  }
+
   async function ensureAppFallbackUi() {
     if (!appUiOptions.fallbackUi) return null;
     if (appFallbackUi) return appFallbackUi;
@@ -1186,6 +1338,7 @@
     host.setAttribute?.("lang", appUiConfiguration?.locale || "zh-CN");
     host.setAttribute?.("data-theme", appUiConfiguration?.theme || "dark");
     const root = host.attachShadow({ mode: "closed" });
+    installAppUiInputIsolation(root);
     const menuButtonMarkup =
       global.__PLAYMESH_BROWSER__ && appUiOptions.floatingButton
         ? `<button class="menu-fab" type="button"><span class="menu-mark" aria-hidden="true">P</span></button>`
@@ -1196,8 +1349,8 @@
       button{box-sizing:border-box;font:inherit}.menu-fab{position:fixed;right:0;top:36%;z-index:2147483645;display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid #92e6d5;border-radius:13px 0 0 13px;background:#087f6d;color:#fff;box-shadow:0 6px 18px #001b1752,0 2px 6px #001b1738;cursor:grab;isolation:isolate;touch-action:none;user-select:none;-webkit-user-select:none;transition:transform .16s ease,box-shadow .16s ease,border-radius .16s ease}.menu-fab.detached{border-radius:13px}
       .menu-fab::before{content:"";position:absolute;inset:-2px;z-index:-1;border:1px solid #36cbb266;border-radius:16px 0 0 16px;animation:menu-breathe 2.8s ease-in-out infinite;pointer-events:none}.menu-fab.detached::before{border-radius:16px}.menu-fab.detached:hover{transform:translateY(-2px)}.menu-fab:active{transform:scale(.96)}.menu-fab.dragging{cursor:grabbing;transform:none;transition:none}.menu-fab:focus-visible,.dialog button:focus-visible,.logs-output:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.action:focus-visible{outline:0;background:var(--pm-hover);box-shadow:inset 0 0 0 2px var(--pm-focus-ring)}
       .menu-mark{position:relative;display:block;width:22px;transform:translateX(-2px);font:900 20px/1 system-ui}.menu-mark::after{content:"";position:absolute;left:15px;top:3px;width:7px;height:2px;border-radius:2px;background:currentColor;box-shadow:0 5px currentColor,0 10px currentColor}
-      .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
-      .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
+      .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;cursor:default;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
+      .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;cursor:default;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
       .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
       [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
@@ -1891,6 +2044,7 @@
     media: {
       open: openAppMedia,
     },
+    storage: appStorageApi,
     lan: appLanApi,
     device: {
       getPlatform() {
@@ -1995,6 +2149,7 @@
     },
   });
 
+  let appAutoApproveCapabilities = false;
   const appInternalRuntime = Object.freeze({
     publicApi: publicAppApi,
     receive,
@@ -2025,6 +2180,9 @@
     },
     confirmCapabilities() {
       return request("app.capabilities.confirm");
+    },
+    shouldAutoApproveCapabilities() {
+      return appAutoApproveCapabilities;
     },
     configureRuntimeGame(declaration) {
       return request("app.game.configure", {
@@ -2107,6 +2265,7 @@
           declaredCapabilities: [],
         },
       };
+      appAutoApproveCapabilities = false;
       appPlatformUiConfiguration = null;
       initializeAppPlatformUi(runtimePlatformUi);
       global.console?.info?.("Playmesh App SDK 就绪");
@@ -2115,6 +2274,8 @@
     })
     : request("app.bootstrap").then((result) => {
       const privateUi = result?._playmeshPlatformUi;
+      appAutoApproveCapabilities =
+        result?._playmeshAutoApproveCapabilities === true;
       appPlatformUiConfiguration =
         privateUi && typeof privateUi === "object" ? clone(privateUi) : null;
       bootstrap = result && typeof result === "object"
@@ -2122,6 +2283,7 @@
         : result;
       if (bootstrap && typeof bootstrap === "object") {
         delete bootstrap._playmeshPlatformUi;
+        delete bootstrap._playmeshAutoApproveCapabilities;
       }
       initializeAppPlatformUi(privateUi);
       requestAppInputTakeover();

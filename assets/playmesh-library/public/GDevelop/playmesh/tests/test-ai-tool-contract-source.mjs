@@ -449,8 +449,8 @@ const collectContractErrors = ({
       `official tools version drift: source=${versionMatch[1]} contract=${contract.officialToolsVersion}`
     );
   }
-  if (contract.toolsVersion !== '4.0.0') {
-    errors.push(`Playmesh toolsVersion must be 4.0.0, got ${contract.toolsVersion}`);
+  if (contract.toolsVersion !== '4.1.0') {
+    errors.push(`Playmesh toolsVersion must be 4.1.0, got ${contract.toolsVersion}`);
   }
   if (
     !contract.officialToolsContract ||
@@ -630,10 +630,10 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const contract = JSON.parse(await readFile(contractPath, 'utf8'));
 const sourceArgumentIndex = process.argv.indexOf('--source');
 if (sourceArgumentIndex === -1) {
-  assert.equal(contract.toolsVersion, '4.0.0');
+  assert.equal(contract.toolsVersion, '4.1.0');
   assert.equal(contract.officialToolsVersion, 'v12');
-  assert.equal(contract.toolCount, 50);
-  assert.equal(contract.tools.length, 50);
+  assert.equal(contract.toolCount, 51);
+  assert.equal(contract.tools.length, 51);
   assert.deepEqual(
     contract.tools
       .filter(tool => tool.implementation === 'official_editor_function')

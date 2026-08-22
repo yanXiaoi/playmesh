@@ -14,7 +14,6 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
-	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -23,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go-server/internal/config"
 	"go-server/internal/gameid"
@@ -53,18 +53,15 @@ func (e *InputError) Error() string {
 }
 
 const (
-	requiredGameSDKVersion              = "4.0.0"
-	requiredAppSDKVersion               = "3.3.0"
-	minimumSupportedAppSDKVersion       = "3.2.0"
-	maxManifestBytes              int64 = 256 << 10
-	maxActiveTextBytes            int64 = 4 << 20
-	maxFindingBytes                     = 8 << 10
-	maxArchivePathBytes                 = 512
-	maxRootIconBytes                    = 2 << 20
-	maxRootIconEdge                     = 8192
-	maxRootIconPixels             int64 = 4 * 1024 * 1024
-	maxGameTagCount                     = 5
-	maxGameTagRunes                     = 64
+	maxManifestBytes    int64 = 256 << 10
+	maxActiveTextBytes  int64 = 4 << 20
+	maxFindingBytes           = 8 << 10
+	maxArchivePathBytes       = 512
+	maxRootIconBytes          = 2 << 20
+	maxRootIconEdge           = 8192
+	maxRootIconPixels   int64 = 4 * 1024 * 1024
+	maxGameTagCount           = 5
+	maxGameTagRunes           = 64
 )
 
 var (
@@ -86,17 +83,21 @@ type ScanReport struct {
 }
 
 type manifestSummary struct {
-	ID       string
-	Name     string
-	Author   string
-	Version  string
-	Remarks  string
-	TagsText string
-	JSON     string
-	Icon     []byte
+	ID            string
+	Name          string
+	Author        string
+	Version       string
+	Remarks       string
+	TagsText      string
+	JSON          string
+	ScannableJSON string
+	Icon          []byte
 }
 
-var knownManifestFields = []string{
+// Only fields understood by the current server are projected into the active
+// content scanner. The complete manifest is preserved separately so a newer
+// SDK can add fields without requiring a simultaneous server release.
+var scannableManifestFields = []string{
 	"id",
 	"name",
 	"author",
@@ -115,7 +116,7 @@ var knownManifestFields = []string{
 	"tags",
 }
 
-var knownManifestObjectFields = map[string][]string{
+var scannableManifestObjectFields = map[string][]string{
 	"players":   {"min", "max"},
 	"entries":   {"game", "controller"},
 	"authority": {"entry"},
@@ -519,7 +520,6 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 		return manifestSummary{}, []string{"ZIP 条目数量超过上限"}
 	}
 	seen := make(map[string]struct{})
-	publishedFiles := make(map[string]struct{})
 	var expanded uint64
 	var manifestBytes []byte
 	for _, entry := range reader.File {
@@ -556,7 +556,6 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 			findings = append(findings, "ZIP 包含符号链接或特殊文件: "+name)
 			continue
 		}
-		publishedFiles[name] = struct{}{}
 		uncompressed := entry.UncompressedSize64
 		compressed := entry.CompressedSize64
 		// #nosec G115 -- Config.Validate requires all three limits to be
@@ -582,10 +581,6 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 			findings = append(findings, "可疑压缩比: "+name)
 		}
 		extension := strings.ToLower(path.Ext(name))
-		if !allowedExtension(extension) {
-			findings = append(findings, "不允许的文件类型: "+name)
-			continue
-		}
 		if name == "icon.png" {
 			// 图标不是可执行内容，解码失败或超限时按协议忽略而不拒绝整个包。
 			continue
@@ -623,11 +618,15 @@ func (s *Service) inspectArchive(filePath string) (manifestSummary, []string) {
 	if summary.JSON != "" {
 		manifestFindings = append(
 			manifestFindings,
-			s.scanActiveContent("main.json", []byte(summary.JSON))...,
+			validateDeclaredHTMLGameEntry(summary.JSON, reader.File)...,
 		)
 		manifestFindings = append(
 			manifestFindings,
-			s.validateManifestPackageContract(summary.JSON, publishedFiles)...,
+			s.scanActiveContent("main.json", []byte(summary.ScannableJSON))...,
+		)
+		manifestFindings = append(
+			manifestFindings,
+			s.scanManifestEntryQueries(summary.JSON)...,
 		)
 	}
 	if iconEntry := findArchiveEntry(reader.File, "icon.png"); iconEntry != nil {
@@ -886,19 +885,6 @@ func findArchiveEntry(entries []*zip.File, name string) *zip.File {
 	return nil
 }
 
-func allowedExtension(extension string) bool {
-	_, ok := map[string]struct{}{
-		".html": {}, ".htm": {}, ".js": {}, ".mjs": {}, ".css": {},
-		".json": {}, ".txt": {}, ".md": {}, ".map": {},
-		".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {}, ".webp": {},
-		".svg": {}, ".ico": {}, ".bmp": {},
-		".mp3": {}, ".ogg": {}, ".wav": {}, ".m4a": {}, ".aac": {},
-		".mp4": {}, ".webm": {},
-		".woff": {}, ".woff2": {}, ".ttf": {}, ".otf": {},
-	}[extension]
-	return ok
-}
-
 func isActiveText(extension string) bool {
 	switch extension {
 	case ".html", ".htm", ".js", ".mjs", ".css", ".svg":
@@ -906,6 +892,45 @@ func isActiveText(extension string) bool {
 	default:
 		return false
 	}
+}
+
+func isUsableHTMLText(content []byte) bool {
+	content = bytes.TrimPrefix(content, []byte{0xef, 0xbb, 0xbf})
+	return utf8.Valid(content) &&
+		!bytes.ContainsRune(content, '\x00') &&
+		len(bytes.TrimSpace(content)) > 0
+}
+
+func validateDeclaredHTMLGameEntry(
+	canonicalManifest string,
+	archiveEntries []*zip.File,
+) []string {
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(canonicalManifest), &manifest); err != nil {
+		return nil
+	}
+	entries, ok := manifest["entries"].(map[string]any)
+	if !ok {
+		return []string{"main.json.entries.game 缺失或不是字符串"}
+	}
+	rawEntry, ok := entries["game"].(string)
+	if !ok || strings.TrimSpace(rawEntry) != rawEntry || rawEntry == "" {
+		return []string{"main.json.entries.game 缺失或不是字符串"}
+	}
+	entryPath, _, _ := strings.Cut(rawEntry, "?")
+	if strings.ToLower(path.Ext(entryPath)) != ".html" {
+		return []string{"main.json.entries.game 必须声明 HTML 网页入口"}
+	}
+	physicalPath := "app/" + entryPath
+	entry := findArchiveEntry(archiveEntries, physicalPath)
+	if entry == nil {
+		return []string{"main.json.entries.game 对应网页入口不存在: " + physicalPath}
+	}
+	content, err := readZipEntry(entry, maxActiveTextBytes)
+	if err != nil || !isUsableHTMLText(content) {
+		return []string{"main.json.entries.game 对应入口不是非空 UTF-8 网页文本: " + physicalPath}
+	}
+	return nil
 }
 
 func hasControlCharacter(value string) bool {
@@ -969,12 +994,13 @@ func parseManifest(content []byte) (manifestSummary, []string) {
 	if err := json.Unmarshal(content, &manifest); err != nil {
 		return manifestSummary{}, []string{"main.json 不是有效 JSON"}
 	}
-	manifest = projectManifest(manifest)
 	canonical, _ := json.Marshal(manifest)
+	scannable, _ := json.Marshal(projectScannableManifest(manifest))
 	summary := manifestSummary{
 		ID: exactStringField(manifest, "id"), Name: stringField(manifest, "name"),
 		Author: stringField(manifest, "author"), Version: exactStringField(manifest, "version"),
 		Remarks: stringField(manifest, "remarks"), JSON: string(canonical),
+		ScannableJSON: string(scannable),
 	}
 	findings := make([]string, 0)
 	if !gameid.Valid(summary.ID) {
@@ -986,307 +1012,50 @@ func parseManifest(content []byte) (manifestSummary, []string) {
 	if _, err := version.Parse(summary.Version); err != nil {
 		findings = append(findings, "main.json.version 必须是无前缀的 MAJOR.MINOR.PATCH")
 	}
-	if len([]rune(summary.Author)) > 120 {
-		findings = append(findings, "main.json.author 过长")
-	}
-	if len([]rune(summary.Remarks)) > 2000 {
-		findings = append(findings, "main.json.remarks 过长")
-	}
 	tags, _ := manifest["tags"].([]any)
-	if len(tags) > maxGameTagCount {
-		findings = append(findings, "main.json.tags 最多只能包含 5 个标签")
-	}
 	tagValues := make([]string, 0, len(tags))
 	for _, value := range tags {
 		if text, ok := value.(string); ok && text != "" &&
 			len([]rune(text)) <= maxGameTagRunes && len(tagValues) < maxGameTagCount {
 			tagValues = append(tagValues, text)
-		} else if ok && len([]rune(text)) > maxGameTagRunes {
-			findings = append(findings, "main.json.tags 含有过长标签")
 		}
 	}
 	summary.TagsText = strings.Join(tagValues, ",")
 	return summary, findings
 }
 
-func (s *Service) validateManifestPackageContract(
-	canonicalManifest string,
-	publishedFiles map[string]struct{},
-) []string {
+// scanManifestEntryQueries keeps the encoded-content security check for entry
+// query strings without treating the current manifest shape as an upload
+// contract. Missing fields, new SDK versions and future entry structures are
+// intentionally left to the consuming client, which owns runtime compatibility.
+func (s *Service) scanManifestEntryQueries(canonicalManifest string) []string {
 	var manifest map[string]any
 	if err := json.Unmarshal([]byte(canonicalManifest), &manifest); err != nil {
 		return nil
 	}
 	findings := make([]string, 0)
-	requireManifestSupportedVersion(
-		manifest,
-		"sdkVersion",
-		&findings,
-		requiredGameSDKVersion,
-	)
-	requireManifestSupportedVersion(
-		manifest,
-		"appSdkVersion",
-		&findings,
-		minimumSupportedAppSDKVersion,
-		requiredAppSDKVersion,
-	)
-	entries := map[string]any{}
-	entriesValid := true
-	if value, exists := manifest["entries"]; exists {
-		var ok bool
-		entries, ok = value.(map[string]any)
+	entries, ok := manifest["entries"].(map[string]any)
+	if !ok {
+		return findings
+	}
+	for _, field := range []string{"game", "controller"} {
+		entry, ok := entries[field].(string)
 		if !ok {
-			findings = append(findings, "main.json.entries 必须是对象")
-			entriesValid = false
+			continue
 		}
-	}
-	singleScreen := manifestStringListContains(
-		manifest["displayModes"],
-		"single_screen_multiplayer",
-	)
-	multiplayer := manifestStringListContains(manifest["modes"], "multiplayer")
-	controllerRequired := multiplayer && singleScreen
-	if entriesValid {
-		gameEntry, valid := manifestWebEntry(
-			entries,
-			"game",
-			"main.json.entries.game",
-			manifestWebEntryHTML,
-			&findings,
-		)
-		if valid {
-			findings = append(
-				findings,
-				s.scanManifestHTMLQuery(
-					"main.json.entries.game",
-					gameEntry.rawQuery,
-				)...,
-			)
-			requirePublishedEntry(
-				publishedFiles,
-				gameEntry,
-				"main.json.entries.game",
-				&findings,
-			)
+		_, rawQuery, hasQuery := strings.Cut(entry, "?")
+		if !hasQuery || rawQuery == "" {
+			continue
 		}
-
-		if controllerRequired {
-			controllerEntry, valid := manifestWebEntry(
-				entries,
-				"controller",
-				"main.json.entries.controller",
-				manifestWebEntryHTML,
-				&findings,
-			)
-			if valid {
-				findings = append(
-					findings,
-					s.scanManifestHTMLQuery(
-						"main.json.entries.controller",
-						controllerEntry.rawQuery,
-					)...,
-				)
-				requirePublishedEntry(
-					publishedFiles,
-					controllerEntry,
-					"main.json.entries.controller",
-					&findings,
-				)
-			}
-		}
-	}
-
-	if multiplayer {
-		authorityValue, authorityDeclared := manifest["authority"]
-		if !authorityDeclared {
-			findings = append(findings, "多人游戏缺少 main.json.authority.entry")
-			return findings
-		}
-		authority, ok := authorityValue.(map[string]any)
-		if !ok {
-			findings = append(findings, "main.json.authority 必须是对象")
-		} else if entryValue, declared := authority["entry"]; declared {
-			authorityEntry, valid := validateManifestWebEntry(
-				entryValue,
-				"main.json.authority.entry",
-				manifestWebEntryJavaScript,
-				&findings,
-			)
-			if valid {
-				requirePublishedEntry(
-					publishedFiles,
-					authorityEntry,
-					"main.json.authority.entry",
-					&findings,
-				)
-			}
-		} else {
-			findings = append(findings, "多人游戏缺少 main.json.authority.entry")
-		}
-	}
-	return findings
-}
-
-func requireManifestSupportedVersion(
-	manifest map[string]any,
-	field string,
-	findings *[]string,
-	supported ...string,
-) {
-	value, ok := manifest[field].(string)
-	if ok {
-		for _, version := range supported {
-			if value == version {
-				return
-			}
-		}
-	}
-	*findings = append(
-		*findings,
-		fmt.Sprintf("main.json.%s 必须显式声明为 %s", field, strings.Join(supported, " 或 ")),
-	)
-}
-
-type manifestWebEntryKind uint8
-
-const (
-	manifestWebEntryHTML manifestWebEntryKind = iota
-	manifestWebEntryJavaScript
-)
-
-type validatedManifestWebEntry struct {
-	path     string
-	rawQuery string
-}
-
-func manifestWebEntry(
-	object map[string]any,
-	field string,
-	pathName string,
-	kind manifestWebEntryKind,
-	findings *[]string,
-) (validatedManifestWebEntry, bool) {
-	value, exists := object[field]
-	if !exists {
-		*findings = append(*findings, pathName+" 必须显式声明")
-		return validatedManifestWebEntry{}, false
-	}
-	return validateManifestWebEntry(value, pathName, kind, findings)
-}
-
-func validateManifestWebEntry(
-	value any,
-	pathName string,
-	kind manifestWebEntryKind,
-	findings *[]string,
-) (validatedManifestWebEntry, bool) {
-	entry, ok := value.(string)
-	if !ok || entry == "" ||
-		len(entry) > maxArchivePathBytes-len("app/") ||
-		strings.TrimSpace(entry) != entry ||
-		strings.Contains(entry, "#") ||
-		hasControlCharacter(entry) {
-		*findings = append(
-			*findings,
-			pathName+" 必须是相对于物理 app/ 的安全路径",
-		)
-		return validatedManifestWebEntry{}, false
-	}
-	entryPath, rawQuery, hasQuery := strings.Cut(entry, "?")
-	if hasQuery && kind == manifestWebEntryJavaScript {
-		*findings = append(
-			*findings,
-			pathName+" 不允许查询参数",
-		)
-		return validatedManifestWebEntry{}, false
-	}
-	if hasQuery && rawQuery == "" {
-		*findings = append(
-			*findings,
-			pathName+" 查询参数不能为空",
-		)
-		return validatedManifestWebEntry{}, false
-	}
-	if !isSafeWebRootEntryPath(entryPath) {
-		*findings = append(
-			*findings,
-			pathName+" 必须是相对于物理 app/ 的安全路径",
-		)
-		return validatedManifestWebEntry{}, false
-	}
-	if hasQuery {
-		if _, err := url.QueryUnescape(rawQuery); err != nil {
-			*findings = append(
-				*findings,
-				pathName+" 查询参数包含无效百分号编码",
-			)
-			return validatedManifestWebEntry{}, false
-		}
-	}
-	if !kind.accepts(entryPath) {
-		requirement := ".html"
-		if kind == manifestWebEntryJavaScript {
-			requirement = ".js 或 .mjs"
-		}
-		*findings = append(
-			*findings,
-			pathName+" 必须是 "+requirement+" 文件",
-		)
-		return validatedManifestWebEntry{}, false
-	}
-	return validatedManifestWebEntry{path: entryPath, rawQuery: rawQuery}, true
-}
-
-func (kind manifestWebEntryKind) accepts(entry string) bool {
-	extension := strings.ToLower(path.Ext(entry))
-	switch kind {
-	case manifestWebEntryHTML:
-		return extension == ".html"
-	case manifestWebEntryJavaScript:
-		return extension == ".js" || extension == ".mjs"
-	default:
-		return false
-	}
-}
-
-func isSafeWebRootEntryPath(entry string) bool {
-	if entry == "" ||
-		strings.HasPrefix(entry, "/") ||
-		strings.Contains(entry, "\\") ||
-		strings.ContainsAny(entry, "?#:") ||
-		strings.Contains(entry, "%") ||
-		hasControlCharacter(entry) {
-		return false
-	}
-	cleaned := path.Clean(entry)
-	if cleaned == "." || cleaned != entry {
-		return false
-	}
-	segments := strings.Split(entry, "/")
-	for _, segment := range segments {
-		if segment == "" || segment == "." || segment == ".." {
-			return false
-		}
-	}
-	first := segments[0]
-	return !strings.EqualFold(first, "playmesh") &&
-		!strings.EqualFold(first, "bucket")
-}
-
-func requirePublishedEntry(
-	publishedFiles map[string]struct{},
-	entry validatedManifestWebEntry,
-	pathName string,
-	findings *[]string,
-) {
-	physicalPath := "app/" + entry.path
-	if _, exists := publishedFiles[physicalPath]; !exists {
-		*findings = append(
-			*findings,
-			pathName+" 对应文件不存在: "+physicalPath,
+		findings = append(
+			findings,
+			s.scanManifestHTMLQuery(
+				"main.json.entries."+field,
+				rawQuery,
+			)...,
 		)
 	}
+	return uniqueStrings(findings)
 }
 
 func (s *Service) scanManifestHTMLQuery(
@@ -1370,32 +1139,22 @@ func hexNibble(value byte) (byte, bool) {
 	}
 }
 
-func manifestStringListContains(value any, expected string) bool {
-	values, _ := value.([]any)
-	for _, value := range values {
-		if text, ok := value.(string); ok && text == expected {
-			return true
-		}
-	}
-	return false
-}
-
-func projectManifest(source map[string]any) map[string]any {
-	projected := make(map[string]any, len(knownManifestFields))
-	for _, field := range knownManifestFields {
+func projectScannableManifest(source map[string]any) map[string]any {
+	projected := make(map[string]any, len(scannableManifestFields))
+	for _, field := range scannableManifestFields {
 		value, exists := source[field]
 		if !exists {
 			continue
 		}
-		if objectFields, nested := knownManifestObjectFields[field]; nested {
-			value = projectManifestObject(value, objectFields)
+		if objectFields, nested := scannableManifestObjectFields[field]; nested {
+			value = projectScannableManifestObject(value, objectFields)
 		}
 		projected[field] = value
 	}
 	return projected
 }
 
-func projectManifestObject(value any, fields []string) any {
+func projectScannableManifestObject(value any, fields []string) any {
 	source, ok := value.(map[string]any)
 	if !ok {
 		return value

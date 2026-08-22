@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -15,9 +16,76 @@ import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 import 'package:playmesh/core/game_sdk/webview_message_queue.dart';
 import 'package:playmesh/core/game_web/game_share_link_snapshot.dart';
 import 'package:playmesh/core/platform/app_device_service.dart';
+import 'package:playmesh/core/storage/app_local_bucket_store.dart';
 import 'package:playmesh/models/game_summary.dart';
 
 void main() {
+  test('App Bridge Bucket 只写入当前设备的游戏本地目录', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-app-bridge-bucket-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final bridge = AppWebViewBridge(
+      userId: 'u-local-bucket',
+      nickname: '本机玩家',
+      localBucketStore: AppLocalBucketStore(
+        gameId: 'com.playmesh.local-bucket',
+        gameName: '本地存档游戏',
+        libraryRoot: root,
+      ),
+    );
+    addTearDown(bridge.close);
+
+    expect(
+      (await _command(
+        bridge,
+        'app.storage.get',
+        'bucket-get-empty',
+        payload: {'bucket': 'player_save', 'key': 'progress'},
+      ))['result'],
+      isNull,
+    );
+    await _command(
+      bridge,
+      'app.storage.set',
+      'bucket-set',
+      payload: {
+        'bucket': 'player_save',
+        'key': 'progress',
+        'value': {'level': 7},
+      },
+    );
+    expect(
+      (await _command(
+        bridge,
+        'app.storage.get',
+        'bucket-get',
+        payload: {'bucket': 'player_save', 'key': 'progress'},
+      ))['result'],
+      {'level': 7},
+    );
+    final file = File(
+      '${root.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}本地存档游戏'
+      '${Platform.pathSeparator}com.playmesh.local-bucket'
+      '${Platform.pathSeparator}player_save.json',
+    );
+    expect(await file.exists(), isTrue);
+
+    await _command(
+      bridge,
+      'app.storage.remove',
+      'bucket-remove',
+      payload: {'bucket': 'player_save', 'key': 'progress'},
+    );
+    await _command(
+      bridge,
+      'app.storage.clear',
+      'bucket-clear',
+      payload: {'bucket': 'player_save'},
+    );
+  });
+
   test('bootstrap 返回项目声明、平台注册表和当前可用插件', () async {
     final vibrationDriver = _FakeVibrationDriver();
     final bridge = AppWebViewBridge(

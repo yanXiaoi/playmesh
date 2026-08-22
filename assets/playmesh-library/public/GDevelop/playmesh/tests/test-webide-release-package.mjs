@@ -773,6 +773,32 @@ try {
       }),
     /downloads\[0\] must contain exactly: name, url/
   );
+  assert.equal(
+    parseWebIdeReleaseManifest({
+      sha256: 'a'.repeat(64),
+      version: '5.6.276',
+      size: 1,
+      downloads: [{ name: 'HTTP', url: 'http://example.com/a.zip' }],
+    }).downloads[0].url,
+    'http://example.com/a.zip',
+    'credential-free HTTP download URLs must be accepted'
+  );
+  for (const invalidUrl of [
+    'ftp://example.com/a.zip',
+    'http://user:password@example.com/a.zip',
+    'https://user:password@example.com/a.zip',
+  ]) {
+    assert.throws(
+      () =>
+        parseWebIdeReleaseManifest({
+          sha256: 'a'.repeat(64),
+          version: '5.6.276',
+          size: 1,
+          downloads: [{ name: 'Invalid', url: invalidUrl }],
+        }),
+      /credential-free HTTP or HTTPS/
+    );
+  }
   assert.throws(
     () =>
       parseWebIdeReleaseLock({

@@ -5,6 +5,9 @@
 [GDevelop 内核升级手册](core-upgrade-guide.md)。AI、History 和运行时替换的领域合同分别
 下钻到本目录对应专项文档，本文不复制它们的协议字段。
 
+本文是 [GDevelop 开发总规范](development-standards.md)的实施手册。两者冲突时以总规范为准；
+本文和专项文档只能增加领域约束，不得缩小总规范的适用范围。
+
 本文中的“必须”“不得”是发布门禁，不是建议。完成一次功能修改的定义是：从锁定的官方
 ZIP 建立全新源码树，仅靠仓库中的 canonical 源和策略脚本即可得到同一输出，并通过与改动
 风险相称的源码、Flow、业务、生产构建和包内审计。
@@ -53,27 +56,33 @@ canonical 源只维护在 `assets/playmesh-library/public/developer/playmesh-gam
 如果一个官方补丁除了 import、挂载、转发或最低 seam 之外还出现异步状态、网络、存储、
 复杂分支或业务错误处理，就已经不是薄入口，必须把主体移到 overlay。只有禁用官方在线
 服务或替换无法外置的最低运行时 I/O seam 时，才允许更大的官方补丁；此时必须在策略步骤
-旁写明不能使用薄入口的原因，并增加专项正向和负向合同测试。
+旁写明不能使用薄入口的原因，并增加专项正向和负向合同测试。补丁即使较大，也只能覆盖该
+service/I/O seam，不能进入官方响应后的处理链。
 
-当前可参考的结构包括：
+### 2.1 官方后续处理不可改写
 
-- `BrowserApp.js` 的预览入口只挂载 `PlaymeshPreviewLauncherRouter`，本地 BrowserSW 与普通
-  Gateway 预览的路由在 Playmesh-owned 模块中完成；
-- `MainFrame`/editor container 的 AI seam 只把官方 callbacks 传给 Playmesh AI，AI 在活动
-  `gdProject` 上调用官方 EditorFunctions，修改后触发 dirty 与编辑器刷新回调；
-- canonical Authority/Multiplayer/调试源码先在 `public/developer/` 维护，再由策略生成 WebIDE
-  字符串模块，而不是维护第二份实现。
-- GDevelop 多人兼容只在
-  `public/developer/gdevelop-multiplayer-bridge.js`、
-  `public/developer/gdevelop-authority-bootstrap.js` 和 Playmesh-owned 运行时注入模块中实现；
-  官方 Multiplayer API 只接到该兼容层。共享 Session 自动入房、Authority direct start、guest
-  拒绝开始、late roster/avatar 和零倒计时都是 canonical bridge/bootstrap 的 GDevelop 业务，
-  不进入 App/Game SDK。
-- Windows WebView 导航完成前无法安全执行宿主回包是跨游戏的共享宿主时序问题。只有独立的
-  非 GDevelop 最小复现证明同样会丢失早发 bootstrap 回包时，才在共享 Windows 宿主增加回包
-  队列；该修复不改变 SDK API、消息协议、超时或版本。
+本节是开发总规范的流程摘要，唯一权威定义见
+[外部边界与官方处理链](development-standards.md#3-外部边界与官方处理链)。
 
-这些是结构示例，不代表可以复制其具体条件。新功能仍须先核对当前官方类型和生命周期。
+Playmesh 替换的是官方在线服务或其最低外部 I/O 来源，不是官方服务返回结果之后的编辑器
+处理链。Playmesh 在取得官方处理函数要求的输入后，必须把真实的官方 context、callbacks、
+options 和活动对象原样交回官方函数，并沿用官方调用顺序；不得使用空函数、假对象或本地
+副本跳过官方生命周期。
+
+官方函数返回后的处理结果是唯一权威结果。Playmesh 不得在其后追加二次校验、修复、补注册、
+再次写入、状态推断或 fallback，也不得因为安装包、目录或网络来源由 Playmesh 提供，就复制或
+重构官方后续处理。下载前的鉴权、审批、路径安全、固定身份和哈希校验仍由各自外部 I/O 边界
+负责，但它们必须在进入官方处理链之前完成。本条是发布门禁；任何例外都必须先修改并评审
+开发总规范，不能在业务代码或领域文档中自行扩张。
+
+官方成功结果和失败信息都属于官方处理结果。Playmesh 不得用统一错误覆盖官方 `output`、
+`message`、错误类型或修改状态，也不得用覆盖整个外部 I/O 与官方生命周期的 `catch` 把两类
+错误合并。线上服务替换必须接在精确 service/I/O seam，禁止用全局主机名重写、无效域名或
+广泛正则改写来批量禁用官方服务。
+
+合规性必须由锁定上游、源码契约测试、Flow、构建审计和最终包验证证明，不能由文档中的当前
+文件名或实现示例证明。需要定位现有入口时查阅[源码接线索引](integration-wiring.md)，但新功能
+仍须重新核对当前官方类型和生命周期。
 
 ## 3. 可重放的精确定义
 
@@ -112,6 +121,8 @@ canonical 源只维护在 `assets/playmesh-library/public/developer/playmesh-gam
 3. 哪些模块、网络、持久化或运行时绝不能进入该路径；
 4. 首次、重复、失败、取消、卸载和页面重载分别应发生什么；
 5. 普通预览、游戏内编辑器、官方导出和 Playmesh 发布是否需要不同路由。
+6. 外部 I/O 在哪里结束、官方处理链从哪里开始，以及两侧错误分别由谁产生和透传；
+7. 哪些官方 `output`、`message`、错误类型、修改标记和 callbacks 必须原样保留。
 
 只写“输入 JSON 正确、输出 JSON 正确”不算业务验收。涉及编辑器修改时，还要证明真实
 GDevelop/libGD 对象已改变、打开的编辑器收到官方刷新回调、工程被标记为未保存，并且后续
@@ -178,9 +189,8 @@ GDevelop 预览或导出中的多人、调试、FPS 等能力，主体必须是
 定位故障时必须先比较普通游戏与 GDevelop 游戏的第一处分叉。普通游戏和 GDevelop 预览若
 共用 `GamePage`、App/Game Bridge 和 SDK 传输层，且普通游戏业务正常，就不能把“可能存在的
 通用时序问题”当成已证实根因。只有具备独立非 GDevelop 复现和普通游戏回归证据，才允许修改
-共享宿主；共享 SDK 仍不得承载 GDevelop 业务。本轮 `<head>` 早加载已经证明属于共享 Windows
-宿主回包调度，因此修复限定为 navigation completed 前缓存 App/Game 回包，GDevelop lobby
-语义仍留在 canonical bridge/bootstrap。
+共享宿主；共享 SDK 仍不得承载 GDevelop 业务。确属共享宿主的问题也只能修复通用传输或时序，
+GDevelop 业务语义仍必须留在其专属兼容层。
 
 ### 4.4 先跑定向业务测试
 
@@ -188,6 +198,10 @@ GDevelop 预览或导出中的多人、调试、FPS 等能力，主体必须是
 
 - Playmesh 模块的成功、失败、重复、卸载和并发边界；
 - 薄入口只调用一个 delegate，并完整透传 options/callbacks；
+- 接入官方处理链时使用真实 project、context、callbacks 和 options；不存在假对象、空回调或
+  以局部状态替代官方 hook；
+- 官方成功与失败结果经 Playmesh 接线后仍保留原始 `output`、`message`、错误类型和修改状态；
+- 官方处理完成后没有二次校验、修复、补注册、额外写入、回退或再次导入；
 - 删除功能的负向依赖扫描；
 - Babel/Flow 能解析所有受影响文件；
 - 对编辑器写操作，使用一次性项目和真实 libGD/官方函数完成
@@ -361,6 +375,10 @@ AI 修改与用户编辑具有相同内存语义：AI 不写 `current`、历史�
 
 - [ ] ownership 正确，业务主体在 overlay/canonical 源；
 - [ ] 官方补丁是可解释的最小薄入口，前像和唯一片段已锁；
+- [ ] 线上服务替换位于精确 service/I/O seam，没有全局主机重写、无效域名替换或扩大拦截面；
+- [ ] 官方函数收到真实 project/context/callbacks/options，且官方调用顺序未改变；
+- [ ] 官方后续处理后没有 Playmesh 二次校验、修复、补注册、额外写入或 fallback；
+- [ ] 官方成功和失败输出被完整保留，外部 I/O 错误与官方业务错误没有被统一 `catch` 混合；
 - [ ] 正向业务行为、错误、重复、卸载和负向依赖均有测试；
 - [ ] 编辑器修改使用真实 libGD/官方函数做过隔离的读写回读；
 - [ ] 受影响 manifest 摘要来自本轮干净树，且已全部冻结；

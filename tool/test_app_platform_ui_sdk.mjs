@@ -119,6 +119,7 @@ function createPage({
   app = false,
   fallbackUi = true,
   sessionState = new Map(),
+  localState = new Map(),
 } = {}) {
   const windowListeners = new Map();
   const mounted = [];
@@ -286,6 +287,17 @@ function createPage({
         sessionState.delete(String(key));
       },
     },
+    localStorage: {
+      getItem(key) {
+        return localState.get(String(key)) ?? null;
+      },
+      setItem(key, value) {
+        localState.set(String(key), String(value));
+      },
+      removeItem(key) {
+        localState.delete(String(key));
+      },
+    },
     history: { length: 1, back() {} },
     queueMicrotask,
     setTimeout,
@@ -302,11 +314,28 @@ function createPage({
     },
   };
   if (app) {
+    const appBuckets = new Map();
     window.PlaymeshAppBridge = {
       postMessage(raw) {
         const command = JSON.parse(raw);
         commands.push(command.command);
         queueMicrotask(() => {
+          const bucket = command.payload?.bucket;
+          const bucketValues = appBuckets.get(bucket) || new Map();
+          let result = null;
+          if (command.command === "app.storage.get") {
+            result = bucketValues.has(command.payload.key)
+              ? bucketValues.get(command.payload.key)
+              : null;
+          } else if (command.command === "app.storage.set") {
+            bucketValues.set(command.payload.key, command.payload.value);
+            appBuckets.set(bucket, bucketValues);
+          } else if (command.command === "app.storage.remove") {
+            bucketValues.delete(command.payload.key);
+            appBuckets.set(bucket, bucketValues);
+          } else if (command.command === "app.storage.clear") {
+            appBuckets.set(bucket, new Map());
+          }
           window[appInternalKey].receive({
             type: "app.command.result",
             requestId: command.requestId,
@@ -326,7 +355,7 @@ function createPage({
                     actions: platformUi.actions,
                   },
                 }
-              : null,
+              : result,
           });
         });
       },
@@ -358,6 +387,7 @@ function createPage({
     consoleEntries,
     gameFocus,
     dispatchKey,
+    localState,
   };
 }
 
@@ -379,6 +409,28 @@ assert.throws(
   (error) => error?.code === "app_not_ready",
 );
 await browserPage.appSdk.ready;
+const browserBucket = browserPage.appSdk.storage.getBucket("player_save");
+const browserValue = { level: 3, items: ["map", "key"] };
+await browserBucket.setData("progress", browserValue);
+browserValue.level = 99;
+assert.equal(
+  JSON.stringify(await browserBucket.getData("progress")),
+  JSON.stringify({ level: 3, items: ["map", "key"] }),
+);
+assert.deepEqual(
+  JSON.parse(browserPage.localState.get("player_save")),
+  { progress: { level: 3, items: ["map", "key"] } },
+);
+await browserBucket.removeData("progress");
+assert.equal(await browserBucket.getData("progress"), null);
+await browserBucket.setData("progress", { level: 4 });
+await browserBucket.clearData();
+assert.equal(browserPage.localState.has("player_save"), false);
+assert.throws(
+  () => browserPage.appSdk.storage.getBucket("bad.bucket"),
+  /Bucket 名称/,
+);
+assert.throws(() => browserBucket.getData("bad key"), /key/);
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(browserPage.mounted.length, 1);
 browserPage.window[appInternalKey].registerRuntimeUi({
@@ -485,6 +537,40 @@ assert.equal(
   ),
   true,
 );
+assert.equal(
+  browserHost.__root.html.includes(
+    ".layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;cursor:default",
+  ),
+  true,
+);
+assert.equal(
+  browserHost.__root.html.includes(
+    ".dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;cursor:default",
+  ),
+  true,
+);
+for (const type of [
+  "auxclick",
+  "click",
+  "contextmenu",
+  "dblclick",
+  "mousedown",
+  "mousemove",
+  "mouseup",
+  "pointercancel",
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "touchcancel",
+  "touchend",
+  "touchmove",
+  "touchstart",
+  "wheel",
+]) {
+  const event = browserHost.__root.emit(type);
+  assert.equal(event.propagationStopped, true, `${type} must not reach the game`);
+  assert.equal(event.defaultPrevented, false, `${type} must keep SDK UI defaults`);
+}
 assert.equal(
   browserHost.__root.html.indexOf('class="performance-panel"'),
   browserHost.__root.html.lastIndexOf('class="performance-panel"'),
@@ -795,6 +881,29 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(earlyEscape.defaultPrevented, true);
 assert.equal(appPage.mounted[0].__elements[".layer"].hidden, false);
 await appPage.appSdk.ready;
+const appBucket = appPage.appSdk.storage.getBucket("player_save");
+await appBucket.setData("progress", { level: 5 });
+assert.equal(
+  JSON.stringify(await appBucket.getData("progress")),
+  JSON.stringify({ level: 5 }),
+);
+await appBucket.removeData("progress");
+assert.equal(await appBucket.getData("progress"), null);
+await appBucket.setData("progress", { level: 6 });
+await appBucket.clearData();
+assert.equal(await appBucket.getData("progress"), null);
+assert.deepEqual(
+  appPage.commands.filter((command) => command.startsWith("app.storage.")),
+  [
+    "app.storage.set",
+    "app.storage.get",
+    "app.storage.remove",
+    "app.storage.get",
+    "app.storage.set",
+    "app.storage.clear",
+    "app.storage.get",
+  ],
+);
 assert.equal(appPage.commands.includes("app.input.takeover"), true);
 assert.equal(appPage.appSdk.ui.initializeBrowser(), false);
 const appUi = appPage.mounted[0].__elements;

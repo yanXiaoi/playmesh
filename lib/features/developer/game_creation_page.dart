@@ -1,27 +1,23 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:file_selector/file_selector.dart';
 
 import '../../core/developer/developer_channel.dart';
 import '../../core/developer/gdevelop_web_ide_installer_contract.dart';
-import '../../core/developer/gdevelop_local_package_source.dart';
 import '../../core/download/endpoint_document_contract.dart';
 import '../../core/download/endpoint_probe_contract.dart';
 import '../../core/download/safe_zip_extractor_contract.dart';
 import '../../core/download/verified_resumable_download_contract.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../ui/playmesh_ui.dart';
-import '../../widgets/endpoint_picker.dart';
-import 'gdevelop_notices_dialog.dart';
 import 'developer_mode_controller.dart';
 import 'developer_workspace_links.dart';
 import 'developer_workspace_page.dart';
+import 'gdevelop_install_dialog.dart';
+import 'gdevelop_notices_dialog.dart';
 import 'gdevelop_workspace_route_coordinator.dart';
 import 'source_development_controller.dart';
 import 'visual_gdevelop_controller.dart';
-
-typedef GDevelopLocalPackagePicker = Future<XFile?> Function();
 
 class GameCreationPage extends StatefulWidget {
   const GameCreationPage({
@@ -36,6 +32,7 @@ class GameCreationPage extends StatefulWidget {
   static const gdevelopNoticesButtonKey = Key('game-creation-gdevelop-notices');
   static const sourcePanelKey = Key('game-creation-source-panel');
   static const visualPanelKey = Key('game-creation-visual-panel');
+  static const gdevelopManageButtonKey = Key('gdevelop-manage-button');
   static const gdevelopInstallButtonKey = Key('gdevelop-install-button');
   static const gdevelopRepairButtonKey = Key('gdevelop-repair-button');
   static const gdevelopCancelButtonKey = Key('gdevelop-cancel-button');
@@ -167,7 +164,7 @@ class _GameCreationPageState extends State<GameCreationPage> {
                       key: GameCreationPage.visualPanelKey,
                       icon: Icons.account_tree_outlined,
                       title: context.tr('creator.visual_title'),
-                      description: context.tr('creator.visual_description'),
+                      description: null,
                       expanded: _visualExpanded,
                       onToggle: _toggleVisualPanel,
                       child: _buildVisualWorkspaceBody(state),
@@ -207,30 +204,10 @@ class _GameCreationPageState extends State<GameCreationPage> {
         !state.enabled && !state.loading && state.targetEnabled == null;
     final installed =
         visual.installation?.state == GDevelopWebIdeInstallationState.ready;
-    final configPicker = _visualController.configSourcePicker;
-    final downloadPicker = _visualController.downloadSourcePicker;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _GDevelopInstallationStatus(state: visual),
-        const SizedBox(height: 8),
-        _GDevelopDistributionNotice(
-          onOpenNotices: installed && widget.developerProvider != null
-              ? () => showGDevelopDistributionNotices(
-                  context,
-                  loadNotices: widget
-                      .developerProvider!
-                      .loadInstalledGDevelopWebIdeNotices,
-                )
-              : null,
-        ),
-        if (!state.enabled) ...[
-          const SizedBox(height: 8),
-          _GDevelopInlineMessage(
-            icon: Icons.power_settings_new_rounded,
-            message: context.tr('creator.gdevelop_enable_to_open'),
-          ),
-        ],
         if (visual.statusError case final error?) ...[
           const SizedBox(height: 8),
           _GDevelopInlineMessage(
@@ -239,12 +216,12 @@ class _GameCreationPageState extends State<GameCreationPage> {
             error: true,
           ),
         ],
-        if (installed) ...[
-          const SizedBox(height: 14),
+        if (installed && state.enabled) ...[
+          const SizedBox(height: 12),
           Card(
             margin: EdgeInsets.zero,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -288,267 +265,50 @@ class _GameCreationPageState extends State<GameCreationPage> {
             ),
           ),
         ],
-        const SizedBox(height: 18),
-        Row(
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            const Icon(Icons.memory_rounded, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              context.tr('creator.gdevelop_kernel_management'),
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-        if (!installationAllowed) ...[
-          const SizedBox(height: 10),
-          _GDevelopInlineMessage(
-            icon: Icons.power_settings_new_rounded,
-            message: context.tr('creator.gdevelop_disable_to_install'),
-          ),
-        ],
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          key: GameCreationPage.gdevelopLocalInstallButtonKey,
-          onPressed: visual.operationRunning || !installationAllowed
-              ? null
-              : _selectLocalPackage,
-          icon: const Icon(Icons.folder_zip_outlined),
-          label: Text(context.tr('creator.gdevelop_local_install')),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          context.tr('creator.gdevelop_local_install_hint'),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 18),
-        Text(
-          context.tr('creator.gdevelop_distribution_title'),
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          context.tr('creator.gdevelop_distribution_description'),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        if (visual.configError case final error?) ...[
-          const SizedBox(height: 12),
-          _GDevelopInlineMessage(
-            icon: Icons.error_outline_rounded,
-            message: _gdevelopErrorMessage(context, error),
-            error: true,
-          ),
-        ],
-        if (configPicker != null) ...[
-          const SizedBox(height: 16),
-          EndpointPicker(
-            controller: configPicker,
-            title: context.tr('creator.gdevelop_config_source_title'),
-            description: context.tr(
-              'creator.gdevelop_config_source_description',
-            ),
-            refreshLabel: context.tr('creator.gdevelop_refresh_sources'),
-            emptyLabel: context.tr('creator.gdevelop_config_source_empty'),
-            probingLabel: context.tr('creator.gdevelop_probe_checking'),
-            timeoutLabel: context.tr('creator.gdevelop_probe_timeout'),
-            unreachableLabel: context.tr('creator.gdevelop_probe_unreachable'),
-            unsupportedLabel: context.tr('creator.gdevelop_probe_unsupported'),
-            latencyLabelBuilder: (latencyMs) => context.tr(
-              'creator.gdevelop_probe_latency',
-              arguments: {'latency': latencyMs},
-            ),
-            onSelected: (endpoint) =>
-                unawaited(_visualController.selectConfigSource(endpoint)),
-          ),
-        ],
-        if (visual.loadingRelease) ...[
-          const SizedBox(height: 14),
-          const LinearProgressIndicator(minHeight: 2),
-          const SizedBox(height: 8),
-          Text(context.tr('creator.gdevelop_manifest_loading')),
-        ],
-        if (visual.releaseError case final error?) ...[
-          const SizedBox(height: 12),
-          _GDevelopInlineMessage(
-            icon: Icons.error_outline_rounded,
-            message: _gdevelopErrorMessage(context, error),
-            error: true,
-          ),
-        ],
-        if (visual.release case final release?) ...[
-          const SizedBox(height: 16),
-          _GDevelopReleaseIdentity(
-            version: release.version,
-            size: release.size,
-            sha256: release.sha256,
-          ),
-          if (visual.releaseMatchesInstallation) ...[
-            const SizedBox(height: 8),
-            _GDevelopInlineMessage(
-              icon: Icons.verified_outlined,
-              message: context.tr('creator.gdevelop_release_current'),
-            ),
-          ],
-        ],
-        if (downloadPicker != null) ...[
-          const SizedBox(height: 16),
-          EndpointPicker(
-            controller: downloadPicker,
-            title: context.tr('creator.gdevelop_download_source_title'),
-            description: context.tr(
-              'creator.gdevelop_download_source_description',
-            ),
-            refreshLabel: context.tr('creator.gdevelop_refresh_sources'),
-            emptyLabel: context.tr('creator.gdevelop_download_source_empty'),
-            probingLabel: context.tr('creator.gdevelop_probe_checking'),
-            timeoutLabel: context.tr('creator.gdevelop_probe_timeout'),
-            unreachableLabel: context.tr('creator.gdevelop_probe_unreachable'),
-            unsupportedLabel: context.tr('creator.gdevelop_probe_unsupported'),
-            latencyLabelBuilder: (latencyMs) => context.tr(
-              'creator.gdevelop_probe_latency',
-              arguments: {'latency': latencyMs},
-            ),
-            onSelected: (_) {},
-          ),
-        ],
-        if (visual.operationRunning) ...[
-          const SizedBox(height: 16),
-          _GDevelopOperationProgress(state: visual),
-        ],
-        if (visual.operationError case final error?) ...[
-          const SizedBox(height: 12),
-          _GDevelopInlineMessage(
-            icon: Icons.error_outline_rounded,
-            message: _gdevelopErrorMessage(context, error),
-            error: true,
-          ),
-        ],
-        if (visual.completedOperation case final operation?) ...[
-          const SizedBox(height: 12),
-          _GDevelopInlineMessage(
-            icon: Icons.check_circle_outline_rounded,
-            message: context.tr(
-              'creator.gdevelop_operation_complete',
-              arguments: {
-                'action': _gdevelopOperationLabel(context, operation),
-              },
-            ),
-          ),
-        ],
-        if (visual.release != null || visual.operationRunning) ...[
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              if (visual.primaryOperation case final operation?)
-                FilledButton.icon(
-                  key: GameCreationPage.gdevelopInstallButtonKey,
-                  onPressed:
+            OutlinedButton.icon(
+              key: GameCreationPage.gdevelopManageButtonKey,
+              onPressed:
+                  widget.developerProvider != null &&
                       installationAllowed &&
-                          _visualController.canStartPrimaryOperation
-                      ? () =>
-                            unawaited(_visualController.startPrimaryOperation())
-                      : null,
-                  icon: Icon(_gdevelopOperationIcon(operation)),
-                  label: Text(_gdevelopOperationLabel(context, operation)),
-                ),
-              if (_visualController.canRepair ||
-                  (visual.releaseMatchesInstallation &&
-                      !visual.operationRunning))
-                OutlinedButton.icon(
-                  key: GameCreationPage.gdevelopRepairButtonKey,
-                  onPressed: installationAllowed && _visualController.canRepair
-                      ? () => unawaited(_visualController.repair())
-                      : null,
-                  icon: const Icon(Icons.healing_rounded),
-                  label: Text(context.tr('creator.gdevelop_action_repair')),
-                ),
-              if (visual.operationRunning)
-                OutlinedButton.icon(
-                  key: GameCreationPage.gdevelopCancelButtonKey,
-                  onPressed: _visualController.cancelOperation,
-                  icon: const Icon(Icons.close_rounded),
-                  label: Text(context.tr('creator.gdevelop_action_cancel')),
-                ),
-            ],
-          ),
-        ],
+                      !visual.operationRunning
+                  ? _showGDevelopInstallDialog
+                  : null,
+              icon: const Icon(Icons.memory_rounded),
+              label: Text(context.tr('creator.gdevelop_manage')),
+            ),
+            TextButton.icon(
+              key: GameCreationPage.gdevelopNoticesButtonKey,
+              onPressed: installed && widget.developerProvider != null
+                  ? () => showGDevelopDistributionNotices(
+                      context,
+                      loadNotices: widget
+                          .developerProvider!
+                          .loadInstalledGDevelopWebIdeNotices,
+                    )
+                  : null,
+              icon: const Icon(Icons.gavel_outlined),
+              label: Text(context.tr('creator.gdevelop_notices')),
+            ),
+          ],
+        ),
       ],
     );
   }
 
-  Future<void> _selectLocalPackage() async {
-    XFile? selected;
-    try {
-      selected =
-          await (widget.localPackagePicker?.call() ??
-              openFile(
-                acceptedTypeGroups: const [
-                  XTypeGroup(label: 'GDevelop WebIDE ZIP', extensions: ['zip']),
-                ],
-              ));
-    } on Object catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.tr(
-              'creator.gdevelop_local_picker_failed',
-              arguments: {'error': error},
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    if (selected == null || !mounted) return;
-    final source = GDevelopLocalPackageSource(
-      displayName: selected.name,
-      openRead: selected.openRead,
-      readAsBytes: selected.readAsBytes,
+  void _showGDevelopInstallDialog() {
+    unawaited(
+      showGDevelopInstallDialog(
+        context,
+        controller: _visualController,
+        errorMessageBuilder: _gdevelopErrorMessage,
+        localPackagePicker: widget.localPackagePicker,
+      ),
     );
-    try {
-      await _visualController.installLocalPackage(
-        source: source,
-        allowMemoryFallback: false,
-      );
-    } on GDevelopLocalPackageStreamingUnavailable {
-      if (!mounted) return;
-      final confirmed =
-          await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) => AlertDialog(
-              title: Text(
-                dialogContext.tr('creator.gdevelop_memory_fallback_title'),
-              ),
-              content: Text(
-                dialogContext.tr('creator.gdevelop_memory_fallback_message'),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: Text(dialogContext.tr('common.cancel')),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: Text(
-                    dialogContext.tr('creator.gdevelop_memory_fallback_use'),
-                  ),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-      if (!confirmed || !mounted) return;
-      await _visualController.installLocalPackage(
-        source: source,
-        allowMemoryFallback: true,
-      );
-    }
   }
 
   void _toggleSourcePanel() {
@@ -576,12 +336,18 @@ class _GameCreationPageState extends State<GameCreationPage> {
   }
 
   void _openVisualWorkspace(Uri workspaceUri) {
-    unawaited(
-      gdevelopWorkspaceRouteCoordinator.open(
-        context: context,
-        workspaceUri: _visualController.inAppWorkspaceUri(workspaceUri),
-        title: context.tr('creator.visual_title'),
-      ),
+    unawaited(_openVisualWorkspaceWithFreshCapability(workspaceUri));
+  }
+
+  Future<void> _openVisualWorkspaceWithFreshCapability(Uri workspaceUri) async {
+    final currentWorkspaceUri = await _visualController.workspaceUriForOpen(
+      workspaceUri,
+    );
+    if (!mounted || currentWorkspaceUri == null) return;
+    await gdevelopWorkspaceRouteCoordinator.open(
+      context: context,
+      workspaceUri: _visualController.inAppWorkspaceUri(currentWorkspaceUri),
+      title: context.tr('creator.visual_title'),
     );
   }
 
@@ -593,45 +359,6 @@ class _GameCreationPageState extends State<GameCreationPage> {
             workspaceUri: workspaceUri,
             workspaceTitle: title,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GDevelopDistributionNotice extends StatelessWidget {
-  const _GDevelopDistributionNotice({required this.onOpenNotices});
-
-  final VoidCallback? onOpenNotices;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.info_outline_rounded, color: colors.primary, size: 20),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                context.tr('creator.gdevelop_unofficial_notice'),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-            TextButton(
-              key: GameCreationPage.gdevelopNoticesButtonKey,
-              onPressed: onOpenNotices,
-              child: Text(context.tr('creator.gdevelop_notices')),
-            ),
-          ],
         ),
       ),
     );
@@ -788,7 +515,7 @@ class _WorkspaceAccordionPanel extends StatelessWidget {
 
   final IconData icon;
   final String title;
-  final String description;
+  final String? description;
   final bool expanded;
   final VoidCallback onToggle;
   final Widget child;
@@ -818,11 +545,13 @@ class _WorkspaceAccordionPanel extends StatelessWidget {
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          description,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        if (description?.trim().isNotEmpty == true) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            description!,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -936,98 +665,6 @@ class _GDevelopInstallationStatus extends StatelessWidget {
   }
 }
 
-class _GDevelopReleaseIdentity extends StatelessWidget {
-  const _GDevelopReleaseIdentity({
-    required this.version,
-    required this.size,
-    required this.sha256,
-  });
-
-  final String version;
-  final int size;
-  final String sha256;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              context.tr(
-                'creator.gdevelop_release_identity',
-                arguments: {
-                  'version': version,
-                  'build': _shortGDevelopSha256(sha256),
-                  'size': _formatGDevelopBytes(size),
-                },
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'SHA-256  $sha256',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GDevelopOperationProgress extends StatelessWidget {
-  const _GDevelopOperationProgress({required this.state});
-
-  final VisualGDevelopState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final progress = state.progress;
-    final operation = state.operation!;
-    final value = progress?.fraction.clamp(0.0, 1.0).toDouble();
-    final message = progress == null
-        ? context.tr(
-            'creator.gdevelop_operation_preparing',
-            arguments: {'action': _gdevelopOperationLabel(context, operation)},
-          )
-        : context.tr(
-            'creator.gdevelop_operation_progress',
-            arguments: {
-              'action': _gdevelopOperationLabel(context, operation),
-              'percent': (value! * 100).round(),
-              'received': _formatGDevelopBytes(progress.receivedBytes),
-              'total': _formatGDevelopBytes(progress.totalBytes),
-            },
-          );
-    return Semantics(
-      liveRegion: true,
-      value: message,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          LinearProgressIndicator(value: value, minHeight: 4),
-          const SizedBox(height: 8),
-          Text(message, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-    );
-  }
-}
-
 class _GDevelopInlineMessage extends StatelessWidget {
   const _GDevelopInlineMessage({
     required this.icon,
@@ -1062,34 +699,6 @@ class _GDevelopInlineMessage extends StatelessWidget {
       ),
     );
   }
-}
-
-String _gdevelopOperationLabel(
-  BuildContext context,
-  VisualGDevelopOperation operation,
-) => switch (operation) {
-  VisualGDevelopOperation.install => context.tr(
-    'creator.gdevelop_action_install',
-  ),
-  VisualGDevelopOperation.upgrade => context.tr(
-    'creator.gdevelop_action_upgrade',
-  ),
-  VisualGDevelopOperation.repair => context.tr(
-    'creator.gdevelop_action_repair',
-  ),
-};
-
-IconData _gdevelopOperationIcon(VisualGDevelopOperation operation) =>
-    switch (operation) {
-      VisualGDevelopOperation.install => Icons.download_rounded,
-      VisualGDevelopOperation.upgrade => Icons.upgrade_rounded,
-      VisualGDevelopOperation.repair => Icons.healing_rounded,
-    };
-
-String _formatGDevelopBytes(int bytes) {
-  const mebibyte = 1024 * 1024;
-  if (bytes < mebibyte) return '$bytes B';
-  return '${(bytes / mebibyte).toStringAsFixed(1)} MiB';
 }
 
 String _shortGDevelopSha256(String? sha256) =>
@@ -1137,7 +746,8 @@ String _gdevelopErrorMessage(
   ),
   GDevelopWebIdeInstallException(
     diagnostic: 'gdevelop_developer_mode_must_be_disabled_before_install',
-  ) => context.tr('creator.gdevelop_disable_to_install'),
+  ) =>
+    context.tr('creator.gdevelop_disable_to_install'),
   GDevelopWebIdeInstallException(diagnostic: final diagnostic)
       when diagnostic.startsWith('gdevelop_local_package_read_failed') =>
     context.tr('creator.gdevelop_error_local_read'),

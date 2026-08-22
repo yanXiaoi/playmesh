@@ -4,10 +4,23 @@
 GDevelop 工程、GDevelop 运行时或 Playmesh GDevelop 扩展的设计与验收资料，都必须放在
 这里；实现目录中的 README 只保留代码入口和本索引链接。
 
+## 规范优先级
+
+1. [GDevelop 开发总规范](development-standards.md)是本目录最高优先级规范，所有 GDevelop
+   修改、审计和发布都必须先满足它。
+2. [功能修改与可重放开发](feature-development-guide.md)规定通用实施流程；AI、History、
+   运行时替换和内核升级文档只补充各自领域合同。
+3. 专项规则只补充本领域合同，不得冻结当前实现；当前文件接线统一记录在
+   [源码接线索引](integration-wiring.md)。
+
+文档之间发生冲突时，以开发总规范为准；实现、测试或旧文档与总规范不一致时，该差异是待
+整改缺口，不得解释为既有实现获准继续使用。
+
 ## 文档索引
 
-- [App 整合验收矩阵](app-integration-audit.md)：App、Gateway、WebIDE、预览、发布、多人、
-  本地化和安全边界的当前验收状态。
+- [GDevelop 开发总规范](development-standards.md)：Playmesh 与官方 GDevelop 的所有权、
+  接线、官方后续处理、错误传播、安全、验证和冲突处理总则。
+- [当前源码接线索引](integration-wiring.md)：仅用于定位当前模块与官方交接点，不产生规则。
 - [本地工程历史](history-development.md)：`gdevelop.history` 的身份、资源、修订、配额、
   恢复和错误合同。
 - [功能修改与可重放开发](feature-development-guide.md)：同一锁定内核上的 ownership、
@@ -19,9 +32,9 @@ GDevelop 工程、GDevelop 运行时或 Playmesh GDevelop 扩展的设计与验�
 - [GDevelop 内核升级手册](core-upgrade-guide.md)：升级官方 WebIDE 时的取源、重放、审计、
   验证、发布和回滚流程。
 
-日常新增或修改功能先使用“功能修改与可重放开发”；只有官方 tag、commit、libGD 或 GDJS
-基线变化时才进入“内核升级手册”。专项协议仍以下钻文档为准，不能在功能实现中重新发明
-AI、History 或运行时状态机。
+日常新增或修改功能先核对“GDevelop 开发总规范”，再使用“功能修改与可重放开发”；只有官方
+tag、commit、libGD 或 GDJS 基线变化时才进入“内核升级手册”。专项协议只补充规则，不能削弱
+总规范边界；实现状态、整改记录、历史结论和易腐摘要不进入本目录。
 
 下列文档同时覆盖源码开发区和 GDevelop，因此继续由平台文档维护：
 
@@ -53,8 +66,8 @@ AI、History 或运行时状态机。
 - 自动回归：`assets/playmesh-library/public/GDevelop/playmesh/tests/` 与根目录 `tool/` 中的
   GDevelop 专项测试。
 
-文档不得复制并宣称另一个固定版本号为事实。需要描述当前版本时，应引用
-`webide-lock.json`；历史验收记录可以保留当时的精确版本和 commit。
+文档不得复制固定版本号、commit 或摘要。需要当前值时直接引用 `webide-lock.json`、输出清单
+或流水线 receipt。
 
 ## 维护规则
 
@@ -66,3 +79,9 @@ AI、History 或运行时状态机。
    仍在本目录说明，不能与源码工作区合并成万能 controller。
 5. `docs/version/NEXT.md` 和发行日志只写摘要并链接本目录，不复制完整设计。
 6. 新增 GDevelop 文档时同时更新本索引；移动文件后必须全仓检查旧链接。
+7. 新增或修改领域规则不得放宽开发总规范；确需改变总边界时，必须先修改并评审总规范，再
+   同步专题文档、实现和测试。
+8. 已知不合规实现进入 issue、测试或版本任务，不在规范文档维护状态台账；不得仅靠修改文档
+   把现状宣称为合规。
+9. 文件路径、模块名和接线点只写入 `integration-wiring.md`；重构时可随源码修改，不得把当前
+   接线误写成永久规则。

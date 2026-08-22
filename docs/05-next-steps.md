@@ -12,9 +12,9 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.2.0+28`、Go Core
+归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.3.0+30`、Go Core
 `0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.3.0`、Developer CLI `2.0.0`、Game SDK `4.1.0`、
+Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`、Game SDK `4.1.0`、
 App Bridge SDK `3.3.0`；当前没有新的未发布变更。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
@@ -43,7 +43,7 @@ App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏�
 
 当前文件导出入口固定在源代码开发工作区：原“发布”改为“导出”，其下“导出源码”
 直接复用既有 `/package` 宽松备份 Operation；普通浏览器下载，App WebView 由原生宿主
-流式保存。“上传到发布源”仍执行完整校验和既有多源发布流程；“安装包导出”通过新增的
+流式保存。“上传到发布源”不执行项目语义校验，直接使用宽松项目包进入既有多源发布流程；“安装包导出”通过新增的
 `package_exports.*` Operation 选择 Android ARM64、Android x86_64 或 Windows x64，
 按需下载/复用固定 Runtime 底包，Android 与 Windows 都通过私有 Go provider 注入
 RSA-OAEP + AES-GCM 的 PME1 加密游戏载荷，并在载荷内写入可选中转服务器后生成 APK 或

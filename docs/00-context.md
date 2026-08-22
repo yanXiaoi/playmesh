@@ -79,9 +79,9 @@ Flutter App
 
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
 `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。当前
-正式版本为 Playmesh `4.2.0+28`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
+正式版本为 Playmesh `4.3.0+30`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
 `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `4.3.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
+Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
 唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。当前 Game SDK 只接受
 `4.1.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0` 的清单请求，并统一解析到兼容的
 `3.3.0` 运行包。更旧或未知版本直接拒绝。所有游戏、

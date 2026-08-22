@@ -11,16 +11,20 @@ const (
 	binaryProtocolVersion byte = 1
 	binaryAuthorityID          = "authority"
 
-	binaryOpCreate   byte = 0x01
-	binaryOpJoin     byte = 0x02
-	binaryOpClose    byte = 0x03
-	binaryOpSend     byte = 0x04
-	binaryOpDecision byte = 0x05
+	binaryOpCreate      byte = 0x01
+	binaryOpJoin        byte = 0x02
+	binaryOpClose       byte = 0x03
+	binaryOpSend        byte = 0x04
+	binaryOpDecision    byte = 0x05
+	binaryOpRPCRequest  byte = 0x06
+	binaryOpRPCResponse byte = 0x07
 
-	binaryOpResponse byte = 0x81
-	binaryOpDelivery byte = 0x82
-	binaryOpReview   byte = 0x83
-	binaryOpClosed   byte = 0x84
+	binaryOpResponse    byte = 0x81
+	binaryOpDelivery    byte = 0x82
+	binaryOpReview      byte = 0x83
+	binaryOpClosed      byte = 0x84
+	binaryOpRPCIncoming byte = 0x85
+	binaryOpRPCResult   byte = 0x86
 
 	binaryModeAuthority byte = 1
 	binaryModeRelay     byte = 2
@@ -49,6 +53,8 @@ var (
 	errBinaryInvalidTarget       = errors.New("二进制目标玩家无效")
 	errBinaryInvalidDecision     = errors.New("Authority 二进制审核结果无效")
 	errBinaryInvalidChannelToken = errors.New("二进制 Channel ID 无效")
+	errBinaryInvalidRPCRequest   = errors.New("Authority RPC 请求格式无效")
+	errBinaryInvalidRPCResponse  = errors.New("Authority RPC 响应格式无效")
 )
 
 type binaryChannelID [binaryChannelIDBytes]byte
@@ -71,12 +77,16 @@ type binaryClientFrame struct {
 	operation    byte
 	requestID    uint32
 	reviewID     uint64
+	rpcID        uint64
+	timeoutMS    uint32
 	mode         byte
 	channelID    binaryChannelID
 	flags        byte
 	targetIDs    []string
 	decision     byte
 	payload      []byte
+	path         string
+	errorCode    string
 	errorMessage string
 }
 
@@ -164,10 +174,105 @@ func decodeBinaryClientFrame(data []byte) (binaryClientFrame, error) {
 		default:
 			return frame, errBinaryInvalidDecision
 		}
+	case binaryOpRPCRequest:
+		if len(data) < 13 {
+			return frame, errBinaryFrameTooShort
+		}
+		frame.requestID = binary.BigEndian.Uint32(data[2:6])
+		frame.timeoutMS = binary.BigEndian.Uint32(data[6:10])
+		pathLength := int(binary.BigEndian.Uint16(data[10:12]))
+		if pathLength == 0 || len(data) < 12+pathLength+1 {
+			return frame, errBinaryInvalidRPCRequest
+		}
+		frame.path = string(data[12 : 12+pathLength])
+		frame.payload = data[12+pathLength:]
+	case binaryOpRPCResponse:
+		if len(data) < 12 {
+			return frame, errBinaryFrameTooShort
+		}
+		frame.rpcID = binary.BigEndian.Uint64(data[2:10])
+		status := data[10]
+		switch status {
+		case binaryStatusOK:
+			if len(data) < 12 {
+				return frame, errBinaryInvalidRPCResponse
+			}
+			frame.payload = data[11:]
+		case binaryStatusError:
+			if len(data) < 13 {
+				return frame, errBinaryInvalidRPCResponse
+			}
+			codeLength := int(binary.BigEndian.Uint16(data[11:13]))
+			if codeLength == 0 || len(data) < 13+codeLength {
+				return frame, errBinaryInvalidRPCResponse
+			}
+			frame.errorCode = string(data[13 : 13+codeLength])
+			frame.errorMessage = string(data[13+codeLength:])
+		default:
+			return frame, errBinaryInvalidRPCResponse
+		}
 	default:
 		return frame, errBinaryUnknownOperation
 	}
 	return frame, nil
+}
+
+func encodeBinaryRPCIncoming(
+	rpcID uint64,
+	senderID string,
+	path string,
+	payload []byte,
+) ([]byte, error) {
+	if len(senderID) == 0 || len(senderID) > 0xffff ||
+		len(path) == 0 || len(path) > 0xffff {
+		return nil, errBinaryInvalidRPCRequest
+	}
+	data := make([]byte, 14+len(senderID)+len(path)+len(payload))
+	data[0], data[1] = binaryProtocolVersion, binaryOpRPCIncoming
+	binary.BigEndian.PutUint64(data[2:10], rpcID)
+	binary.BigEndian.PutUint16(data[10:12], uint16(len(senderID)))
+	binary.BigEndian.PutUint16(data[12:14], uint16(len(path)))
+	copy(data[14:14+len(senderID)], senderID)
+	copy(data[14+len(senderID):14+len(senderID)+len(path)], path)
+	copy(data[14+len(senderID)+len(path):], payload)
+	if len(data) > maxBinaryFrameBytes {
+		return nil, errBinaryInvalidRPCRequest
+	}
+	return data, nil
+}
+
+func encodeBinaryRPCResult(
+	requestID uint32,
+	status byte,
+	payload []byte,
+	code string,
+	message string,
+) ([]byte, error) {
+	if status == binaryStatusOK {
+		data := make([]byte, 7+len(payload))
+		data[0], data[1] = binaryProtocolVersion, binaryOpRPCResult
+		binary.BigEndian.PutUint32(data[2:6], requestID)
+		data[6] = binaryStatusOK
+		copy(data[7:], payload)
+		if len(data) > maxBinaryFrameBytes {
+			return nil, errBinaryInvalidRPCResponse
+		}
+		return data, nil
+	}
+	if status != binaryStatusError || len(code) == 0 || len(code) > 0xffff {
+		return nil, errBinaryInvalidRPCResponse
+	}
+	data := make([]byte, 9+len(code)+len(message))
+	data[0], data[1] = binaryProtocolVersion, binaryOpRPCResult
+	binary.BigEndian.PutUint32(data[2:6], requestID)
+	data[6] = binaryStatusError
+	binary.BigEndian.PutUint16(data[7:9], uint16(len(code)))
+	copy(data[9:9+len(code)], code)
+	copy(data[9+len(code):], message)
+	if len(data) > maxBinaryFrameBytes {
+		return nil, errBinaryInvalidRPCResponse
+	}
+	return data, nil
 }
 
 func encodeBinaryResponse(

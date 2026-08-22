@@ -62,11 +62,15 @@ class LocalToolError extends Error {
 
 const scene = { name: 'Game', getEvents: () => ({}) };
 let applyResult = { applied: 1, errors: ['one operation was skipped'] };
+let applyFailure = null;
 globalThis.__playmeshEventExecutorDeps = {
   addMissingObjectBehaviors: () => {},
   addObjectUndeclaredVariables: () => {},
   addUndeclaredVariables: () => {},
-  applyEventsChanges: () => applyResult,
+  applyEventsChanges: () => {
+    if (applyFailure) throw applyFailure;
+    return applyResult;
+  },
   PlaymeshAiLocalToolError: LocalToolError,
   getPlaymeshAiEventPayloadValidationError: () => null,
 };
@@ -129,10 +133,39 @@ assert.equal(
   1,
   'an event callback must only be emitted when the official applier mutated events'
 );
+const officialApplyFailure = Object.assign(
+  new Error('official event application detail'),
+  { code: 'official_event_application_failed' }
+);
+applyFailure = officialApplyFailure;
+await assert.rejects(
+  eventExecutorModule.applyPlaymeshAiEventPayload(eventContext),
+  error => error === officialApplyFailure
+);
+applyFailure = null;
+applyResult = { applied: 1, errors: [] };
+const officialRefreshFailure = new Error('official refresh callback detail');
+await assert.rejects(
+  eventExecutorModule.applyPlaymeshAiEventPayload({
+    ...eventContext,
+    runnerOptions: {
+      onSceneEventsModifiedOutsideEditor: () => {
+        throw officialRefreshFailure;
+      },
+    },
+  }),
+  error => error === officialRefreshFailure
+);
 
 let swapAccepted = true;
 let importedResourceFile = null;
 let installedExtensionNames = new Set();
+const extensionLifecycle = [];
+const realEventsFunctionsExtensionsState = {
+  loadProjectEventsFunctionsExtensions: async () => {
+    extensionLifecycle.push(['load']);
+  },
+};
 const externalEditorToolOptions = [];
 const localPlaymeshHeader = {
   name: 'Playmesh',
@@ -162,13 +195,20 @@ const wrapperDependencies = {
   swapAsset: () => swapAccepted,
   PixiResourcesLoader: {},
   addSerializedExtensionsToProject: async (
-    _eventsFunctionsExtensionsState,
+    eventsFunctionsExtensionsState,
     _project,
     serializedExtensions
   ) => {
+    assert.equal(
+      eventsFunctionsExtensionsState,
+      realEventsFunctionsExtensionsState
+    );
     extensionLifecycle.push(['apply', serializedExtensions.map(item => item.name)]);
     installedExtensionNames = new Set(
       serializedExtensions.map(extension => extension.name)
+    );
+    await eventsFunctionsExtensionsState.loadProjectEventsFunctionsExtensions(
+      _project
     );
   },
   createNewResource: () => ({
@@ -323,6 +363,45 @@ await objectWrappers.create_or_replace_object({
   runOfficial: async () => {},
 });
 assert.equal(objectNotifications.length, 1);
+const officialEnsureExtensionInstalled = async () => {};
+let officialCreateOverrides = null;
+const officialCreateResult = {
+  result: {
+    status: 'finished',
+    call_id: 'object-call-3',
+    success: true,
+    output: { created: true },
+  },
+  createdProject: null,
+  createdSceneNames: [],
+};
+const forwardedCreateResult = await objectWrappers.create_or_replace_object({
+  call: {
+    callId: 'object-call-3',
+    toolName: 'create_or_replace_object',
+    arguments: {
+      scene_name: 'Game',
+      object_name: 'Fresh',
+      object_type: 'Sprite',
+      replace_existing_object: false,
+    },
+  },
+  project: objectProject,
+  runnerOptions: { ensureExtensionInstalled: officialEnsureExtensionInstalled },
+  runOfficial: async overrides => {
+    officialCreateOverrides = overrides;
+    return officialCreateResult;
+  },
+});
+assert.equal(forwardedCreateResult, officialCreateResult);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(
+    officialCreateOverrides,
+    'ensureExtensionInstalled'
+  ),
+  false,
+  'the wrapper must leave the official session hook owned by runnerOptions'
+);
 
 const stagedBlob = new Blob(['resource remains readable'], {
   type: 'text/plain',
@@ -402,7 +481,6 @@ assert.deepEqual(
 );
 
 const originalFetch = globalThis.fetch;
-const extensionLifecycle = [];
 try {
   globalThis.fetch = async (url, options = {}) => {
     if (String(url).includes('/catalog/capabilities/extension/')) {
@@ -437,7 +515,19 @@ try {
     throw new Error(`Unexpected extension fixture URL: ${url}`);
   };
   const extensionProject = capabilityProject;
-  const extensionWrappers = wrappersModule.createPlaymeshAiLocalToolWrappers();
+  let previewCalls = 0;
+  const extensionWrappers = wrappersModule.createPlaymeshAiLocalToolWrappers({
+    eventsFunctionsExtensionsState: realEventsFunctionsExtensionsState,
+    onPreviewOrRefresh: async () => {
+      previewCalls++;
+    },
+  });
+  const previewResult = await extensionWrappers.preview_or_refresh_project({
+    call: { callId: 'preview-call-1', arguments: {} },
+  });
+  assert.equal(previewResult.result.success, true);
+  assert.equal(previewResult.result.output.status, 'completed');
+  assert.equal(previewCalls, 1);
   const extensionResult = await extensionWrappers.install_gdevelop_extension({
     call: {
       callId: 'extension-call-1',
@@ -453,6 +543,7 @@ try {
   assert.deepEqual(extensionLifecycle, [
     ['will', ['ProbeExtension']],
     ['apply', ['ProbeExtension']],
+    ['load'],
     ['installed', ['ProbeExtension']],
   ]);
   extensionLifecycle.length = 0;
@@ -472,6 +563,7 @@ try {
   assert.deepEqual(extensionLifecycle, [
     ['will', ['Playmesh']],
     ['apply', ['Playmesh']],
+    ['load'],
     ['installed', ['Playmesh']],
   ]);
 } finally {
@@ -486,5 +578,10 @@ assert.equal(
   false
 );
 assert.doesNotMatch(wrappersSource, /\binitialize_project\b/);
+assert.doesNotMatch(
+  wrappersSource,
+  /loadProjectEventsFunctionsExtensions:\s*async\s*\(\)\s*=>\s*\{\}/
+);
+assert.doesNotMatch(wrappersSource, /capability_install_incomplete/);
 
 console.log('PlayMesh AI live wrapper callback and resource lifetime tests passed.');

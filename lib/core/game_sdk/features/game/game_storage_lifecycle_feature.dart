@@ -85,6 +85,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       defaultNamespace: DEFAULT_AUTHORITY_SERVICE_NAMESPACE,
       onService: registerAuthorityService,
     },
+    rpc: {
+      request: requestRpc,
+      onRequest: registerRpcRequestHandler,
+    },
     binary: {
       authorityPlayerId: "authority",
       async createChannel(options) {
@@ -282,6 +286,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       socket.close(1000, reason);
     }
     closeBinaryTransport(reason, true);
+    rejectAllRpcRequests(reason);
     stopLatencyProbes();
     global.console?.info?.(
       reason === "开发游戏页面正在重启"

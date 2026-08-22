@@ -7,7 +7,6 @@ import 'package:cryptography/cryptography.dart';
 
 import 'game_storage_service.dart';
 
-const _uploadTokenHeader = 'x-playmesh-share-token';
 const _standardJsonDigestHeader = 'x-playmesh-content-sha256';
 const _synchronousStorageHeader = 'x-playmesh-storage-sync';
 const playmeshStandardJsonBucketPath = '/bucket/_playmesh-json/v1';
@@ -25,9 +24,10 @@ typedef StandardJsonBucketAuthorizer =
     StandardJsonBucketAuthorization? Function(HttpRequest request);
 
 class StandardJsonBucketAuthorization {
-  const StandardJsonBucketAuthorization(this.scope);
+  const StandardJsonBucketAuthorization(this.scope, {this.isAuthority = true});
 
   final String scope;
+  final bool isAuthority;
 }
 
 class StandardJsonBucketRequestLedger {
@@ -99,7 +99,7 @@ class StandardJsonBucketRequestLedger {
 Future<bool> handleGameBucketRequest(
   HttpRequest request, {
   required GameStorageService storage,
-  String? uploadToken,
+  StandardJsonBucketAuthorizer? authorizeUpload,
   StandardJsonBucketAuthorizer? authorizeStandardJson,
   StandardJsonBucketRequestLedger? standardJsonLedger,
 }) async {
@@ -117,9 +117,23 @@ Future<bool> handleGameBucketRequest(
   }
 
   if (request.method == 'POST' && segments.length == 2) {
-    if (uploadToken != null &&
-        request.headers.value(_uploadTokenHeader) != uploadToken) {
-      await _json(request.response, HttpStatus.forbidden, {'error': '分享令牌无效'});
+    final authorization = authorizeUpload?.call(request);
+    if (authorization == null || authorization.scope.isEmpty) {
+      await _jsonError(
+        request.response,
+        HttpStatus.forbidden,
+        'storage_session_invalid',
+        '存储会话无效',
+      );
+      return true;
+    }
+    if (!authorization.isAuthority) {
+      await _jsonError(
+        request.response,
+        HttpStatus.forbidden,
+        'not_authority',
+        '只有 Authority 主机可以写入 Main Bucket',
+      );
       return true;
     }
     final originalName = request.uri.queryParameters['name'];
@@ -272,6 +286,15 @@ Future<void> _handleVersionedStandardJson(
       HttpStatus.forbidden,
       'storage_session_invalid',
       '存储会话无效',
+    );
+    return;
+  }
+  if (!authorization.isAuthority) {
+    await _jsonError(
+      request.response,
+      HttpStatus.forbidden,
+      'not_authority',
+      '只有 Authority 主机可以读写 Main Bucket',
     );
     return;
   }

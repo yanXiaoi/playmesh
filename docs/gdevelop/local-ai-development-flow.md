@@ -1,4 +1,4 @@
-# GDevelop 5 本地 AI 开发流设计
+# GDevelop 5 本地 AI 开发规则
 
 ## 结论
 
@@ -13,6 +13,10 @@ AI 修改与用户在编辑器里直接修改具有相同的内存语义：函�
 
 App 不包含 LLM 推理客户端，也不保存模型密钥。模型推理由用户选择的 Chat 或 Agent 承担，
 不能把外部推理能力描述为 App 内置模型。
+
+本文服从 [GDevelop 开发总规范](development-standards.md)。Playmesh AI 可以替换目录、下载、
+鉴权、审批和传输，但不能接管官方 EditorFunctions 开始后的处理、错误或状态生命周期；冲突
+实现必须整改，不能作为本文例外。
 
 ## 目标与非目标
 
@@ -39,32 +43,7 @@ App 不包含 LLM 推理客户端，也不保存模型密钥。模型推理由�
 GDevelop 普通保存、普通项目历史和用户主动恢复仍是独立功能。它们由 GDevelop 的正常编辑
 流程触发，不是 AI 调用协议的一部分。
 
-## 可复用实现
-
-Playmesh 侧只复用编辑器无关的公共底层，不让 GDevelop controller/DTO 与源码工作区耦合：
-
-- `lib/core/developer/developer_ai_prompt_templates.dart`：提示词清单、locale 与用户覆盖。
-- `lib/core/developer/foundation/developer_ai_approval.dart`：审批领域模型；GDevelop 使用自己的
-  tool subject 与 session controller。
-- Developer Gateway 的鉴权、中间件、事件中心和操作注册公共层；GDevelop AI 路由集中在
-  `operations/gdevelop/gdevelop_ai_operation.dart`，不复用源码文件操作 DTO。
-- `assets/playmesh-library/public/developer/workspace.js` 只作为同源 API、安全边界和交互语义
-  的参考实现；GDevelop 使用独立的 `PlaymeshAi` overlay。
-
-GDevelop 侧复用固定版本源码中的：
-
-- `newIDE/app/src/EditorFunctions/index.js` 及 `EditorFunctionCallRunner`。
-- `SimplifiedProject` 和 `ExtensionSummary` 上下文模型。
-- `ApplyEventsChanges` 的反序列化、校验和变更应用逻辑。
-- 官方对象、扩展、资源和事件修改后的编辑器通知回调。
-
-不复用 `Generation.js` 和 `AskAiEditorContainer`。它们与 GDevelop 账号、Credits、云端版本、
-素材和二次生成服务绑定。Playmesh 使用独立的轻量 `PlaymeshAiEditorContainer`，并维护唯一的
-本地 Tool Schema，不重新开放已经由
-`assets/playmesh-library/public/GDevelop/playmesh/scripts/apply-source-policy.mjs` 隐藏的
-官方 Ask AI。
-
-## v4 架构
+## 架构规则
 
 ```text
 用户选择的 Chat / Agent
@@ -107,26 +86,20 @@ Chat/Agent 对话只存在于当前内存会话，不持久化 transcript。Gate
 
 ## 调用和执行协议
 
-Editor session wire 协议为 `4.0.0`。Tool Contract 的协议版本和工具版本由唯一文件
-`assets/playmesh-library/public/GDevelop/playmesh/runtime/ai/tools.json` 发布，客户端必须
-精确匹配，不能降级到旧 editor-session wire。
+Editor session wire、Tool Contract 和工具版本只由
+`assets/playmesh-library/public/GDevelop/playmesh/runtime/ai/tools.json` 发布，客户端必须精确匹配，
+不得依据本文复制版本号或静默降级。
 
-当前 Tool Contract 为破坏性的 `4.0.0`。GDevelop 5.6.276 源码 ZIP 发布
-`EditorFunctions` 实现和 `AI_ORCHESTRATOR_TOOLS_VERSION = 'v12'`，但不发布服务端交给 AI 的
-输入 JSON Schema。因此 `tools.json` 不是从官方 ZIP 自动生成的“官方 Schema”，而是针对固定
-5.6.276/v12 源码维护的兼容快照。clean-replay 会直接读取锁定源码，核对 v12 常量、17 个官方
-函数名、`modifiesProject` 以及实现实际通过 `SafeExtractor` 消费的字段。门禁还会分别冻结参数的
-完整嵌套路径（含数组 `items`）、类型、必填列表和枚举；字段放错层级、类型或必填/枚举漂移、
-多出字段都会阻断构建。这些参数定义是 Playmesh 对锁定源码的对齐快照，不表示官方 ZIP 发布了
-完整 JSON Schema。
+官方源码只发布 `EditorFunctions` 实现和 orchestrator generation，不发布服务端输入 JSON
+Schema。因此 `tools.json` 是对锁定源码的 Playmesh 兼容快照，不得描述为官方 Schema。
+clean-replay 必须核对 generation、官方函数名、`modifiesProject`、`SafeExtractor` 实际消费字段，
+以及参数的嵌套路径、数组项、类型、必填列表和枚举；任何漂移都阻断构建。
 
 `implementation: official_editor_function` 只用于官方函数名与参数面完全一致的工具，调用参数
 原样交给官方 runner，不合并隐藏参数。`implementation: playmesh_wrapper` 明确表示本地 facade，
-不得冒充官方完整接口。旧的资源/对象子集别名和 `delete_object`、`remove_behavior`、
-`delete_scene` 已移除；删除能力由完整官方 change 函数的 `delete_this_*` 字段提供，整个函数按
-其最危险语义审批。场景对象组直接使用官方字段
-`changed_groups[].objects_to_add: string[]` 与 `objects_to_remove: string[]`，不翻译成员结构。
-Playmesh Tool Contract `4.0.0` 与官方 runner generation `v12` 是两个独立版本域。
+不得冒充官方完整接口。工具的当前名称、字段和删除能力只以 `tools.json` 与锁定源码合同为准；
+完整官方函数按其最危险语义审批，不得翻译或补造官方参数结构。Playmesh Tool Contract 与官方
+runner generation 是两个独立版本域。
 
 ### 调用信封
 
@@ -223,9 +196,12 @@ Web IDE 回传体只允许：
 ```
 
 失败时可额外携带字符串 `errorCode` 和 `errorMessage`。`output` 是 Web IDE 官方函数或 wrapper
-产生的业务结果；Gateway 不添加工程 before/after、revision、hash、history transaction 或
-commit evidence。循环引用、不可序列化 getter 等后处理错误会转换为一个可重放的失败结果，
-不能在修改已经发生后重新调用函数。
+产生的业务结果；官方函数已经给出失败结果时，Web IDE、Gateway、Chat 和 Agent 必须完整保留
+其可序列化的 `output`、`message`、错误类型和修改状态，`errorCode`/`errorMessage`只能补充传输
+语境，不得把它们统一替换成 `editor_function_failed`、`status: 0` 和空对象。Gateway 不添加工程
+before/after、revision、hash、history transaction 或 commit evidence。只有结果本身因循环引用、
+不可序列化 getter 等无法进入线协议时，结果规范化边界才可生成明确的、可重放的序列化失败；
+不能在修改已经发生后重新调用函数，也不能借序列化失败覆盖已经可用的官方诊断。
 
 Chat 复制给模型的返回状态使用 `playmesh.gdevelop.ai.return-status.v3`，并在
 `schemaVersion` 同级完整回显本次提交的根 `echo`：
@@ -254,9 +230,29 @@ GDevelop 版本的 EditorFunctions 与少量本地 wrapper 组成；工具名、
 
 - 事件修改使用官方 `applyEventsChanges`，完成后调用官方场景事件外部修改回调。
 - 对象修改和扩展安装按官方顺序调用对应通知回调。
+- 扩展目录解析、制品下载、固定身份和哈希校验、依赖闭包及审批由 Playmesh 负责；得到
+  `serializedExtensions` 后必须把 MainFrame 从官方 `EventsFunctionsExtensionsContext` 持有的真实
+  `EventsFunctionsExtensionsState` 传给官方 `addSerializedExtensionsToProject`，等待其完成后再
+  调用官方 `onExtensionInstalled`。
+- 官方 EditorFunctions 要求的 `ensureExtensionInstalled` 必须是编辑器当前会话提供的真实 hook；
+  不得用本地扩展存在性检查、空函数或自行拼装的注册表替代它。
 - 资源导入的临时 Blob URL 由页面级 registry 管理到资源不再需要为止，不能在官方保存序列化
   读取前提前撤销。
 - wrapper 不得返回新的 `createdProject` 替换活动工程。
+
+扩展安装不得把 `loadProjectEventsFunctionsExtensions` 替换为空函数或假 context，不得复制官方
+反序列化、origin、注册表加载和安装通知逻辑，也不得在 `addSerializedExtensionsToProject` 或
+`onExtensionInstalled` 之后增加二次存在性校验、补注册、修复或再次写入。Playmesh 只替换官方
+在线目录与制品来源；官方后续处理及其结果必须保持不变。
+
+wrapper 只能在进入官方函数前拒绝不合法的外部输入。一旦官方调用开始，异常和失败结果必须
+沿原调用边界返回；不得用覆盖官方调用的总 `catch` 吞掉异常、合并成统一错误或触发第二套
+恢复逻辑。
+
+`preview_or_refresh_project` 不实现预览导出、运行或刷新逻辑。EditorTabsPane 按官方工具栏当前
+状态原样传入 `launchNewPreview` 或 `launchHotReloadPreview`，wrapper 只调用并等待该回调。该工具
+不读取调试状态、不选择 launcher、不重试，也不在回调前后添加保存、校验或刷新处理；鉴权与
+审批继续由现有 Developer Gateway session 边界统一完成。
 
 能力搜索读取编辑器已经合并的官方目录和 Playmesh 本地扩展目录，保持大小写不敏感的连续
 子串匹配、精确类别过滤和原有分页语义。本地扩展的详情与安装继续通过同源固定目录读取，
@@ -265,7 +261,8 @@ GDevelop 版本的 EditorFunctions 与少量本地 wrapper 组成；工具名、
 `add_scene_events` 的 `GDevelopEventPayload 1.0.0` 只接受官方 `AiGeneratedEventChange` DTO，
 不接受裸 `EventsList` 或自造 placement。浏览器在调用前验证外层字段、sceneName、体积、深度、
 生成事件 JSON、对象/行为/资源引用以及敏感内容，然后把 `payload.changes` 交给官方事件应用
-函数。校验失败终止该 call；不存在“先写一部分再纠错”或自动再试。
+函数。校验失败终止该 call；不存在“先写一部分再纠错”或自动再试。进入官方事件应用函数后，
+其异常和返回结果必须原样传播，不得再由 Playmesh 捕获并改写为统一事件错误。
 
 Agent 资源导入可使用当前 session 的一次性内存资源暂存路由。它只为当前工具调用提供字节，
 不写 GDevelop 工程历史或 App CAS；资源读取后仍由官方资源 wrapper 加入活动 `gdProject`。
@@ -305,7 +302,7 @@ Editor session `4.0.0` 另外提供仅属于当前 WebIDE session 的 `approvalM
   无 fragment 的 workspace URL，并依赖已有 HttpOnly Cookie 恢复；任何平台都不得重放已经
   轮换的 `editorBootstrap`。平台层只实现 `load(Uri)`，稳定刷新地址由共享宿主代码生成。
 
-## Gateway v4 路由职责
+## Gateway 路由职责
 
 - `GET /dev/api/gdevelop/ai/tools`：返回唯一工具合约。
 - editor-session：创建、读取、更新 locale/context 和 session-scoped `approvalMode`、关闭当前
@@ -342,22 +339,16 @@ Playmesh 的多人兼容层只替换运行时，不改变编辑器公开调用�
   重启恢复默认值，且外部 Agent 不能改设置。
 - live project：官方函数收到当前页面同一个 `gdProject`；没有 clone、serializer transaction、
   history、reload、pending journal 或 recovery 路径。
-- wrapper：事件、对象、扩展和资源修改分别触发正确的官方回调；dirty 通知在 HTTP 回传前
-  恰好发生一次。
+- wrapper：事件、对象、扩展和资源修改分别触发正确的官方回调；扩展安装把同一个真实
+  `EventsFunctionsExtensionsState` 和真实 `ensureExtensionInstalled` 交给官方安装函数且没有
+  安装后复核；预览工具只调用传入的官方预览/热重载回调；dirty 通知在 HTTP 回传前恰好发生
+  一次。
 - 事件：完整 `GDevelopEventPayload 1.0.0` 与 call 同时入队、其他工具禁止 input、审批展示
   有界摘要、失败不自动纠错或重试。
-- 结果：先缓存再回传、响应丢失只重发、不可序列化输出转换为固定失败、同 call 不重复执行。
+- 结果：先缓存再回传、响应丢失只重发、不可序列化输出转换为固定失败、同 call 不重复执行；
+  官方失败的 `output`、`message`、错误类型和修改状态经过 WebIDE、Gateway、Chat、Agent 后仍
+  保持可诊断，且不会被统一空对象覆盖。
 - UI：粘贴前清空旧输入，执行后保留本次输入，复制返回状态不清空输入。
 - 安全：任意 JS、外部 URL、直接 IndexedDB 和跨项目调用均被拒绝。
 - 可迁移：生成工程不含 `playmesh.main.*`，官方 Multiplayer 行为保持原格式。
 - 上游升级：`apply-source-policy.mjs` 在文件 Blob 或唯一源片段变化时立即停止。
-
-## 风险与决策记录
-
-- 官方 AI 与官方商业服务深度绑定，因此只复用开源编辑器工具和工程语义。
-- Gateway 负责协调而不拥有工程内容，避免 App 历史与 Web IDE 内存工程形成两个写入真源。
-- 直接修改 live project 意味着函数进入修改阶段后不能安全取消；实现通过前置审批、单 writer
-  lease、非取消边界和结果幂等重发控制风险。
-- 失败后不自动修改第二次。模型或用户必须读取当前实际工程状态，再决定新的独立调用。
-- 移除 Playmesh AI overlay 和脚本注入即可恢复无 AI 的裁剪版 Web IDE；工程 JSON 与官方
-  格式保持一致，不需要迁移用户工程。

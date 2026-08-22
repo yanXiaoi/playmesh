@@ -289,6 +289,7 @@ const gameBinarySdkSource = SdkSourceFragment(
       request.reject(error);
     }
     binaryPending.clear();
+    rejectAllRpcRequests(error, "rpc_transport_closed");
     if (closeChannels) {
       for (const state of binaryChannels.values()) {
         state.closed = true;
@@ -350,6 +351,7 @@ const gameBinarySdkSource = SdkSourceFragment(
         socket.send(item.data);
       } catch (error) {
         settleBinaryRequest(item.requestId, BINARY_STATUS_ERROR, error);
+        settleRpcRequest(item.requestId, error);
       }
     }
     if (binaryQueueHead >= binaryQueue.length) {
@@ -421,6 +423,12 @@ const gameBinarySdkSource = SdkSourceFragment(
       break;
     case BINARY_OP_CLOSED:
       receiveBinaryClosed(data);
+      break;
+    case BINARY_OP_RPC_INCOMING:
+      void receiveRpcIncoming(data);
+      break;
+    case BINARY_OP_RPC_RESULT:
+      receiveRpcResult(data);
       break;
     default:
       closeBinaryTransport("主机返回了未知的二进制操作");

@@ -182,30 +182,6 @@ func Default() Config {
 			TimeoutSeconds: 120,
 			ContentRules: []ContentRule{
 				{
-					ID: "external-http-ws", Description: "外部 HTTP/WS 地址",
-					Pattern: `(?i)(?:https?|wss?)://`, Enabled: true,
-				},
-				{
-					ID: "protocol-relative-attribute", Description: "HTML 协议相对外部地址",
-					Pattern: `(?i)(?:src|href|action)\s*=\s*["']//`, Enabled: true,
-				},
-				{
-					ID: "protocol-relative-css", Description: "CSS 协议相对外部地址",
-					Pattern: `(?i)url\s*\(\s*["']?//`, Enabled: true,
-				},
-				{
-					ID: "protocol-relative-script", Description: "脚本协议相对外部地址",
-					Pattern: `(?i)["']\s*//[a-z0-9]`, Enabled: true,
-				},
-				{
-					ID: "file-protocol", Description: "本地文件协议",
-					Pattern: `(?i)file://`, Enabled: true,
-				},
-				{
-					ID: "javascript-url", Description: "JavaScript URL",
-					Pattern: `(?i)javascript\s*:`, Enabled: true,
-				},
-				{
 					ID: "html-data-url", Description: "可执行 HTML Data URL",
 					Pattern: `(?i)data\s*:\s*text/html`, Enabled: true,
 				},
@@ -214,16 +190,8 @@ func Default() Config {
 					Pattern: `(?i)\beval\s*\(`, Enabled: true,
 				},
 				{
-					ID: "function-constructor", Description: "动态 Function 构造",
-					Pattern: `(?i)new\s+Function\s*\(`, Enabled: true,
-				},
-				{
 					ID: "service-worker", Description: "Service Worker 注册",
 					Pattern: `(?i)serviceWorker\s*\.\s*register`, Enabled: true,
-				},
-				{
-					ID: "embedded-document", Description: "嵌入外部文档元素",
-					Pattern: `(?i)<\s*(iframe|object|embed)\b`, Enabled: true,
 				},
 				{
 					ID: "active-svg", Description: "SVG 活动脚本或 foreignObject",
@@ -362,19 +330,42 @@ func (c *Config) normalize() {
 	if c.Storage.MaxConcurrentScans == 0 {
 		c.Storage.MaxConcurrentScans = 4
 	}
-	// Older releases shipped a broad content rule that rejected every "../"
-	// occurrence inside JavaScript. Relative module imports are valid package
-	// content, while ZIP entry traversal is already rejected by safeArchivePath.
-	// Drop only the exact legacy default so operator-defined rules stay intact.
+	// Retire only exact historical defaults that are no longer part of upload
+	// policy. Keeping the pattern check preserves operator-defined rules that
+	// happen to reuse an old ID with different semantics.
 	contentRules := c.Scanner.ContentRules[:0]
 	for _, rule := range c.Scanner.ContentRules {
-		if rule.ID == "parent-path" &&
-			rule.Pattern == `(?:\.\./|\.\.\\)` {
+		if isRetiredDefaultContentRule(rule) {
 			continue
 		}
 		contentRules = append(contentRules, rule)
 	}
 	c.Scanner.ContentRules = contentRules
+}
+
+func isRetiredDefaultContentRule(rule ContentRule) bool {
+	switch rule.ID {
+	case "parent-path":
+		return rule.Pattern == `(?:\.\./|\.\.\\)`
+	case "external-http-ws":
+		return rule.Pattern == `(?i)(?:https?|wss?)://`
+	case "protocol-relative-attribute":
+		return rule.Pattern == `(?i)(?:src|href|action)\s*=\s*["']//`
+	case "protocol-relative-css":
+		return rule.Pattern == `(?i)url\s*\(\s*["']?//`
+	case "protocol-relative-script":
+		return rule.Pattern == `(?i)["']\s*//[a-z0-9]`
+	case "function-constructor":
+		return rule.Pattern == `(?i)new\s+Function\s*\(`
+	case "file-protocol":
+		return rule.Pattern == `(?i)file://`
+	case "javascript-url":
+		return rule.Pattern == `(?i)javascript\s*:`
+	case "embedded-document":
+		return rule.Pattern == `(?i)<\s*(iframe|object|embed)\b`
+	default:
+		return false
+	}
 }
 
 func (c *Config) applyEnvironment() error {

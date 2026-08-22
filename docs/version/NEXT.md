@@ -2,11 +2,11 @@
 
 ## 状态
 
-- 状态：App `4.2.1+29` 已于 2026-08-21 完成正式构建；当前没有新的未发布变更。
-- 当前发行基线：App `4.2.1+29`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+- 状态：App `4.3.0+30` 已于 2026-08-22 完成正式构建并发布；当前没有新的未发布变更。
+- 当前发行基线：App `4.3.0+30`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
-  Relay 协议 `3.0.0`、Developer API / OpenAPI `4.4.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.2.1.md`；本文件保留 4.2.1、4.2.0、4.1.0 与 4.0.0
+  Relay 协议 `3.0.0`、Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。
+- 最新正式发布日志：`docs/version/4.3.0.md`；本文件保留 4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
   发布归档。
 - Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
   隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
@@ -19,6 +19,52 @@
   `data/data`。SDK、App host、GameRuntimeBridge 与 Go Core 主 Session 链中的旧 WS 存储
   请求/响应、pending/settle、双读、双写和 fallback 全部删除。正式项目清单使用升级完成的
   Game SDK `4.1.0`；其公共异步 API 签名与 Promise 语义保持兼容。
+
+## 未发布变更
+
+- 当前没有新的未发布变更。
+
+## 4.3.0 发布归档
+
+- Game SDK `4.1.0` 兼容新增 `playmesh.main.rpc.request/onRequest`，版本号保持不变。
+  客户端请求全部异步，只有 Authority 能监听；handler 可同步或异步返回。请求与结果
+  复用会话认证的 Binary WebSocket 内部帧，支持 JSON 兼容值、Blob/File、ArrayBuffer
+  和 Uint8Array，不再通过 JSON action 信封传输。Go Core 只做身份、path、限流、大小和
+  超时校验，且后台拒绝非 Authority 伪造响应。GDevelop 扩展同步加入 RPC 调用、监听和
+  `$binary/$file` 请求响应桥接。
+
+- App Bridge SDK `3.3.0` 兼容新增 `playmesh.app.storage.getBucket()`，版本号保持不变。
+  App 页面在当前设备读写独占 JSON Bucket；数据不通过 Authority、Session 或其他玩家同步，
+  原生宿主按游戏隔离持久化，普通浏览器使用当前源的 `localStorage`。
+
+- GDevelop WebIDE Playmesh revision 升到 `20`，Tool Contract 兼容升级为 `4.1.0`（51 个工具）。
+  AI 扩展安装在 Playmesh 完成目录解析、制品下载、哈希校验和审批后，改为把真实
+  `EventsFunctionsExtensionsState` 交给官方 `addSerializedExtensionsToProject`，随后沿用官方
+  `onExtensionInstalled`，并移除官方处理后的二次存在性校验。新增
+  `preview_or_refresh_project`，只调用 WebIDE 工具栏当前选择的官方新建预览或热重载回调。
+- Runtime 分享面板现在可在多条局域网地址间切换二维码；主 App 与 Runtime 的 SDK 启动
+  遮罩统一为仅含 Playmesh 标识和转圈的加载层。Runtime 底包版本提升为 `1.0.1+4`。
+  统一加载层由新的本地包 `packages/playmesh_ui` 提供，避免主 App 与 Runtime 维护分叉 UI。
+- 安装包导出新增默认关闭的“自动同意能力授权”开关，并在需要下载或更新 Runtime 底包时
+  强制用户明确选择下载线路；客户端提交受校验的 opaque ID，服务端只下载所选线路且不
+  自动回退。导出流程调整为“平台与底包 → 导出参数 → 生成安装包”三步并支持逐步返回；
+  底包弹层再按“选择来源 → 选择线路”两步推进并支持返回，线路显示并发探测的延迟状态。
+  导出平台改为纵向紧凑单选行，来源与线路信息统一左对齐，两个开关的控件与文字垂直居中。
+  点击入口后先显示向导并异步回填本地状态；只有明确更新或下载时才读取目标来源，线路测速
+  只在选中来源后针对该来源异步回填，且不阻塞线路选择；中转服务器也延后到第二步读取，
+  不再阻塞弹窗出现。
+- Developer API / OpenAPI 升级为 `5.0.0`：源代码工作区“上传到发布源”不再执行项目
+  语义校验，也不再返回校验报告或 `package_validation_failed` 422；包导出仍保留 ZIP
+  路径、容量、符号链接和基础清单元数据等传输安全边界。项目校验函数与 Operation、既有
+  AI 提示、本地运行、安装包导出与重新导入的校验要求不变。
+- 源代码工作区只在当前源的 `localStorage` 记忆最近项目 ID；下次进入时仅在该项目仍存在时
+  自动打开，否则展示项目选择器，不回退到服务端活动项目或列表首项。
+- Go Server 接收包不再绑定当前 SDK 版本或固定清单结构，并保留未知清单字段；默认内容扫描
+  不再拒绝 HTTP/HTTPS/WS/WSS、协议相对链接、动态 `Function`、`file:`、`javascript:`
+  或 `iframe/object/embed`。旧配置中精确等于历史默认值的对应规则会在加载时迁移移除，
+  运营方显式配置的其他自定义规则不受影响。`app/` 内其他资源不再使用扩展名或文件类型
+  白名单；只按 `main.json.entries.game` 定位 `.html` 首页并确认其为非空、合法 UTF-8、
+  无 NUL 的网页文本。App 上传与网页上传共享的服务端 IP 限流窗口由 30 秒缩短为 2 秒。
 
 ## 4.2.1 发布归档
 

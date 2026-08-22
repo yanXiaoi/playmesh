@@ -12,12 +12,14 @@ import 'capabilities/capability_runtime.dart';
 import 'capabilities/default_capability_plugins.dart';
 import 'capabilities/web_permission/capability_web_permission.dart';
 import 'runtime_display_controller.dart';
+import 'runtime_app_local_bucket_store.dart';
 import 'runtime_lan_host.dart';
 import 'runtime_module_catalog.dart';
 import 'runtime_package.dart';
 import 'runtime_platform_ui.dart';
 
 typedef RuntimeBridgeSender = Future<void> Function(String message);
+
 final class RuntimeAppBridge {
   static const supportedCommandNames = <String>{
     'app.bootstrap',
@@ -34,6 +36,10 @@ final class RuntimeAppBridge {
     'app.game.exit',
     'app.identity.syncAvatar',
     'app.identity.updateNickname',
+    'app.storage.get',
+    'app.storage.set',
+    'app.storage.remove',
+    'app.storage.clear',
     'app.lan.discover',
     'app.lan.joinDiscovered',
     'app.lan.joinByLink',
@@ -57,6 +63,8 @@ final class RuntimeAppBridge {
     RuntimeLanHost? lanHost,
     Future<void> Function()? onOpenSharePanel,
     void Function()? onInputTakeover,
+    RuntimeAppLocalBucketStore? localBucketStore,
+    bool autoApproveCapabilities = false,
     http.Client? httpClient,
   }) {
     final mediaRuntime = createDefaultAppMediaRuntime(
@@ -80,6 +88,10 @@ final class RuntimeAppBridge {
       lanHost: lanHost,
       onOpenSharePanel: onOpenSharePanel,
       onInputTakeover: onInputTakeover,
+      localBucketStore:
+          localBucketStore ??
+          RuntimeAppLocalBucketStore(gameId: game.id, gameName: game.name),
+      autoApproveCapabilities: autoApproveCapabilities,
       mediaRuntime: mediaRuntime,
       capabilityRegistry: capabilityRegistry,
       httpClient: httpClient ?? http.Client(),
@@ -101,6 +113,8 @@ final class RuntimeAppBridge {
     required this.lanHost,
     required this.onOpenSharePanel,
     required this.onInputTakeover,
+    required this.localBucketStore,
+    required this.autoApproveCapabilities,
     required this.mediaRuntime,
     required this.capabilityRegistry,
     required this._httpClient,
@@ -134,6 +148,8 @@ final class RuntimeAppBridge {
   final RuntimeLanHost? lanHost;
   final Future<void> Function()? onOpenSharePanel;
   final void Function()? onInputTakeover;
+  final RuntimeAppLocalBucketStore localBucketStore;
+  final bool autoApproveCapabilities;
   final AppMediaRuntime mediaRuntime;
   final CapabilityRegistry capabilityRegistry;
   late CapabilityRuntime _capabilityRuntime;
@@ -304,6 +320,21 @@ final class RuntimeAppBridge {
         return null;
       case 'app.identity.updateNickname':
         return _updateNickname(payload);
+      case 'app.storage.get':
+        _requirePayload(payload, const {'bucket', 'key'});
+        return _readLocalBucket(payload);
+      case 'app.storage.set':
+        _requirePayload(payload, const {'bucket', 'key', 'value'});
+        await _writeLocalBucket(payload);
+        return null;
+      case 'app.storage.remove':
+        _requirePayload(payload, const {'bucket', 'key'});
+        await _removeLocalBucketValue(payload);
+        return null;
+      case 'app.storage.clear':
+        _requirePayload(payload, const {'bucket'});
+        await _clearLocalBucket(payload);
+        return null;
       case 'app.lan.discover':
         _requirePayload(payload, const {});
         final games = await _requireLanHost().discoverGames();
@@ -378,6 +409,7 @@ final class RuntimeAppBridge {
 
   Map<String, Object?> _environment(String sdkVersion) => {
     '_playmeshPlatformUi': platformUiConfiguration,
+    '_playmeshAutoApproveCapabilities': autoApproveCapabilities,
     'available': true,
     'sdkVersion': sdkVersion,
     'identity': _identityEnvironment(),
@@ -601,6 +633,57 @@ final class RuntimeAppBridge {
       onError: (Object _, StackTrace _) {},
     );
     return operation;
+  }
+
+  Future<Object?> _readLocalBucket(Map<String, Object?> payload) async {
+    final bucket = payload['bucket'];
+    final key = payload['key'];
+    if (bucket is! String || key is! String) {
+      throw const RuntimeAppSdkException('invalid_argument', 'App Bucket 参数无效');
+    }
+    try {
+      return await localBucketStore.getData(bucket, key);
+    } on FormatException catch (error) {
+      throw RuntimeAppSdkException('invalid_argument', error.message);
+    }
+  }
+
+  Future<void> _writeLocalBucket(Map<String, Object?> payload) async {
+    final bucket = payload['bucket'];
+    final key = payload['key'];
+    if (bucket is! String || key is! String) {
+      throw const RuntimeAppSdkException('invalid_argument', 'App Bucket 参数无效');
+    }
+    try {
+      await localBucketStore.setData(bucket, key, payload['value']);
+    } on FormatException catch (error) {
+      throw RuntimeAppSdkException('invalid_argument', error.message);
+    }
+  }
+
+  Future<void> _removeLocalBucketValue(Map<String, Object?> payload) async {
+    final bucket = payload['bucket'];
+    final key = payload['key'];
+    if (bucket is! String || key is! String) {
+      throw const RuntimeAppSdkException('invalid_argument', 'App Bucket 参数无效');
+    }
+    try {
+      await localBucketStore.removeData(bucket, key);
+    } on FormatException catch (error) {
+      throw RuntimeAppSdkException('invalid_argument', error.message);
+    }
+  }
+
+  Future<void> _clearLocalBucket(Map<String, Object?> payload) async {
+    final bucket = payload['bucket'];
+    if (bucket is! String) {
+      throw const RuntimeAppSdkException('invalid_argument', 'App Bucket 参数无效');
+    }
+    try {
+      await localBucketStore.clearData(bucket);
+    } on FormatException catch (error) {
+      throw RuntimeAppSdkException('invalid_argument', error.message);
+    }
   }
 
   Future<Map<String, Object?>> _performNicknameUpdate(

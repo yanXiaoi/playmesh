@@ -8,8 +8,8 @@
 Agent API、项目文件与本地历史。游戏作者使用说明见
 [网页开发者通道](../game/web-dev-channel.md)。
 
-当前正式 Developer API / OpenAPI 版本为 `4.4.0`。开发资源会话与外部工程接入变更见
-[Playmesh 4.0.0 版本日志](../version/4.0.0.md)；此前统一能力实现见
+当前 Developer API / OpenAPI 实现及正式发行版本为 `5.0.0`；版本变化见
+[Playmesh 4.3.0 版本日志](../version/4.3.0.md)；此前统一能力实现见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
 
 ## 架构
@@ -60,7 +60,7 @@ lib/core/developer/operations/{domain}/
 
 ## 当前完整 Operation 注册表
 
-下表记录 Developer API `4.4.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
+下表记录 Developer API `5.0.0` 当前注册内容。箭头右侧是稳定 operation ID；运行时
 真正用于路由的是“HTTP method + path 模板”，operation ID 用于响应头、OpenAPI、
 操作目录、审批和诊断，不参与路径命中。
 
@@ -349,7 +349,8 @@ X-Playmesh-AI-Channel: agent
 - 写入必须校验 revision；批量修改使用 preview/apply 和 `baseRevisions`。
 - 多文件提交应原子完成，失败不留下半个版本。
 - 保存、上传、移动、删除、整包发布和恢复进入同一项目本地历史。
-- 运行、发布和正式导入保持严格校验；发现和项目拉取可提供明确的宽松自救通道。
+- 运行和正式导入保持严格校验；源码工作区的多源发布使用宽松项目包，不执行项目
+  语义校验。发现和项目拉取也可提供明确的宽松自救通道。
 - `requestId`、`projectId`、`runId`、`eventId` 用于跨接口和日志定位。
 
 ## 本地历史
@@ -392,6 +393,9 @@ assets/playmesh-library/public/developer/
   `methods[].argumentsSchema` 递归渲染表单，不要求开发者手写 JSON，也不按能力
   code 编写专用页面。
 - 文件状态和运行状态通过正式 API 与 SSE 同步。
+- 最近打开的源码项目 ID 只保存在当前 Origin 的 `localStorage`。工作区启动时优先
+  恢复它；记录对应项目不存在时保持未选择并打开项目选择菜单。该存储不得承载主题、
+  语言、Token、项目内容或其他 App 状态。
 - 响应式布局必须同时保留项目、运行、保存、AI 和更多操作的可达性。
 - 第三方编辑器依赖由独立 `package.json` 和锁文件管理，不混入游戏模板。
 
@@ -463,23 +467,43 @@ Workspace 顶部保留既有 `#publish` 与移动端 `#publishFromMenu` DOM ID�
   Operation，继续使用 `GamePackageTransferService` 的宽松导出，用于正常备份，也允许取回
   待修复项目；不得为这一 UI 新增第二个 Operation 或改变 CLI 依赖的宽松语义。
 - “安装包导出”进入独立的 `package_exports.*` Operation：用户只选择一个
-  `android-arm64`、`android-x86_64` 或 `windows-x64` 目标。三个目标使用可横向滚动的紧凑
-  卡片，角标只显示“已安装”“未安装”或“可更新”，不展示 Runtime 版本及安装/下载诊断行。
-  导出设置区提供当前可用中转服务器列表，并保留“不内置”和“使用自定义地址”两种选择；
+  `android-arm64`、`android-x86_64` 或 `windows-x64` 目标。三个目标使用纵向紧凑单选行，
+  角标只显示“已安装”“未安装”或“可更新”，不展示 Runtime 版本及安装/下载诊断行。
+  主流程固定为三步并始终提供“上一步”：第一步选择平台和是否更新底包；第二步配置
+  “自动同意能力授权”和内置中转服务器；第三步确认并生成。文件不存在或第一步勾选
+  “更新底包”时，在进入第二步前打开独立的两步底包弹层：先选择 Runtime 清单来源，再选择
+  该来源下的下载线路。弹层使用“上一步/下一步”，不预选来源或线路，并展示宿主复用
+  `EndpointProbeService` 并发检测得到的线路延迟或失败状态。服务仍只下载用户明确选择的
+  线路且不自动回退。两个开关的控件和文字使用同一垂直居中基线；自动授权开关默认关闭且
+  不附加说明文案。
+  第二步提供当前可用中转服务器列表，并保留“不内置”和“使用自定义地址”两种选择；
   桌面端可手动使用搜索框，移动端列表在文档流内展开且不自动聚焦搜索输入，避免软键盘遮挡
   当前选项。选择已配置服务器时，工作区将其 Catalog 地址与读取 Token 组合为 Runtime
   publicURL。重新下载 Runtime 是目标底包维护动作，不属于游戏导出设置。
-- “上传到发布源”进入原有发布源候选、校验、提交、状态与失败重试界面。
+- 点击“导出安装包”必须先显示向导，再异步请求 `package_exports.options`。选项读取按
+  `scope` 拆分：`local` 只并发检查三个固定底包文件是否存在及大小，不读取 App Runtime
+  来源、不计算 SHA-256、不测速且不检查中转服务器；只有用户选择缺失底包后继续，或明确
+  勾选“更新底包”后继续，才以 `runtime + target` 读取该目标的清单来源和线路、计算该目标
+  的更新状态。读取来源本身不得发起测速；用户明确选中某个来源后，才单独请求
+  `probes + target + source` 并且只探测该来源下的线路。测速结果异步回填，不得阻塞进入
+  线路页或选择线路。中转服务器仅在进入第二步后以 `relays` 异步读取。Runtime 清单检查结果可在
+  30 秒内复用于紧随其后的测速请求，但生成安装包时仍重新解析最新清单并校验线路 opaque ID。
+- “上传到发布源”保存当前文本后直接进入原有发布源候选、提交、状态与失败重试界面，
+  不调用项目校验 Operation。
 
 安装包 Runtime 不得进入主 App 的 Flutter assets。固定安装位置是
 `<playmesh-library>/runtime/packages/` 下的 `playmesh-runtime-arm.apk`、
 `playmesh-runtime-x86.apk` 与 `playmesh-runtime-win.zip`；`installed` 只表示对应文件存在，
-因此测试期可以手工复制。`package_exports.options` 的 `updateAvailable` 只在本地文件已存在、
+因此测试期可以手工复制。`package_exports.options?scope=runtime&target=...` 的
+`updateAvailable` 只在本地文件已存在、
 目标有可用下载线路，且本地文件 SHA-256 与 Runtime 清单中该目标的 SHA-256 不一致时为
 `true`；版本字符串不参与判定。文件不存在或用户选择重新下载时，服务必须按
-`assets/app/App.json` 的 `export` 源依次读取 Runtime `update.json`，再按目标选择下载线路，
-流式下载并只以声明的 SHA-256 验证，成功后原子替换固定文件。已存在且未要求重新下载时
-直接复用，不访问远端；重新下载失败必须保留旧文件。
+`assets/app/App.json` 的全部 `export` 源读取可用 Runtime `update.json`，把每个目标的所有
+有效线路投影为带 64 位 opaque ID 的 `runtimeDownloads`。浏览器只提交用户所选 ID，不能
+提交任意下载 URL；服务端必须在最新声明中重新解析并精确匹配该 ID，只下载这一条线路，
+流式下载并以目标 SHA-256 验证，成功后原子替换固定文件。已存在且未要求重新下载时直接
+复用，不访问远端；所选线路失效或下载失败时保留旧文件，不尝试下一线路。每条投影同时
+携带清单来源的 opaque ID、名称和地址，仅用于客户端先按来源分组；提交契约仍只有线路 ID。
 
 `resources/runtime/update.json` 对每个目标只声明一次平台级 SHA-256，再列出共享该摘要的
 下载线路，不能在每条线路内重复或覆盖摘要：
@@ -499,7 +523,11 @@ Workspace 顶部保留既有 `#publish` 与移动端 `#publishFromMenu` DOM ID�
 地址在实际下载时失败。无论选择哪条线路，最终文件都必须通过该目标唯一的 SHA-256 校验。
 
 安装包创建请求正文固定为
-`{target, refreshRuntime, relayServer}`，不接受额外字段。`relayServer` 只能是一个
+`{target, refreshRuntime, runtimeDownloadId, autoApproveCapabilities, relayServer}`，不接受
+额外字段。只有需要下载/更新底包时 `runtimeDownloadId` 才是 64 位线路 ID，否则必须为
+`null`。`autoApproveCapabilities` 为布尔值；开启时导出服务把该私有设置写入
+`playmesh-runtime.json`，Runtime 的 App bootstrap 仅将其交给 SDK 内部能力确认流程，
+不作为公开 SDK 环境字段。`relayServer` 只能是一个
 `http`/`https` URL 或 `null`，由导出服务写入 Runtime 游戏载荷（Android 与 Windows 均为
 平台 Runtime 公钥封装的 PME1 加密）；游戏项目不能自行携带
 Runtime 私有配置覆盖它。客户端可用 `X-Playmesh-Package-Export-Request-ID` 关联
@@ -535,7 +563,9 @@ Blob 与白名单项目包 URL。宿主复用当前 Developer Token 流式写入
 `Content-Length`，共用下载函数必须核对完整接收并在取消或失败时清理半成品。
 
 `/package` 不做完整语义校验是已知且保留的修复能力；UI 与文档不得把宽松导出结果描述为
-项目已通过校验。重新导入、安装和“上传到发布源”仍执行严格校验。
+项目已通过校验。重新导入、运行和安装包导出仍执行各自的严格校验；“上传到发布源”
+明确复用宽松项目包，不在提交前执行项目语义校验。`validateProject()` 与
+`projects.validate` Operation 不得删除；既有 AI 提示和其他调用方的校验要求保持不变。
 
 发布必须使用正式 Operation，不在 Workspace JavaScript 中直接拼 Catalog 请求：
 
@@ -548,7 +578,8 @@ POST /dev/api/projects/{projectId}/publish
 - 候选响应只暴露 `id/name/protocolVersion/maxUploadBytes`；Host、读取 Token 和
   上传密钥均不得返回前端。
 - POST body 只允许 `sourceIds`，额外字段拒绝。
-- 服务端重新保存并完整校验项目；校验失败时不准备或导出 ZIP。
+- 服务端读取已经保存的项目元数据并宽松导出 ZIP，不调用 `projects.validate`；Manifest
+  无法提供发布请求所需的基础元数据或 ZIP 安全边界失败时仍返回打包失败。
 - 同一次发布只导出一个 ZIP，按源独立上传并经安全 SSE 更新状态。
 - 部分成功保留成功结果，重试只接受上次失败的源。
 - 30 秒超时、有限错误体、凭据脱敏和临时文件 finally 清理属于服务端不变量。
@@ -672,9 +703,9 @@ WebView JavaScript 等 View 操作在不可用时返回结构化 `409`。
 - 导出选择弹层、发布源弹层和移动端菜单都可全键盘操作，关闭后恢复到实际触发控件。
 - 浏览器导出走标准下载；WebView 直连保存只接受当前网关的项目包路径、携带当前会话
   Token、流式写入并在取消或失败时清理半成品，不经 GDevelop Blob 暂存。
-- `/package` 继续允许待修复项目宽松导出，且产物排除 `data/`、`cache/`、`.playmesh/`；
-  重新导入与上传发布源仍严格校验。
-- 校验失败不打包，部分失败可以只重试失败源，所有路径清理临时 ZIP。
+- `/package` 与上传发布源继续允许待修复项目宽松导出，且产物排除 `data/`、`cache/`、
+  `.playmesh/`；重新导入、运行和安装包导出仍严格校验。
+- 上传发布源不调用项目校验；单源失败可以只重试失败源，所有路径清理临时 ZIP。
 - 项目设置保存只投影当前表单字段；任意额外 `main.json` 字段静默忽略，且不存在
   字段专用识别、删除、告警或兼容逻辑。
 - 两个启用语言的 Developer 词典 key 集一致，清单 fallback 无环。

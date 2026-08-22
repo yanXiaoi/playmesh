@@ -78,7 +78,34 @@ const outputManifest = await loadSourcePolicyOutputManifest(
 const webIdeLock = JSON.parse(
   await readFile(path.join(playmeshDirectory, 'webide-lock.json'), 'utf8')
 );
+const sourcePolicy = await readFile(
+  path.join(playmeshDirectory, 'scripts/apply-source-policy.mjs'),
+  'utf8'
+);
 assertManifestMatchesWebIdeLock({ manifest: outputManifest, lock: webIdeLock });
+const apiConfigsRelativePath =
+  'newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js';
+const apiConfigsBytes = await readFile(
+  path.join(sourceRoot, ...apiConfigsRelativePath.split('/'))
+);
+assert.equal(
+  gitBlobSha(apiConfigsBytes),
+  'cc52e676c4bf4873bb1a0fe6c6568982e1fbd1bb',
+  'ApiConfigs must remain the exact official source; services are replaced at their individual seams'
+);
+assert.equal(
+  outputManifest.patchedOfficialFiles.some(
+    record => record.relativePath === apiConfigsRelativePath
+  ),
+  false,
+  'the output manifest must not claim a global ApiConfigs patch'
+);
+assert.doesNotMatch(
+  sourcePolicy,
+  /relativePath:\s*['"]newIDE\/app\/src\/Utils\/GDevelopServices\/ApiConfigs\.js['"]/
+);
+assert.doesNotMatch(sourcePolicy, /const hostPattern =/);
+assert.doesNotMatch(apiConfigsBytes.toString('utf8'), /playmesh\.invalid/);
 const overlayOutput = await verifyBidirectionalOverlayOutput({
   overlayDirectory,
   sourceRoot,

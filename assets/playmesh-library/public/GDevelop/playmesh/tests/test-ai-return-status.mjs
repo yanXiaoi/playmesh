@@ -598,7 +598,14 @@ assert.equal(
           message:
             'Revision changed; token=root-secret-value Bearer root-secret-value',
         },
-        output: { reason: 'safe function failure reason' },
+        output: {
+          message: 'safe official function failure reason',
+          error: {
+            code: 'official_validation_failed',
+            type: 'GDevelopValidationError',
+          },
+          didModifyProject: true,
+        },
       },
     ],
     approvals: [],
@@ -619,6 +626,14 @@ assert.equal(
     status.latestTurn.calls[0].failure.code,
     'editor_function_failed'
   );
+  assert.deepEqual(status.latestTurn.calls[0].result, {
+    message: 'safe official function failure reason',
+    error: {
+      code: 'official_validation_failed',
+      type: 'GDevelopValidationError',
+    },
+    didModifyProject: true,
+  });
   assert.equal(status.failure.stage, 'pre_request');
   assert.equal(status.failure.requestId, undefined);
   assert.equal(status.latestTurn.calls[0].failure.requestId, undefined);

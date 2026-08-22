@@ -5,7 +5,7 @@
     "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
   },
   "overlay": {
-    "treeSha256": "d57cdd613ef0357fd3aa529e53db0d37a2d370c4686acedc52f7a4abcf6ff382"
+    "treeSha256": "c72d8698b878bf2f43c1bf85ea9e6b8ae4449cea866cc0ccf2870766d60b45c6"
   },
   "generatedFiles": [
     {
@@ -162,7 +162,7 @@
     {
       "relativePath": "newIDE/app/src/AssetStore/ExtensionStore/InstallExtension.js",
       "upstreamGitBlobSha": "f07f4a26ebbad25ac47f7659a48ff0a6f4cf6179",
-      "postPatchSha256": "ddf60cfbb302094fe42fa170088b31b28955ee95961e8adeaa74d56297e3fd98"
+      "postPatchSha256": "0157186d708997d7de01a73c173cfcd745980a3d38381c3814d436959fe5d355"
     },
     {
       "relativePath": "newIDE/app/src/AssetStore/NewObjectDialog.js",
@@ -192,7 +192,7 @@
     {
       "relativePath": "newIDE/app/src/BehaviorsEditor/NewBehaviorDialog.js",
       "upstreamGitBlobSha": "213c19392e5e7dcc8bca1b87d1500906c246975f",
-      "postPatchSha256": "e2ba31ab966e99c5fd616f8786a7fecb2ce8abf430e9f027cfd0372c2ca31ea7"
+      "postPatchSha256": "22ec9e59ce7de54c150cdc8fe6dedbda80e81a353fbab2179ef3abb1e3059e09"
     },
     {
       "relativePath": "newIDE/app/src/BrowserApp.js",
@@ -267,7 +267,17 @@
     {
       "relativePath": "newIDE/app/src/MainFrame/EditorContainers/BaseEditor.js",
       "upstreamGitBlobSha": "3bdede2fb3a37676bc901e4e43eb83fecc55fa66",
-      "postPatchSha256": "eb3b4313b8f71a7185c5fb55648710026278831f6a47fee60b4eff9c2c534a01"
+      "postPatchSha256": "1156fd80f23586648d0ab7bc5b28b8281625df9f8406e6b4f3de87fb53bc6452"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/EditorTabsPane.js",
+      "upstreamGitBlobSha": "2914b8c522097260bbf3e10bfde7a1f00603d6ce",
+      "postPatchSha256": "7a811239292e6ced1c4d84e089a1bd0ba3eb53e067fc2e7ab9b8ec8b4350ded4"
+    },
+    {
+      "relativePath": "newIDE/app/src/MainFrame/PoppedOutEditorContainerWindow.js",
+      "upstreamGitBlobSha": "df76c570ce2b967a506ab96060cc14481dd518b7",
+      "postPatchSha256": "8e03ebaf270dd5e1d97da2323fc6b59e4bd4f3c4c3b3cdbf80254ae3a8978d76"
     },
     {
       "relativePath": "newIDE/app/src/MainFrame/AboutDialog.js",
@@ -483,11 +493,6 @@
       "relativePath": "newIDE/app/src/UI/ExternalEditorOpenedDialog.js",
       "upstreamGitBlobSha": "c09d9d0744ca4cbc6cfbe4316fd7a28cea18ef98",
       "postPatchSha256": "3c9832d916be62db51d77ca9c74110c2e622025a57a66efabc56909710bcd823"
-    },
-    {
-      "relativePath": "newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js",
-      "upstreamGitBlobSha": "cc52e676c4bf4873bb1a0fe6c6568982e1fbd1bb",
-      "postPatchSha256": "1353b0877f59a758b576ac6a7749884c4348e26f13f3b4b044197cf9672a141d"
     },
     {
       "relativePath": "newIDE/app/src/Utils/GDevelopServices/Authentication.js",

@@ -120,6 +120,12 @@ class _IoGameAssetGateway implements GameAssetGateway {
         await handleGameBucketRequest(
           request,
           storage: bucketStorage,
+          authorizeUpload: (request) =>
+              request.connectionInfo?.remoteAddress.isLoopback == true
+              ? StandardJsonBucketAuthorization(
+                  'local:${server.port}:${bucketStorage.gameId}',
+                )
+              : null,
           authorizeStandardJson: (request) =>
               request.connectionInfo?.remoteAddress.isLoopback == true
               ? StandardJsonBucketAuthorization(

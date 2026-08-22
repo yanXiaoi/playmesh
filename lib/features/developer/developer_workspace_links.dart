@@ -42,114 +42,89 @@ class _DeveloperWorkspaceLinksState extends State<DeveloperWorkspaceLinks> {
     final displayedLinks = sortLanEndpointCandidates(widget.links);
     final selectedLink = _effectiveLink;
     final colors = Theme.of(context).colorScheme;
+    if (displayedLinks.isEmpty || selectedLink == null) {
+      return Text(widget.emptyMessage);
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final details = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        final chooser = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (selectedLink != null) ...[
-              FilledButton.icon(
-                onPressed: () => widget.onOpenWorkspace(selectedLink.uri),
-                icon: Icon(widget.openIcon),
-                label: Text(widget.openLabel),
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (displayedLinks.isEmpty)
-              Text(widget.emptyMessage)
-            else
-              for (final link in displayedLinks)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: ListTile(
-                    dense: true,
-                    selected: link == selectedLink,
-                    selectedTileColor: colors.secondaryContainer,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+            for (final link in displayedLinks)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Semantics(
+                  label: link.uri.host,
+                  selected: link == selectedLink,
+                  button: true,
+                  child: Material(
+                    key: ValueKey<String>(
+                      'developer-workspace-link-${link.uri.host}',
                     ),
-                    textColor: colors.onSurface,
-                    iconColor: colors.onSurfaceVariant,
-                    selectedColor: colors.onSecondaryContainer,
-                    leading: Icon(
-                      link == selectedLink
-                          ? Icons.radio_button_checked
-                          : Icons.radio_button_off,
+                    color: link == selectedLink
+                        ? colors.secondaryContainer
+                        : colors.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      textColor: colors.onSurface,
+                      iconColor: colors.onSurfaceVariant,
+                      leading: Icon(
+                        link == selectedLink
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        size: 20,
+                      ),
+                      title: Text(
+                        link.uri.host,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      trailing: IconButton(
+                        tooltip: context.tr('creator.copy_link'),
+                        onPressed: () => _copyLink(context, link.uri),
+                        icon: const Icon(Icons.copy_outlined),
+                      ),
+                      onTap: () => setState(() => _selectedLink = link),
                     ),
-                    title: Text(link.uri.host),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${context.tr('creator.lan_interface')}: '
-                          '${link.interfaceName} · '
-                          '${_addressTypeLabel(context, link.addressType)} · '
-                          '${_riskLabel(context, link.risk)}',
-                        ),
-                        SelectableText(
-                          link.uri.toString(),
-                          style: TextStyle(
-                            fontFamily: 'Consolas',
-                            color: link == selectedLink
-                                ? colors.onSecondaryContainer
-                                : colors.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                    trailing: IconButton(
-                      tooltip: context.tr('creator.copy_link'),
-                      onPressed: () => _copyLink(context, link.uri),
-                      icon: const Icon(Icons.copy_rounded),
-                    ),
-                    onTap: () => setState(() => _selectedLink = link),
                   ),
                 ),
-            if (displayedLinks.isNotEmpty)
-              Text(context.tr('creator.qr_description')),
+              ),
+            const SizedBox(height: 2),
+            FilledButton.icon(
+              onPressed: () => widget.onOpenWorkspace(selectedLink.uri),
+              icon: Icon(widget.openIcon),
+              label: Text(widget.openLabel),
+            ),
           ],
         );
-        final qr = selectedLink == null
-            ? null
-            : DeveloperWorkspaceQrCode(uri: selectedLink.uri);
-        if (constraints.maxWidth < 560 && qr != null) {
+        final qr = DeveloperWorkspaceQrCode(uri: selectedLink.uri);
+        if (constraints.maxWidth < 480) {
           return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [qr, const SizedBox(height: 12), details],
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(child: qr),
+              const SizedBox(height: 12),
+              chooser,
+            ],
           );
         }
-        if (qr == null) return details;
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             qr,
-            const SizedBox(width: 16),
-            Expanded(child: details),
+            const SizedBox(width: 14),
+            Expanded(child: chooser),
           ],
         );
       },
     );
   }
-
-  String _addressTypeLabel(BuildContext context, LanAddressType type) =>
-      context.tr(switch (type) {
-        LanAddressType.privateIpv4 => 'creator.lan_type_private_ipv4',
-        LanAddressType.linkLocalIpv4 => 'creator.lan_type_link_local_ipv4',
-        LanAddressType.carrierGradeNatIpv4 =>
-          'creator.lan_type_carrier_nat_ipv4',
-        LanAddressType.benchmarkIpv4 => 'creator.lan_type_benchmark_ipv4',
-        LanAddressType.publicIpv4 => 'creator.lan_type_public_ipv4',
-        LanAddressType.uniqueLocalIpv6 => 'creator.lan_type_unique_local_ipv6',
-        LanAddressType.globalIpv6 => 'creator.lan_type_global_ipv6',
-        LanAddressType.other => 'creator.lan_type_other',
-      });
-
-  String _riskLabel(BuildContext context, LanEndpointRisk risk) =>
-      context.tr(switch (risk) {
-        LanEndpointRisk.low => 'creator.lan_risk_low',
-        LanEndpointRisk.caution => 'creator.lan_risk_caution',
-        LanEndpointRisk.high => 'creator.lan_risk_high',
-      });
 
   Future<void> _copyLink(BuildContext context, Uri link) async {
     await Clipboard.setData(ClipboardData(text: link.toString()));
@@ -167,11 +142,22 @@ class DeveloperWorkspaceQrCode extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: QrImageView(data: uri.toString(), size: 150),
+    return Semantics(
+      image: true,
+      label: uri.host,
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: QrImageView(
+            data: uri.toString(),
+            size: 136,
+            padding: EdgeInsets.zero,
+          ),
+        ),
       ),
     );
   }

@@ -166,7 +166,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	userLoginLimiter := middleware.NewIntervalLimiter(
 		time.Duration(cfg.Admin.LoginIntervalMilliseconds) * time.Millisecond,
 	)
-	userUploadLimiter := middleware.NewIntervalLimiter(30 * time.Second)
+	userUploadLimiter := middleware.NewIntervalLimiter(2 * time.Second)
 	external.GET("/api/user/config", userHandler.RegistrationState)
 	external.GET(
 		"/api/user/auth/captcha",

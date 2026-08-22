@@ -509,12 +509,27 @@ void main() {
     expect(workspaceScript.statusCode, HttpStatus.ok);
     expect(workspaceScript.headers['referrer-policy'], 'no-referrer');
     expect(workspaceScript.headers['x-content-type-options'], 'nosniff');
-    expect(workspaceScript.body, isNot(contains('localStorage')));
+    expect(
+      workspaceScript.body,
+      contains("lastProjectStorageKey='playmesh.developer.lastProject'"),
+    );
+    expect(workspaceScript.body, contains('localStorage.getItem'));
+    expect(workspaceScript.body, contains('localStorage.setItem'));
+    expect(workspaceScript.body, isNot(contains('playmesh.theme')));
     expect(
       workspaceScript.body,
       contains('webviewJavaScriptHistoryByProject=new Map()'),
     );
-    expect(workspaceScript.body, contains('data.activeProjectId'));
+    expect(
+      workspaceScript.body,
+      contains('loadProjects(selectedId=projectId||storedProjectId())'),
+    );
+    expect(workspaceScript.body, isNot(contains('data.activeProjectId')));
+    expect(
+      workspaceScript.body,
+      contains('async function validateProject(show=true)'),
+      reason: '发布绕过校验不能删除 AI、运行和手工校验共用的函数。',
+    );
     expect(workspaceScript.body, contains('openProjectPicker()'));
     expect(workspaceScript.body, contains('positionAnchoredMenu'));
     expect(workspaceScript.body, contains('CodeMirror.MergeView'));
@@ -1017,6 +1032,7 @@ void main() {
     expect(aiPrompt.body, contains('按需读取项目文件'));
     expect(aiPrompt.body, contains('本提示词不预载任何项目文件内容'));
     expect(aiPrompt.body, contains('通过 files.read 读取必要的文本文件'));
+    expect(aiPrompt.body, contains('项目校验指令'));
     expect(aiPrompt.body, contains('### files.read'));
     expect(aiPrompt.body, isNot(contains('===== BEGIN WORKSPACE FILE:')));
     expect(aiPrompt.body, isNot(contains('<title>Demo</title>')));
@@ -1106,6 +1122,7 @@ void main() {
     expect(agentPrompt.body, contains('按需读取项目文件'));
     expect(agentPrompt.body, contains('本提示词不预载任何项目文件内容'));
     expect(agentPrompt.body, contains('通过 files.read 读取必要的文本文件'));
+    expect(agentPrompt.body, contains('完成后调用项目校验'));
     expect(agentPrompt.body, contains('### files.read'));
     expect(agentPrompt.body, isNot(contains('===== BEGIN WORKSPACE FILE:')));
     expect(agentPrompt.body, isNot(contains('<title>Demo</title>')));
@@ -1377,7 +1394,7 @@ void main() {
     expect(paths, contains('/dev/api/projects/{projectId}/capabilities'));
     expect(paths, contains('/dev/api/projects/{projectId}/copy'));
     expect(paths, contains('/dev/api/projects/{projectId}'));
-    expect((openApiJson['info'] as Map)['version'], '4.4.0');
+    expect((openApiJson['info'] as Map)['version'], '5.0.0');
     final components = Map<String, Object?>.from(
       openApiJson['components']! as Map,
     );
@@ -2629,7 +2646,7 @@ void main() {
     expect(publisher.requests, hasLength(2));
   });
 
-  test('工作区发布在服务端完整校验失败时不准备或导出游戏包', () async {
+  test('工作区发布不执行项目校验并直接准备上传包', () async {
     final port = await _availablePort();
     final catalog = _InvalidPublishCatalog();
     final publisher = _FakeProjectPublisher();
@@ -2656,16 +2673,15 @@ void main() {
       }),
     );
 
-    expect(
-      response.statusCode,
-      HttpStatus.unprocessableEntity,
-      reason: response.body,
-    );
+    expect(response.statusCode, HttpStatus.ok, reason: response.body);
     final body = jsonDecode(response.body) as Map;
-    expect(body['error'], containsPair('code', 'package_validation_failed'));
-    expect(body['validation'], containsPair('valid', false));
-    expect(catalog.prepareCount, 0);
-    expect(publisher.requests, isEmpty);
+    expect(body, isNot(contains('validation')));
+    expect((body['result'] as Map)['succeeded'], isTrue);
+    expect(catalog.validateCount, 0);
+    expect(catalog.prepareCount, 1);
+    expect(publisher.requests, [
+      ['official'],
+    ]);
   });
 
   test('开发资源会话只接受当前 CLI 对端并在撤销时停止临时运行', () async {
@@ -3236,23 +3252,27 @@ class _FakeCatalog implements DeveloperProjectCatalog {
 
 class _InvalidPublishCatalog extends _FakeCatalog {
   int prepareCount = 0;
+  int validateCount = 0;
 
   @override
   Future<DeveloperProjectValidationReport> validateProject(
     String projectId,
-  ) async => const DeveloperProjectValidationReport(
-    projectId: 'demo',
-    diagnostics: [
-      DeveloperProjectDiagnostic(
-        code: 'entry_missing',
-        severity: DeveloperDiagnosticSeverity.error,
-        message: '主游戏入口不存在',
-        path: 'app/index.html',
-      ),
-    ],
-    fileCount: 2,
-    totalBytes: 64,
-  );
+  ) async {
+    validateCount += 1;
+    return const DeveloperProjectValidationReport(
+      projectId: 'demo',
+      diagnostics: [
+        DeveloperProjectDiagnostic(
+          code: 'entry_missing',
+          severity: DeveloperDiagnosticSeverity.error,
+          message: '主游戏入口不存在',
+          path: 'app/index.html',
+        ),
+      ],
+      fileCount: 2,
+      totalBytes: 64,
+    );
+  }
 
   @override
   Future<GameSummary> prepareGame(String projectId) {

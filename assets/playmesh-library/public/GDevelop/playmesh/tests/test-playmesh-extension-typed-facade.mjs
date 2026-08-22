@@ -25,6 +25,7 @@ playmesh.main.session.finish
 playmesh.main.player.getCurrent
 playmesh.main.player.setNickname
 playmesh.main.game.submitAction
+playmesh.main.rpc.request
 playmesh.main.binary.createChannel
 playmesh.main.binary.joinChannel
 playmesh.main.sync.startAuthority
@@ -50,6 +51,11 @@ PlaymeshStorageBucket.upload
 playmesh.app.isAvailable
 playmesh.app.identity.getCurrent
 playmesh.app.runtime.getLocale
+playmesh.app.storage.getBucket
+PlaymeshAppStorageBucket.getData
+PlaymeshAppStorageBucket.setData
+PlaymeshAppStorageBucket.removeData
+PlaymeshAppStorageBucket.clearData
 playmesh.app.performance.getFps
 playmesh.app.performance.getLatency
 playmesh.app.performance.getLatencyDiagnostics
@@ -112,6 +118,7 @@ PlaymeshCapabilityHandle.onError
 
 const expectedHandlerCommands = Object.freeze([
   'playmesh.main.authority.onService',
+  'playmesh.main.rpc.onRequest',
   'PlaymeshBinaryChannel.onForward',
 ]);
 
@@ -125,11 +132,11 @@ const expectedCommands = Object.freeze([
   ...expectedSubscribeCommands,
   ...expectedHandlerCommands,
 ]);
-assert.equal(expectedExecuteCommands.length, 68);
+assert.equal(expectedExecuteCommands.length, 74);
 assert.equal(expectedSubscribeCommands.length, 20);
-assert.equal(expectedHandlerCommands.length, 2);
-assert.equal(expectedCommands.length, 90);
-assert.equal(new Set(expectedCommands).size, 90);
+assert.equal(expectedHandlerCommands.length, 3);
+assert.equal(expectedCommands.length, 97);
+assert.equal(new Set(expectedCommands).size, 97);
 
 const readJson = async filePath => JSON.parse(await readFile(filePath, 'utf8'));
 const [extension, capabilityDescriptors] = await Promise.all([
@@ -210,7 +217,7 @@ for (const [primitive, commands] of Object.entries(expectedCommandsByPrimitive))
     );
   }
 }
-assert.equal(typedFunctionsByCommand.size, 90);
+assert.equal(typedFunctionsByCommand.size, 97);
 
 for (const command of expectedSubscribeCommands) {
   const subscribeFunction = typedFunctionsByCommand.get(command);
@@ -565,5 +572,5 @@ assert.equal(builtInLeaves.size, capabilityDescriptors.length);
 
 process.stdout.write(
   'Playmesh GDevelop typed facade contract passed ' +
-    '(90 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
+    '(97 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
 );

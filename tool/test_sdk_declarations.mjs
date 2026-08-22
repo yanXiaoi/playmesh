@@ -214,7 +214,15 @@ assert.match(
 assert.match(game, /onChange\(callback: \(event: PlaymeshLifecycleEvent\) => void\)/);
 assert.match(game, /当前会话中的玩家/);
 assert.match(game, /固定 Authority Client/);
-assert.match(game, /Authority 主机上的持久 JSON Bucket/);
+assert.match(game, /只有 Authority 页面可读写，宿主后台会拒绝远程玩家/);
+assert.match(
+  game,
+  /interface PlaymeshAppStorageBucket \{[\s\S]*?getData<[\s\S]*?setData\([\s\S]*?removeData\([\s\S]*?clearData\(\): Promise<void>/,
+);
+assert.match(
+  game,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly storage:[\s\S]*?getBucket\(bucket: string\): PlaymeshAppStorageBucket/,
+);
 assert.match(game, /准备、倒计时和玩法条件由游戏 Authority 判断/);
 assert.match(game, /SDK 不判断胜负/);
 assert.match(
@@ -360,6 +368,22 @@ assert.match(game, /send\(targetPlayerIds: readonly string\[\], data: Uint8Array
 assert.match(game, /sendLatest\(data: Uint8Array\): Promise<void>/);
 assert.match(game, /sendLatest\(targetPlayerIds: readonly string\[\], data: Uint8Array\): Promise<void>/);
 assert.match(game, /interface PlaymeshBinaryForwardContext[\s\S]*targetPlayerIds: string\[\]/);
+assert.match(
+  game,
+  /interface PlaymeshRpcRequestOptions[\s\S]*timeoutMs\?: number/,
+);
+assert.match(
+  game,
+  /interface PlaymeshRpcContext extends PlaymeshAuthorityContext[\s\S]*requestId: string;[\s\S]*path: string;/,
+);
+assert.match(
+  game,
+  /request\(path: string, data\?: any, options\?: PlaymeshRpcRequestOptions\): Promise<any>/,
+);
+assert.match(
+  game,
+  /onRequest\(path: string, handler: \(data: any, context: PlaymeshRpcContext\) => any \| Promise<any>\): PlaymeshUnsubscribe/,
+);
 assert.doesNotMatch(game, /sendLast\(/);
 assert.equal(app.trim(), '/// <reference path="./playmesh-main.d.ts" />');
 assert.equal(sdkManifest.projectRules.appUrlRoot, "/");

@@ -52,6 +52,7 @@ class GameLauncher extends StatelessWidget {
       resourceSource: source,
       entryPath: game.entry.gameEntryPath,
       title: game.name,
+      gameId: game.id,
       gameSdkVersion: game.sdkVersion.isEmpty ? null : game.sdkVersion,
       appSdkVersion: game.appSdkVersion.isEmpty ? null : game.appSdkVersion,
       bridge: bridge,

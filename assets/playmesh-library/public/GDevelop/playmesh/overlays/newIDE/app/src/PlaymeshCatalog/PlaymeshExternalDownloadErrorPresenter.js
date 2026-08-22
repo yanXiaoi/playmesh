@@ -9,6 +9,10 @@ import {
   normalizePlaymeshExternalDownloadFailure,
   type PlaymeshExternalDownloadFailure,
 } from './PlaymeshExternalDownloadDiagnostic';
+import type {
+  ExtensionShortHeader,
+  SerializedExtension,
+} from '../Utils/GDevelopServices/Extension';
 
 export const presentPlaymeshExternalDownloadFailure = ({
   rawError,
@@ -50,4 +54,42 @@ export const presentPlaymeshExternalDownloadFailure = ({
     doNotReport: true,
   });
   return failure;
+};
+
+/**
+ * Own exactly the external artifact acquisition seam. The caller continues
+ * with GDevelop's official deserialization, project insertion, registry load
+ * and callbacks after this Promise resolves; none of those steps are caught
+ * or reclassified here.
+ */
+export const acquirePlaymeshExtensionArtifacts = async ({
+  extensionShortHeaders,
+  acquire,
+  reason,
+}: {|
+  extensionShortHeaders: Array<ExtensionShortHeader>,
+  acquire: ExtensionShortHeader => Promise<SerializedExtension>,
+  reason: 'asset' | 'extension' | 'behavior',
+|}): Promise<Array<SerializedExtension>> => {
+  try {
+    return await Promise.all(extensionShortHeaders.map(acquire));
+  } catch (rawError) {
+    // Asset installation already owns its aggregate user-facing error. The
+    // other two catalog entry points need one sanitized download diagnostic.
+    if (reason !== 'asset') {
+      presentPlaymeshExternalDownloadFailure({
+        rawError,
+        stage:
+          reason === 'behavior'
+            ? 'behavior_extension_download'
+            : 'extension_download',
+        operation: 'gdevelop.catalog.artifact.acquire',
+        errorId:
+          reason === 'behavior'
+            ? 'download-behavior-extension-error'
+            : 'download-extension-error',
+      });
+    }
+    throw rawError;
+  }
 };

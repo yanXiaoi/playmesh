@@ -185,11 +185,14 @@ try {
     'Patched newIDE/app/src/ProjectsStorage/index.js',
     'Patched newIDE/app/src/MainFrame/Preferences/PreferencesDialog.js',
     'Patched newIDE/app/src/MainFrame/index.js',
-    'Patched newIDE/app/src/Utils/GDevelopServices/ApiConfigs.js',
     'GDevelop source policy applied successfully.',
   ]) {
     assert.match(firstReplay.stdout, new RegExp(marker.replaceAll('.', '\\.')));
   }
+  assert.doesNotMatch(
+    firstReplay.stdout,
+    /Patched newIDE\/app\/src\/Utils\/GDevelopServices\/ApiConfigs\.js/
+  );
   if (allowPendingOutputManifest) {
     assert.match(firstReplay.stderr, /OUTPUT MANIFEST IS PENDING/);
   } else {

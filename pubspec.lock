@@ -484,6 +484,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  playmesh_ui:
+    dependency: "direct main"
+    description:
+      path: "packages/playmesh_ui"
+      relative: true
+    source: path
+    version: "1.0.0"
   plugin_platform_interface:
     dependency: transitive
     description:

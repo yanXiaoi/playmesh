@@ -42,6 +42,7 @@ import type {
   BehaviorShortHeader,
   ExtensionShortHeader,
 } from '../Utils/GDevelopServices/Extension';
+import type { EventsFunctionsExtensionsState } from '../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
 
 type PlaymeshAiCapabilitySearchEntry = {|
   summary: PlaymeshAiObject,
@@ -85,6 +86,8 @@ export type PlaymeshAiLocalToolWrappersOptions = {|
   beforeProjectMutation?: () => void,
   onFetchNewlyAddedResources?: () => Promise<void>,
   onNewResourcesAdded?: () => void,
+  eventsFunctionsExtensionsState?: EventsFunctionsExtensionsState,
+  onPreviewOrRefresh?: () => Promise<void>,
   toolsContract?: PlaymeshAiObject,
 |};
 
@@ -1355,6 +1358,8 @@ export const createPlaymeshAiLocalToolWrappers = ({
   beforeProjectMutation,
   onFetchNewlyAddedResources,
   onNewResourcesAdded,
+  eventsFunctionsExtensionsState,
+  onPreviewOrRefresh,
   toolsContract,
 } /*: PlaymeshAiLocalToolWrappersOptions */ = {}) /*: PlaymeshAiLocalToolWrappers */ => {
   const createObject = async (
@@ -1375,9 +1380,6 @@ export const createPlaymeshAiLocalToolWrappers = ({
         }),
         searchAndInstallAsset: storeDisabledAssetSearch,
         searchAndInstallResources: storeDisabledResourceSearch,
-        // 仅允许当前内核已注册的类型；官方函数随后仍会通过 MetadataProvider
-        // 验证类型，未知扩展不会触发网络安装。
-        ensureExtensionInstalled: async () => {},
       });
   };
 
@@ -1394,6 +1396,19 @@ export const createPlaymeshAiLocalToolWrappers = ({
       onFetchNewlyAddedResources,
       onNewResourcesAdded,
     }),
+    preview_or_refresh_project: async ({
+      call,
+    } /*: PlaymeshAiLocalToolContext */) /*: Promise<PlaymeshAiLocalToolExecution> */ => {
+      if (typeof onPreviewOrRefresh !== 'function') {
+        throw new PlaymeshAiLocalToolError('preview_callback_unavailable');
+      }
+      await onPreviewOrRefresh();
+      return finished({
+        call,
+        success: true,
+        output: { status: 'completed' },
+      });
+    },
     list_event_types: async ({
       call,
     } /*: PlaymeshAiLocalToolContext */) /*: Promise<PlaymeshAiLocalToolExecution> */ =>
@@ -1986,6 +2001,11 @@ export const createPlaymeshAiLocalToolWrappers = ({
       ) {
         throw new PlaymeshAiLocalToolError('invalid_capability_reference');
       }
+      if (!eventsFunctionsExtensionsState) {
+        throw new PlaymeshAiLocalToolError(
+          'events_functions_extensions_context_unavailable'
+        );
+      }
       const closure = await resolveExtensionClosure({ type, stableId });
       if (!closure.length) {
         throw new PlaymeshAiLocalToolError('capability_not_found');
@@ -2026,23 +2046,13 @@ export const createPlaymeshAiLocalToolWrappers = ({
       });
       runnerOptions.onWillInstallExtension(expectedNames);
       await addSerializedExtensionsToProject(
-        ({
-          loadProjectEventsFunctionsExtensions: async () => {},
-        } /*: any */),
+        eventsFunctionsExtensionsState,
         project,
         (serializedExtensions /*: any */),
         expectedNames
       );
       runnerOptions.onExtensionInstalled(expectedNames);
       const installedExtensions = expectedNames;
-      if (
-        installedExtensions.some(
-          extensionName =>
-            !project.hasEventsFunctionsExtensionNamed(extensionName)
-        )
-      ) {
-        throw new PlaymeshAiLocalToolError('capability_install_incomplete');
-      }
       return finished({
         call,
         success: true,

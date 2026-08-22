@@ -32,7 +32,7 @@ class _ProjectPublishOperation implements _DeveloperHttpOperation {
       id: 'projects.publish',
       method: 'POST',
       path: '/dev/api/projects/{projectId}/publish',
-      summary: '完整校验项目并将同一游戏包发布到所选游戏源',
+      summary: '将当前项目包发布到所选游戏源',
       description: '请求体只接受 sourceIds；上传凭据始终保留在 App 内。',
       permission: 'project.publish',
       risk: DeveloperOperationRisk.medium,
@@ -42,11 +42,7 @@ class _ProjectPublishOperation implements _DeveloperHttpOperation {
       requestExample: {
         'sourceIds': ['official', 'community'],
       },
-      additionalResponses: {
-        409: '发布服务未接线或所选源已不可用',
-        422: '项目完整校验失败，未导出或上传游戏包',
-        503: '发布服务不可用',
-      },
+      additionalResponses: {409: '发布服务未接线或所选源已不可用', 503: '发布服务不可用'},
       chatEnabled: false,
     ),
   ];
@@ -107,25 +103,6 @@ class _ProjectPublishOperation implements _DeveloperHttpOperation {
         return;
       }
 
-      final validation = await gateway.catalog.validateProject(projectId);
-      if (!validation.valid) {
-        developerEventHub.emit({
-          'type': 'project.publish.rejected',
-          'projectId': projectId,
-          'reason': 'package_validation_failed',
-          'timestamp': gateway.clock().toUtc().millisecondsSinceEpoch,
-        });
-        await _json(request.response, HttpStatus.unprocessableEntity, {
-          'requestId': requestId,
-          'error': {
-            'code': 'package_validation_failed',
-            'message': '项目完整校验未通过，未导出或上传游戏包',
-          },
-          'validation': validation.toJson(),
-        });
-        return;
-      }
-
       final game = await gateway.catalog.prepareGame(projectId);
       final result = await publisher.publish(
         game: game,
@@ -152,7 +129,6 @@ class _ProjectPublishOperation implements _DeveloperHttpOperation {
       await _json(request.response, HttpStatus.ok, {
         'requestId': requestId,
         'projectId': projectId,
-        'validation': validation.toJson(),
         'result': result.toJson(),
       });
     });

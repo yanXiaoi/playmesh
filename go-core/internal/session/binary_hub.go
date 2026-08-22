@@ -16,15 +16,20 @@ import (
 )
 
 const (
-	maxBinaryFrameBytes      = 4 * 1024 * 1024
-	maxBinaryFramesPerSecond = 2000
-	maxBinaryBytesPerSecond  = 64 * 1024 * 1024
-	maxBinaryQueuedBytes     = 32 * 1024 * 1024
-	maxBinaryChannels        = 1024
-	maxBinaryPendingReviews  = 1024
-	maxBinaryPendingBytes    = 128 * 1024 * 1024
-	binaryAuthorityTimeout   = 15 * time.Second
-	binaryWriteTimeout       = 5 * time.Second
+	maxBinaryFrameBytes          = 4 * 1024 * 1024
+	maxBinaryFramesPerSecond     = 2000
+	maxBinaryBytesPerSecond      = 64 * 1024 * 1024
+	maxBinaryQueuedBytes         = 32 * 1024 * 1024
+	maxBinaryChannels            = 1024
+	maxBinaryPendingReviews      = 1024
+	maxBinaryPendingBytes        = 128 * 1024 * 1024
+	maxBinaryPendingRPC          = 256
+	maxBinaryPendingRPCPerPlayer = 32
+	maxBinaryPendingRPCBytes     = 32 * 1024 * 1024
+	minBinaryRPCTimeout          = 100 * time.Millisecond
+	maxBinaryRPCTimeout          = 60 * time.Second
+	binaryAuthorityTimeout       = 15 * time.Second
+	binaryWriteTimeout           = 5 * time.Second
 )
 
 var (
@@ -41,6 +46,15 @@ var (
 	errBinarySendQueueFull      = errors.New("目标玩家二进制发送队列已满")
 	errBinaryAuthorityOnly      = errors.New("只有 Authority 可以创建或关闭二进制 Channel")
 	errBinaryReviewExpired      = errors.New("Authority 二进制审核超时")
+)
+
+const (
+	binaryRPCCodeAuthorityOffline = "rpc_authority_offline"
+	binaryRPCCodeBusy             = "rpc_busy"
+	binaryRPCCodeDuplicate        = "rpc_duplicate_request"
+	binaryRPCCodeInvalidRequest   = "rpc_request_invalid"
+	binaryRPCCodePayloadTooLarge  = "rpc_payload_too_large"
+	binaryRPCCodeTimeout          = "rpc_timeout"
 )
 
 type binaryLatestKey struct {
@@ -216,14 +230,32 @@ type binaryPendingReview struct {
 	latestKey *binaryLatestKey
 }
 
+type binaryRPCClientKey struct {
+	senderID  string
+	requestID uint32
+}
+
+type binaryPendingRPC struct {
+	id           uint64
+	requestID    uint32
+	senderID     string
+	payloadBytes int
+	timer        *time.Timer
+}
+
 type binarySession struct {
-	authorityID  string
-	peers        map[string]*binaryPeer
-	channels     map[binaryChannelID]*binaryChannel
-	pending      map[uint64]*binaryPendingReview
-	latestReview map[binaryLatestKey]uint64
-	pendingBytes int
-	nextReviewID uint64
+	authorityID        string
+	peers              map[string]*binaryPeer
+	channels           map[binaryChannelID]*binaryChannel
+	pending            map[uint64]*binaryPendingReview
+	latestReview       map[binaryLatestKey]uint64
+	pendingBytes       int
+	nextReviewID       uint64
+	pendingRPC         map[uint64]*binaryPendingRPC
+	pendingRPCByClient map[binaryRPCClientKey]uint64
+	pendingRPCByPlayer map[string]int
+	pendingRPCBytes    int
+	nextRPCID          uint64
 }
 
 type binaryHub struct {
@@ -322,11 +354,14 @@ func (b *binaryHub) attach(sessionID, authorityID string, peer *binaryPeer) {
 	session := b.sessions[sessionID]
 	if session == nil {
 		session = &binarySession{
-			authorityID:  authorityID,
-			peers:        make(map[string]*binaryPeer),
-			channels:     make(map[binaryChannelID]*binaryChannel),
-			pending:      make(map[uint64]*binaryPendingReview),
-			latestReview: make(map[binaryLatestKey]uint64),
+			authorityID:        authorityID,
+			peers:              make(map[string]*binaryPeer),
+			channels:           make(map[binaryChannelID]*binaryChannel),
+			pending:            make(map[uint64]*binaryPendingReview),
+			latestReview:       make(map[binaryLatestKey]uint64),
+			pendingRPC:         make(map[uint64]*binaryPendingRPC),
+			pendingRPCByClient: make(map[binaryRPCClientKey]uint64),
+			pendingRPCByPlayer: make(map[string]int),
 		}
 		b.sessions[sessionID] = session
 	}
@@ -353,8 +388,14 @@ func (b *binaryHub) detach(sessionID string, peer *binaryPeer) {
 		// Binary 瞬断不代表游戏运行时退出。保留 Channel，让同一主会话下
 		// 的 SDK 重连后通过 JOIN 恢复；未完成审核必须立即失败，不能等超时。
 		b.cancelAllReviewsLocked(session, errBinaryAuthorityOffline)
+		b.cancelAllRPCsLocked(
+			session,
+			binaryRPCCodeAuthorityOffline,
+			errBinaryAuthorityOffline.Error(),
+		)
 	} else {
 		b.cancelPlayerReviewsLocked(session, peer.player.ID, errBinaryTargetOffline)
+		b.cancelPlayerRPCsLocked(session, peer.player.ID)
 	}
 	if len(session.peers) == 0 && len(session.channels) == 0 {
 		delete(b.sessions, sessionID)
@@ -385,6 +426,7 @@ func (b *binaryHub) closeSessionChannels(sessionID string, reason string) {
 		return
 	}
 	b.closeAllChannelsLocked(session, reason)
+	b.cancelAllRPCsLocked(session, binaryRPCCodeAuthorityOffline, reason)
 	if len(session.peers) == 0 {
 		delete(b.sessions, sessionID)
 	}
@@ -402,7 +444,127 @@ func (b *binaryHub) handle(peer *binaryPeer, frame binaryClientFrame) {
 		b.send(peer, frame)
 	case binaryOpDecision:
 		b.decide(peer, frame)
+	case binaryOpRPCRequest:
+		b.requestRPC(peer, frame)
+	case binaryOpRPCResponse:
+		b.respondRPC(peer, frame)
 	}
+}
+
+func (b *binaryHub) requestRPC(peer *binaryPeer, frame binaryClientFrame) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	session := b.sessions[peer.sessionID]
+	if session == nil || session.peers[peer.player.ID] != peer {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodeAuthorityOffline, errBinaryTargetOffline.Error())
+		return
+	}
+	if !validBinaryRPCPath(frame.path) ||
+		frame.timeoutMS < uint32(minBinaryRPCTimeout/time.Millisecond) ||
+		frame.timeoutMS > uint32(maxBinaryRPCTimeout/time.Millisecond) {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodeInvalidRequest, errBinaryInvalidRPCRequest.Error())
+		return
+	}
+	authority := session.peers[session.authorityID]
+	if authority == nil {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodeAuthorityOffline, errBinaryAuthorityOffline.Error())
+		return
+	}
+	key := binaryRPCClientKey{senderID: peer.player.ID, requestID: frame.requestID}
+	if session.pendingRPCByClient[key] != 0 {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodeDuplicate, "RPC requestId 正在处理中")
+		return
+	}
+	if len(session.pendingRPC) >= maxBinaryPendingRPC ||
+		session.pendingRPCByPlayer[peer.player.ID] >= maxBinaryPendingRPCPerPlayer ||
+		session.pendingRPCBytes+len(frame.payload) > maxBinaryPendingRPCBytes {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodeBusy, "Authority RPC 请求队列已满")
+		return
+	}
+	session.nextRPCID++
+	if session.nextRPCID == 0 {
+		session.nextRPCID++
+	}
+	rpcID := session.nextRPCID
+	incoming, err := encodeBinaryRPCIncoming(
+		rpcID,
+		peer.player.ID,
+		frame.path,
+		frame.payload,
+	)
+	if err != nil {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodePayloadTooLarge, "Authority RPC 请求数据过大")
+		return
+	}
+	if err := authority.enqueue(incoming, nil); err != nil {
+		b.sendRPCErrorLocked(peer, frame.requestID, binaryRPCCodeAuthorityOffline, err.Error())
+		return
+	}
+	pending := &binaryPendingRPC{
+		id: rpcID, requestID: frame.requestID, senderID: peer.player.ID,
+		payloadBytes: len(frame.payload),
+	}
+	session.pendingRPC[rpcID] = pending
+	session.pendingRPCByClient[key] = rpcID
+	session.pendingRPCByPlayer[peer.player.ID]++
+	session.pendingRPCBytes += len(frame.payload)
+	pending.timer = time.AfterFunc(time.Duration(frame.timeoutMS)*time.Millisecond, func() {
+		b.expireRPC(peer.sessionID, rpcID)
+	})
+}
+
+func (b *binaryHub) respondRPC(peer *binaryPeer, frame binaryClientFrame) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	session := b.sessions[peer.sessionID]
+	if session == nil || session.peers[peer.player.ID] != peer ||
+		peer.player.ID != session.authorityID {
+		peer.close(websocket.StatusPolicyViolation, "只有 Authority 可以返回 RPC 结果")
+		return
+	}
+	pending := session.pendingRPC[frame.rpcID]
+	if pending == nil {
+		return
+	}
+	b.removePendingRPCLocked(session, pending)
+	requester := session.peers[pending.senderID]
+	if requester == nil {
+		return
+	}
+	var data []byte
+	var err error
+	if frame.errorCode != "" {
+		if !validBinaryRPCErrorCode(frame.errorCode) || len(frame.errorMessage) > 512 {
+			data, err = encodeBinaryRPCResult(
+				pending.requestID,
+				binaryStatusError,
+				nil,
+				"rpc_response_invalid",
+				"Authority RPC 错误响应格式无效",
+			)
+		} else {
+			data, err = encodeBinaryRPCResult(
+				pending.requestID,
+				binaryStatusError,
+				nil,
+				frame.errorCode,
+				frame.errorMessage,
+			)
+		}
+	} else {
+		data, err = encodeBinaryRPCResult(
+			pending.requestID,
+			binaryStatusOK,
+			frame.payload,
+			"",
+			"",
+		)
+	}
+	if err != nil {
+		b.sendRPCErrorLocked(requester, pending.requestID, "rpc_response_invalid", err.Error())
+		return
+	}
+	_ = requester.enqueue(data, nil)
 }
 
 func (b *binaryHub) createChannel(peer *binaryPeer, frame binaryClientFrame) {
@@ -856,6 +1018,138 @@ func containsBinaryTarget(targetIDs []string, playerID string) bool {
 		}
 	}
 	return false
+}
+
+func validBinaryRPCPath(path string) bool {
+	if len(path) == 0 || len(path) > 256 || path[0] != '/' {
+		return false
+	}
+	if path == "/" {
+		return true
+	}
+	if path[len(path)-1] == '/' {
+		return false
+	}
+	previousSlash := true
+	for index := 1; index < len(path); index++ {
+		value := path[index]
+		if value == '/' {
+			if previousSlash {
+				return false
+			}
+			previousSlash = true
+			continue
+		}
+		previousSlash = false
+		if (value >= 'a' && value <= 'z') ||
+			(value >= 'A' && value <= 'Z') ||
+			(value >= '0' && value <= '9') ||
+			value == '.' || value == '_' || value == '-' || value == '~' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validBinaryRPCErrorCode(code string) bool {
+	if len(code) == 0 || len(code) > 64 || code[0] < 'a' || code[0] > 'z' {
+		return false
+	}
+	for index := 1; index < len(code); index++ {
+		value := code[index]
+		if (value >= 'a' && value <= 'z') ||
+			(value >= '0' && value <= '9') || value == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (b *binaryHub) sendRPCErrorLocked(
+	peer *binaryPeer,
+	requestID uint32,
+	code string,
+	message string,
+) {
+	data, err := encodeBinaryRPCResult(
+		requestID,
+		binaryStatusError,
+		nil,
+		code,
+		message,
+	)
+	if err == nil {
+		_ = peer.enqueue(data, nil)
+	}
+}
+
+func (b *binaryHub) expireRPC(sessionID string, rpcID uint64) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	session := b.sessions[sessionID]
+	if session == nil {
+		return
+	}
+	pending := session.pendingRPC[rpcID]
+	if pending == nil {
+		return
+	}
+	b.removePendingRPCLocked(session, pending)
+	if requester := session.peers[pending.senderID]; requester != nil {
+		b.sendRPCErrorLocked(
+			requester,
+			pending.requestID,
+			binaryRPCCodeTimeout,
+			"Authority RPC 请求超时",
+		)
+	}
+}
+
+func (b *binaryHub) removePendingRPCLocked(
+	session *binarySession,
+	pending *binaryPendingRPC,
+) {
+	delete(session.pendingRPC, pending.id)
+	delete(
+		session.pendingRPCByClient,
+		binaryRPCClientKey{senderID: pending.senderID, requestID: pending.requestID},
+	)
+	remaining := session.pendingRPCByPlayer[pending.senderID] - 1
+	if remaining > 0 {
+		session.pendingRPCByPlayer[pending.senderID] = remaining
+	} else {
+		delete(session.pendingRPCByPlayer, pending.senderID)
+	}
+	session.pendingRPCBytes -= pending.payloadBytes
+	if pending.timer != nil {
+		pending.timer.Stop()
+	}
+}
+
+func (b *binaryHub) cancelPlayerRPCsLocked(
+	session *binarySession,
+	playerID string,
+) {
+	for _, pending := range session.pendingRPC {
+		if pending.senderID == playerID {
+			b.removePendingRPCLocked(session, pending)
+		}
+	}
+}
+
+func (b *binaryHub) cancelAllRPCsLocked(
+	session *binarySession,
+	code string,
+	message string,
+) {
+	for _, pending := range session.pendingRPC {
+		b.removePendingRPCLocked(session, pending)
+		if requester := session.peers[pending.senderID]; requester != nil {
+			b.sendRPCErrorLocked(requester, pending.requestID, code, message)
+		}
+	}
 }
 
 func (b *binaryHub) closeAllChannelsLocked(session *binarySession, reason string) {

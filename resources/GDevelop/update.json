@@ -1,7 +1,7 @@
 {
-  "sha256": "cd75f990233bce275511460c4ecf5ea1c7b3fc282ae8f93d51eca7ad6daa4ca3",
+  "sha256": "9f1a723d8c61d3df7085f02de95b2b848018069c33f352ba51fa3ff26cc0b321",
   "version": "5.6.276",
-  "size": 42136435,
+  "size": 42137282,
   "downloads": [
     {
       "name": "GitHub",
@@ -9,7 +9,7 @@
     },
     {
       "name": "临时源",
-      "url": ""
+      "url": "http://8.137.106.103:1000/playmesh/resources/GDevelop/GDevelop-webide-v5.6.276.zip"
     }
   ]
 }

@@ -287,6 +287,55 @@ void main() {
       contains('await openPublishPanel(returnFocus)'),
       reason: 'Upload must continue through the existing publish workflow.',
     );
+    final publishPanelStart = script.indexOf(
+      'async function openPublishPanel(',
+    );
+    final publishPanelEnd = script.indexOf(
+      'function beginPublishStatus(',
+      publishPanelStart,
+    );
+    expect(publishPanelStart, isNonNegative);
+    expect(publishPanelEnd, greaterThan(publishPanelStart));
+    final publishPanelSource = script.substring(
+      publishPanelStart,
+      publishPanelEnd,
+    );
+    expect(publishPanelSource, isNot(contains('validateProject(')));
+    expect(publishPanelSource, isNot(contains('publish_validating')));
+    expect(script, contains('async function validateProject(show=true)'));
+    expect(
+      script,
+      contains(
+        'async function run(){const validation=await validateProject(false)',
+      ),
+      reason: '发布放宽不能影响本地运行前校验。',
+    );
+    expect(
+      script,
+      contains("lastProjectStorageKey='playmesh.developer.lastProject'"),
+    );
+    expect(
+      script,
+      contains('loadProjects(selectedId=projectId||storedProjectId())'),
+    );
+    expect(script, isNot(contains('data.activeProjectId')));
+    expect(
+      script,
+      contains(
+        "const selected=selectedId&&projectItems.some(p=>p.id===selectedId)"
+        "?selectedId:''",
+      ),
+      reason: 'A missing remembered project must leave selection empty.',
+    );
+    expect(script, contains('if(selected)persistProjectId(selected)'));
+    expect(
+      script,
+      contains(
+        "if(selected){await loadTree()}else{currentPath='';"
+        "tree.replaceChildren();",
+      ),
+    );
+    expect(script, contains('openProjectPicker()'));
     expect(
       script,
       contains("openExportPanel(q('moreActions'))"),
@@ -412,31 +461,108 @@ void main() {
     );
     expect(html, contains('id="packageExportRefreshRuntime"'));
     expect(html, contains('id="packageExportRuntimeActions"'));
-    final runtimeActionsStart = html.indexOf(
-      '<div id="packageExportRuntimeActions" '
-      'class="package-export-runtime-actions">',
-    );
-    final settingsStart = html.indexOf(
-      '<section class="package-export-settings"',
-    );
-    final settingsEnd = html.indexOf('</section>', settingsStart);
-    expect(runtimeActionsStart, isNonNegative);
-    expect(settingsStart, greaterThan(runtimeActionsStart));
-    expect(settingsEnd, greaterThan(settingsStart));
-    final runtimeActionsSource = html.substring(
-      runtimeActionsStart,
-      settingsStart,
-    );
-    final settingsSource = html.substring(settingsStart, settingsEnd);
-    expect(runtimeActionsSource, contains('id="packageExportRefreshRuntime"'));
-    expect(settingsSource, contains('id="packageExportRelayServer"'));
-    expect(settingsSource, contains('id="packageExportRelayPicker"'));
-    expect(settingsSource, isNot(contains('id="packageExportRefreshRuntime"')));
-    expect(settingsSource, isNot(contains('packageExportRelayServerId')));
+    expect(html, contains('id="packageExportRuntimeDownload"'));
+    expect(html, contains('id="packageExportAutoApproveCapabilities"'));
     expect(
-      RegExp('<label(?:\\s|>)').allMatches(settingsSource).length,
-      2,
-      reason: 'Only the relay search and custom URL require form labels.',
+      html,
+      contains(
+        'id="packageExportStepProgress" '
+        'class="package-export-step-progress" max="3" value="1"',
+      ),
+    );
+    expect(html, contains('id="packageExportSettingsStep"'));
+    expect(html, contains('id="packageExportParametersStep"'));
+    expect(html, contains('id="packageExportGenerateStep"'));
+    expect(
+      html,
+      contains('id="packageExportRuntimeModal" class="modal" role="dialog"'),
+    );
+    expect(html, contains('id="packageExportPrevious"'));
+    expect(html, contains('id="cancelPackageExportRuntime"'));
+    expect(
+      html,
+      contains(
+        'id="packageExportRuntimeLoadState" '
+        'class="package-export-runtime-load-state" role="status"',
+      ),
+    );
+    expect(html, contains('id="packageExportRuntimePrevious"'));
+    expect(html, contains('id="packageExportRuntimeNext"'));
+    expect(
+      html,
+      contains(
+        'id="packageExportRuntimeStepProgress" '
+        'class="package-export-step-progress" max="2" value="1"',
+      ),
+    );
+    expect(
+      html,
+      isNot(
+        contains('workspace.package_export_auto_approve_capabilities_help'),
+      ),
+      reason: 'The auto-approve switch intentionally has no secondary copy.',
+    );
+    final platformStepStart = html.indexOf(
+      '<section id="packageExportSettingsStep"',
+    );
+    final parametersStepStart = html.indexOf(
+      '<section id="packageExportParametersStep"',
+    );
+    final generateStepStart = html.indexOf(
+      '<section id="packageExportGenerateStep"',
+    );
+    final runtimeModalStart = html.indexOf(
+      '<div id="packageExportRuntimeModal"',
+    );
+    expect(platformStepStart, isNonNegative);
+    expect(parametersStepStart, greaterThan(platformStepStart));
+    expect(generateStepStart, greaterThan(parametersStepStart));
+    expect(runtimeModalStart, greaterThan(generateStepStart));
+    final platformStepSource = html.substring(
+      platformStepStart,
+      parametersStepStart,
+    );
+    final parametersStepSource = html.substring(
+      parametersStepStart,
+      generateStepStart,
+    );
+    final runtimeModalSource = html.substring(runtimeModalStart);
+    expect(
+      runtimeModalSource,
+      contains(
+        'id="packageExportRuntimeSourceList" '
+        'class="package-export-runtime-source-list" role="radiogroup"',
+      ),
+    );
+    expect(platformStepSource, contains('id="packageExportRefreshRuntime"'));
+    expect(
+      platformStepSource,
+      isNot(contains('id="packageExportAutoApproveCapabilities"')),
+    );
+    expect(
+      parametersStepSource,
+      contains('id="packageExportAutoApproveCapabilities"'),
+    );
+    expect(parametersStepSource, contains('id="packageExportRelayServer"'));
+    expect(parametersStepSource, contains('id="packageExportRelayPicker"'));
+    expect(
+      parametersStepSource,
+      isNot(contains('id="packageExportRefreshRuntime"')),
+    );
+    expect(parametersStepSource, isNot(contains('packageExportRelayServerId')));
+    expect(
+      runtimeModalSource,
+      contains(
+        'id="packageExportRuntimeDownloadList" '
+        'class="package-export-runtime-download-list" role="radiogroup"',
+      ),
+    );
+    expect(
+      runtimeModalSource.indexOf('id="packageExportRuntimeSourceStep"'),
+      lessThan(
+        runtimeModalSource.indexOf('id="packageExportRuntimeDownloadStep"'),
+      ),
+      reason: 'The runtime source step must precede route selection.',
     );
     expect(
       html,
@@ -477,6 +603,28 @@ void main() {
       'workspace.package_export_progress_label',
       'workspace.package_export_progress_runtime_download_bytes',
       'workspace.package_export_progress_runtime_download_received',
+      'workspace.package_export_platform_step',
+      'workspace.package_export_parameters_step',
+      'workspace.package_export_generate_step',
+      'workspace.package_export_previous',
+      'workspace.package_export_next',
+      'workspace.package_export_step_count',
+      'workspace.package_export_step_progress',
+      'workspace.package_export_runtime_probe_checking',
+      'workspace.package_export_runtime_probe_latency',
+      'workspace.package_export_runtime_probe_timeout',
+      'workspace.package_export_runtime_probe_unreachable',
+      'workspace.package_export_runtime_probe_unsupported',
+      'workspace.package_export_runtime_picker_title',
+      'workspace.package_export_runtime_route_step',
+      'workspace.package_export_runtime_source_routes',
+      'workspace.package_export_runtime_sources_empty',
+      'workspace.package_export_runtime_sources_failed',
+      'workspace.package_export_runtime_sources_loading',
+      'workspace.package_export_runtime_source_step',
+      'workspace.package_export_runtime_step_progress',
+      'workspace.package_export_status_checking',
+      'workspace.package_export_targets_failed',
     ]) {
       expect(zh[key], isNotEmpty, reason: 'Missing zh-CN progress key: $key');
       expect(en[key], isNotEmpty, reason: 'Missing en-US progress key: $key');
@@ -487,7 +635,9 @@ void main() {
       'workspace.package_export_relay_custom_option_help',
       'workspace.package_export_relay_custom_required',
       'workspace.package_export_relay_empty',
+      'workspace.package_export_relay_failed',
       'workspace.package_export_relay_latency',
+      'workspace.package_export_relay_loading',
       'workspace.package_export_relay_no_results',
       'workspace.package_export_relay_none',
       'workspace.package_export_relay_none_help',
@@ -500,6 +650,69 @@ void main() {
     }
 
     expect(script, contains("packageExportRelaySelection='none'"));
+    expect(script, contains('packageExportStep=0'));
+    expect(script, contains("packageExportRuntimeStep=0"));
+    expect(script, contains("packageExportRuntimeSourceId=''"));
+    expect(script, contains("packageExportTargetsState='idle'"));
+    expect(script, contains("packageExportRuntimeLoadState='idle'"));
+    expect(script, contains('async function advancePackageExport(event)'));
+    expect(
+      script,
+      contains(
+        'if(packageExportNeedsRuntimeDownload(target))'
+        '{openPackageExportRuntimeModal();return}',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        'closePackageExportRuntimeModal(false);showPackageExportStep(1)',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        "q('packageExportRuntimePrevious').onclick=()=>"
+        'showPackageExportRuntimeStep(packageExportRuntimeStep-1)',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        'if(packageExportRuntimeStep===0)'
+        '{if(!packageExportRuntimeSources(target).some(',
+      ),
+      reason: 'Source confirmation must advance to route selection first.',
+    );
+    expect(
+      script,
+      contains(
+        "q('packageExportPrevious').onclick=()=>showPackageExportStep("
+        'packageExportStep-1)',
+      ),
+    );
+    expect(script, contains("probeStates=new Set(['probing','reachable'"));
+    expect(
+      script,
+      contains(
+        'records.push({id,name,manifestSourceId,manifestSourceName,'
+        'manifestSourceAddress:sourceParsed.toString(),'
+        'manifestSourceHost:sourceParsed.host,address:parsed.toString(),'
+        'host:parsed.host,probeState,latencyMs})',
+      ),
+    );
+    expect(
+      script,
+      contains(
+        '.filter(download=>download.manifestSourceId==='
+        'packageExportRuntimeSourceId)',
+      ),
+    );
+    expect(script, contains("option.setAttribute('role','radio')"));
+    expect(
+      script,
+      contains("tr('workspace.package_export_runtime_probe_latency'"),
+    );
     expect(
       script,
       contains('if(target?.updateAvailable===true)return'),
@@ -507,11 +720,67 @@ void main() {
     );
     expect(
       script,
-      contains(
-        "canRefresh=target?.installed===true&&target?.downloadAvailable===true",
-      ),
+      contains("canRefresh=target?.installed===true"),
       reason:
-          'A missing runtime downloads automatically and needs no refresh UI.',
+          'Installed runtimes must allow an explicit on-demand update check.',
+    );
+    expect(
+      script,
+      contains(
+        "packageExportOptionsEndpoint(scope='local',target='',source='')",
+      ),
+    );
+    expect(
+      script,
+      contains("api(packageExportOptionsEndpoint('runtime',targetId))"),
+    );
+    expect(
+      script,
+      contains("api(packageExportOptionsEndpoint('probes',targetId,sourceId))"),
+    );
+    final runtimeLoadStart = script.indexOf(
+      'async function loadPackageExportRuntimeOptions(',
+    );
+    final runtimeProbeStart = script.indexOf(
+      'async function probePackageExportRuntimeDownloads(',
+      runtimeLoadStart,
+    );
+    expect(runtimeLoadStart, isNonNegative);
+    expect(runtimeProbeStart, greaterThan(runtimeLoadStart));
+    expect(
+      script.substring(runtimeLoadStart, runtimeProbeStart),
+      isNot(contains('probePackageExportRuntimeDownloads(')),
+      reason: 'Loading sources must not start route probes.',
+    );
+    expect(
+      script,
+      contains(
+        "download.manifestSourceId===source.id&&"
+        "download.probeState==='probing'))void "
+        'probePackageExportRuntimeDownloads(target.id,source.id,requestId)',
+      ),
+      reason: 'Only selecting a source starts its asynchronous probes.',
+    );
+    expect(script, contains("api(packageExportOptionsEndpoint('relays'))"));
+    final openPackageExportStart = script.indexOf(
+      'async function openPackageExportFromExport()',
+    );
+    final closePackageExportStart = script.indexOf(
+      'function closePackageExportModal()',
+      openPackageExportStart,
+    );
+    expect(openPackageExportStart, isNonNegative);
+    expect(closePackageExportStart, greaterThan(openPackageExportStart));
+    final openPackageExportSource = script.substring(
+      openPackageExportStart,
+      closePackageExportStart,
+    );
+    expect(
+      openPackageExportSource.indexOf("modal.style.display='grid'"),
+      lessThan(
+        openPackageExportSource.indexOf('loadPackageExportLocalOptions('),
+      ),
+      reason: 'The export modal must open before local status is requested.',
     );
     expect(
       script,
@@ -644,13 +913,20 @@ void main() {
       RegExp(
         "api\\(endpoint\\('package-exports',''\\)",
       ).allMatches(script).length,
-      greaterThanOrEqualTo(2),
-      reason: 'GET options and POST create share the fixed collection URL.',
+      greaterThanOrEqualTo(1),
+      reason: 'POST create keeps the fixed collection URL.',
+    );
+    expect(
+      script,
+      contains("return endpoint('package-exports','')+'?'"),
+      reason: 'GET options add only validated scope and target queries.',
     );
     expect(
       script,
       contains(
         "body={target,refreshRuntime:q('packageExportRefreshRuntime').checked,"
+        'runtimeDownloadId:needsDownload?runtimeDownloadId:null,'
+        "autoApproveCapabilities:q('packageExportAutoApproveCapabilities').checked,"
         'relayServer:relayValue||null}',
       ),
     );
@@ -701,6 +977,8 @@ void main() {
       submitSource,
       contains(
         "body={target,refreshRuntime:q('packageExportRefreshRuntime').checked,"
+        'runtimeDownloadId:needsDownload?runtimeDownloadId:null,'
+        "autoApproveCapabilities:q('packageExportAutoApproveCapabilities').checked,"
         'relayServer:relayValue||null}',
       ),
     );
@@ -813,9 +1091,28 @@ void main() {
 
     expect(css, contains('.package-export-targets {'));
     expect(css, contains('.package-export-target {'));
-    expect(css, contains('scroll-snap-type: inline mandatory;'));
+    expect(css, contains('grid-template-rows: 44px auto 3px minmax(0, 1fr);'));
+    expect(css, contains('min-height: 58px;'));
+    expect(css, contains('width: 100%;'));
     expect(css, contains('.package-export-target-badge {'));
     expect(css, contains('.package-export-target-check {'));
+    expect(css, contains('.package-export-runtime-source-option,'));
+    expect(css, contains('.package-export-runtime-step[hidden] {'));
+    expect(css, contains('.package-export-runtime-load-state {'));
+    expect(
+      RegExp(
+        r'\.package-export-runtime-option-copy\s*\{[\s\S]*?'
+        r'justify-items:\s*start;',
+      ).hasMatch(css),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r'\.package-export-runtime-option-status\s*\{[\s\S]*?'
+        r'justify-self:\s*end;',
+      ).hasMatch(css),
+      isTrue,
+    );
     expect(css, contains('min-height: var(--target-size);'));
     expect(css, contains('.package-export-result {'));
     expect(css, contains('.package-export-progress {'));
@@ -841,6 +1138,24 @@ void main() {
       isTrue,
     );
     expect(css, contains('.package-export-actions {'));
+    expect(css, contains('.package-export-step-head {'));
+    expect(css, contains('.package-export-step-progress {'));
+    expect(css, contains('.package-export-runtime-dialog {'));
+    expect(css, contains('.package-export-runtime-option {'));
+    expect(css, contains('.package-export-runtime-option-status {'));
+    expect(css, contains('.package-export-summary {'));
+    expect(
+      RegExp(
+        r'\.package-export-refresh\s*\{[\s\S]*?align-items:\s*center;',
+      ).hasMatch(css),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r'\.package-export-auto-approve\s*\{[\s\S]*?align-items:\s*center;',
+      ).hasMatch(css),
+      isTrue,
+    );
   });
 
   test('Opening a file keeps the existing project tree in place', () {

@@ -20,6 +20,10 @@ void main() {
     expect(SdkFeatureRegistry.appCommandNames, {
       'app.bootstrap',
       'app.game.configure',
+      'app.storage.get',
+      'app.storage.set',
+      'app.storage.remove',
+      'app.storage.clear',
       'app.capabilities.confirm',
       'app.capability.create',
       'app.capability.invoke',
@@ -41,15 +45,15 @@ void main() {
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;
-    expect(fragments, hasLength(16));
-    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(16));
+    expect(fragments, hasLength(18));
+    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(18));
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.game),
-      hasLength(8),
+      hasLength(9),
     );
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.app),
-      hasLength(8),
+      hasLength(9),
     );
     expect(
       fragments.every((fragment) => fragment.typeScript.trim().isNotEmpty),

@@ -1,13 +1,13 @@
 [
   {
     "name": "GitHub",
-    "app": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/assets/app/app_update.json",
+    "app": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/app/update.json",
     "gdevelop": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/GDevelop/update.json",
     "export": "https://raw.githubusercontent.com/yanXiaoi/playmesh/refs/heads/master/resources/runtime/update.json"
   },
   {
     "name": "临时源",
-    "app": "http://8.137.106.103:1000/playmesh/app_update.json",
+    "app": "http://8.137.106.103:1000/playmesh/resources/app/update.json",
     "gdevelop": "http://8.137.106.103:1000/playmesh/resources/GDevelop/update.json",
     "export": "http://8.137.106.103:1000/playmesh/resources/runtime/update.json"
   }

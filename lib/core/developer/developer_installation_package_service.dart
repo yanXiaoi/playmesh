@@ -1,4 +1,5 @@
 import '../../models/game_summary.dart';
+import '../download/endpoint_probe_contract.dart';
 
 const developerInstallationPackageTargetAndroidArm64 = 'android-arm64';
 const developerInstallationPackageTargetAndroidX86_64 = 'android-x86_64';
@@ -62,6 +63,39 @@ final class DeveloperInstallationPackageProgress {
 typedef DeveloperInstallationPackageProgressCallback =
     void Function(DeveloperInstallationPackageProgress progress);
 
+final class DeveloperInstallationPackageRuntimeDownload {
+  const DeveloperInstallationPackageRuntimeDownload({
+    required this.id,
+    required this.name,
+    required this.address,
+    required this.manifestSourceId,
+    required this.manifestSourceName,
+    required this.manifestSourceAddress,
+    required this.probeState,
+    this.latencyMs,
+  });
+
+  final String id;
+  final String name;
+  final Uri address;
+  final String manifestSourceId;
+  final String manifestSourceName;
+  final Uri manifestSourceAddress;
+  final EndpointProbeState probeState;
+  final int? latencyMs;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'address': address.toString(),
+    'manifestSourceId': manifestSourceId,
+    'manifestSourceName': manifestSourceName,
+    'manifestSourceAddress': manifestSourceAddress.toString(),
+    'probeState': probeState.name,
+    if (latencyMs != null) 'latencyMs': latencyMs,
+  };
+}
+
 final class DeveloperInstallationPackageTargetStatus {
   const DeveloperInstallationPackageTargetStatus({
     required this.id,
@@ -71,6 +105,7 @@ final class DeveloperInstallationPackageTargetStatus {
     required this.installed,
     required this.downloadAvailable,
     required this.updateAvailable,
+    this.runtimeDownloads = const [],
     this.runtimeVersion,
     this.sizeBytes,
   });
@@ -82,6 +117,7 @@ final class DeveloperInstallationPackageTargetStatus {
   final bool installed;
   final bool downloadAvailable;
   final bool updateAvailable;
+  final List<DeveloperInstallationPackageRuntimeDownload> runtimeDownloads;
   final String? runtimeVersion;
   final int? sizeBytes;
 
@@ -93,6 +129,9 @@ final class DeveloperInstallationPackageTargetStatus {
     'installed': installed,
     'downloadAvailable': downloadAvailable,
     'updateAvailable': updateAvailable,
+    'runtimeDownloads': [
+      for (final download in runtimeDownloads) download.toJson(),
+    ],
     if (runtimeVersion != null) 'runtimeVersion': runtimeVersion,
     if (sizeBytes != null) 'sizeBytes': sizeBytes,
   };
@@ -161,7 +200,16 @@ final class DeveloperInstallationPackageArtifact {
 }
 
 abstract interface class DeveloperInstallationPackageService {
+  Future<List<DeveloperInstallationPackageTargetStatus>> inspectLocalTargets();
+
   Future<List<DeveloperInstallationPackageTargetStatus>> inspectTargets();
+
+  Future<DeveloperInstallationPackageTargetStatus> inspectRuntimeTarget(
+    String targetId,
+  );
+
+  Future<List<DeveloperInstallationPackageRuntimeDownload>>
+  probeRuntimeTargetDownloads(String targetId, String manifestSourceId);
 
   Future<List<DeveloperInstallationPackageRelayServer>> inspectRelayServers();
 
@@ -169,6 +217,8 @@ abstract interface class DeveloperInstallationPackageService {
     required GameSummary game,
     required String targetId,
     required bool refreshRuntime,
+    String? runtimeDownloadId,
+    bool autoApproveCapabilities = false,
     Uri? relayServer,
     DeveloperInstallationPackageProgressCallback? onProgress,
   });

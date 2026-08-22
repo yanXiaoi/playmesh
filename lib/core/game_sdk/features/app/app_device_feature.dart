@@ -71,6 +71,7 @@ const appDeviceSdkSource = SdkSourceFragment(
     media: {
       open: openAppMedia,
     },
+    storage: appStorageApi,
     lan: appLanApi,
     device: {
       getPlatform() {
@@ -175,6 +176,7 @@ const appDeviceSdkSource = SdkSourceFragment(
     },
   });
 
+  let appAutoApproveCapabilities = false;
   const appInternalRuntime = Object.freeze({
     publicApi: publicAppApi,
     receive,
@@ -205,6 +207,9 @@ const appDeviceSdkSource = SdkSourceFragment(
     },
     confirmCapabilities() {
       return request("app.capabilities.confirm");
+    },
+    shouldAutoApproveCapabilities() {
+      return appAutoApproveCapabilities;
     },
     configureRuntimeGame(declaration) {
       return request("app.game.configure", {
@@ -287,6 +292,7 @@ const appDeviceSdkSource = SdkSourceFragment(
           declaredCapabilities: [],
         },
       };
+      appAutoApproveCapabilities = false;
       appPlatformUiConfiguration = null;
       initializeAppPlatformUi(runtimePlatformUi);
       global.console?.info?.("Playmesh App SDK 就绪");
@@ -295,6 +301,8 @@ const appDeviceSdkSource = SdkSourceFragment(
     })
     : request("app.bootstrap").then((result) => {
       const privateUi = result?._playmeshPlatformUi;
+      appAutoApproveCapabilities =
+        result?._playmeshAutoApproveCapabilities === true;
       appPlatformUiConfiguration =
         privateUi && typeof privateUi === "object" ? clone(privateUi) : null;
       bootstrap = result && typeof result === "object"
@@ -302,6 +310,7 @@ const appDeviceSdkSource = SdkSourceFragment(
         : result;
       if (bootstrap && typeof bootstrap === "object") {
         delete bootstrap._playmeshPlatformUi;
+        delete bootstrap._playmeshAutoApproveCapabilities;
       }
       initializeAppPlatformUi(privateUi);
       requestAppInputTakeover();

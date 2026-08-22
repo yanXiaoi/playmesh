@@ -6,7 +6,13 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
   static const _collectionSuffix = 'package-exports';
   static const _createSchema = <String, Object?>{
     'type': 'object',
-    'required': ['target', 'refreshRuntime', 'relayServer'],
+    'required': [
+      'target',
+      'refreshRuntime',
+      'runtimeDownloadId',
+      'autoApproveCapabilities',
+      'relayServer',
+    ],
     'additionalProperties': false,
     'properties': {
       'target': {
@@ -18,12 +24,49 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
         ],
       },
       'refreshRuntime': {'type': 'boolean'},
+      'runtimeDownloadId': {
+        'type': ['string', 'null'],
+        'pattern': r'^[a-f0-9]{64}$',
+      },
+      'autoApproveCapabilities': {'type': 'boolean'},
       'relayServer': {
         'type': ['string', 'null'],
         'maxLength': 2048,
       },
     },
   };
+
+  static const _optionsScopeParameter = DeveloperOperationParameter(
+    name: 'scope',
+    location: DeveloperOperationParameterLocation.query,
+    description: '按需读取本地状态、Runtime 线路、线路延迟或中转服务器',
+    schema: {
+      'type': 'string',
+      'enum': ['local', 'runtime', 'probes', 'relays'],
+      'default': 'local',
+    },
+  );
+
+  static const _optionsTargetParameter = DeveloperOperationParameter(
+    name: 'target',
+    location: DeveloperOperationParameterLocation.query,
+    description: '读取 Runtime 线路或延迟时指定的导出目标',
+    schema: {
+      'type': 'string',
+      'enum': [
+        developerInstallationPackageTargetAndroidArm64,
+        developerInstallationPackageTargetAndroidX86_64,
+        developerInstallationPackageTargetWindowsX64,
+      ],
+    },
+  );
+
+  static const _optionsSourceParameter = DeveloperOperationParameter(
+    name: 'source',
+    location: DeveloperOperationParameterLocation.query,
+    description: '测速时指定已选择的 Runtime 清单来源 opaque ID',
+    schema: {'type': 'string', 'pattern': r'^[a-f0-9]{64}$'},
+  );
 
   static const _exportIdParameter = DeveloperOperationParameter(
     name: 'exportId',
@@ -50,8 +93,13 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
       id: 'package_exports.options',
       method: 'GET',
       path: '/dev/api/projects/{projectId}/package-exports',
-      summary: '读取 Runtime 目标状态与当前可用的游戏中转服务器',
-      parameters: [developerProjectIdParameter],
+      summary: '按需读取 Runtime 本地状态、下载选项、延迟或游戏中转服务器',
+      parameters: [
+        developerProjectIdParameter,
+        _optionsScopeParameter,
+        _optionsTargetParameter,
+        _optionsSourceParameter,
+      ],
       chatEnabled: false,
       agentEnabled: false,
     ),
@@ -68,6 +116,8 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
       requestExample: {
         'target': developerInstallationPackageTargetAndroidArm64,
         'refreshRuntime': false,
+        'runtimeDownloadId': null,
+        'autoApproveCapabilities': false,
         'relayServer': null,
       },
       successStatus: 201,
@@ -146,21 +196,72 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
     String projectId,
   ) async {
     final service = gateway.installationPackageService;
-    final targetsOperation = service == null
-        ? Future.value(const <DeveloperInstallationPackageTargetStatus>[])
-        : service.inspectTargets();
-    final relayServersOperation = service == null
-        ? Future.value(const <DeveloperInstallationPackageRelayServer>[])
-        : service.inspectRelayServers();
-    final targets = await targetsOperation;
-    final relayServers = await relayServersOperation;
-    await _json(request.response, HttpStatus.ok, {
+    final query = request.uri.queryParametersAll;
+    if (query.keys.toSet().difference(const {
+          'scope',
+          'target',
+          'source',
+        }).isNotEmpty ||
+        query.values.any((values) => values.length != 1)) {
+      throw const FormatException('安装包选项查询参数无效');
+    }
+    final scope = query['scope']?.single ?? 'local';
+    final targetId = query['target']?.single;
+    final sourceId = query['source']?.single;
+    final validTarget =
+        targetId != null &&
+        developerInstallationPackageTargetIds.contains(targetId);
+    final validSource =
+        sourceId != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(sourceId);
+    final validQuery = switch (scope) {
+      'local' || 'relays' => targetId == null && sourceId == null,
+      'runtime' => validTarget && sourceId == null,
+      'probes' => validTarget && validSource,
+      _ => false,
+    };
+    if (!validQuery) {
+      throw const FormatException('安装包选项 scope、target 与 source 不匹配');
+    }
+    final response = <String, Object?>{
       'requestId': requestId,
       'projectId': projectId,
       'available': service != null,
-      'targets': targets.map((target) => target.toJson()).toList(),
-      'relayServers': relayServers.map((server) => server.toJson()).toList(),
-    });
+      'scope': scope,
+    };
+    switch (scope) {
+      case 'local':
+        final targets = service == null
+            ? const <DeveloperInstallationPackageTargetStatus>[]
+            : await service.inspectLocalTargets();
+        response['targets'] = [
+          for (final target in targets)
+            {...target.toJson(), 'runtimeOptionsLoaded': false},
+        ];
+      case 'runtime':
+        response['target'] = service == null
+            ? null
+            : {
+                ...(await service.inspectRuntimeTarget(targetId!)).toJson(),
+                'runtimeOptionsLoaded': true,
+              };
+      case 'probes':
+        final downloads = service == null
+            ? const <DeveloperInstallationPackageRuntimeDownload>[]
+            : await service.probeRuntimeTargetDownloads(targetId!, sourceId!);
+        response['targetId'] = targetId;
+        response['sourceId'] = sourceId;
+        response['runtimeDownloads'] = [
+          for (final download in downloads) download.toJson(),
+        ];
+      case 'relays':
+        final relayServers = service == null
+            ? const <DeveloperInstallationPackageRelayServer>[]
+            : await service.inspectRelayServers();
+        response['relayServers'] = [
+          for (final server in relayServers) server.toJson(),
+        ];
+    }
+    await _json(request.response, HttpStatus.ok, response);
   }
 
   Future<void> _create(
@@ -173,19 +274,23 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
     if (body.keys.toSet().difference(const {
           'target',
           'refreshRuntime',
+          'runtimeDownloadId',
+          'autoApproveCapabilities',
           'relayServer',
         }).isNotEmpty ||
         !body.keys.toSet().containsAll(const {
           'target',
           'refreshRuntime',
+          'runtimeDownloadId',
+          'autoApproveCapabilities',
           'relayServer',
         })) {
-      throw const FormatException(
-        '安装包导出请求只允许 target、refreshRuntime、relayServer 字段',
-      );
+      throw const FormatException('安装包导出请求字段不完整或包含未知字段');
     }
     final targetId = body['target'];
     final refreshRuntime = body['refreshRuntime'];
+    final runtimeDownloadId = body['runtimeDownloadId'];
+    final autoApproveCapabilities = body['autoApproveCapabilities'];
     final rawRelayServer = body['relayServer'];
     if (targetId is! String ||
         !developerInstallationPackageTargetIds.contains(targetId)) {
@@ -193,6 +298,14 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
     }
     if (refreshRuntime is! bool) {
       throw const FormatException('refreshRuntime 必须是布尔值');
+    }
+    if (runtimeDownloadId != null &&
+        (runtimeDownloadId is! String ||
+            !RegExp(r'^[a-f0-9]{64}$').hasMatch(runtimeDownloadId))) {
+      throw const FormatException('runtimeDownloadId 必须是有效的下载线路 ID 或 null');
+    }
+    if (autoApproveCapabilities is! bool) {
+      throw const FormatException('autoApproveCapabilities 必须是布尔值');
     }
     if (rawRelayServer != null && rawRelayServer is! String) {
       throw const FormatException('relayServer 必须是字符串或 null');
@@ -253,6 +366,8 @@ class _ProjectInstallationPackageOperation implements _DeveloperHttpOperation {
         game: game,
         targetId: targetId,
         refreshRuntime: refreshRuntime,
+        runtimeDownloadId: runtimeDownloadId as String?,
+        autoApproveCapabilities: autoApproveCapabilities,
         relayServer: relayServer,
         onProgress: progress.emit,
       );

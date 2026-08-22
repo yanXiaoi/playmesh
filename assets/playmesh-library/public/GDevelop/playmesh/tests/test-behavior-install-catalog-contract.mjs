@@ -14,7 +14,13 @@ if (!sourceRoot) {
   );
 }
 
-const [installExtension, catalog, newBehaviorDialog, catalogSource] = await Promise.all([
+const [
+  installExtension,
+  catalog,
+  newBehaviorDialog,
+  catalogSource,
+  downloadPresenter,
+] = await Promise.all([
   readFile(
     path.join(
       sourceRoot,
@@ -55,6 +61,17 @@ const [installExtension, catalog, newBehaviorDialog, catalogSource] = await Prom
       'src',
       'PlaymeshCatalog',
       'PlaymeshCatalogSource.js'
+    ),
+    'utf8'
+  ),
+  readFile(
+    path.join(
+      sourceRoot,
+      'newIDE',
+      'app',
+      'src',
+      'PlaymeshCatalog',
+      'PlaymeshExternalDownloadErrorPresenter.js'
     ),
     'utf8'
   ),
@@ -131,25 +148,49 @@ assert.ok(
   'fixture must cover behavior owner dependency traversal'
 );
 
-assert.match(newBehaviorDialog, /await getExtensionsRegistry\(\)/);
+assert.match(newBehaviorDialog, /fetchExtensionsAndFilters\(\)/);
 assert.match(
   newBehaviorDialog,
-  /installExtensionShortHeadersByName\[extensionShortHeader\.name\]/
+  /await ensureExtensionsRegistryLoaded\(\s*extensionShortHeadersByName\s*\)/
 );
 assert.match(
   newBehaviorDialog,
-  /extensionShortHeadersByName:\s*installExtensionShortHeadersByName/
+  /extensionShortHeadersByName:\s*activeExtensionShortHeadersByName/
 );
 assert.match(
   newBehaviorDialog,
-  /getExtensionHeader\(\s*installExtensionShortHeadersByName,\s*behaviorShortHeader\.extensionName/
+  /getExtensionHeader\(\s*activeExtensionShortHeadersByName,\s*behaviorShortHeader\.extensionName/
 );
-assert.match(newBehaviorDialog, /presentPlaymeshExternalDownloadFailure/);
-assert.match(newBehaviorDialog, /stage: 'behavior_extension_download'/);
-assert.match(installExtension, /presentPlaymeshExternalDownloadFailure/);
-assert.match(installExtension, /reason === 'behavior'/);
-assert.match(installExtension, /stage:\s*reason === 'behavior'/);
-assert.match(installExtension, /if \(reason === 'asset'\) throw rawError/);
+assert.doesNotMatch(newBehaviorDialog, /getExtensionsRegistry/);
+assert.doesNotMatch(newBehaviorDialog, /presentPlaymeshExternalDownloadFailure/);
+assert.doesNotMatch(newBehaviorDialog, /catch \(rawError\)/);
+assert.match(installExtension, /acquirePlaymeshExtensionArtifacts\(\{/);
+assert.match(installExtension, /reason: 'asset' \| 'extension' \| 'behavior'/);
+assert.doesNotMatch(
+  installExtension,
+  /try\s*\{\s*await installRequiredExtensions/
+);
+const acquireIndex = installExtension.indexOf(
+  'await acquirePlaymeshExtensionArtifacts'
+);
+const willInstallIndex = installExtension.indexOf(
+  'onWillInstallExtension(installedExtensionNames)'
+);
+const officialInstallIndex = installExtension.indexOf(
+  'await addSerializedExtensionsToProject'
+);
+assert.ok(
+  acquireIndex >= 0 &&
+    willInstallIndex > acquireIndex &&
+    officialInstallIndex > willInstallIndex,
+  'the Playmesh acquisition seam must end before the official lifecycle begins'
+);
+assert.match(
+  downloadPresenter,
+  /return await Promise\.all\(extensionShortHeaders\.map\(acquire\)\)/
+);
+assert.match(downloadPresenter, /if \(reason !== 'asset'\)/);
+assert.match(downloadPresenter, /stage:\s*reason === 'behavior'/);
 assert.match(catalogSource, /const resolveCatalogExtensionName =/);
 assert.match(
   catalogSource,

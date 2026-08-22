@@ -1,5 +1,15 @@
 # GDevelop 本地多文件源码与历史 v3
 
+本文服从 [GDevelop 开发总规范](development-standards.md)。Playmesh 可以拥有物理目录、CAS、
+事务、资源下载、身份和历史证据，但不能把这些存储职责扩张成第二套 GDevelop opener、
+serializer、split/unsplit 或编辑器生命周期：
+
+- WebIDE 的打开、保存、导入、导出和历史恢复必须把工程交给真实官方函数处理；
+- App 中的 Dart 翻译只用于项目列表、证据读取和历史 diff，不得替代 WebIDE 或官方 opener；
+- Playmesh 自有归档、路径、资源和身份处理必须在官方处理链之前结束；
+- 进入官方打开、反序列化、重组或回调链后，不得追加二次校验、修复、再次导入或 fallback，
+  官方错误必须保持可诊断并原样传播。
+
 ## 不可违反的边界
 
 GDevelop 当前工程源码与版本历史是两套独立数据：
@@ -52,31 +62,18 @@ playmesh-library/GDevelop/packages/{gameId}/
 current 自己的资源 CAS；清空 history 只删除 `history/cas`，不得清理 `source/current`。
 `history/cas` 由历史版本独立 pin/GC，不能反向决定工程是否可打开。
 
-## 官方实现映射与接线点
+## 官方格式合同
 
-这里的“官方兼容”特指 GDevelop 5.6.276 桌面端 `LocalFileStorageProvider` 的
-folder-project 协议。官方浏览器 `DownloadFileStorageProvider` 仍导出单个 `game.json`；Playmesh
-下载的是一个采用桌面 folder-project 布局的 ZIP，解压后可由官方桌面版直接打开，不宣称与官方
-浏览器下载产物的文件数或字节布局相同。
+“官方兼容”指锁定上游桌面端 `LocalFileStorageProvider` 的 folder-project 协议。官方浏览器
+`DownloadFileStorageProvider` 仍可导出单个 `game.json`；Playmesh 下载的是采用桌面
+folder-project 布局的 ZIP，不承诺与浏览器下载产物具有相同文件数或字节布局。
 
-| 改动点 | 官方底层/规则 | Playmesh 架构实现 | 主要接线点 |
-| --- | --- | --- | --- |
-| 工程拆分 | `Utils/ObjectSplitter.split`；`splitPaths` 只匹配 `/layouts/*`、`/externalLayouts/*`、`/externalEvents/*`、`/eventsFunctionsExtensions/*`；名称由 `getSlugifiedUniqueNameFromProperty('name')` 生成 | WebIDE 直接复用这三个官方函数，根文件固定为 `game.json`，分片引用保持 `__REFERENCE_TO_SPLIT_OBJECT/referenceTo` 原样 | `PlaymeshProjectFiles.splitPlaymeshProject` -> 保存、示例导入、源码导出 |
-| 工程重组 | `Utils/ObjectSplitter.unsplit`，官方 opener 使用 `maxUnsplitDepth: 3` | WebIDE 直接复用官方 `unsplit`；App 中需要读取/diff 时使用同算法的 Dart 翻译 | WebIDE 打开、portable import、history restore；App history diff |
-| JSON 字节格式 | `JSON.stringify(value, null, 2)` + `addFinalNewline` | 每个 `game.json`/分片均以两空格缩进和一个末尾换行写入 | ZIP text files、`source/current/project/*`、history CAS project objects |
-| WebIDE 保存 | 官方 `LocalProjectWriter` 依据 `project.isFolderProject()` 决定拆分 | Playmesh provider 是唯一多文件模式；快照前调用 `setFolderProject(true)`，会话镜像保存 `projectFiles[{path,content}]`，不保留 `projectJson` | `PlaymeshProjectSerializer`、`PlaymeshProjectStore`、provider `index.js` |
-| 属性面板 | 官方提供 Single/Multiple 两种选择，并注明只对桌面文件系统生效 | Playmesh 薄接线把该字段固定为 Multiple files，避免显示一个保存时会被覆盖的假选项 | `apply-source-policy.mjs` 对 `ProjectPropertiesDialog.js` 的精确前像替换 |
-| App current | 官方目录工程以主文件与相邻四目录为一个项目 | direct current 原子目录改为 `current/project/game.json` 与四类分片路径；manifest v3 记录逐文件引用 | `GDevelopProjectHistoryAdapter`、`_GDevelopDirectCurrentStore` |
-| History | 官方不提供 Playmesh 本地历史 CAS | 每个工程 JSON 分别进入既有 CAS，revision payload 保存 `projectFilesHash/projectFilesSize/projectFiles[]`；整棵工程树仍是一次原子 revision；手动保存和有新修改时的自动保存均创建用户可见 revision | history save/current/diff/restore，capability `gdevelop.history.v3` |
-| Allocation | 官方没有 Playmesh allocation 协议 | 上传内容从一个 project JSON 改为 `projectFiles` DTO；workspace 解析 `game.json` 获取身份与资源引用，并把逐文件对象接入 current/history | `/workspace/project-files`、allocation coordinator/client/operation |
-| Restore / rekey | 官方 opener 只负责按引用加载；不处理 Playmesh 事务 | restore 传输完整 `projectFiles`；rekey 只修改根 `game.json.properties.packageName`，随后更新 v3 current/history 事务证据 | restore protocol/client/materializer/transaction；rekey coordinator/journal/operation |
-| 源码导入 | 官方 opener 从根引用按需读取分片；单文件工程可直接反序列化 | 接受 folder-project ZIP、仅含 `game.json` 的 ZIP，以及官方浏览器下载的裸 `game.json`。ZIP 分片先按官方引用串行读入再 `unsplit`；单文件直接反序列化。所有输入在身份/资源处理后都经统一 `createProjectSnapshot` 调用官方 `split`，因此 allocation 之后只存在多文件树 | `PlaymeshPortableProjectImporter`、`PlaymeshRawProjectJsonReader`、`PlaymeshPortableProjectFormat`、`PlaymeshProjectSerializer` |
-| 示例导入 | 官方示例正文是完整工程 JSON | 示例完成身份和资源 URL 改写后调用同一官方 `split`，不建立示例专用单文件存储；最终也只向 allocation 上传 `projectFiles` | `PlaymeshExampleImporter`、`PlaymeshProjectAllocationCoordinator` |
-| 源码导出 | 官方桌面 writer 写分片后写根文件 | 克隆项目、下载本地资源、强制 folder-project、复用官方 split，再把工程文件和资源放入 ZIP；不加入 Playmesh 私有 manifest | `PlaymeshDownloadProjectArchive`、官方 Download dialog 薄接线 |
+WebIDE 的拆分、重组、名称生成、引用深度和 JSON 格式必须直接使用锁定上游的
+`ObjectSplitter`、`JSON.stringify(value, null, 2)` 与末尾换行规则。Playmesh 不增加路径白名单、
+孤儿分片、重复引用、大小写冲突或引用闭包门禁。归档、身份和资源处理在官方 opener 之前完成；
+进入官方打开、反序列化、`unsplit` 或 callback 后，不再重组、复核、再次导入或 fallback。
 
-分片格式的接受与重组不增加 Playmesh 自定义的路径白名单、孤儿分片、重复引用、大小写冲突或
-引用闭包检查，只执行官方 `ObjectSplitter` 的判断和深度规则。表中 hash/CAS 字段是既有 App
-事务与内容寻址存储证据的多文件迁移，不作为额外的 GDevelop folder-project 格式门禁。
+当前实现入口仅记录在[源码接线索引](integration-wiring.md)，不属于本合同。
 
 ## 身份与项目列表
 
@@ -180,3 +177,7 @@ projectFiles 不包含图片、音频、模型等资源字节，因此“工程�
 7. old `gdevelop.history.v2`、单文件 current 和旧 restore journal 不被新实现读取；
 8. 导出的 `game.json` 与四个分片目录可由官方桌面 GDevelop 直接打开并继续按多文件保存。
 9. 官方裸 `game.json`、单文件 ZIP、folder-project ZIP 与官方示例导入后都只生成多文件 current/history。
+10. WebIDE 打开、导入和恢复都调用官方 opener、反序列化、split/unsplit 与原始 callbacks；App
+    Dart 翻译没有进入这些编辑器路径。
+11. 官方处理开始后不存在 Playmesh 二次导入、后置修复、额外写入或 fallback，官方错误经
+    WebIDE、Gateway/App 边界后仍保留原始诊断。

@@ -874,6 +874,7 @@ const liveProject = {
   hasEventsFunctionsExtensionNamed: () => false,
 };
 const outsideCounts = { events: 0, instances: 0, objects: 0, groups: 0 };
+const officialEnsureExtensionInstalled = async () => {};
 const runnerOptions = {
   onSceneEventsModifiedOutsideEditor: () => outsideCounts.events++,
   onInstancesModifiedOutsideEditor: () => outsideCounts.instances++,
@@ -884,10 +885,16 @@ const runnerOptions = {
   onWillDeleteObject: () => {},
   onWillInstallExtension: () => {},
   onExtensionInstalled: () => {},
+  ensureExtensionInstalled: officialEnsureExtensionInstalled,
 };
 globalThis.__playmeshAiOfficialRunner = async options => {
   assert.equal(options.project, liveProject);
   assert.equal(options.toolsVersion, 'v12');
+  assert.equal(
+    options.ensureExtensionInstalled,
+    officialEnsureExtensionInstalled,
+    'the official session hook must cross the adapter by object identity'
+  );
   liveProject.mutations++;
   options.onSceneEventsModifiedOutsideEditor({});
   options.onInstancesModifiedOutsideEditor({});
@@ -997,6 +1004,8 @@ const executeEditorFunction = async options => {
 let firstLocalWrapperOptions = null;
 const onFetchNewlyAddedResources = async () => {};
 const onNewResourcesAdded = () => {};
+const eventsFunctionsExtensionsState = {};
+const onPreviewOrRefresh = async () => {};
 const executor = new executorModule.PlaymeshAiExecutor({
   client: retryClient,
   executeEditorFunction,
@@ -1007,6 +1016,8 @@ const executor = new executorModule.PlaymeshAiExecutor({
   onProjectModified: () => dirtyCount++,
   onFetchNewlyAddedResources,
   onNewResourcesAdded,
+  eventsFunctionsExtensionsState,
+  onPreviewOrRefresh,
 });
 const executeOptions = {
   gameId,
@@ -1031,6 +1042,11 @@ assert.equal(
   firstLocalWrapperOptions.onNewResourcesAdded,
   onNewResourcesAdded
 );
+assert.equal(
+  firstLocalWrapperOptions.eventsFunctionsExtensionsState,
+  eventsFunctionsExtensionsState
+);
+assert.equal(firstLocalWrapperOptions.onPreviewOrRefresh, onPreviewOrRefresh);
 const pendingRegistry = new executorModule.PlaymeshAiExecutionAbortRegistry();
 let cancellationPosts = 0;
 if (
@@ -1231,9 +1247,58 @@ assert.equal(failedResult.status, 'failed');
 assert.equal(failedDirtyCount, 1, 'a partial mutation must still mark dirty');
 assert.deepEqual(failedExecution, {
   success: false,
-  output: {},
+  output: {
+    code: 'official_failed',
+    message: 'official failure',
+    errorType: 'Error',
+  },
   errorCode: 'official_failed',
-  errorMessage: 'The local GDevelop AI tool failed.',
+  errorMessage: 'official failure',
+});
+
+let reportedFailureExecution;
+const officialFailureOutput = {
+  message: 'Scene Player is missing a required behavior.',
+  error: {
+    code: 'official_behavior_missing',
+    type: 'GDevelopBehaviorValidationError',
+    message: 'Add the required platform behavior first.',
+  },
+  warnings: ['No fallback was applied.'],
+};
+const reportedFailureExecutor = new executorModule.PlaymeshAiExecutor({
+  client: {
+    finishExecution: async (_gameId, _sessionId, callId, execution) => {
+      reportedFailureExecution = execution;
+      return { call: { ...makeCall(callId), state: 'failed', output: execution.output } };
+    },
+  },
+  executeEditorFunction: async () => ({
+    result: {
+      status: 'finished',
+      success: false,
+      output: officialFailureOutput,
+      didModifyProject: true,
+    },
+    createdProject: null,
+    transientObjectUrls: [],
+  }),
+  createLocalWrappers: () => ({}),
+  onProjectModified: () => {},
+});
+const reportedFailureResult = await reportedFailureExecutor.executeCall({
+  ...executeOptions,
+  call: makeCall('live-reported-failure-1'),
+});
+assert.equal(reportedFailureResult.status, 'failed');
+assert.deepEqual(reportedFailureExecution, {
+  success: false,
+  output: {
+    ...officialFailureOutput,
+    didModifyProject: true,
+  },
+  errorCode: 'official_behavior_missing',
+  errorMessage: 'Scene Player is missing a required behavior.',
 });
 
 let invalidEventExecution;
@@ -1455,9 +1520,13 @@ assert.equal(staleProjectIdentityReads, 1);
 assert.equal(staleProjectResourceReads, 0);
 assert.deepEqual(staleExecution, {
   success: false,
-  output: {},
+  output: {
+    code: 'editor_session_epoch_mismatch',
+    message: 'The local GDevelop AI call could not be completed.',
+    errorType: 'PlaymeshAiExecutionError',
+  },
   errorCode: 'editor_session_epoch_mismatch',
-  errorMessage: 'The local GDevelop AI tool failed.',
+  errorMessage: 'The local GDevelop AI call could not be completed.',
 });
 
 globalThis.__playmeshAiSessionImports = {

@@ -148,6 +148,7 @@ class VisualGDevelopController extends ChangeNotifier {
   int _releaseGeneration = 0;
   int _operationGeneration = 0;
   int _startGeneration = 0;
+  Future<List<LanEndpointCandidate>?>? _workspaceLinksRefresh;
   bool _disposed = false;
 
   VisualGDevelopState get state => _state;
@@ -171,6 +172,7 @@ class VisualGDevelopController extends ChangeNotifier {
   Future<void> synchronize(DeveloperSession? session) async {
     final generation = ++_synchronizeGeneration;
     _startGeneration += 1;
+    _workspaceLinksRefresh = null;
     _releaseGeneration += 1;
     _session = session;
     final activeProvider = provider;
@@ -229,26 +231,67 @@ class VisualGDevelopController extends ChangeNotifier {
   /// Ensures the visual workspace gateway is available for the active
   /// Developer Mode session and refreshes its visual-only LAN endpoints.
   Future<void> ensureStarted() async {
+    await _refreshWorkspaceLinks();
+  }
+
+  /// Resolves a launch URL immediately before creating a GDevelop WebView.
+  ///
+  /// The URL carries a rotating editor bootstrap capability, so a URL cached
+  /// before a previous editor acquisition cannot be reused after that editor
+  /// is closed. Keep the selected LAN endpoint where possible while replacing
+  /// its short-lived query credentials with the current values.
+  Future<Uri?> workspaceUriForOpen(Uri requestedUri) async {
+    final links = await _refreshWorkspaceLinks();
+    if (links == null || links.isEmpty) return null;
+    for (final link in links) {
+      final uri = link.uri;
+      if (uri.scheme == requestedUri.scheme &&
+          uri.host == requestedUri.host &&
+          uri.port == requestedUri.port &&
+          uri.path == requestedUri.path) {
+        return uri;
+      }
+    }
+    return sortLanEndpointCandidates(links).first.uri;
+  }
+
+  Future<List<LanEndpointCandidate>?> _refreshWorkspaceLinks() {
+    final inProgress = _workspaceLinksRefresh;
+    if (inProgress != null) return inProgress;
+    late final Future<List<LanEndpointCandidate>?> operation;
+    operation = _refreshWorkspaceLinksOnce().whenComplete(() {
+      if (identical(_workspaceLinksRefresh, operation)) {
+        _workspaceLinksRefresh = null;
+      }
+    });
+    _workspaceLinksRefresh = operation;
+    return operation;
+  }
+
+  Future<List<LanEndpointCandidate>?> _refreshWorkspaceLinksOnce() async {
     final activeProvider = provider;
     final session = _session;
-    if (activeProvider == null || session?.enabled != true || state.starting) {
-      return;
+    if (activeProvider == null || session?.enabled != true) {
+      return null;
     }
     final generation = ++_startGeneration;
     _setState(_state.copyWith(starting: true, startError: null));
     try {
       final links = await activeProvider.gdevelopWorkspaceLinks(session!);
-      if (_disposed || generation != _startGeneration) return;
+      if (_disposed || generation != _startGeneration) return null;
+      final immutableLinks = List<LanEndpointCandidate>.unmodifiable(links);
       _setState(
         _state.copyWith(
-          links: List.unmodifiable(links),
+          links: immutableLinks,
           starting: false,
           startError: null,
         ),
       );
+      return immutableLinks;
     } on Object catch (error) {
-      if (_disposed || generation != _startGeneration) return;
+      if (_disposed || generation != _startGeneration) return null;
       _setState(_state.copyWith(starting: false, startError: error));
+      return null;
     }
   }
 

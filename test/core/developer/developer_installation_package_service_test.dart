@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/developer/developer_installation_package_service.dart';
 import 'package:playmesh/core/developer/developer_installation_package_service_io.dart';
+import 'package:playmesh/core/download/endpoint_probe_contract.dart';
 import 'package:playmesh/core/download/named_download_endpoint.dart';
 import 'package:playmesh/core/game_package/game_package_transfer_service.dart';
 import 'package:playmesh/core/runtime_distribution/runtime_package_manager.dart';
@@ -111,6 +112,8 @@ void main() {
     late _RecordingNativeExporter nativeExporter;
     late _StaticSigningKeyProvider signingKeyProvider;
     late FileDeveloperInstallationPackageService service;
+    late EndpointProbeService runtimeDownloadProbeService;
+    late _ReachableEndpointProbeHttpClient runtimeDownloadProbeHttpClient;
     late DateTime now;
 
     setUp(() async {
@@ -129,9 +132,14 @@ void main() {
       await key.writeAsBytes(const [1, 2, 3, 4], flush: true);
       signingKeyProvider = _StaticSigningKeyProvider(key.path);
       now = DateTime.utc(2026, 8, 20, 12);
+      runtimeDownloadProbeHttpClient = _ReachableEndpointProbeHttpClient();
+      runtimeDownloadProbeService = EndpointProbeService(
+        httpClient: runtimeDownloadProbeHttpClient,
+      );
       service = FileDeveloperInstallationPackageService(
         runtimePackages: runtimePackages,
         nativeExporter: nativeExporter,
+        runtimeDownloadProbeService: runtimeDownloadProbeService,
         packageTransfer: packageTransfer,
         signingKeyProvider: signingKeyProvider,
         temporaryRoot: root,
@@ -141,6 +149,7 @@ void main() {
 
     tearDown(() async {
       await service.close();
+      runtimeDownloadProbeService.close();
       if (await root.exists()) await root.delete(recursive: true);
     });
 
@@ -158,6 +167,7 @@ void main() {
         game: game,
         targetId: developerInstallationPackageTargetAndroidX86_64,
         refreshRuntime: false,
+        autoApproveCapabilities: true,
       );
       final windows = await service.create(
         game: game,
@@ -202,7 +212,11 @@ void main() {
       _expectSingleRelayConfig(armEntries, relay);
       expect(
         nativeExporter.androidCalls[1].entries,
-        isNot(contains('playmesh-runtime.json')),
+        contains('playmesh-runtime.json'),
+      );
+      _expectRuntimeConfig(
+        nativeExporter.androidCalls[1].entries,
+        autoApproveCapabilities: true,
       );
       final windowsCall = nativeExporter.windowsCalls.single;
       expect(
@@ -228,6 +242,113 @@ void main() {
       expect(arm.filename, endsWith('.apk'));
       expect(x86.filename, endsWith('.apk'));
       expect(windows.filename, endsWith('.zip'));
+    });
+
+    test('本地状态不联网，选中来源后只异步测速该来源', () async {
+      final source = NamedDownloadEndpoint(
+        name: 'Runtime releases',
+        url: Uri.parse('https://runtime.example.test/update.json'),
+      );
+      final mirrorSource = NamedDownloadEndpoint(
+        name: 'Mirror releases',
+        url: Uri.parse('https://mirror.example.test/update.json'),
+      );
+      runtimePackages
+        ..configSources = RuntimePackageConfigSources([source, mirrorSource])
+        ..releaseManifests[source.url] = RuntimePackageReleaseManifest.parse(
+          jsonEncode({
+            'version': 'v1.0.0-build1',
+            'platform': {
+              'android': {
+                'x86': {
+                  'sha256': '0' * 64,
+                  'downloads': [
+                    {'name': 'Unavailable', 'url': ''},
+                  ],
+                },
+                'arm': {
+                  'sha256': 'a' * 64,
+                  'downloads': [
+                    {
+                      'name': 'Primary',
+                      'url': 'https://runtime.example.test/runtime-arm.apk',
+                    },
+                  ],
+                },
+              },
+              'windows': {
+                'sha256': 'b' * 64,
+                'downloads': [
+                  {'name': 'Unavailable', 'url': ''},
+                ],
+              },
+            },
+          }),
+        )
+        ..releaseManifests[mirrorSource.url] =
+            RuntimePackageReleaseManifest.parse(
+              jsonEncode({
+                'version': 'v1.0.0-build1',
+                'platform': {
+                  'android': {
+                    'x86': {
+                      'sha256': '0' * 64,
+                      'downloads': [
+                        {'name': 'Unavailable', 'url': ''},
+                      ],
+                    },
+                    'arm': {
+                      'sha256': 'a' * 64,
+                      'downloads': [
+                        {
+                          'name': 'Mirror',
+                          'url': 'https://mirror.example.test/runtime-arm.apk',
+                        },
+                      ],
+                    },
+                  },
+                  'windows': {
+                    'sha256': 'b' * 64,
+                    'downloads': [
+                      {'name': 'Unavailable', 'url': ''},
+                    ],
+                  },
+                },
+              }),
+            );
+
+      final localTargets = await service.inspectLocalTargets();
+      expect(localTargets, hasLength(RuntimePackageTarget.values.length));
+      expect(runtimePackages.configReadCount, 0);
+      expect(runtimePackages.manifestReadCount, 0);
+
+      final runtimeTarget = await service.inspectRuntimeTarget(
+        developerInstallationPackageTargetAndroidArm64,
+      );
+      expect(runtimeTarget.runtimeDownloads, hasLength(2));
+      expect(
+        runtimeTarget.runtimeDownloads.every(
+          (download) => download.probeState == EndpointProbeState.probing,
+        ),
+        isTrue,
+      );
+      expect(runtimePackages.configReadCount, 1);
+      expect(runtimePackages.manifestReadCount, 2);
+
+      final selectedSourceId = runtimeTarget.runtimeDownloads
+          .singleWhere((download) => download.name == 'Primary')
+          .manifestSourceId;
+      final probes = await service.probeRuntimeTargetDownloads(
+        developerInstallationPackageTargetAndroidArm64,
+        selectedSourceId,
+      );
+      expect(probes.single.probeState, EndpointProbeState.reachable);
+      expect(probes.single.name, 'Primary');
+      expect(runtimeDownloadProbeHttpClient.requestedUrls, [
+        Uri.parse('https://runtime.example.test/runtime-arm.apk'),
+      ]);
+      expect(runtimePackages.configReadCount, 1);
+      expect(runtimePackages.manifestReadCount, 2);
     });
 
     test('inspectTargets 只按实际 Runtime 清单逐目标报告可下载状态', () async {
@@ -301,6 +422,7 @@ void main() {
         isTrue,
       );
       expect(statuses.map((status) => status.runtimeVersion).toSet(), {
+        null,
         'v1.0.0-build1',
       });
       expect(runtimePackages.configReadCount, 1);
@@ -326,6 +448,107 @@ void main() {
       expect(statuses.every((status) => status.runtimeVersion == null), isTrue);
       expect(runtimePackages.configReadCount, 1);
       expect(runtimePackages.manifestReadCount, 1);
+    });
+
+    test('缺失底包时必须使用用户明确选择的下载线路且不自动回退', () async {
+      final source = NamedDownloadEndpoint(
+        name: 'Runtime releases',
+        url: Uri.parse('https://runtime.example.test/update.json'),
+      );
+      runtimePackages
+        ..configSources = RuntimePackageConfigSources([source])
+        ..releaseManifests[source.url] = RuntimePackageReleaseManifest.parse(
+          jsonEncode({
+            'version': 'v1.0.0-build1',
+            'platform': {
+              'android': {
+                'x86': {
+                  'sha256': '0' * 64,
+                  'downloads': [
+                    {'name': 'Unavailable', 'url': ''},
+                  ],
+                },
+                'arm': {
+                  'sha256': 'a' * 64,
+                  'downloads': [
+                    {
+                      'name': 'Primary',
+                      'url': 'https://runtime.example.test/primary-arm.apk',
+                    },
+                    {
+                      'name': 'Mirror',
+                      'url': 'https://mirror.example.test/runtime-arm.apk',
+                    },
+                  ],
+                },
+              },
+              'windows': {
+                'sha256': 'b' * 64,
+                'downloads': [
+                  {'name': 'Unavailable', 'url': ''},
+                ],
+              },
+            },
+          }),
+        )
+        ..allowDownload = true;
+      await File(
+        runtimePackages.pathFor(RuntimePackageTarget.androidArm),
+      ).delete();
+      final target = (await service.inspectTargets()).singleWhere(
+        (item) => item.id == developerInstallationPackageTargetAndroidArm64,
+      );
+      expect(target.runtimeDownloads.map((item) => item.name), [
+        'Primary',
+        'Mirror',
+      ]);
+      expect(
+        target.runtimeDownloads.map((item) => item.manifestSourceId).toSet(),
+        hasLength(1),
+      );
+      expect(
+        target.runtimeDownloads.every(
+          (item) =>
+              RegExp(r'^[a-f0-9]{64}$').hasMatch(item.manifestSourceId) &&
+              item.manifestSourceName == source.name &&
+              item.manifestSourceAddress == source.url,
+        ),
+        isTrue,
+      );
+      expect(
+        target.runtimeDownloads.every(
+          (item) => item.probeState == EndpointProbeState.reachable,
+        ),
+        isTrue,
+      );
+      expect(
+        target.runtimeDownloads.every((item) => item.latencyMs != null),
+        isTrue,
+      );
+
+      await expectLater(
+        service.create(
+          game: _game(),
+          targetId: developerInstallationPackageTargetAndroidArm64,
+          refreshRuntime: false,
+        ),
+        throwsA(
+          isA<DeveloperInstallationPackageException>().having(
+            (error) => error.code,
+            'code',
+            'runtime_package_download_selection_required',
+          ),
+        ),
+      );
+      expect(runtimePackages.downloadCount, 0);
+
+      await service.create(
+        game: _game(),
+        targetId: developerInstallationPackageTargetAndroidArm64,
+        refreshRuntime: false,
+        runtimeDownloadId: target.runtimeDownloads.last.id,
+      );
+      expect(runtimePackages.selectedDownloads.single.name, 'Mirror');
     });
 
     test('Runtime 版本变化但 SHA 相同时不提示可更新', () async {
@@ -427,11 +650,20 @@ void main() {
         runtimePackages.pathFor(RuntimePackageTarget.androidArm),
       ).delete();
       final progress = <DeveloperInstallationPackageProgress>[];
+      final runtimeDownloadId = (await service.inspectTargets())
+          .singleWhere(
+            (target) =>
+                target.id == developerInstallationPackageTargetAndroidArm64,
+          )
+          .runtimeDownloads
+          .single
+          .id;
 
       await service.create(
         game: _game(),
         targetId: developerInstallationPackageTargetAndroidArm64,
         refreshRuntime: false,
+        runtimeDownloadId: runtimeDownloadId,
         onProgress: progress.add,
       );
 
@@ -493,11 +725,20 @@ void main() {
           runtimePackages.pathFor(RuntimePackageTarget.androidX86),
         ).delete();
         final progress = <DeveloperInstallationPackageProgress>[];
+        final runtimeDownloadId = (await service.inspectTargets())
+            .singleWhere(
+              (target) =>
+                  target.id == developerInstallationPackageTargetAndroidX86_64,
+            )
+            .runtimeDownloads
+            .single
+            .id;
 
         await service.create(
           game: _game(),
           targetId: developerInstallationPackageTargetAndroidX86_64,
           refreshRuntime: false,
+          runtimeDownloadId: runtimeDownloadId,
           onProgress: progress.add,
         );
 
@@ -660,6 +901,14 @@ void _expectClearRuntimeEntries(Map<String, List<int>> entries) {
 }
 
 void _expectSingleRelayConfig(Map<String, List<int>> entries, Uri expected) {
+  _expectRuntimeConfig(entries, relayServer: expected);
+}
+
+void _expectRuntimeConfig(
+  Map<String, List<int>> entries, {
+  Uri? relayServer,
+  bool autoApproveCapabilities = false,
+}) {
   expect(
     entries.keys.where((path) => path == 'playmesh-runtime.json'),
     hasLength(1),
@@ -667,7 +916,11 @@ void _expectSingleRelayConfig(Map<String, List<int>> entries, Uri expected) {
   final config = Map<String, Object?>.from(
     jsonDecode(utf8.decode(entries['playmesh-runtime.json']!)) as Map,
   );
-  expect(config, {'schemaVersion': 1, 'relayServer': expected.toString()});
+  expect(config, {
+    'schemaVersion': 1,
+    if (relayServer != null) 'relayServer': relayServer.toString(),
+    'autoApproveCapabilities': autoApproveCapabilities,
+  });
 }
 
 Future<void> _waitUntilMissing(Directory directory) async {
@@ -929,6 +1182,25 @@ final class _StaticSigningKeyProvider
   }
 }
 
+final class _ReachableEndpointProbeHttpClient
+    implements EndpointProbeHttpClient {
+  final requestedUrls = <Uri>[];
+
+  @override
+  Future<EndpointProbeHttpResponse> send({
+    required String method,
+    required Uri url,
+    required Map<String, String> headers,
+    required Duration timeout,
+  }) async {
+    requestedUrls.add(url);
+    return EndpointProbeHttpResponse(statusCode: HttpStatus.noContent);
+  }
+
+  @override
+  void close() {}
+}
+
 final class _FileBackedRuntimePackageManager implements RuntimePackageManager {
   _FileBackedRuntimePackageManager(this.root);
 
@@ -937,6 +1209,7 @@ final class _FileBackedRuntimePackageManager implements RuntimePackageManager {
   var manifestReadCount = 0;
   var downloadCount = 0;
   var closeCount = 0;
+  final selectedDownloads = <RuntimePackageDownloadEndpoint>[];
   RuntimePackageConfigSources configSources = const RuntimePackageConfigSources(
     [],
   );
@@ -1006,6 +1279,7 @@ final class _FileBackedRuntimePackageManager implements RuntimePackageManager {
     RuntimePackageDownloadCancellationToken? cancellationToken,
   }) async {
     downloadCount += 1;
+    selectedDownloads.add(selectedDownload);
     if (!allowDownload) {
       throw UnsupportedError('本测试不应下载 Runtime 底包');
     }

@@ -14,6 +14,11 @@ const dialogSource = await sourceOf('PlaymeshAiApprovalDialog.js');
 const panelSource = await sourceOf('PlaymeshAiPanel.js');
 const containerSource = await sourceOf('PlaymeshAiEditorContainer.js');
 const executorSource = await sourceOf('PlaymeshAiExecutor.js');
+const adapterSource = await sourceOf('PlaymeshAiEditorFunctionAdapter.js');
+const wrappersSource = await sourceOf('PlaymeshAiLocalToolWrappers.js');
+const eventPayloadExecutorSource = await sourceOf(
+  'PlaymeshAiEventPayloadExecutor.js'
+);
 const protocolSource = await sourceOf('PlaymeshAiProtocol.js');
 const clientSource = await sourceOf('PlaymeshAiClient.js');
 const controllerSource = await sourceOf('PlaymeshAiSessionController.js');
@@ -92,6 +97,18 @@ assert.match(
   executorSource,
   /options\.onFetchNewlyAddedResources = this\.onFetchNewlyAddedResources/
 );
+assert.match(
+  containerSource,
+  /useEnsureExtensionInstalled\(\{[\s\S]*?project: props\.project,[\s\S]*?i18n: props\.i18n/
+);
+assert.match(containerSource, /ensureExtensionInstalled,\s*onWillInstallExtension/);
+assert.doesNotMatch(
+  [containerSource, adapterSource, wrappersSource].join('\n'),
+  /ensureExtensionInstalled:\s*async\s*\([^)]*\)\s*=>\s*\{\}/
+);
+assert.doesNotMatch(adapterSource, /extension_not_installed_locally/);
+assert.doesNotMatch(wrappersSource, /capability_install_incomplete/);
+assert.doesNotMatch(eventPayloadExecutorSource, /event_payload_apply_failed/);
 assert.match(
   executorSource,
   /DEFERRED_PROJECT_MUTATION_TOOLS\.has\(definition\.name\)[\s\S]*?_assertExecutionIdentity\([\s\S]*?enterNonCancellableExecution\(\)/

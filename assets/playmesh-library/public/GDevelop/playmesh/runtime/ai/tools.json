@@ -1,10 +1,10 @@
 {
   "protocolVersion": "1.0.0",
-  "toolsVersion": "4.0.0",
+  "toolsVersion": "4.1.0",
   "gdevelopVersion": "5.6.276",
   "upstreamCommit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361",
   "storeNetworkEnabled": false,
-  "toolCount": 50,
+  "toolCount": 51,
   "discovery": {
     "toolDetailsToolName": "get_gdevelop_tool_details",
     "toolNameArgument": "tool_name"
@@ -2021,6 +2021,24 @@
       "approvalRequired": true,
       "implementation": "playmesh_wrapper",
       "officialImplementationName": "install_gdevelop_extension",
+      "chatEnabled": true,
+      "agentEnabled": true,
+      "timeoutMs": 90000,
+      "executionKind": "editor_function"
+    },
+    {
+      "name": "preview_or_refresh_project",
+      "summary": "Launch a project preview or refresh the running preview by invoking the current WebIDE preview toolbar callback.",
+      "argumentsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "risk": "medium",
+      "modifiesProject": false,
+      "approvalRequired": true,
+      "implementation": "playmesh_wrapper",
+      "officialImplementationName": "launchNewPreview/launchHotReloadPreview",
       "chatEnabled": true,
       "agentEnabled": true,
       "timeoutMs": 90000,

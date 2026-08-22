@@ -26,6 +26,7 @@ const executePaths = [
   'playmesh.main.player.getCurrent',
   'playmesh.main.player.setNickname',
   'playmesh.main.game.submitAction',
+  'playmesh.main.rpc.request',
   'playmesh.main.binary.createChannel',
   'playmesh.main.binary.joinChannel',
   'playmesh.main.sync.startAuthority',
@@ -55,6 +56,11 @@ const executePaths = [
   'playmesh.app.isAvailable',
   'playmesh.app.identity.getCurrent',
   'playmesh.app.runtime.getLocale',
+  'playmesh.app.storage.getBucket',
+  'PlaymeshAppStorageBucket.getData',
+  'PlaymeshAppStorageBucket.setData',
+  'PlaymeshAppStorageBucket.removeData',
+  'PlaymeshAppStorageBucket.clearData',
   'playmesh.app.performance.getFps',
   'playmesh.app.performance.getLatency',
   'playmesh.app.performance.getLatencyDiagnostics',
@@ -122,6 +128,7 @@ const subscribePaths = [
 
 const handlerPaths = [
   'playmesh.main.authority.onService',
+  'playmesh.main.rpc.onRequest',
   'PlaymeshBinaryChannel.onForward',
 ];
 
@@ -256,6 +263,9 @@ const expectedInternalFunctionNames = [
 // original identifiers as an ordered subsequence, while locking every added
 // identifier independently so additions cannot silently hide a rename.
 const expectedAddedInternalFunctionNames = [
+  'CallMainRpc',
+  'RegisterMainRpcHandler',
+  'CallAppStorage',
   'GetCurrentGameInfo',
   'GetIsAuthority',
   'GetCurrentSession',
@@ -264,6 +274,7 @@ const expectedAddedInternalFunctionNames = [
   'GetCurrentPlayer',
   'SetPlayerNickname',
   'SubmitGameAction',
+  'RequestAuthorityRpc',
   'CreateBinaryChannel',
   'JoinBinaryChannel',
   'StartAuthoritySync',
@@ -289,6 +300,11 @@ const expectedAddedInternalFunctionNames = [
   'GetAppAvailability',
   'GetAppIdentity',
   'GetAppLocale',
+  'GetAppStorageBucket',
+  'GetAppBucketData',
+  'SetAppBucketData',
+  'RemoveAppBucketData',
+  'ClearAppBucketData',
   'GetAppFps',
   'GetAppLatency',
   'GetAppLatencyDiagnostics',
@@ -401,6 +417,9 @@ const expectedAddedInternalFunctionNames = [
   'RegisterAuthorityService',
   'HasRegisterAuthorityServiceRequest',
   'PopRegisterAuthorityServiceRequest',
+  'RegisterAuthorityRpcHandler',
+  'HasRegisterAuthorityRpcHandlerRequest',
+  'PopRegisterAuthorityRpcHandlerRequest',
   'RegisterBinaryForwardHandler',
   'HasRegisterBinaryForwardHandlerRequest',
   'PopRegisterBinaryForwardHandlerRequest',
@@ -483,6 +502,8 @@ const expectedAddedInternalFunctionNames = [
   'HasAppLatencyEventValue',
   'AppLatencyEventValue',
   'RespondAuthorityResult',
+  'RespondAuthorityRpc',
+  'RejectAuthorityRpc',
   'PassBinaryForwardRequest',
   'ReplaceBinaryForwardRequest',
   'ReplaceBinaryForwardRequestWithBytes',
@@ -559,20 +580,20 @@ const appCallablePaths = expectedCallablePaths.filter(
   sdkPath => !isMainCallablePath(sdkPath)
 );
 
-assert.equal(executePaths.length, 68, 'the execute baseline must stay at 68');
+assert.equal(executePaths.length, 74, 'the execute baseline must stay at 74');
 assert.equal(
   subscribePaths.length,
   20,
   'the subscription baseline must stay at 20'
 );
-assert.equal(handlerPaths.length, 2, 'the handler baseline must stay at 2');
+assert.equal(handlerPaths.length, 3, 'the handler baseline must stay at 3');
 assert.equal(
   new Set(expectedCallablePaths).size,
-  90,
-  'the public SDK callable baseline must contain 90 unique paths'
+  97,
+  'the public SDK callable baseline must contain 97 unique paths'
 );
-assert.equal(mainCallablePaths.length, 44);
-assert.equal(appCallablePaths.length, 46);
+assert.equal(mainCallablePaths.length, 46);
+assert.equal(appCallablePaths.length, 51);
 
 const extensionSource = await readFile(extensionPath, 'utf8');
 const extension = JSON.parse(extensionSource);
@@ -830,13 +851,13 @@ const executeMappings = collectMappedPaths(surface.execute);
 const subscribeMappings = collectMappedPaths(surface.subscribe);
 const handlerMappings = collectMappedPaths(surface.handler);
 
-assert.equal(executeMappings.size, 68, 'execute must map exactly 68 SDK calls');
+assert.equal(executeMappings.size, 74, 'execute must map exactly 74 SDK calls');
 assert.equal(
   subscribeMappings.size,
   20,
   'subscribe must map exactly 20 SDK subscriptions'
 );
-assert.equal(handlerMappings.size, 2, 'handler must map exactly 2 SDK handlers');
+assert.equal(handlerMappings.size, 3, 'handler must map exactly 3 SDK handlers');
 
 for (const sdkPath of executePaths) {
   assert.ok(
@@ -875,8 +896,8 @@ for (const readyPath of [
 assert.equal(
   expectedCallablePaths.filter(path => allDeclaredCallableMappings.has(path))
     .length,
-  90,
-  'all 90 public callable members must have a declared command mapping'
+  97,
+  'all 97 public callable members must have a declared command mapping'
 );
 
 const featureNames = new Set(
@@ -1042,6 +1063,7 @@ const expectedGroupPaths = new Set([
   `${mainGroupRoot}${groupDelimiter}玩家`,
   `${mainGroupRoot}${groupDelimiter}游戏`,
   `${mainGroupRoot}${groupDelimiter}权威端`,
+  `${mainGroupRoot}${groupDelimiter}请求响应`,
   `${mainGroupRoot}${groupDelimiter}二进制通信`,
   `${mainGroupRoot}${groupDelimiter}状态同步`,
   `${mainGroupRoot}${groupDelimiter}生命周期`,
@@ -1050,6 +1072,7 @@ const expectedGroupPaths = new Set([
   `${appGroupRoot}${groupDelimiter}可用性`,
   `${appGroupRoot}${groupDelimiter}身份`,
   `${appGroupRoot}${groupDelimiter}运行环境`,
+  `${appGroupRoot}${groupDelimiter}存储`,
   `${appGroupRoot}${groupDelimiter}性能`,
   `${appGroupRoot}${groupDelimiter}能力注册表`,
   `${appGroupRoot}${groupDelimiter}动态能力（高级）`,
@@ -1124,8 +1147,8 @@ for (const root of allowedGroupRoots) {
 assert.equal(publicGroupRoots.size, 6, 'the semantic tree must keep six roots');
 assert.equal(
   publicGroupPaths.size,
-  35,
-  'the semantic tree must keep 35 distinct root-to-leaf groups'
+  37,
+  'the semantic tree must keep 37 distinct root-to-leaf groups'
 );
 assert.deepEqual(
   [...publicGroupPaths].sort(),
@@ -1293,10 +1316,21 @@ for (const [label, pattern] of [
 // operation records instead of escaping into the GDevelop event sheet.
 const reportedRuntimeErrors = [];
 const legacyRuntime = { runtimeVersion: 1, legacy: true };
+class GDevelopRpcFile extends Blob {
+  constructor(parts, name, options = {}) {
+    super(parts, { type: options.type || '' });
+    this.name = name;
+    this.lastModified = options.lastModified || 0;
+  }
+}
 const runtimeSandbox = {
   gdjs: { _playmeshExtension: legacyRuntime },
   setTimeout,
   clearTimeout,
+  Uint8Array,
+  ArrayBuffer,
+  Blob,
+  File: GDevelopRpcFile,
   console: {
     error(value) {
       reportedRuntimeErrors.push(String(value));
@@ -1662,6 +1696,76 @@ assert.equal(
   'timed-out requests must not remain queued'
 );
 
+let rpcPath;
+let rpcCallback;
+let rpcCleanupCalls = 0;
+runtimeSandbox.playmesh = {
+  main: {
+    rpc: {
+      onRequest(path, callback) {
+        rpcPath = path;
+        rpcCallback = callback;
+        return () => {
+          rpcCleanupCalls += 1;
+        };
+      },
+    },
+  },
+};
+const registeredRpcHandler = runtime.registerHandler(
+  'playmesh.main.rpc.onRequest',
+  '["/files/echo",{"callbackTimeoutMs":1000}]',
+  'rpc-handler',
+  ''
+);
+assert.equal(registeredRpcHandler.ok, true);
+assert.equal(rpcPath, '/files/echo');
+const rpcResultPromise = rpcCallback(
+  {
+    metadata: { slot: 3 },
+    bytes: Uint8Array.from([0, 255, 7]),
+    file: new GDevelopRpcFile([Uint8Array.from([1, 2, 3])], 'save.bin', {
+      type: 'application/octet-stream',
+      lastModified: 123,
+    }),
+  },
+  { senderPlayerId: 'player-2' }
+);
+for (let attempt = 0; attempt < 20 && runtime.requestCount('rpc-handler') === 0; attempt += 1) {
+  await Promise.resolve();
+}
+const rpcRequest = runtime.peekRequest('rpc-handler');
+assert.equal(rpcRequest?.payload?.data?.metadata?.slot, 3);
+assert.equal(rpcRequest?.payload?.data?.bytes?.$binary?.data, 'AP8H');
+assert.equal(rpcRequest?.payload?.data?.file?.$file?.name, 'save.bin');
+assert.equal(rpcRequest?.payload?.data?.file?.$file?.data, 'AQID');
+assert.equal(
+  runtime.respond(
+    rpcRequest.requestId,
+    {
+      accepted: true,
+      bytes: { $binary: { encoding: 'bytes', data: [9, 8, 7] } },
+      file: {
+        $file: {
+          name: 'reply.bin',
+          type: 'application/octet-stream',
+          encoding: 'base64',
+          data: 'BgUE',
+        },
+      },
+    },
+    'result'
+  ),
+  true
+);
+const rpcResult = await rpcResultPromise;
+assert.equal(rpcResult.accepted, true);
+assert.deepEqual([...rpcResult.bytes], [9, 8, 7]);
+assert.equal(rpcResult.file.name, 'reply.bin');
+assert.deepEqual([...new Uint8Array(await rpcResult.file.arrayBuffer())], [6, 5, 4]);
+assert.equal(runtime.unregisterHandler('rpc-handler'), true);
+assert.equal(rpcCleanupCalls, 1);
+
 // lifecycle.onExit is not an ordinary fire-and-forget event: the SDK awaits
 // its callback Promise. Preserve that contract with the same queued-request
 // bridge used by handlers while still exposing the exit event for inspection.
@@ -1719,5 +1823,5 @@ assert.equal(runtime.unsubscribe('passive-exit-subscription'), true);
 assert.equal(exitCleanupCalls, 2);
 
 process.stdout.write(
-  'Playmesh GDevelop extension SDK surface contract passed (90 callable members; ready is automatic).\n'
+  'Playmesh GDevelop extension SDK surface contract passed (97 callable members; ready is automatic).\n'
 );

@@ -33,7 +33,10 @@ import { usePlaymeshLocalization } from '../PlaymeshLocalization/PlaymeshLocaliz
 import { playmeshMessages } from '../PlaymeshLocalization/PlaymeshMessageKeys';
 import type { PlaymeshMessageKey } from '../PlaymeshLocalization/PlaymeshMessageKeys';
 import type { PlaymeshMessageArguments } from '../PlaymeshLocalization/PlaymeshLocalizationSession';
-import type { FileMetadataAndStorageProviderName } from '../ProjectsStorage';
+import type {
+  FileMetadata,
+  FileMetadataAndStorageProviderName,
+} from '../ProjectsStorage';
 import classes from './PlaymeshNewProjectCatalog.module.css';
 
 type PlaymeshTranslate = (
@@ -458,8 +461,9 @@ const PlaymeshNewProjectCatalog = ({
     setImportingId(header.id);
     setProgress({ completed: 0, total: null });
     onImportingChange(true);
+    let fileMetadata: FileMetadata;
     try {
-      const fileMetadata = await importPlaymeshExample({
+      fileMetadata = await importPlaymeshExample({
         header,
         signal: controller.signal,
         licenseEvidenceKey,
@@ -469,15 +473,6 @@ const PlaymeshNewProjectCatalog = ({
             total: nextProgress.total,
           }),
       });
-      await onOpenProject({
-        fileMetadata,
-        storageProviderName: 'PlaymeshLocal',
-      });
-      importController.current = null;
-      setImportingId(null);
-      setProgress(null);
-      onImportingChange(false);
-      onImported();
     } catch (rawError) {
       if (!controller.signal.aborted) {
         const error = normalizePlaymeshExampleImportError(
@@ -520,7 +515,20 @@ const PlaymeshNewProjectCatalog = ({
       setImportingId(null);
       setProgress(null);
       onImportingChange(false);
+      return;
     }
+    // The Playmesh import boundary is complete. Clear its progress state
+    // before handing the verified FileMetadata to the official project opener;
+    // opener errors retain their own type, message and handling.
+    importController.current = null;
+    setImportingId(null);
+    setProgress(null);
+    onImportingChange(false);
+    await onOpenProject({
+      fileMetadata,
+      storageProviderName: 'PlaymeshLocal',
+    });
+    onImported();
   };
 
   const importReviewedExample = (): void => {

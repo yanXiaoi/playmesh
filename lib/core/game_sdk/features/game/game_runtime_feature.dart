@@ -802,6 +802,12 @@ const gameRuntimeSdkSource = SdkSourceFragment(
   async function requestCapabilityConsent(appBootstrap) {
     const context = capabilityConsentContext(appBootstrap);
     if (context.required.length === 0) return;
+    if (appSdk.isAvailable() &&
+        typeof appInternalRuntime.shouldAutoApproveCapabilities === "function" &&
+        appInternalRuntime.shouldAutoApproveCapabilities() === true) {
+      await appInternalRuntime.confirmCapabilities();
+      return;
+    }
     const document = global.document;
     if (!document) throw new Error("当前页面无法显示游戏能力确认");
     if (!document.body) {

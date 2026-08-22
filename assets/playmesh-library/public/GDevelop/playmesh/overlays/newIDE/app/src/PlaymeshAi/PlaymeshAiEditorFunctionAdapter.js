@@ -40,7 +40,7 @@ const findTool = (
 };
 
 const createNoNetworkRunnerOptions = (
-  project /*: gdProject */
+  _project /*: gdProject */
 ) /*: PlaymeshAiRunnerOverrides */ => ({
   generateEvents: async () => ({
     generationCompleted: false,
@@ -60,24 +60,10 @@ const createNoNetworkRunnerOptions = (
       status: 'nothing-found',
     })),
   }),
-  ensureExtensionInstalled: async ({ extensionName } = {}) => {
-    const platform = project.getCurrentPlatform();
-    const isBuiltInOrLoaded = !!(
-      platform &&
-      platform.isExtensionLoaded(extensionName)
-    );
-    const isProjectExtension = !!(
-      project.hasEventsFunctionsExtensionNamed(extensionName)
-    );
-    if (!isBuiltInOrLoaded && !isProjectExtension) {
-      throw new PlaymeshAiEditorFunctionError(
-        'extension_not_installed_locally'
-      );
-    }
-  },
   // Outside-editor and lifecycle callbacks intentionally stay owned by the
-  // caller. The runner edits the live WebIDE project, so replacing them with
-  // no-ops would leave open editors stale and hide unsaved work.
+  // caller. This includes the official ensureExtensionInstalled hook: it is
+  // session context, not a network service adapter, and must keep the editor's
+  // own install lifecycle and diagnostics.
   getAssetStoreTagForNewObject: () => null,
 });
 

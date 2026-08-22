@@ -93,9 +93,9 @@ void main() {
           as Map<String, Object?>)['loopbackOnly'],
       isFalse,
     );
-    expect(registry.contractJson()['toolsVersion'], '4.0.0');
+    expect(registry.contractJson()['toolsVersion'], '4.1.0');
     expect(registry.contractJson()['officialToolsVersion'], 'v12');
-    expect(registry.definitions, hasLength(50));
+    expect(registry.definitions, hasLength(51));
     const officialNames = <String>[
       'inspect_project_properties_resources',
       'change_project_properties_resources',

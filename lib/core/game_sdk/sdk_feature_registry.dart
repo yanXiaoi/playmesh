@@ -4,6 +4,7 @@ import '../capabilities/capability_runtime.dart';
 import '../app_media/app_media_runtime.dart';
 import '../game_web/game_share_link_snapshot.dart';
 import '../session/go_core_session_client.dart';
+import '../storage/app_local_bucket_store.dart';
 
 part 'features/app/app_capability_feature.dart';
 part 'features/app/app_core_feature.dart';
@@ -12,11 +13,13 @@ part 'features/app/app_lan_feature.dart';
 part 'features/app/app_media_feature.dart';
 part 'features/app/app_media_webrtc_feature.dart';
 part 'features/app/app_performance_feature.dart';
+part 'features/app/app_storage_feature.dart';
 part 'features/app/app_ui_feature.dart';
 part 'features/game/game_binary_feature.dart';
 part 'features/game/game_authority_feature.dart';
 part 'features/game/game_core_feature.dart';
 part 'features/game/game_performance_feature.dart';
+part 'features/game/game_rpc_feature.dart';
 part 'features/game/game_runtime_feature.dart';
 part 'features/game/game_session_feature.dart';
 part 'features/game/game_storage_lifecycle_feature.dart';
@@ -219,6 +222,7 @@ class AppSdkCommandContext {
     required this.requestExit,
     required this.syncAvatar,
     required this.updateNickname,
+    required this.localBucketStore,
   });
 
   final Future<Map<String, Object?>> Function(
@@ -242,6 +246,7 @@ class AppSdkCommandContext {
   final Object? Function() requestExit;
   final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
   final Future<Object?> Function(Map<String, Object?> payload) updateNickname;
+  final AppLocalBucketStore? localBucketStore;
 }
 
 /// 唯一 SDK 注册位置。新增功能时在对应 feature 文件实现并在这里注册一次。
@@ -257,6 +262,7 @@ final class SdkFeatureRegistry {
 
   static final List<_AppSdkCommandFeature> _appCommandFeatures = [
     _AppCoreFeature(),
+    _AppStorageFeature(),
     _AppCapabilityFeature(),
     _AppMediaFeature(),
     _AppUiFeature(),
@@ -286,10 +292,12 @@ final class SdkFeatureRegistry {
     gameSessionSdkSource,
     gameSyncSdkSource,
     gameAuthoritySdkSource,
+    gameRpcSdkSource,
     gamePerformanceSdkSource,
     gameRuntimeSdkSource,
     gameStorageLifecycleSdkSource,
     appCoreSdkSource,
+    appStorageSdkSource,
     appCapabilitySdkSource,
     appMediaSdkSource,
     appMediaWebRtcSdkSource,

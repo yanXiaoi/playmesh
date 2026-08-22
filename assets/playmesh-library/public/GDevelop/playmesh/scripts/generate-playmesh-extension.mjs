@@ -40,6 +40,7 @@ const executeCommands = [
   'playmesh.main.player.getCurrent',
   'playmesh.main.player.setNickname',
   'playmesh.main.game.submitAction',
+  'playmesh.main.rpc.request',
   'playmesh.main.binary.createChannel',
   'playmesh.main.binary.joinChannel',
   'playmesh.main.sync.startAuthority',
@@ -65,6 +66,11 @@ const executeCommands = [
   'playmesh.app.isAvailable',
   'playmesh.app.identity.getCurrent',
   'playmesh.app.runtime.getLocale',
+  'playmesh.app.storage.getBucket',
+  'PlaymeshAppStorageBucket.getData',
+  'PlaymeshAppStorageBucket.setData',
+  'PlaymeshAppStorageBucket.removeData',
+  'PlaymeshAppStorageBucket.clearData',
   'playmesh.app.performance.getFps',
   'playmesh.app.performance.getLatency',
   'playmesh.app.performance.getLatencyDiagnostics',
@@ -127,6 +133,7 @@ const subscribeCommands = [
 
 const handlerCommands = [
   'playmesh.main.authority.onService',
+  'playmesh.main.rpc.onRequest',
   'PlaymeshBinaryChannel.onForward',
 ];
 
@@ -179,6 +186,7 @@ const returnedInterfaceBodies = new Map([
   ['PlaymeshBinaryChannel', interfaceBody('PlaymeshBinaryChannel')],
   ['PlaymeshSyncAuthorityController', interfaceBody('PlaymeshSyncAuthorityController')],
   ['PlaymeshStorageBucket', interfaceBody('PlaymeshStorageBucket')],
+  ['PlaymeshAppStorageBucket', interfaceBody('PlaymeshAppStorageBucket')],
   ['PlaymeshCapabilityHandle', interfaceBody('PlaymeshCapabilityHandle')],
   ['PlaymeshAppMediaSession', interfaceBody('PlaymeshAppMediaSession')],
   ['PlaymeshLanGame', interfaceBody('PlaymeshLanGame')],
@@ -764,6 +772,66 @@ const runtimeCode = String.raw`(() => {
       return output;
     };
 
+    const rpcTransferValue = async (value, sdk, depth = 0, seen = new WeakSet()) => {
+      if (value === undefined || value === null || typeof value !== "object") {
+        return plainValue(value, sdk);
+      }
+      if (value instanceof Uint8Array) {
+        return { $binary: { encoding: "base64", data: bytesToBase64(value) } };
+      }
+      if (value instanceof ArrayBuffer) {
+        return {
+          $binary: {
+            encoding: "base64",
+            data: bytesToBase64(new Uint8Array(value)),
+          },
+        };
+      }
+      const FileType = globalThis.File;
+      const BlobType = globalThis.Blob;
+      if (typeof FileType === "function" && value instanceof FileType) {
+        return {
+          $file: {
+            name: clipped(value.name || "file.bin", 255),
+            type: clipped(value.type || "application/octet-stream", 255),
+            lastModified: Number(value.lastModified) || 0,
+            encoding: "base64",
+            data: bytesToBase64(new Uint8Array(await value.arrayBuffer())),
+          },
+        };
+      }
+      if (typeof BlobType === "function" && value instanceof BlobType) {
+        return {
+          $file: {
+            name: "blob.bin",
+            type: clipped(value.type || "application/octet-stream", 255),
+            lastModified: 0,
+            encoding: "base64",
+            data: bytesToBase64(new Uint8Array(await value.arrayBuffer())),
+          },
+        };
+      }
+      if (depth >= limits.depth || seen.has(value)) {
+        throw makeFault("rpc_transfer_invalid", "RPC data is too deep or circular.");
+      }
+      seen.add(value);
+      let output;
+      if (Array.isArray(value)) {
+        output = [];
+        for (const item of value.slice(0, limits.objectKeys)) {
+          output.push(await rpcTransferValue(item, sdk, depth + 1, seen));
+        }
+      } else {
+        output = {};
+        for (const key of Object.keys(value).slice(0, limits.objectKeys)) {
+          if (forbiddenPathKeys.has(key)) continue;
+          output[key] = await rpcTransferValue(value[key], sdk, depth + 1, seen);
+        }
+      }
+      seen.delete(value);
+      return output;
+    };
+
     const handleDescriptor = (entry) => {
       const value = entry.value;
       const output = { handleId: entry.id, handleType: entry.type };
@@ -798,12 +866,16 @@ const runtimeCode = String.raw`(() => {
       if (command === "playmesh.main.binary.createChannel" || command === "playmesh.main.binary.joinChannel") type = "PlaymeshBinaryChannel";
       else if (command === "playmesh.main.sync.startAuthority") type = "PlaymeshSyncAuthorityController";
       else if (command === "playmesh.main.storage.getBucket") type = "PlaymeshStorageBucket";
+      else if (command === "playmesh.app.storage.getBucket") type = "PlaymeshAppStorageBucket";
       else if (command === "playmesh.app.capabilities.create") type = "PlaymeshCapabilityHandle";
       else if (command === "playmesh.app.media.open") type = "PlaymeshAppMediaSession";
       if (type) return handleDescriptor(handles.get(registerHandle(type, value, sdk)));
       if (command === "playmesh.app.lan.discoverGames") {
         const games = Array.isArray(value) ? value : [];
         return games.map((game) => handleDescriptor(handles.get(registerHandle("PlaymeshLanGame", game, sdk))));
+      }
+      if (command === "playmesh.main.rpc.request") {
+        return rpcTransferValue(value, sdk);
       }
       return plainValue(value, sdk);
     };
@@ -986,6 +1058,7 @@ const runtimeCode = String.raw`(() => {
         kind,
         timestamp: now(),
         payload: requestPayload(payload, sdk),
+        sdk,
         defaultValue,
         resolve: null,
         reject: null,
@@ -1048,7 +1121,12 @@ const runtimeCode = String.raw`(() => {
           recordError(error, { command: record.kind });
           record.reject(error);
           return true;
-        } else value = parseJsonInput(responseInput, null);
+        } else {
+          value = parseJsonInput(responseInput, null);
+          if (record.kind === "playmesh.main.rpc.onRequest") {
+            value = decodeValue(value, record.sdk);
+          }
+        }
         finishRequest(record);
         record.resolve(value);
         return true;
@@ -1131,7 +1209,7 @@ const runtimeCode = String.raw`(() => {
           return undefined;
         });
         if (invokeError) throw invokeError;
-        const publicValue = commandResult(command, rawValue, sdk);
+        const publicValue = await Promise.resolve(commandResult(command, rawValue, sdk));
         return operationSuccess(operationId, publicValue, rawValue === undefined ? "undefined" : rawValue === null ? "null" : handles.has(publicValue && publicValue.handleId) ? "handle" : typeof rawValue);
       } catch (error) {
         const entry = recordError(error, { command, operationId, handleId: handleIdInput });
@@ -1253,7 +1331,10 @@ const runtimeCode = String.raw`(() => {
         if (handlers.has(handlerId)) unregisterHandler(handlerId);
         const normalized = normalizeArguments(argumentsInput, sdk);
         const target = command.startsWith("playmesh.") ? resolveDirect(sdk, command) : handleCommand(sdk, command, handleIdInput);
-        const options = normalized.args[0] && typeof normalized.args[0] === "object" ? { ...normalized.args[0] } : {};
+        const optionSource = command === "playmesh.main.rpc.onRequest"
+          ? normalized.args[1]
+          : normalized.args[0];
+        const options = optionSource && typeof optionSource === "object" ? { ...optionSource } : {};
         const timeoutMs = options.callbackTimeoutMs;
         delete options.callbackTimeoutMs;
         let callback;
@@ -1261,6 +1342,17 @@ const runtimeCode = String.raw`(() => {
         if (command === "playmesh.main.authority.onService") {
           callback = (action, context) => createRequest(handlerId, command, { action, context }, sdk, null, timeoutMs);
           returned = Object.keys(options).length ? target.callable.call(target.owner, callback, options) : target.callable.call(target.owner, callback);
+        } else if (command === "playmesh.main.rpc.onRequest") {
+          const path = String(normalized.args[0] || "");
+          callback = async (data, context) => createRequest(
+            handlerId,
+            command,
+            { data: await rpcTransferValue(data, sdk), context },
+            sdk,
+            undefined,
+            timeoutMs || 10000,
+          );
+          returned = target.callable.call(target.owner, path, callback);
         } else {
           callback = (data, context) => createRequest(handlerId, command, { data: makeBinaryView(data instanceof Uint8Array ? data : new Uint8Array(data || [])), context }, sdk, undefined, timeoutMs);
           returned = target.callable.call(target.owner, callback);
@@ -1548,6 +1640,7 @@ const chineseGroupSegments = new Map([
   ['Player', '玩家'],
   ['Game', '游戏'],
   ['Authority', '权威端'],
+  ['RPC', '请求响应'],
   ['Binary', '二进制通信'],
   ['Sync', '状态同步'],
   ['Lifecycle', '生命周期'],
@@ -1822,6 +1915,7 @@ const commandGroups = [
   { id: 'MainPlayer', group: 'Main SDK ❯ Player', matches: command => command.startsWith('playmesh.main.player.'), properties: [] },
   { id: 'MainGame', group: 'Main SDK ❯ Game', matches: command => command.startsWith('playmesh.main.game.'), properties: [] },
   { id: 'MainAuthority', group: 'Main SDK ❯ Authority', matches: command => command.startsWith('playmesh.main.authority.'), properties: ['playmesh.main.authority.defaultNamespace'] },
+  { id: 'MainRpc', group: 'Main SDK ❯ RPC', matches: command => command.startsWith('playmesh.main.rpc.'), properties: [] },
   { id: 'MainBinary', group: 'Main SDK ❯ Binary', matches: command => command.startsWith('playmesh.main.binary.') || command.startsWith('PlaymeshBinaryChannel.'), properties: ['playmesh.main.binary.authorityPlayerId', 'PlaymeshBinaryChannel.id', 'PlaymeshBinaryChannel.mode'] },
   { id: 'MainSync', group: 'Main SDK ❯ Sync', matches: command => command.startsWith('playmesh.main.sync.') || command.startsWith('PlaymeshSyncAuthorityController.'), properties: [] },
   { id: 'MainLifecycle', group: 'Main SDK ❯ Lifecycle', matches: command => command.startsWith('playmesh.main.lifecycle.'), properties: [] },
@@ -1829,6 +1923,7 @@ const commandGroups = [
   { id: 'AppAvailability', group: 'App SDK ❯ Availability', matches: command => command === 'playmesh.app.isAvailable', properties: ['playmesh.app.version'] },
   { id: 'AppIdentity', group: 'App SDK ❯ Identity', matches: command => command.startsWith('playmesh.app.identity.'), properties: [] },
   { id: 'AppRuntime', group: 'App SDK ❯ Runtime', matches: command => command.startsWith('playmesh.app.runtime.'), properties: [] },
+  { id: 'AppStorage', group: 'App SDK ❯ Storage', matches: command => command.startsWith('playmesh.app.storage.') || command.startsWith('PlaymeshAppStorageBucket.'), properties: [] },
   { id: 'AppPerformance', group: 'App SDK ❯ Performance', matches: command => command.startsWith('playmesh.app.performance.'), properties: [] },
   { id: 'AppCapabilities', group: 'App SDK ❯ Capabilities', matches: command => command.startsWith('playmesh.app.capabilities.') || command.startsWith('PlaymeshCapabilityHandle.'), properties: ['PlaymeshCapabilityHandle.id', 'PlaymeshCapabilityHandle.code', 'PlaymeshCapabilityHandle.apiVersion'] },
   { id: 'AppMedia', group: 'App SDK ❯ Media', matches: command => command.startsWith('playmesh.app.media.') || command.startsWith('PlaymeshAppMediaSession.'), properties: ['PlaymeshAppMediaSession.id', 'PlaymeshAppMediaSession.source', 'PlaymeshAppMediaSession.state', 'PlaymeshAppMediaSession.stream'] },
@@ -1953,6 +2048,13 @@ const typedExecuteSpecs = [
     args: `(() => { const values = [${variableCode('Action')}]; if (${argumentCode('UseNamespace')}) values.push({ namespace: ${argumentCode('Namespace')} }); return values; })()`,
   },
   {
+    command: 'playmesh.main.rpc.request', name: 'RequestAuthorityRpc', group: 'Main SDK ❯ RPC', label: '向 Authority 请求路径数据',
+    description: '通过认证二进制通道请求 Authority；数据变量可包含 JSON、$binary 或 $file 参数。',
+    parameters: [requiredString('Path', 'Authority 监听的精确 RPC path。'), requiredVariable('Data', 'JSON、$binary 或 $file 请求数据。'), requiredBoolean('UseTimeout', '是否显式设置请求超时。'), optionalNumber('TimeoutMs', '请求等待毫秒数，100～60000。', 10000)],
+    result: '将 Authority 返回的 JSON、$binary 或 $file 数据写入变量。',
+    args: `(() => { const values = [${argumentCode('Path')}, ${variableCode('Data')}]; if (${argumentCode('UseTimeout')}) values.push({ timeoutMs: ${argumentCode('TimeoutMs')} }); return values; })()`,
+  },
+  {
     command: 'playmesh.main.binary.createChannel', name: 'CreateBinaryChannel', group: 'Main SDK ❯ Binary', label: '创建二进制通道',
     description: '仅 Authority 创建 authority 审核或 relay 直传通道。', parameters: [requiredString('Mode', '二进制通道模式。', ['authority', 'relay'])], result: '将通道描述和 handleId 写入变量。', args: `[{ mode: ${argumentCode('Mode')} }]`,
   },
@@ -2047,6 +2149,14 @@ typedExecuteSpecs.push(
     command: 'playmesh.app.runtime.getLocale', name: 'GetAppLocale', group: 'App SDK ❯ Runtime', label: '获取 App 显示语言',
     description: '获取实际显示当前页面的 locale。', result: '将 locale 文本写入变量。', args: '[]',
   },
+  {
+    command: 'playmesh.app.storage.getBucket', name: 'GetAppStorageBucket', group: 'App SDK ❯ Storage', label: '获取当前设备存储桶句柄',
+    description: '获取只属于当前设备、不会通过 Authority 或会话共享的 JSON Bucket。', parameters: [requiredString('Bucket', '存储桶名称；规则与 Main Bucket 相同。')], result: '将当前设备存储桶 handleId 写入变量。', args: `[${argumentCode('Bucket')}]`,
+  },
+  { command: 'PlaymeshAppStorageBucket.getData', name: 'GetAppBucketData', group: 'App SDK ❯ Storage', label: '读取当前设备存储桶数据', description: '异步读取当前设备上的 key；不存在时结果为 null。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '存储 key，1～128 个允许字符。')], result: '将 JSON 值或 null 写入变量。', args: `[${argumentCode('Key')}]`, handle: 'HandleId' },
+  { command: 'PlaymeshAppStorageBucket.setData', name: 'SetAppBucketData', group: 'App SDK ❯ Storage', label: '写入当前设备存储桶数据', description: '异步写入一个只保存在当前设备的 JSON 值。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '存储 key，1～128 个允许字符。'), requiredVariable('Value', '要写入的 JSON 值变量。')], args: `[${argumentCode('Key')}, ${variableCode('Value')}]`, handle: 'HandleId', void: true },
+  { command: 'PlaymeshAppStorageBucket.removeData', name: 'RemoveAppBucketData', group: 'App SDK ❯ Storage', label: '删除当前设备存储桶数据', description: '删除当前设备存储桶中的指定 key。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '要删除的存储 key。')], args: `[${argumentCode('Key')}]`, handle: 'HandleId', void: true },
+  { command: 'PlaymeshAppStorageBucket.clearData', name: 'ClearAppBucketData', group: 'App SDK ❯ Storage', label: '清空当前设备存储桶', description: '清空当前设备上的当前 Bucket，不影响 Main Bucket。', parameters: [handleIdParameter('当前设备存储桶 handleId。')], args: '[]', handle: 'HandleId', void: true },
   {
     command: 'playmesh.app.performance.getFps', name: 'GetAppFps', group: 'App SDK ❯ Performance', label: '获取最近 FPS',
     description: '获取最近 FPS；尚未形成统计窗口时为 null。', result: '将 FPS 或 null 写入变量。', args: '[]',
@@ -2235,6 +2345,11 @@ const typedHandlerSpecs = [
     command: 'playmesh.main.authority.onService', name: 'RegisterAuthorityService', group: 'Main SDK ❯ Authority', label: '注册 Authority 动作处理器', description: '把游戏动作和可信 sender/session/members 上下文桥接为可响应请求。',
     parameters: [requiredBoolean('UseNamespace', '是否显式传入路由 namespace。'), optionalString('Namespace', '隔离路由 namespace。'), requiredBoolean('UseCallbackTimeout', '是否显式设置回调超时。'), optionalNumber('CallbackTimeoutMs', '请求等待毫秒数，100～60000。', 15000)],
     args: `(() => { const options = {}; if (${argumentCode('UseNamespace')}) options.namespace = ${argumentCode('Namespace')}; if (${argumentCode('UseCallbackTimeout')}) options.callbackTimeoutMs = ${argumentCode('CallbackTimeoutMs')}; return Object.keys(options).length ? [options] : []; })()`,
+  },
+  {
+    command: 'playmesh.main.rpc.onRequest', name: 'RegisterAuthorityRpcHandler', group: 'Main SDK ❯ RPC', label: '监听 Authority RPC 路径', description: '仅 Authority 可注册；把 JSON、图片或文件请求与可信上下文桥接到请求队列，响应可同步表达为队列结果。',
+    parameters: [requiredString('Path', '要监听的精确 RPC path。'), requiredBoolean('UseCallbackTimeout', '是否显式设置 GDevelop 回调等待时间。'), optionalNumber('CallbackTimeoutMs', '回调等待毫秒数，100～60000。', 10000)],
+    args: `(() => { const options = {}; if (${argumentCode('UseCallbackTimeout')}) options.callbackTimeoutMs = ${argumentCode('CallbackTimeoutMs')}; return Object.keys(options).length ? [${argumentCode('Path')}, options] : [${argumentCode('Path')}]; })()`,
   },
   {
     command: 'PlaymeshBinaryChannel.onForward', name: 'RegisterBinaryForwardHandler', group: 'Main SDK ❯ Binary', label: '注册二进制 Authority 审核器', description: '把待转发字节和可信 sender/delivery/targets 上下文桥接为 pass、replace 或 reject 请求。',
@@ -2452,6 +2567,8 @@ const eventFieldFunctions = [
 
 const typedResponseFunctions = [
   eventFunction({ name: 'RespondAuthorityResult', fullName: '响应 Authority 动作请求', description: '以一个显式目标列表和可选 message/payload 响应 Authority 请求。', group: 'Main SDK ❯ Authority', sentence: '响应 Authority 请求 _PARAM1_', parameters: [requiredString('RequestId', 'Authority 请求 ID。'), requiredVariable('TargetPlayerIds', '目标玩家 ID 数组。'), requiredBoolean('UseMessage', '是否包含推荐 message 字段。'), requiredVariable('Message', 'message 开放 JSON 值。'), requiredBoolean('UsePayload', '是否包含兼容 payload 字段。'), requiredVariable('Payload', 'payload 开放 JSON 值。')], code: extensionGuard('', `const result = { targetPlayerIds: ${variableCode('TargetPlayerIds')} }; if (${argumentCode('UseMessage')}) result.message = ${variableCode('Message')}; if (${argumentCode('UsePayload')}) result.payload = ${variableCode('Payload')}; extension.respond(${argumentCode('RequestId')}, result, "result");`) }),
+  eventFunction({ name: 'RespondAuthorityRpc', fullName: '响应 Authority RPC 请求', description: '以 JSON、$binary 或 $file 变量完成 RPC handler。', group: 'Main SDK ❯ RPC', sentence: '响应 RPC 请求 _PARAM1_，返回 _PARAM2_', parameters: [requiredString('RequestId', 'RPC 请求队列中的 RequestId。'), requiredVariable('Result', 'JSON、$binary 或 $file 返回值。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, ${variableCode('Result')}, "result");`) }),
+  eventFunction({ name: 'RejectAuthorityRpc', fullName: '拒绝 Authority RPC 请求', description: '让 RPC Promise 以 request_rejected 错误失败。', group: 'Main SDK ❯ RPC', sentence: '拒绝 RPC 请求 _PARAM1_，原因 _PARAM2_', parameters: [requiredString('RequestId', 'RPC 请求队列中的 RequestId。'), requiredString('Message', '拒绝原因。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, ${argumentCode('Message')}, "reject");`) }),
   eventFunction({ name: 'PassBinaryForwardRequest', fullName: '原样通过二进制审核请求', description: '以 void 结果原样通过二进制帧。', group: 'Main SDK ❯ Binary', sentence: '原样通过二进制审核请求 _PARAM1_', parameters: [requiredString('RequestId', '二进制审核请求 ID。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, null, "pass");`) }),
   eventFunction({ name: 'ReplaceBinaryForwardRequest', fullName: '以编码数据替换二进制审核帧', description: '用 UTF-8、Base64 或十六进制数据替换后通过。', group: 'Main SDK ❯ Binary', sentence: '替换二进制审核请求 _PARAM1_', parameters: [requiredString('RequestId', '二进制审核请求 ID。'), requiredString('Encoding', '替换数据编码。', ['utf8', 'base64', 'hex']), requiredString('Data', '替换帧数据。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, { $binary: { encoding: ${argumentCode('Encoding')}, data: ${argumentCode('Data')} } }, "replace");`) }),
   eventFunction({ name: 'ReplaceBinaryForwardRequestWithBytes', fullName: '以字节变量替换二进制审核帧', description: '用 0～255 数组变量替换后通过。', group: 'Main SDK ❯ Binary', sentence: '以字节变量替换二进制审核请求 _PARAM1_', parameters: [requiredString('RequestId', '二进制审核请求 ID。'), requiredVariable('Bytes', '0～255 字节数组变量。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, { $binary: { encoding: "bytes", data: ${variableCode('Bytes')} } }, "replace");`) }),

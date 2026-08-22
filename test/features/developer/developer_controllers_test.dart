@@ -73,6 +73,24 @@ void main() {
     );
   });
 
+  test('关闭后重开 GDevelop 时重新解析已轮换的 bootstrap capability', () async {
+    final provider = _RotatingCapabilityControllerProvider();
+    final controller = VisualGDevelopController(provider);
+    addTearDown(controller.dispose);
+
+    await controller.synchronize(provider.session);
+    final cachedUri = controller.state.links.single.uri;
+    expect(cachedUri.queryParameters['editorBootstrap'], 'bootstrap_1');
+
+    final firstOpen = await controller.workspaceUriForOpen(cachedUri);
+    expect(firstOpen?.queryParameters['editorBootstrap'], 'bootstrap_2');
+    expect(controller.state.links.single.uri, firstOpen);
+
+    final secondOpen = await controller.workspaceUriForOpen(firstOpen!);
+    expect(secondOpen?.queryParameters['editorBootstrap'], 'bootstrap_3');
+    expect(provider.visualCalls, 3);
+  });
+
   test('同一开发者会话安装完成后立即重新解析可视化链接', () async {
     final provider = _DistributionControllerProvider(initialInstalled: false);
     final probeService = EndpointProbeService(
@@ -410,6 +428,27 @@ class _ControllerProvider
     required bool allowMemoryFallback,
     DownloadCancellationToken? cancellationToken,
   }) => throw UnimplementedError();
+}
+
+class _RotatingCapabilityControllerProvider extends _ControllerProvider {
+  @override
+  Future<List<LanEndpointCandidate>> gdevelopWorkspaceLinks(
+    DeveloperSession session,
+  ) async {
+    final links = await super.gdevelopWorkspaceLinks(session);
+    return links
+        .map(
+          (link) => link.withUri(
+            link.uri.replace(
+              queryParameters: {
+                'token': session.token,
+                'editorBootstrap': 'bootstrap_$visualCalls',
+              },
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
 }
 
 class _DistributionControllerProvider extends _ControllerProvider {

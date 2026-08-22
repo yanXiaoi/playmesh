@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -21,6 +22,7 @@ import '../../core/game_web/game_web_external_navigation.dart';
 import '../../core/localization/platform_game_ui_assets.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/platform/app_platform.dart';
+import '../../core/storage/app_local_bucket_store.dart';
 import '../../models/user_profile.dart';
 
 class LocalGameWebView extends StatefulWidget {
@@ -29,6 +31,7 @@ class LocalGameWebView extends StatefulWidget {
     required this.resourceSource,
     required this.entryPath,
     required this.title,
+    required this.gameId,
     this.gameSdkVersion,
     this.appSdkVersion,
     this.bridge,
@@ -46,6 +49,7 @@ class LocalGameWebView extends StatefulWidget {
   final GameWebResourceSource resourceSource;
   final String entryPath;
   final String title;
+  final String gameId;
   final String? gameSdkVersion;
   final String? appSdkVersion;
   final GameSdkBridge? bridge;
@@ -109,6 +113,10 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       onInputTakeover: _takeOverAppSdkInput,
       onExitRequested: _exitFromAppGameMenu,
       onNicknameUpdate: widget.onNicknameUpdate,
+      localBucketStore: AppLocalBucketStore(
+        gameId: widget.gameId,
+        gameName: widget.title,
+      ),
     );
     HardwareKeyboard.instance.addHandler(_recordHardwareUserActivation);
     widget.onSystemBackHandlerChanged?.call(_handleNativeSystemBack);
@@ -611,6 +619,13 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       canRequestFocus: !_appSdkInputTakenOver,
       onKeyEvent: _handleNativeFallbackKey,
       child: AbsorbPointer(absorbing: !_appSdkInputTakenOver, child: content),
+    );
+    content = Stack(
+      fit: StackFit.expand,
+      children: [
+        content,
+        if (!_appSdkInputTakenOver) const PlaymeshLoadingView(),
+      ],
     );
     content = Listener(
       behavior: HitTestBehavior.translucent,

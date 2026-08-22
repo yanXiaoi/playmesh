@@ -25,6 +25,7 @@ import '../../core/relay/relay_tunnel.dart';
 import '../../core/developer/webview_console_capture.dart';
 import '../../core/platform/app_device_service.dart';
 import '../../core/platform/app_platform.dart';
+import '../../core/storage/app_local_bucket_store.dart';
 import '../../core/network/lan_game_discovery_service.dart';
 import '../../core/profile/user_profile_store.dart';
 import '../../models/user_profile.dart';
@@ -214,6 +215,12 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         lanHost: _appLanHost,
         onExitRequested: _exitFromAppGameMenu,
         onNicknameChanged: _persistNickname,
+        localBucketStore: widget.gameId == null || widget.gameName == null
+            ? null
+            : AppLocalBucketStore(
+                gameId: widget.gameId!,
+                gameName: widget.gameName!,
+              ),
       );
       if (_usesFlutterWebView) {
         await _initialize();

@@ -172,9 +172,9 @@ console.log(ready.main.sdkVersion, playmesh.app.runtime.getLocale());
 
 游戏只显式引入 `playmesh-main.js`，平台会在 App WebView 和普通浏览器中先注入
 `playmesh-app.js`。Game SDK `4.1.0` 在 `playmesh.main.*` 提供所有平台一致的游戏
-声明、会话、玩家、角色、联机、生命周期和存储 API，共享结果来自 Authority；App SDK
+声明、会话、玩家、角色、联机、生命周期和 Authority 主机存储 API；App SDK
 `3.3.0` 在 `playmesh.app.*` 只提供当前终端的平台环境、身份、设备能力、权限、
-输入、性能、本机 Console 日志、locale、外部 HTTP(S) 链接打开和覆盖层。面向游戏代码的唯一全局对象是
+输入、性能、当前设备存储、本机 Console 日志、locale、外部 HTTP(S) 链接打开和覆盖层。面向游戏代码的唯一全局对象是
 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在。`playmesh.main.ready` 内部先
 等待 `playmesh.app.ready`，再完成 Game 域初始化；根 `playmesh.ready` 是唯一例外，
@@ -246,6 +246,37 @@ Channel 中除发送者外的当前在线成员，所有投递都由同一个 `o
 通过、替换或拒绝；已经开始执行的旧、新审核都会继续且各自结果生效。
 `mode: "relay"` 直接转发。
 
+需要让任意客户端按精确路径向 Authority 请求并等待一个返回值时，使用
+`playmesh.main.rpc`。这不是 Main Bucket 的客户端直连入口；Authority handler 仍须根据
+可信 `context.senderPlayerId` 做业务审计：
+
+```js
+if (playmesh.main.session.isAuthority()) {
+  playmesh.main.rpc.onRequest("/profile/load", async (request, context) => {
+    const profile = await loadProfileFor(context.senderPlayerId, request.slot);
+    return {
+      profile,
+      portrait: profilePortraitBlob, // Blob/File/ArrayBuffer/Uint8Array 均可
+    };
+  });
+}
+
+const result = await playmesh.main.rpc.request(
+  "/profile/load",
+  { slot: "slot1" },
+  { timeoutMs: 10000 },
+);
+```
+
+- 客户端调用始终异步；Authority handler 可以同步返回，也可以返回 Promise。
+- 传输使用会话认证的内部二进制 RPC 帧，不把图片或文件转成 JSON/Base64。支持 JSON
+  兼容值、`Blob`、`File`、`ArrayBuffer` 和 `Uint8Array`；函数、DOM 对象、循环引用及
+  自定义类实例不能跨设备传递。
+- 只有 Authority 可以注册 `onRequest`；Core 后台也只会把请求路由给固定 Authority，
+  并拒绝非 Authority 伪造结果。客户端超时不会取消已经开始执行的 handler。
+- 单个编码后 payload 受 Binary WS 4 MiB 帧上限约束，当前 SDK 为帧头和元数据预留
+  64 KiB；大文件应继续使用游戏自己的受控文件流程，而不是把 RPC 当文件服务器。
+
 大屏游戏不在公共显示端提供“开始游戏”动作。每位控制器玩家提交准备状态，人数满足 `players.min` 且全员准备后，由 Authority 时钟自动倒计时并开始。回合推进也应由 Authority 时钟完成，不能依赖显示页面的定时器。
 
 ## 生命周期
@@ -262,6 +293,8 @@ playmesh.main.lifecycle.onExit(() => {
 
 ## 持久化数据
 
+需要由 Authority 持有游戏数据时，使用 Main Bucket：
+
 ```js
 const save = playmesh.main.storage.getBucket("save_v1");
 const score = await save.getData("high_score");
@@ -277,7 +310,10 @@ preview.src = imageUrl;
   上层语义的运行时适配器使用 `getDataSync/setDataSync`；同步调用会阻塞页面，失败时直接
   抛错，不能作为普通存档 API。
 - 平台只自动绑定当前 `gameId`，不创建 `{userId}` 目录。用户维度由游戏在 key 或 JSON 内容中设计。
-- 所有客户端读写 Authority 主机的同一份 Bucket。浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Bucket。
+- 只有 Authority 页面可以读写 Main Bucket；分享浏览器、远程 App 和其他非 Authority
+  玩家即使持有有效会话 Cookie 或分享令牌，宿主后台也会拒绝。玩家需要的数据必须由
+  Authority 通过正常游戏消息投影，不能把 Main Bucket 当作客户端直连数据库。
+- 浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Main Bucket。
 - 浏览器昵称采集、修改和普通浏览器居中游戏菜单由 SDK 统一提供。菜单包含继续、刷新、日志、性能、全屏、信息和退出；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具入口或昵称控件。
 - 使用 `session.onPlayerJoin`、`session.onPlayerLeave` 和 `session.onPlayerReconnect` 处理首次连接、掉线和同 ID 重连。不要用昵称推断玩家身份。
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
@@ -285,6 +321,28 @@ preview.src = imageUrl;
   统一由 SDK 通过同源 HTTP `GET/PUT/DELETE` 访问，不存在 Session WS fallback。
   `upload(file)` 仍使用独立原始文件流 `POST` 写入 `data/data`，返回运行时
   `/bucket/...` 地址。游戏不得猜测宿主文件路径、枚举目录或自行调用内部 JSON 路由。
+
+只需保存在玩家当前设备、且不希望其他玩家通过游戏会话访问的数据，使用 App Bucket：
+
+```js
+const localSave = playmesh.app.storage.getBucket("player_save");
+const settings = await localSave.getData("settings");
+await localSave.setData("settings", {
+  sensitivity: settings?.sensitivity ?? 1,
+});
+```
+
+- App Bucket 的名称和 key 规则与 Main Bucket 相同；名称匹配
+  `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，key 匹配
+  `^[A-Za-z0-9._-]{1,128}$`。
+- App WebView 只写入当前设备的
+  `playmesh-library/data/{游戏名称}/{gameId}/{bucket名称}.json`。该目录不是 Authority
+  主机的共享 Bucket，也不会经由 Session 暴露给其他玩家；游戏名称文件段由宿主安全
+  处理，游戏不能传入、猜测或枚举文件路径。
+- 普通浏览器以 Bucket 名称本身作为 `localStorage` key；同源浏览器存储仍受浏览器清理、
+  隐私模式和配额影响。
+- App Bucket 只支持异步 `getData/setData/removeData/clearData` 和 JSON 值，不支持
+  `upload()`、同步接口或默认跨设备恢复。不要存放凭证、令牌等敏感认证数据。
 
 ## FPS 上报
 
@@ -371,13 +429,16 @@ if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
 - HTML 查询参数只属于游戏页面的可见、自定义启动配置。App 身份、昵称、设备能力和
   Core 地址由页面内标准 App SDK 通过原生 Bridge 向 Dart 请求 `app.bootstrap`
   获得；不得用 URL 参数判断当前是否运行在 App 中或指定 App SDK 脚本地址。
-- 本地开发与 App 运行不按关键词限制入口查询参数；go-server 云分发上传会解码并
-  扫描其中的外部 HTTP/WS、`file:`、`javascript:` 等主动内容。
+- 本地开发与 App 运行不按关键词限制入口查询参数；go-server 云分发上传也不因
+  外部 HTTP/WS、协议相对链接或动态 `Function` 构造拒绝包。`file:`、
+  `javascript:`、可执行 HTML Data URL、`eval`、Service Worker 等其余启用的
+  内容规则仍按服务端配置执行。
 - 多人游戏显式声明合法且存在的 `authority.entry`。
 - 需要设备能力时存在合法的 `capabilities.json`，能力 code 来自统一注册表；未声明或当前不可用时主流程仍可运行。
 - 主 SDK 从 `/playmesh/sdk/v1/playmesh-main.js` 引入，没有跨目录相对路径；旧
   `playmesh.js` 不兼容。
 - 页面没有直接 WebSocket、Core 地址、原生 Bridge 或私有 `data/json` URL；运行时文件只使用 `upload(file)` 返回的 `/bucket/...` 地址。
 - Authority 与玩家层职责分离，大屏公共显示端不进入玩家集合。
-- 存储只通过 `playmesh.main.storage`，FPS 只在真实渲染完成处通过
+- Authority 主机存储只通过 `playmesh.main.storage`，当前设备私有存储只通过
+  `playmesh.app.storage`；FPS 只在真实渲染完成处通过
   `playmesh.app.performance` 上报；`playmesh.main.performance` 不存在。

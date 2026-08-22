@@ -66,6 +66,113 @@ func TestBinaryChannelRelayRoutesOpaquePayload(t *testing.T) {
 	}
 }
 
+func TestBinaryRPCRoutesOpaquePayloadThroughAuthority(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	requestPayload := []byte{7, 0, 255, 19, 88}
+	writeBinary(t, guestBinary, binaryRPCRequestFrame(
+		41,
+		1000,
+		"/files/load",
+		requestPayload,
+	))
+	incoming := readBinaryRPCIncoming(t, hostBinary)
+	if incoming.rpcID == 0 ||
+		incoming.senderID != guest.Credential.Player.ID ||
+		incoming.path != "/files/load" ||
+		!bytes.Equal(incoming.payload, requestPayload) {
+		t.Fatalf("rpc incoming = %#v", incoming)
+	}
+
+	responsePayload := []byte{11, 0, 42, 255}
+	writeBinary(t, hostBinary, binaryRPCResponseFrame(
+		incoming.rpcID,
+		binaryStatusOK,
+		responsePayload,
+		"",
+		"",
+	))
+	result := readBinaryRPCResult(t, guestBinary)
+	if result.requestID != 41 || result.status != binaryStatusOK ||
+		!bytes.Equal(result.payload, responsePayload) {
+		t.Fatalf("rpc result = %#v", result)
+	}
+}
+
+func TestBinaryRPCPreservesAuthorityErrorCode(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	writeBinary(t, guestBinary, binaryRPCRequestFrame(
+		9,
+		1000,
+		"/files/save",
+		[]byte{1},
+	))
+	incoming := readBinaryRPCIncoming(t, hostBinary)
+	writeBinary(t, hostBinary, binaryRPCResponseFrame(
+		incoming.rpcID,
+		binaryStatusError,
+		nil,
+		"save_rejected",
+		"存档未通过 Authority 校验",
+	))
+	result := readBinaryRPCResult(t, guestBinary)
+	if result.requestID != 9 || result.status != binaryStatusError ||
+		result.code != "save_rejected" ||
+		result.message != "存档未通过 Authority 校验" {
+		t.Fatalf("rpc error result = %#v", result)
+	}
+}
+
+func TestBinaryRPCRejectsResponseFromNonAuthority(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	writeBinary(t, guestBinary, binaryRPCRequestFrame(
+		12,
+		1000,
+		"/secure/path",
+		[]byte{1},
+	))
+	incoming := readBinaryRPCIncoming(t, hostBinary)
+	writeBinary(t, guestBinary, binaryRPCResponseFrame(
+		incoming.rpcID,
+		binaryStatusOK,
+		[]byte{1},
+		"",
+		"",
+	))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, err := guestBinary.Read(ctx)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("non-authority rpc response close status = %v, err = %v", websocket.CloseStatus(err), err)
+	}
+}
+
 func TestBinaryChannelAuthorityCanReplaceOrRejectPayload(t *testing.T) {
 	server, host, guest, hostSession, guestSession := binaryTestSession(t)
 	defer server.Close()
@@ -782,5 +889,115 @@ func binaryDecisionFrame(reviewID uint64, decision byte, payload []byte) []byte 
 	data[0], data[1], data[10] = binaryProtocolVersion, binaryOpDecision, decision
 	binary.BigEndian.PutUint64(data[2:10], reviewID)
 	copy(data[11:], payload)
+	return data
+}
+
+type binaryTestRPCIncoming struct {
+	rpcID    uint64
+	senderID string
+	path     string
+	payload  []byte
+}
+
+func readBinaryRPCIncoming(
+	t *testing.T,
+	connection *websocket.Conn,
+) binaryTestRPCIncoming {
+	t.Helper()
+	data := readBinaryServerFrame(t, connection)
+	if len(data) < 15 || data[1] != binaryOpRPCIncoming {
+		t.Fatalf("expected rpc incoming, got %x", data)
+	}
+	senderLength := int(binary.BigEndian.Uint16(data[10:12]))
+	pathLength := int(binary.BigEndian.Uint16(data[12:14]))
+	if senderLength == 0 || pathLength == 0 ||
+		len(data) < 14+senderLength+pathLength {
+		t.Fatalf("invalid rpc incoming: %x", data)
+	}
+	offset := 14
+	result := binaryTestRPCIncoming{
+		rpcID:    binary.BigEndian.Uint64(data[2:10]),
+		senderID: string(data[offset : offset+senderLength]),
+	}
+	offset += senderLength
+	result.path = string(data[offset : offset+pathLength])
+	offset += pathLength
+	result.payload = data[offset:]
+	return result
+}
+
+type binaryTestRPCResult struct {
+	requestID uint32
+	status    byte
+	payload   []byte
+	code      string
+	message   string
+}
+
+func readBinaryRPCResult(
+	t *testing.T,
+	connection *websocket.Conn,
+) binaryTestRPCResult {
+	t.Helper()
+	data := readBinaryServerFrame(t, connection)
+	if len(data) < 7 || data[1] != binaryOpRPCResult {
+		t.Fatalf("expected rpc result, got %x", data)
+	}
+	result := binaryTestRPCResult{
+		requestID: binary.BigEndian.Uint32(data[2:6]),
+		status:    data[6],
+	}
+	if result.status == binaryStatusOK {
+		result.payload = data[7:]
+		return result
+	}
+	if result.status != binaryStatusError || len(data) < 9 {
+		t.Fatalf("invalid rpc result: %x", data)
+	}
+	codeLength := int(binary.BigEndian.Uint16(data[7:9]))
+	if codeLength == 0 || len(data) < 9+codeLength {
+		t.Fatalf("invalid rpc error result: %x", data)
+	}
+	result.code = string(data[9 : 9+codeLength])
+	result.message = string(data[9+codeLength:])
+	return result
+}
+
+func binaryRPCRequestFrame(
+	requestID uint32,
+	timeoutMS uint32,
+	path string,
+	payload []byte,
+) []byte {
+	data := make([]byte, 12+len(path)+len(payload))
+	data[0], data[1] = binaryProtocolVersion, binaryOpRPCRequest
+	binary.BigEndian.PutUint32(data[2:6], requestID)
+	binary.BigEndian.PutUint32(data[6:10], timeoutMS)
+	binary.BigEndian.PutUint16(data[10:12], uint16(len(path)))
+	copy(data[12:12+len(path)], path)
+	copy(data[12+len(path):], payload)
+	return data
+}
+
+func binaryRPCResponseFrame(
+	rpcID uint64,
+	status byte,
+	payload []byte,
+	code string,
+	message string,
+) []byte {
+	if status == binaryStatusOK {
+		data := make([]byte, 11+len(payload))
+		data[0], data[1], data[10] = binaryProtocolVersion, binaryOpRPCResponse, status
+		binary.BigEndian.PutUint64(data[2:10], rpcID)
+		copy(data[11:], payload)
+		return data
+	}
+	data := make([]byte, 13+len(code)+len(message))
+	data[0], data[1], data[10] = binaryProtocolVersion, binaryOpRPCResponse, status
+	binary.BigEndian.PutUint64(data[2:10], rpcID)
+	binary.BigEndian.PutUint16(data[11:13], uint16(len(code)))
+	copy(data[13:13+len(code)], code)
+	copy(data[13+len(code):], message)
 	return data
 }

@@ -348,13 +348,17 @@ function createPage(
 
     constructor(url) {
       this.url = url;
+      this.isBinary = String(url).includes("/binary");
       this.readyState = FakeWebSocket.CONNECTING;
+      this.bufferedAmount = 0;
       this.listeners = new Map();
+      this.sent = [];
       FakeWebSocket.instances.push(this);
       queueMicrotask(() => {
         if (this.readyState !== FakeWebSocket.CONNECTING) return;
         this.readyState = FakeWebSocket.OPEN;
         this.emit("open", {});
+        if (this.isBinary) return;
         this.emit("message", {
           data: JSON.stringify({
             type: "session.state",
@@ -406,7 +410,15 @@ function createPage(
     }
 
     send(rawMessage) {
+      if (this.isBinary) {
+        const data = rawMessage instanceof Uint8Array
+          ? rawMessage
+          : new Uint8Array(rawMessage);
+        this.sent.push(new Uint8Array(data));
+        return;
+      }
       const message = JSON.parse(rawMessage);
+      this.sent.push(message);
       if (message.type === "session.ping") {
         queueMicrotask(() => this.emit("message", {
           data: JSON.stringify({
@@ -603,6 +615,10 @@ function createPage(
       };
     },
     WebSocket: FakeWebSocket,
+    Uint8Array,
+    ArrayBuffer,
+    DataView,
+    Blob,
     crypto: webcrypto,
     TextEncoder,
     TextDecoder,
@@ -900,6 +916,62 @@ assert.deepEqual(
 assert.equal(firstPage.playmesh.app.isAvailable(), false);
 assert.equal(firstPage.playmesh.app.identity.getCurrent(), null);
 assert.equal(firstPage.playmesh.main.session.isAuthority(), false);
+assert.throws(
+  () => firstPage.playmesh.main.rpc.onRequest("/player/profile", () => null),
+  (error) => error?.code === "not_authority",
+);
+const rpcMessages = [];
+const unsubscribeRpcMessages = firstPage.playmesh.main.game.onMessage((message) => {
+  rpcMessages.push(message);
+});
+const browserRpcOperation = firstPage.playmesh.main.rpc.request(
+  "/player/profile",
+  { includeInventory: true },
+);
+let browserRpcSocket;
+let browserRpcRequest;
+for (let attempt = 0; attempt < 50 && !browserRpcRequest; attempt += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  browserRpcSocket = firstPage.__sockets.findLast((socket) => socket.isBinary);
+  browserRpcRequest = browserRpcSocket?.sent.findLast((frame) => frame[1] === 0x06);
+}
+assert.ok(
+  browserRpcRequest,
+  `browser RPC must send an internal binary frame: ${JSON.stringify(
+    firstPage.__sockets.map((socket) => ({ url: socket.url, sent: socket.sent.length })),
+  )}`,
+);
+const browserRpcView = new DataView(
+  browserRpcRequest.buffer,
+  browserRpcRequest.byteOffset,
+  browserRpcRequest.byteLength,
+);
+const browserRpcRequestId = browserRpcView.getUint32(2);
+const browserRpcPathLength = browserRpcView.getUint16(10);
+assert.equal(
+  new TextDecoder().decode(
+    browserRpcRequest.subarray(12, 12 + browserRpcPathLength),
+  ),
+  "/player/profile",
+);
+const browserRpcResult = new Uint8Array(30);
+const browserRpcResultView = new DataView(browserRpcResult.buffer);
+browserRpcResult[0] = 1;
+browserRpcResult[1] = 0x86;
+browserRpcResultView.setUint32(2, browserRpcRequestId);
+browserRpcResult[6] = 0;
+browserRpcResult[7] = 7;
+browserRpcResultView.setUint32(8, 1);
+browserRpcResultView.setUint32(12, 5);
+browserRpcResult.set(new TextEncoder().encode("level"), 16);
+browserRpcResult[21] = 4;
+browserRpcResultView.setFloat64(22, 7);
+browserRpcSocket.emit("message", {
+  data: browserRpcResult.buffer,
+});
+assert.equal((await browserRpcOperation).level, 7);
+assert.deepEqual(rpcMessages, [], "RPC 内部响应不能泄漏到 game.onMessage");
+unsubscribeRpcMessages();
 assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), true);
 assert.equal(
   firstPage.__mountedHosts.includes("playmesh-browser-fullscreen"),

@@ -176,7 +176,7 @@ App 外部端口的 `/` 是游戏源与用户门户：
 - 网页上传使用 HttpOnly/Secure/SameSite=Lax 会话 Cookie 与 Secure CSRF Cookie，
   所有写操作同时校验会话绑定的 CSRF Token。Cookie 始终带 Secure，因此匿名
   Catalog 可继续通过纯 HTTP 浏览，但账号登录和用户门户必须部署在 HTTPS 上。
-- App 上传与网页上传共用同一 IP 的 30 秒窗口；限流发生在读取请求体之前，
+- App 上传与网页上传共用同一 IP 的 2 秒窗口；限流发生在读取请求体之前，
   `Retry-After` 返回当前窗口的剩余整秒。两个入口共享所有权和严格递增版本事务。
 - 默认显示“快速添加当前游戏源”二维码；管理员可通过
   `showPublicSourceQRCode` 开关隐藏。二维码由后端使用 `publicBaseUrl`、正式发布
@@ -210,20 +210,21 @@ POST /api/user/uploads
 2. 限制请求大小、ZIP 文件数量、单文件大小、展开总大小和压缩比。
 3. 拒绝绝对路径、目录穿越、反斜杠路径、隐藏文件、大小写冲突路径、Windows
    设备名、符号链接、特殊文件、重复路径和加密 ZIP 条目。
-4. 只允许 `main.json`、可选 `capabilities.json`、可选根 `icon.png` 与 `app/`，并使用 Web 资源扩展名
-   白名单。
+4. 只允许 `main.json`、可选 `capabilities.json`、可选根 `icon.png` 与 `app/`；不对
+   `app/` 内其他文件使用扩展名或文件类型白名单。只读取 `main.json.entries.game` 声明的
+   `.html` 首页，并确认对应物理文件是非空、合法 UTF-8、无 NUL 的网页文本。
 5. 使用 ClamAV 扫描原始 ZIP；默认扫描器缺失、超时或报错都会拒绝上传。
-6. 静态检查 HTML、JavaScript、CSS 与 SVG 中的外部 HTTP/WS 地址、`file:`、
-   `javascript:`、动态代码执行、Service Worker 和嵌入文档元素。
-7. `main.json.entries.game` 与 `entries.controller` 可使用
-   `relative.html?query`；物理文件检查只使用 `?` 前的路径。云端上传扫描会把
-   查询原文及每一层百分号解码结果按 HTML 活动内容规则检查，阻止编码或多重编码的
-   外链协议绕过；`authority.entry` 仍不允许查询参数。
-8. 完整校验 `main.json` 后才把原包原子写入游戏包目录；`id` 只接受 1–64 个
-   安全字符。解析器对所有未知字段一律静默忽略，不产生 finding、告警、错误或兼容
-   分支；规范化使用当前已知 Manifest 字段投影，因此数据库和 ZIP 中统一丢弃所有
-   未知字段。`permissions`、`icon` 只是普通未知键；能力只读取独立
-   `capabilities.json`，图标只读取包根 `icon.png`。
+6. 静态检查 HTML、JavaScript、CSS 与 SVG 中启用的内容规则；默认仅保留可执行 HTML
+   Data URL、`eval`、Service Worker 和活动 SVG。外部 HTTP/WS、协议相对链接、动态
+   `Function`、`file:`、`javascript:` 及 `iframe/object/embed` 不作为默认拒绝条件。
+7. `main.json.entries.game` 与 `entries.controller` 中已声明的查询参数仍会把原文及
+   每一层百分号解码结果交给其余启用的内容规则；上传服务不把当前版本的入口、模式
+   或 Authority 结构作为兼容性门槛。
+8. `main.json` 只校验服务端持久化和版本管理实际依赖的 `id`、`name`、`version`
+   核心元数据；`id` 只接受 1–64 个安全字符，包版本仍使用无前缀
+   `MAJOR.MINOR.PATCH`。`sdkVersion`、`appSdkVersion` 不设版本白名单，也不要求存在；
+   运行时是否兼容由下载并运行游戏的客户端判断。未知字段及未知嵌套字段在数据库和
+   规范化 ZIP 中原样保留，SDK 或 Manifest 扩展无需同步发布服务端。
 9. 敏感或感染文件立即删除，不创建版本、所有权或审核记录。
 10. 并发扫描数默认限制为 4；可在后台通过 `maxConcurrentScans` 调整。
 11. 下载和删除时把 SQLite 路径重新视为不可信值，解析符号链接并强制目标仍是
@@ -240,7 +241,7 @@ POST /api/user/uploads
 不会被扫描器删除。上传冲突或失败时若即时删除失败，错误会被记录并由启动任务及每
 30 秒的后台任务持续重试。
 
-ClamAV 是纵深防御的一层，不替代 ZIP 边界、扩展名白名单和静态分析。生产环境应让
+ClamAV 是纵深防御的一层，不替代 ZIP 边界、声明首页检查和静态分析。生产环境应让
 ClamAV 使用低权限服务账号，并定期通过 `freshclam` 更新签名库。
 
 无法安装 ClamAV 的开发或受控内网环境可以在 `.env` 显式关闭：
@@ -250,16 +251,16 @@ PLAYMESH_CLAMAV_ENABLED=false
 ```
 
 该开关默认 `true`，只从 `.env` 读取，不允许通过后台远程修改。关闭后上传仍会执行
-ZIP 路径、文件类型、大小、压缩比、Manifest 和内容正则检查，但缺少病毒签名扫描，
+ZIP 路径、大小、压缩比、Manifest、声明首页和内容正则检查，但缺少病毒签名扫描，
 因此不建议用于公共生产游戏源。
 
 活动内容正则不硬编码在扫描器中。后台“运行配置”以规则数组维护：
 
 ```json
 {
-  "id": "external-http-ws",
-  "description": "外部 HTTP/WS 地址",
-  "pattern": "(?i)(?:https?|wss?)://",
+  "id": "operator-custom-policy",
+  "description": "部署者自定义内容策略",
+  "pattern": "(?i)blocked-content",
   "extensions": [".html", ".js"],
   "enabled": true
 }
@@ -268,6 +269,10 @@ ZIP 路径、文件类型、大小、压缩比、Manifest 和内容正则检查�
 `extensions` 为空表示应用于全部活动文本。保存和启动时会编译每条规则并拒绝无效
 正则、重复 ID 或不规范扩展名；至少必须保留一条启用规则。后续新增风险只需在后台
 增加规则并安全重启，不需要修改 Go 源码。
+
+旧配置中精确匹配历史默认值的外部 HTTP/WS、协议相对链接、动态 `Function`、
+`file:`、`javascript:` 和嵌入文档规则会在启动时自动移除；表达式不同的部署者
+自定义规则不受影响。
 
 ZIP 条目路径穿越由归档路径校验直接阻断，不使用内容正则扫描 JavaScript 文本中的
 `../`。这是因为 `import "../service/index.js"`、`fetch("../data.json")` 等是包内

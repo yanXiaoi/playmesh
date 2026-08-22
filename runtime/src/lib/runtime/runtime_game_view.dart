@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
@@ -531,7 +532,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
     if (Platform.isWindows) {
       final controller = _windows;
       content = controller == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const PlaymeshLoadingView()
           : Webview(
               controller,
               permissionRequested: (_, kind, isUserInitiated) async {
@@ -554,7 +555,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
     } else {
       final controller = _android;
       content = controller == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const PlaymeshLoadingView()
           : FocusScope(
               node: _androidWebViewFocusScopeNode,
               child: WebViewWidget(controller: controller),
@@ -570,6 +571,12 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
         child: content,
       ),
     );
+    if (!widget.inputTakenOver.value) {
+      content = Stack(
+        fit: StackFit.expand,
+        children: [content, const PlaymeshLoadingView()],
+      );
+    }
     content = Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (_) => widget.appBridge.recordUserActivation(),

@@ -45,7 +45,7 @@ func TestManifestGameIDUsesUnifiedSafeBounds(t *testing.T) {
 	}
 }
 
-func TestManifestParserProjectsOnlyKnownFields(t *testing.T) {
+func TestManifestParserPreservesUnknownFields(t *testing.T) {
 	summary, findings := parseManifest([]byte(
 		`{"id":"com.example.game","name":"Game","version":"1.0.0",` +
 			`"players":{"min":1,"max":2,"extraNested":"ignored"},` +
@@ -55,29 +55,30 @@ func TestManifestParserProjectsOnlyKnownFields(t *testing.T) {
 	if len(findings) != 0 {
 		t.Fatalf("未知字段不应触发校验: %#v", findings)
 	}
-	for _, unknown := range []string{
+	for _, preserved := range []string{
 		`"permissions":["http://ignored.example"]`,
 		`"icon":"javascript:ignored"`,
 		`"extra":"http://ignored.example"`,
 		`"extraNested":"ignored"`,
 	} {
-		if strings.Contains(summary.JSON, unknown) {
-			t.Fatalf("已知字段投影保留了未知字段 %s: %s", unknown, summary.JSON)
+		if !strings.Contains(summary.JSON, preserved) {
+			t.Fatalf("Manifest 向前兼容字段被删除 %s: %s", preserved, summary.JSON)
 		}
 	}
 	for _, known := range []string{
 		`"id":"com.example.game"`,
 		`"name":"Game"`,
 		`"version":"1.0.0"`,
-		`"players":{"max":2,"min":1}`,
+		`"max":2`,
+		`"min":1`,
 	} {
 		if !strings.Contains(summary.JSON, known) {
-			t.Fatalf("已知字段投影丢失 %s: %s", known, summary.JSON)
+			t.Fatalf("Manifest 丢失核心字段 %s: %s", known, summary.JSON)
 		}
 	}
 }
 
-func TestUserUploadRejectsUnsupportedSDKVersions(t *testing.T) {
+func TestUserUploadAcceptsSDKAndManifestChangesWithoutServerUpgrade(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.Storage.DatabasePath = filepath.Join(root, "server.db")
@@ -107,39 +108,38 @@ func TestUserUploadRejectsUnsupportedSDKVersions(t *testing.T) {
 	cases := []struct {
 		name     string
 		manifest string
-		want     string
 	}{
 		{
-			name: "旧 Game SDK",
-			manifest: `{"id":"com.example.old-game-sdk","name":"Old Game SDK",` +
-				`"version":"1.0.0","sdkVersion":"3.2.0","appSdkVersion":"3.3.0",` +
+			name: "未来 SDK 版本",
+			manifest: `{"id":"com.example.future-sdk","name":"Future SDK",` +
+				`"version":"1.0.0","sdkVersion":"99.0.0","appSdkVersion":"42.0.0",` +
 				`"entries":{"game":"index.html"}}`,
-			want: "main.json.sdkVersion 必须显式声明为 4.0.0",
 		},
 		{
-			name: "旧 App SDK",
-			manifest: `{"id":"com.example.old-app-sdk","name":"Old App SDK",` +
-				`"version":"1.0.0","sdkVersion":"4.0.0","appSdkVersion":"3.1.0",` +
-				`"entries":{"game":"index.html"}}`,
-			want: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
+			name: "省略 SDK 并扩展清单结构",
+			manifest: `{"id":"com.example.future-shape","name":"Future Shape",` +
+				`"version":"1.0.0","entries":{"game":"index.html"},` +
+				`"runtime":{"channel":"next"},` +
+				`"futureField":{"preserved":true}}`,
 		},
 	}
-	for _, testCase := range cases {
+	for index, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			file := buildTestPackageArchive(t, testCase.manifest, nil)
-			_, uploadErr := service.ProcessUserUpload(
+			game, uploadErr := service.ProcessUserUpload(
 				context.Background(),
-				file,
-				"old-sdk.zip",
+				file, "future-sdk.zip",
 				owner,
 			)
 			_ = file.Close()
-			var rejected *RejectedError
-			if !errors.As(uploadErr, &rejected) ||
-				!strings.Contains(rejected.Reason, testCase.want) {
-				t.Fatalf("非当前 SDK 上传未被严格拒绝: %v", uploadErr)
+			if uploadErr != nil {
+				t.Fatalf("SDK 或 Manifest 演进不应要求服务端同步升级: %v", uploadErr)
 			}
-			assertUploadFileCounts(t, cfg.Storage, 0, 0)
+			if strings.Contains(testCase.manifest, "futureField") &&
+				!strings.Contains(game.ManifestJSON, `"futureField":{"preserved":true}`) {
+				t.Fatalf("上传后未来字段未保留: %s", game.ManifestJSON)
+			}
+			assertUploadFileCounts(t, cfg.Storage, index+1, 0)
 		})
 	}
 }
@@ -503,9 +503,9 @@ func assertNormalizedManifest(t *testing.T, game store.Game) {
 			info.Size(),
 		)
 	}
-	for _, forbidden := range []string{`"permissions"`, `"icon"`, `"extra"`} {
-		if strings.Contains(game.ManifestJSON, forbidden) {
-			t.Fatalf("数据库 Manifest 已知字段投影仍包含 %s: %s", forbidden, game.ManifestJSON)
+	for _, preserved := range []string{`"permissions"`, `"icon"`, `"extra"`} {
+		if !strings.Contains(game.ManifestJSON, preserved) {
+			t.Fatalf("数据库 Manifest 丢失向前兼容字段 %s: %s", preserved, game.ManifestJSON)
 		}
 	}
 	if !strings.Contains(game.ManifestJSON, `"author":"原样发布者 API Name"`) {
@@ -525,9 +525,9 @@ func assertNormalizedManifest(t *testing.T, game store.Game) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{`"permissions"`, `"icon"`, `"extra"`} {
-		if strings.Contains(string(content), forbidden) {
-			t.Fatalf("规范化 ZIP 已知字段投影仍包含 %s: %s", forbidden, content)
+	for _, preserved := range []string{`"permissions"`, `"icon"`, `"extra"`} {
+		if !strings.Contains(string(content), preserved) {
+			t.Fatalf("规范化 ZIP 丢失向前兼容字段 %s: %s", preserved, content)
 		}
 	}
 	if !strings.Contains(string(content), `"author":"原样发布者 API Name"`) {

@@ -10,8 +10,8 @@ class EndpointPicker extends StatefulWidget {
   const EndpointPicker({
     super.key,
     required this.controller,
-    required this.title,
-    required this.description,
+    this.title,
+    this.description,
     required this.refreshLabel,
     required this.emptyLabel,
     required this.probingLabel,
@@ -24,8 +24,8 @@ class EndpointPicker extends StatefulWidget {
   });
 
   final EndpointPickerController controller;
-  final String title;
-  final String description;
+  final String? title;
+  final String? description;
   final String refreshLabel;
   final String emptyLabel;
   final String probingLabel;
@@ -68,38 +68,51 @@ class _EndpointPickerState extends State<EndpointPicker> {
     animation: widget.controller,
     builder: (context, _) {
       final theme = Theme.of(context);
+      final title = widget.title;
+      final description = widget.description;
+      final hasHeading =
+          title?.trim().isNotEmpty == true ||
+          description?.trim().isNotEmpty == true;
+      final refreshButton = TextButton.icon(
+        onPressed: widget.controller.endpoints.isEmpty
+            ? null
+            : widget.controller.refresh,
+        icon: const Icon(Icons.refresh, size: 18),
+        label: Text(widget.refreshLabel),
+      );
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(widget.title, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 4),
-                    Text(
-                      widget.description,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+          if (hasHeading)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (title?.trim().isNotEmpty == true)
+                        Text(title!, style: theme.textTheme.titleMedium),
+                      if (description?.trim().isNotEmpty == true) ...[
+                        if (title?.trim().isNotEmpty == true)
+                          const SizedBox(height: 4),
+                        Text(
+                          description!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              TextButton.icon(
-                onPressed: widget.controller.endpoints.isEmpty
-                    ? null
-                    : widget.controller.refresh,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: Text(widget.refreshLabel),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+                const SizedBox(width: 12),
+                refreshButton,
+              ],
+            )
+          else
+            Align(alignment: Alignment.centerRight, child: refreshButton),
+          const SizedBox(height: 8),
           if (widget.controller.endpoints.isEmpty)
             _EndpointEmptyState(label: widget.emptyLabel)
           else

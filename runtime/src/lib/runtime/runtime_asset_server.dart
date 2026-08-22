@@ -120,7 +120,20 @@ final class RuntimeAssetServer {
       return;
     }
     if (request.uri.path.startsWith('/bucket/')) {
-      if (!_isLocalRequest(request) && !_isAuthorizedBrowser(request)) {
+      final authorityRequest = _isLocalRequest(request);
+      final requiresAuthority =
+          request.uri.path == '/bucket/_playmesh-json/v1' ||
+          request.method == 'POST';
+      if (requiresAuthority && !authorityRequest) {
+        await _jsonError(
+          request.response,
+          HttpStatus.forbidden,
+          'not_authority',
+          '只有 Authority 主机可以读写 Main Bucket',
+        );
+        return;
+      }
+      if (!authorityRequest && !_isAuthorizedBrowser(request)) {
         await _jsonError(
           request.response,
           HttpStatus.forbidden,

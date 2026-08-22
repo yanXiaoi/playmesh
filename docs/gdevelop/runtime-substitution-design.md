@@ -2,12 +2,17 @@
 
 ## 状态与范围
 
-本文定义 Playmesh 预览和发布流程对 GDevelop 运行时的后端替换边界。当前固定上游以
-`webide-lock.json` 为准；本文审计所依据的版本是该锁文件中的 GDevelop `v5.6.276`
-commit `9ef4a53e6a9b351618a1e60a99f7d7f4baf36361`。
+本文定义 Playmesh 预览和发布流程对 GDevelop 运行时的后端替换边界。固定上游始终以
+`webide-lock.json` 为准，本文不复制当前版本、commit 或摘要。
 
-本文记录已经冻结的边界和当前已落实的宿主契约。后续新增能力仍不得在未经独立审计时扩展
-App、Game SDK 或 Go Core 的公共接口。
+本文只定义目标边界和宿主合同，不记录当前实现状态。后续新增能力仍不得在未经独立审计时
+扩展 App、Game SDK 或 Go Core 的公共接口；当前入口只在[源码接线索引](integration-wiring.md)
+中维护。
+
+本文服从 [GDevelop 开发总规范](development-standards.md)。这里的“替换”只指精确外部
+backend/I/O seam：Playmesh 可以实现该 seam 所需的网络或宿主传输，但官方状态机开始后的
+对象、事件、回调、结果和错误仍归官方实现。本文所列固定错误码只适用于 Playmesh 私有 façade
+自身的连接、超时和协议失败，不得覆盖已经进入官方逻辑后产生的错误。
 
 ## 已冻结的全局原则
 
@@ -20,6 +25,8 @@ App、Game SDK 或 Go Core 的公共接口。
    `fetch`、`WebSocket`、`localStorage` 或 `Peer`。Storage 是经单独审批的唯一例外：锁定的
    `storagetools` seam 只调用公开且精确类型化的
    `playmesh.main.storage.getBucket(...).getDataSync/setDataSync`，不增加第二个私有入口。
+   同样禁止全局改写 `ApiConfigs`、批量替换官方 host 或把官方端点统一指向无效域名；需要禁用
+   的在线服务必须在其精确 service 调用点显式失败关闭。
 4. 通用 Browser HTML5 导出完全保留官方 backend。只有 Playmesh 预览和“发布到
    Playmesh”生成的完整 file map 可以经过替换注册表。
 5. 每个替换项必须同时校验精确文件路径、固定上游 SHA-256、入口 HTML 中的精确脚本引用
@@ -106,7 +113,7 @@ compatibility façade，并由 App/SDK 在**每次调用**时重新执行权限�
 type PlaymeshRuntimeCompatibilityRegistryV1 = {
   negotiate(request: {
     engine: 'gdevelop';
-    engineVersion: '5.6.276';
+    engineVersion: string; // 必须精确等于 webide-lock.json 的当前上游版本
     feature: 'storage' | 'multiplayer' | 'playerAuthentication' | 'locale';
     minVersion: number;
     maxVersion: number;
@@ -415,9 +422,9 @@ Playmesh 身份由宿主预载到 identity façade，使官方第一次 getter �
 它不是 App token、Session 原始凭据或 Go Core credential，也不能被任何宿主 API 用于鉴权。
 显式 logout 仍清理官方内存状态；重新进入游戏时由宿主按当前 Playmesh 身份重新预载。
 
-### 已落实的宿主契约
+### 宿主合同
 
-Playmesh 私有 backend 现已提供：
+Playmesh 私有 backend 必须提供：
 
 1. 当前 game/session/player 的同步身份快照；如果官方同步入口早于 SDK ready，则全部异步 façade
    共用一次有界 negotiation，官方同步 control socket 使用最多 16 帧的 deferred virtual socket，
@@ -439,28 +446,6 @@ Playmesh 私有 backend 现已提供：
 新缺口，先在 GDevelop 私有兼容层解决；只有共享宿主问题有独立非 GDevelop 复现时，才允许修改
 共享宿主，而且仍不能把底层连接或通用网络能力暴露给游戏。
 
-## bridge/bootstrap 落地状态
-
-旧的高层 monkey-patch 已在同一变更中移除，没有保留双实现。canonical
-`gdevelop-multiplayer-bridge.js` 现在只注册冻结的私有 backend registry 和 coordinator，不读取、
-覆盖或修改 `gdjs.multiplayer`、message manager、player authentication 或其他 GDevelop 公共对象。
-锁定版官方源码仅在 `peerJsHelper.ts`、`multiplayertools.ts`、`multiplayercomponents.ts`、
-`playerauthenticationtools.ts` 和 `playerauthenticationcomponents.ts` 的精确外部 I/O seam
-协商私有 façade。普通官方导出中不存在
-Playmesh runtime，因此继续走官方实现；Playmesh runtime 已存在但 registry/capability 缺失、
-损坏或版本不兼容时必须失败关闭，不得回退到官方云服务或 PeerJS。
-
-canonical `gdevelop-authority-bootstrap.js` 只负责 SDK readiness、Playmesh Session 上下文、Binary
-Channel 创建/加入和私有 Authority 服务协调。Authority 服务只承载版本化发现与稳定玩家编号；
-Peer 数据帧和逻辑连接控制均走 Binary Channel。GDevelop close/leave 只关闭本地逻辑连接，不关闭
-底层 Playmesh Session 或 Channel，重新进入时直接复用现有传输。
-
-`apply-source-policy.mjs` 从这两份 canonical 源机械生成 WebIDE 模块。canonical、生成模块和官方
-补丁后的精确摘要只以本轮 clean replay 冻结的 `source-policy-output-manifest.json` 与流水线
-receipt 为准，本文不复制易腐哈希。当前实现修改期间 manifest 仍含 `pending`，最低层 seam、
-真实 Game SDK/go-core E2E、官方 frame/Promise、自动入房、direct start、late roster/avatar 与零
-倒计时合同都必须在最终干净重放后重跑；在对应 receipt 生成前不得宣称已通过。
-
 ## 验证矩阵
 
 ### Source policy 与等价性
@@ -473,6 +458,8 @@ receipt 为准，本文不复制易腐哈希。当前实现修改期间 manifest
 - patched helper 的构建产物不得再出现可执行的 `new Peer`；
 - patched multiplayer/player-auth 产物不得在批准 seam 外直接调用官方 fetch、WebSocket、
   localStorage 或官方外部 endpoint。
+- source policy 和最终产物不得出现用于批量禁用服务的全局 `ApiConfigs`/host 重写；每项在线
+  服务替换都必须能映射到一个经审计的精确 seam；
 - patched component/tools 必须把 lobby/auth iframe 限制为无网络 `srcdoc`，并覆盖错误
   `WindowProxy`、nonce、sequence、额外字段、token 泄漏与认证结果回流 frame 的负向用例。
 
@@ -499,6 +486,8 @@ receipt 为准，本文不复制易腐哈希。当前实现修改期间 manifest
 - 稳定 playerNumber、username/userId、just-started/just-ended 单帧标志；
 - messageManager 的对象/变量所有权、保存更新和断线恢复；
 - façade 拒绝、瞬断、重连、重复成员事件和缺失 backend 的失败路径；
+- façade 自身的传输错误使用本文固定诊断；进入官方状态机后的失败保留官方错误类型、消息和
+  返回结构，不被 Playmesh 统一错误覆盖；
 - 早于 `playmesh.main.ready` 的并发 async/sync 官方调用共享有界 negotiation，ready reject/timeout、
   attach timeout、无 Session、dispose 和 deferred 队列溢出均有确定失败；inactive 路径零 SDK/
   Channel/Go Core 副作用；

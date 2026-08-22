@@ -67,11 +67,15 @@ function parseBinarySend(frame) {
   };
 }
 
-class MockFile {
-  constructor(bytes, name) {
-    this.bytes = bytes;
+class MockFile extends Blob {
+  constructor(parts, name, options = {}) {
+    const normalizedParts = Array.isArray(parts) ? parts : [parts];
+    super(normalizedParts, { type: options.type || "" });
+    this.bytes = normalizedParts.length === 1 && normalizedParts[0] instanceof Uint8Array
+      ? normalizedParts[0]
+      : new Uint8Array();
     this.name = name;
-    this.size = bytes.length;
+    this.lastModified = options.lastModified || 0;
   }
 }
 
@@ -202,6 +206,8 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CONNECTING;
     this.bufferedAmount = 0;
     this.listeners = new Map();
+    this.rpcSequence = 0n;
+    this.rpcRequests = new Map();
     setTimeout(() => {
       this.readyState = MockWebSocket.OPEN;
       this.emit("open", {});
@@ -255,6 +261,40 @@ class MockWebSocket {
       response[1] = 0x81;
       new DataView(response.buffer).setUint32(2, view.getUint32(2));
       response[6] = 0;
+      setTimeout(() => this.receive(response), 0);
+    } else if (operation === 0x06) {
+      const requestId = view.getUint32(2);
+      const pathLength = view.getUint16(10);
+      const sender = new TextEncoder().encode("p-authority");
+      const path = data.subarray(12, 12 + pathLength);
+      const payload = data.subarray(12 + pathLength);
+      this.rpcSequence += 1n;
+      const rpcId = this.rpcSequence;
+      const incoming = new Uint8Array(14 + sender.length + path.length + payload.length);
+      const incomingView = new DataView(incoming.buffer);
+      incoming[0] = 1;
+      incoming[1] = 0x85;
+      incomingView.setBigUint64(2, rpcId);
+      incomingView.setUint16(10, sender.length);
+      incomingView.setUint16(12, path.length);
+      incoming.set(sender, 14);
+      incoming.set(path, 14 + sender.length);
+      incoming.set(payload, 14 + sender.length + path.length);
+      this.rpcRequests.set(rpcId.toString(), requestId);
+      setTimeout(() => this.receive(incoming), 0);
+    } else if (operation === 0x07) {
+      const rpcId = view.getBigUint64(2);
+      const requestId = this.rpcRequests.get(rpcId.toString());
+      assert.ok(requestId, "Authority RPC response must match a routed request");
+      this.rpcRequests.delete(rpcId.toString());
+      const responsePayload = data.subarray(11);
+      const response = new Uint8Array(7 + responsePayload.length);
+      const responseView = new DataView(response.buffer);
+      response[0] = 1;
+      response[1] = 0x86;
+      responseView.setUint32(2, requestId);
+      response[6] = data[10];
+      response.set(responsePayload, 7);
       setTimeout(() => this.receive(response), 0);
     }
   }
@@ -400,6 +440,7 @@ globalThis.window = {
   Uint8Array,
   ArrayBuffer,
   DataView,
+  Blob,
   File: MockFile,
   crypto: webcrypto,
   async fetch(url, options) {
@@ -922,6 +963,105 @@ assert.deepEqual(
   ["avatar", "connected", "id", "nickname", "role"],
 );
 unregisterEchoAuthority();
+
+let rpcHandlerCalls = 0;
+let rpcHandlerContext = null;
+const unregisterRpc = window.playmesh.main.rpc.onRequest(
+  "/player/profile",
+  async (data, context) => {
+    rpcHandlerCalls += 1;
+    rpcHandlerContext = context;
+    assert.equal(data.slot, "slot-1");
+    assert.deepEqual([...data.raw], [0, 255, 7]);
+    assert.equal(data.image.type, "image/png");
+    assert.deepEqual([...new Uint8Array(await data.image.arrayBuffer())], [137, 80, 78, 71]);
+    assert.equal(data.file.name, "save.bin");
+    assert.equal(data.file.type, "application/octet-stream");
+    assert.equal(data.file.lastModified, 123456);
+    assert.deepEqual([...new Uint8Array(await data.file.arrayBuffer())], [9, 8, 7]);
+    return {
+      playerId: context.senderPlayerId,
+      slot: data.slot,
+      preview: Uint8Array.from([3, 2, 1]),
+      file: new MockFile(Uint8Array.from([6, 5, 4]), "reply.bin", {
+        type: "application/octet-stream",
+        lastModified: 654321,
+      }),
+    };
+  },
+);
+assert.throws(
+  () => window.playmesh.main.rpc.onRequest("/player/profile", () => null),
+  (error) => error?.code === "rpc_path_registered",
+);
+assert.throws(
+  () => window.playmesh.main.rpc.onRequest("player/profile", () => null),
+  (error) => error?.code === "rpc_path_invalid",
+);
+const rpcOperation = window.playmesh.main.rpc.request(
+  "/player/profile",
+  {
+    slot: "slot-1",
+    raw: Uint8Array.from([0, 255, 7]),
+    image: new Blob([Uint8Array.from([137, 80, 78, 71])], { type: "image/png" }),
+    file: new MockFile(Uint8Array.from([9, 8, 7]), "save.bin", {
+      type: "application/octet-stream",
+      lastModified: 123456,
+    }),
+  },
+);
+const rpcResult = await rpcOperation;
+assert.equal(rpcHandlerCalls, 1);
+assert.match(rpcHandlerContext.requestId, /^rpc-[a-f0-9]{16}$/);
+assert.equal(rpcHandlerContext.path, "/player/profile");
+assert.equal(rpcHandlerContext.senderPlayerId, "p-authority");
+assert.equal(rpcResult.playerId, "p-authority");
+assert.equal(rpcResult.slot, "slot-1");
+assert.deepEqual([...rpcResult.preview], [3, 2, 1]);
+assert.equal(rpcResult.file.name, "reply.bin");
+assert.equal(rpcResult.file.type, "application/octet-stream");
+assert.equal(rpcResult.file.lastModified, 654321);
+assert.deepEqual([...new Uint8Array(await rpcResult.file.arrayBuffer())], [6, 5, 4]);
+const rpcBinaryRequest = binaryFrames.findLast((frame) => frame[1] === 0x06);
+assert.ok(rpcBinaryRequest, "RPC request must use the authenticated binary transport");
+const rpcBinaryPathLength = new DataView(
+  rpcBinaryRequest.buffer,
+  rpcBinaryRequest.byteOffset,
+  rpcBinaryRequest.byteLength,
+).getUint16(10);
+assert.equal(
+  new TextDecoder().decode(rpcBinaryRequest.subarray(12, 12 + rpcBinaryPathLength)),
+  "/player/profile",
+);
+assert.equal(
+  commands.some((command) => command.payload?.__playmeshRpc),
+  false,
+  "RPC must not fall back to the JSON command transport",
+);
+assert.equal(received.correct, true, "RPC 内部响应不能泄漏到 game.onMessage");
+unregisterRpc();
+unregisterRpc();
+
+const unregisterFailingRpc = window.playmesh.main.rpc.onRequest(
+  "/player/reject",
+  () => {
+    const error = new Error("请求未通过 Authority 审核");
+    error.code = "request_rejected";
+    throw error;
+  },
+);
+const failingRpcOperation = window.playmesh.main.rpc.request("/player/reject", {});
+await assert.rejects(
+  failingRpcOperation,
+  (error) => error?.code === "request_rejected" && /未通过/.test(error.message),
+);
+unregisterFailingRpc();
+await assert.rejects(
+  window.playmesh.main.rpc.request("/too/large", {
+    data: new Uint8Array(4 * 1024 * 1024),
+  }),
+  (error) => error?.code === "rpc_payload_too_large",
+);
 
 assert.equal(
   window.playmesh.main.authority.defaultNamespace,

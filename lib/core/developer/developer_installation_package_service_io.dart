@@ -10,6 +10,8 @@ import 'package:flutter/services.dart';
 import '../../models/game_summary.dart';
 import '../catalog/game_catalog_models.dart';
 import '../catalog/online_game_catalog.dart';
+import '../download/endpoint_probe.dart';
+import '../download/named_download_endpoint.dart';
 import '../game_package/game_package_icon.dart';
 import '../game_package/game_package_share_files.dart';
 import '../game_package/game_package_transfer_service.dart';
@@ -154,13 +156,17 @@ final class FileDeveloperInstallationPackageService
   FileDeveloperInstallationPackageService({
     required this.runtimePackages,
     required this.nativeExporter,
+    EndpointProbeService? runtimeDownloadProbeService,
     DeveloperInstallationPackageRelayServerCatalog? relayServerCatalog,
     GamePackageTransferService? packageTransfer,
     DeveloperAndroidExportSigningKeyProvider? signingKeyProvider,
     Directory? temporaryRoot,
     DateTime Function()? clock,
     Random? random,
-  }) : packageTransfer = packageTransfer ?? GamePackageTransferService(),
+  }) : runtimeDownloadProbeService =
+           runtimeDownloadProbeService ?? createEndpointProbeService(),
+       _ownsRuntimeDownloadProbeService = runtimeDownloadProbeService == null,
+       packageTransfer = packageTransfer ?? GamePackageTransferService(),
        relayServerCatalog =
            relayServerCatalog ??
            const EmptyDeveloperInstallationPackageRelayServerCatalog(),
@@ -175,6 +181,8 @@ final class FileDeveloperInstallationPackageService
 
   final RuntimePackageManager runtimePackages;
   final RuntimeNativeExporter nativeExporter;
+  final EndpointProbeService runtimeDownloadProbeService;
+  final bool _ownsRuntimeDownloadProbeService;
   final DeveloperInstallationPackageRelayServerCatalog relayServerCatalog;
   final GamePackageTransferService packageTransfer;
   final DeveloperAndroidExportSigningKeyProvider signingKeyProvider;
@@ -182,10 +190,15 @@ final class FileDeveloperInstallationPackageService
   final DateTime Function() _clock;
   final Random _random;
   final Map<String, _InstallationArtifactLease> _artifacts = {};
-  RuntimePackageReleaseManifest? _lastRelease;
   Future<void> _createTail = Future<void>.value();
+  Future<List<_RuntimePackageDownloadSelection>>?
+  _runtimeInspectionSelectionsOperation;
+  List<_RuntimePackageDownloadSelection>? _runtimeInspectionSelections;
+  DateTime? _runtimeInspectionSelectionsAt;
   Future<void>? _closeOperation;
   var _closed = false;
+
+  static const _runtimeInspectionCacheDuration = Duration(seconds: 30);
 
   Directory get _artifactRoot => Directory(
     '${_temporaryRoot.path}${Platform.pathSeparator}'
@@ -194,13 +207,39 @@ final class FileDeveloperInstallationPackageService
 
   @override
   Future<List<DeveloperInstallationPackageTargetStatus>>
+  inspectLocalTargets() async {
+    _ensureOpen();
+    final statuses = await Future.wait([
+      for (final target in RuntimePackageTarget.values)
+        runtimePackages.inspectPackage(target),
+    ]);
+    return List.unmodifiable([
+      for (final status in statuses)
+        DeveloperInstallationPackageTargetStatus(
+          id: status.target.id,
+          platform: status.target.platform,
+          architecture: status.target.architecture,
+          runtimeFilename: status.target.fileName,
+          installed: status.installed,
+          downloadAvailable: false,
+          updateAvailable: false,
+          sizeBytes: status.sizeBytes,
+        ),
+    ]);
+  }
+
+  @override
+  Future<List<DeveloperInstallationPackageTargetStatus>>
   inspectTargets() async {
     _ensureOpen();
     final statuses = await runtimePackages.inspectPackages();
-    final release = await _releaseForInspection();
+    final selections = await _runtimeDownloadSelectionsForInspection();
     final results = <DeveloperInstallationPackageTargetStatus>[];
     for (final status in statuses) {
-      final downloadAvailable = release?.canDownload(status.target) ?? false;
+      final targetSelections = selections
+          .where((selection) => selection.target == status.target)
+          .toList(growable: false);
+      final downloadAvailable = targetSelections.isNotEmpty;
       results.add(
         DeveloperInstallationPackageTargetStatus(
           id: status.target.id,
@@ -211,10 +250,12 @@ final class FileDeveloperInstallationPackageService
           downloadAvailable: downloadAvailable,
           updateAvailable: await _runtimeUpdateAvailable(
             status: status,
-            release: release,
-            downloadAvailable: downloadAvailable,
+            selections: targetSelections,
           ),
-          runtimeVersion: release?.version,
+          runtimeDownloads: targetSelections
+              .map((selection) => selection.presentation())
+              .toList(growable: false),
+          runtimeVersion: targetSelections.firstOrNull?.release.version,
           sizeBytes: status.sizeBytes,
         ),
       );
@@ -222,21 +263,143 @@ final class FileDeveloperInstallationPackageService
     return results;
   }
 
+  @override
+  Future<DeveloperInstallationPackageTargetStatus> inspectRuntimeTarget(
+    String targetId,
+  ) async {
+    _ensureOpen();
+    final target = RuntimePackageTarget.parse(targetId);
+    final status = await runtimePackages.inspectPackage(target);
+    final selections = (await _runtimeDownloadSelectionsForInspectionCached())
+        .where((selection) => selection.target == target)
+        .toList(growable: false);
+    return DeveloperInstallationPackageTargetStatus(
+      id: status.target.id,
+      platform: status.target.platform,
+      architecture: status.target.architecture,
+      runtimeFilename: status.target.fileName,
+      installed: status.installed,
+      downloadAvailable: selections.isNotEmpty,
+      updateAvailable: await _runtimeUpdateAvailable(
+        status: status,
+        selections: selections,
+      ),
+      runtimeDownloads: selections
+          .map(
+            (selection) => selection.presentation(
+              fallbackProbeState: EndpointProbeState.probing,
+            ),
+          )
+          .toList(growable: false),
+      runtimeVersion: selections.firstOrNull?.release.version,
+      sizeBytes: status.sizeBytes,
+    );
+  }
+
+  @override
+  Future<List<DeveloperInstallationPackageRuntimeDownload>>
+  probeRuntimeTargetDownloads(String targetId, String manifestSourceId) async {
+    _ensureOpen();
+    final target = RuntimePackageTarget.parse(targetId);
+    final selections = (await _runtimeDownloadSelectionsForInspectionCached())
+        .where(
+          (selection) =>
+              selection.target == target &&
+              selection.presentation().manifestSourceId == manifestSourceId,
+        )
+        .toList(growable: false);
+    final probed = await _probeRuntimeDownloadSelections(selections);
+    return List.unmodifiable([
+      for (final selection in probed) selection.presentation(),
+    ]);
+  }
+
   Future<bool> _runtimeUpdateAvailable({
     required RuntimePackageStatus status,
-    required RuntimePackageReleaseManifest? release,
-    required bool downloadAvailable,
+    required List<_RuntimePackageDownloadSelection> selections,
   }) async {
-    if (!status.installed || release == null || !downloadAvailable) {
+    if (!status.installed || selections.isEmpty) {
       return false;
     }
-    final expectedSha256 = release.sha256For(status.target);
-    if (expectedSha256.isEmpty) return false;
     try {
       final digest = await sha256.bind(File(status.filePath).openRead()).first;
-      return digest.toString() != expectedSha256;
+      final installedSha256 = digest.toString();
+      return selections.any(
+        (selection) =>
+            selection.release.sha256For(status.target) != installedSha256,
+      );
     } on FileSystemException {
       return false;
+    }
+  }
+
+  Future<List<_RuntimePackageDownloadSelection>>
+  _runtimeDownloadSelectionsForInspection() async {
+    late List<_RuntimePackageDownloadSelection> selections;
+    try {
+      selections = await _runtimeDownloadSelectionsForInspectionCached();
+    } on Object {
+      // 本地文件状态仍然可用；远端目录不可用时不误报可下载。
+      return const [];
+    }
+    return _probeRuntimeDownloadSelections(selections);
+  }
+
+  Future<List<_RuntimePackageDownloadSelection>>
+  _runtimeDownloadSelectionsForInspectionCached() async {
+    final cached = _runtimeInspectionSelections;
+    final cachedAt = _runtimeInspectionSelectionsAt;
+    if (cached != null &&
+        cachedAt != null &&
+        _clock().difference(cachedAt) < _runtimeInspectionCacheDuration) {
+      return cached;
+    }
+    final active = _runtimeInspectionSelectionsOperation;
+    if (active != null) return active;
+    final operation = _loadRuntimeDownloadSelections();
+    _runtimeInspectionSelectionsOperation = operation;
+    try {
+      final selections = await operation;
+      _runtimeInspectionSelections = selections;
+      _runtimeInspectionSelectionsAt = _clock();
+      return selections;
+    } finally {
+      if (identical(_runtimeInspectionSelectionsOperation, operation)) {
+        _runtimeInspectionSelectionsOperation = null;
+      }
+    }
+  }
+
+  Future<List<_RuntimePackageDownloadSelection>>
+  _probeRuntimeDownloadSelections(
+    List<_RuntimePackageDownloadSelection> selections,
+  ) async {
+    if (selections.isEmpty) return const [];
+    try {
+      final addresses = <Uri>[];
+      final addressKeys = <String>{};
+      for (final selection in selections) {
+        final address = selection.download.url!;
+        if (addressKeys.add(normalizedEndpointProbeCacheKey(address))) {
+          addresses.add(address);
+        }
+      }
+      final probes = await runtimeDownloadProbeService.probeAll(addresses);
+      final probesByAddress = <String, EndpointProbeResult>{
+        for (final probe in probes)
+          normalizedEndpointProbeCacheKey(probe.url): probe,
+      };
+      return List.unmodifiable([
+        for (final selection in selections)
+          selection.withProbe(
+            probesByAddress[normalizedEndpointProbeCacheKey(
+              selection.download.url!,
+            )],
+          ),
+      ]);
+    } on Object {
+      // 测速失败不隐藏有效线路；前端仍允许用户明确选择并实际下载。
+      return selections;
     }
   }
 
@@ -251,6 +414,8 @@ final class FileDeveloperInstallationPackageService
     required GameSummary game,
     required String targetId,
     required bool refreshRuntime,
+    String? runtimeDownloadId,
+    bool autoApproveCapabilities = false,
     Uri? relayServer,
     DeveloperInstallationPackageProgressCallback? onProgress,
   }) {
@@ -260,6 +425,8 @@ final class FileDeveloperInstallationPackageService
         game: game,
         targetId: targetId,
         refreshRuntime: refreshRuntime,
+        runtimeDownloadId: runtimeDownloadId,
+        autoApproveCapabilities: autoApproveCapabilities,
         relayServer: relayServer,
         onProgress: onProgress,
       ),
@@ -268,30 +435,12 @@ final class FileDeveloperInstallationPackageService
     return operation;
   }
 
-  Future<RuntimePackageReleaseManifest?> _releaseForInspection() async {
-    final cached = _lastRelease;
-    if (cached != null) return cached;
-    try {
-      final sources = await runtimePackages.loadConfigSources();
-      for (final source in sources.sources) {
-        try {
-          final release = await runtimePackages.loadReleaseManifest(source);
-          _lastRelease = release;
-          return release;
-        } on Object {
-          // 继续尝试 App.json 中的下一个 Runtime 清单源。
-        }
-      }
-    } on Object {
-      // 本地文件存在状态仍然可用；远程清单不可用时不误报可下载。
-    }
-    return null;
-  }
-
   Future<DeveloperInstallationPackageArtifact> _create({
     required GameSummary game,
     required String targetId,
     required bool refreshRuntime,
+    required String? runtimeDownloadId,
+    required bool autoApproveCapabilities,
     required Uri? relayServer,
     required DeveloperInstallationPackageProgressCallback? onProgress,
   }) async {
@@ -308,6 +457,7 @@ final class FileDeveloperInstallationPackageService
       status = await _downloadRuntime(
         target,
         force: refreshRuntime,
+        selectedId: runtimeDownloadId,
         onProgress: onProgress,
       ).then((result) => result.status);
     }
@@ -344,6 +494,7 @@ final class FileDeveloperInstallationPackageService
         sourcePackage: sourcePackage,
         destination: clearPackage,
         relayServer: relayServer,
+        autoApproveCapabilities: autoApproveCapabilities,
         leaseDirectory: leaseDirectory,
       );
       final extension = target.platform == 'android' ? 'apk' : 'zip';
@@ -434,11 +585,20 @@ final class FileDeveloperInstallationPackageService
   Future<RuntimePackageInstallResult> _downloadRuntime(
     RuntimePackageTarget target, {
     required bool force,
+    required String? selectedId,
     required DeveloperInstallationPackageProgressCallback? onProgress,
   }) async {
-    RuntimePackageConfigSources sources;
+    if (selectedId == null) {
+      throw const DeveloperInstallationPackageException(
+        kind:
+            DeveloperInstallationPackageFailureKind.runtimeDownloadUnavailable,
+        code: 'runtime_package_download_selection_required',
+        message: '请选择 Runtime 底包下载线路',
+      );
+    }
+    List<_RuntimePackageDownloadSelection> selections;
     try {
-      sources = await runtimePackages.loadConfigSources();
+      selections = await _loadRuntimeDownloadSelections();
     } on Object catch (error) {
       throw DeveloperInstallationPackageException(
         kind:
@@ -448,69 +608,86 @@ final class FileDeveloperInstallationPackageService
         diagnostic: error.toString(),
       );
     }
-    if (!sources.configured) {
+    final targetSelections = selections
+        .where((selection) => selection.target == target)
+        .toList(growable: false);
+    if (targetSelections.isEmpty) {
       throw const DeveloperInstallationPackageException(
-        kind:
-            DeveloperInstallationPackageFailureKind.runtimeDownloadUnavailable,
-        code: 'runtime_package_sources_unavailable',
-        message: 'Runtime 底包下载源尚未配置',
-      );
-    }
-
-    Object? lastError;
-    var hadDownload = false;
-    for (final source in sources.sources) {
-      RuntimePackageReleaseManifest release;
-      try {
-        release = await runtimePackages.loadReleaseManifest(source);
-      } on Object catch (error) {
-        lastError = error;
-        continue;
-      }
-      _lastRelease = release;
-      for (final download in release.downloadsFor(target)) {
-        if (!download.downloadable) continue;
-        hadDownload = true;
-        final progress = _RuntimeDownloadProgressEmitter(
-          callback: onProgress,
-          clock: _clock,
-        )..begin();
-        try {
-          final result = await runtimePackages.downloadPackage(
-            target: target,
-            release: release,
-            selectedDownload: download,
-            forceRedownload: force,
-            onProgress: progress.add,
-          );
-          progress.verified();
-          return result;
-        } on Object catch (error) {
-          lastError = error;
-        }
-      }
-    }
-    if (!hadDownload) {
-      throw DeveloperInstallationPackageException(
         kind:
             DeveloperInstallationPackageFailureKind.runtimeDownloadUnavailable,
         code: 'runtime_package_download_unavailable',
         message: '所选 Runtime 底包没有可用下载线路',
-        diagnostic: lastError?.toString(),
       );
     }
-    throw DeveloperInstallationPackageException(
-      kind: DeveloperInstallationPackageFailureKind.runtimeDownloadFailed,
-      code: 'runtime_package_download_failed',
-      message: 'Runtime 底包下载或 SHA-256 校验失败',
-      diagnostic: lastError?.toString(),
-    );
+    final selection = targetSelections
+        .where((candidate) => candidate.presentation().id == selectedId)
+        .firstOrNull;
+    if (selection == null) {
+      throw const DeveloperInstallationPackageException(
+        kind:
+            DeveloperInstallationPackageFailureKind.runtimeDownloadUnavailable,
+        code: 'runtime_package_download_selection_invalid',
+        message: '所选 Runtime 底包下载线路已失效，请刷新后重选',
+      );
+    }
+    final progress = _RuntimeDownloadProgressEmitter(
+      callback: onProgress,
+      clock: _clock,
+    )..begin();
+    try {
+      final result = await runtimePackages.downloadPackage(
+        target: target,
+        release: selection.release,
+        selectedDownload: selection.download,
+        forceRedownload: force,
+        onProgress: progress.add,
+      );
+      progress.verified();
+      return result;
+    } on Object catch (error) {
+      throw DeveloperInstallationPackageException(
+        kind: DeveloperInstallationPackageFailureKind.runtimeDownloadFailed,
+        code: 'runtime_package_download_failed',
+        message: 'Runtime 底包下载或 SHA-256 校验失败',
+        diagnostic: error.toString(),
+      );
+    }
+  }
+
+  Future<List<_RuntimePackageDownloadSelection>>
+  _loadRuntimeDownloadSelections() async {
+    final sources = await runtimePackages.loadConfigSources();
+    if (!sources.configured) return const [];
+    final selections = <_RuntimePackageDownloadSelection>[];
+    for (final source in sources.sources) {
+      RuntimePackageReleaseManifest release;
+      try {
+        release = await runtimePackages.loadReleaseManifest(source);
+      } on Object {
+        continue;
+      }
+      for (final target in RuntimePackageTarget.values) {
+        for (final download in release.downloadsFor(target)) {
+          if (!download.downloadable) continue;
+          selections.add(
+            _RuntimePackageDownloadSelection(
+              target: target,
+              source: source,
+              release: release,
+              download: download,
+            ),
+          );
+        }
+      }
+    }
+    return List.unmodifiable(selections);
   }
 
   Future<File?> _buildClearRuntimePackage({
     required File sourcePackage,
     required File destination,
     required Uri? relayServer,
+    required bool autoApproveCapabilities,
     required Directory leaseDirectory,
   }) async {
     final input = InputFileStream(sourcePackage.path);
@@ -561,17 +738,15 @@ final class FileDeveloperInstallationPackageService
       if (!mappedPaths.contains('main.json')) {
         throw const FormatException('Runtime 游戏包缺少 main.json');
       }
-      if (relayServer != null) {
-        if (!mappedPaths.add('playmesh-runtime.json')) {
-          throw const FormatException('游戏项目占用 playmesh-runtime.json');
-        }
-        final data = utf8.encode(
-          '${const JsonEncoder.withIndent('  ').convert({'schemaVersion': 1, 'relayServer': relayServer.toString()})}\n',
-        );
-        encoder.addArchiveFile(
-          ArchiveFile('playmesh-runtime.json', data.length, data),
-        );
+      if (!mappedPaths.add('playmesh-runtime.json')) {
+        throw const FormatException('游戏项目占用 playmesh-runtime.json');
       }
+      final data = utf8.encode(
+        '${const JsonEncoder.withIndent('  ').convert({'schemaVersion': 1, if (relayServer != null) 'relayServer': relayServer.toString(), 'autoApproveCapabilities': autoApproveCapabilities})}\n',
+      );
+      encoder.addArchiveFile(
+        ArchiveFile('playmesh-runtime.json', data.length, data),
+      );
       await encoder.close();
       opened = false;
       return icon;
@@ -642,6 +817,7 @@ final class FileDeveloperInstallationPackageService
     // 它可能刚刚注册的产物。新 create 已被 _closed 同步拒绝。
     await _createTail;
     runtimePackages.close();
+    if (_ownsRuntimeDownloadProbeService) runtimeDownloadProbeService.close();
     final leases = _artifacts.values.toList();
     _artifacts.clear();
     for (final lease in leases) {
@@ -738,6 +914,70 @@ final class _RuntimeDownloadProgressEmitter {
       ),
     );
   }
+}
+
+final class _RuntimePackageDownloadSelection {
+  _RuntimePackageDownloadSelection({
+    required this.target,
+    required this.source,
+    required this.release,
+    required this.download,
+    this.probe,
+  });
+
+  final RuntimePackageTarget target;
+  final NamedDownloadEndpoint source;
+  final RuntimePackageReleaseManifest release;
+  final RuntimePackageDownloadEndpoint download;
+  final EndpointProbeResult? probe;
+
+  DeveloperInstallationPackageRuntimeDownload presentation({
+    EndpointProbeState fallbackProbeState = EndpointProbeState.unsupported,
+  }) => DeveloperInstallationPackageRuntimeDownload(
+    id: sha256
+        .convert(
+          utf8.encode(
+            jsonEncode([
+              source.name,
+              source.url.toString(),
+              target.id,
+              release.version,
+              release.sha256For(target),
+              download.name,
+              download.urlValue,
+            ]),
+          ),
+        )
+        .toString(),
+    name: download.name,
+    address: download.url!,
+    manifestSourceId: sha256
+        .convert(
+          utf8.encode(
+            jsonEncode([
+              source.name,
+              source.url.toString(),
+              target.id,
+              release.version,
+              release.sha256For(target),
+            ]),
+          ),
+        )
+        .toString(),
+    manifestSourceName: source.name,
+    manifestSourceAddress: source.url,
+    probeState: probe?.state ?? fallbackProbeState,
+    latencyMs: probe?.latencyMs,
+  );
+
+  _RuntimePackageDownloadSelection withProbe(EndpointProbeResult? value) =>
+      _RuntimePackageDownloadSelection(
+        target: target,
+        source: source,
+        release: release,
+        download: download,
+        probe: value,
+      );
 }
 
 void _notifyInstallationPackageProgress(

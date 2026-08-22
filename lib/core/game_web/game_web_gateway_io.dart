@@ -212,9 +212,18 @@ class _IoGameWebGateway implements GameWebGateway {
     if (await handleGameBucketRequest(
       request,
       storage: storage,
-      uploadToken: shareToken,
+      authorizeUpload: (request) =>
+          request.headers.value(playmeshShareTokenHeader) == shareToken
+          ? StandardJsonBucketAuthorization(
+              'browser:$browserSessionToken',
+              isAuthority: false,
+            )
+          : null,
       authorizeStandardJson: (request) => _hasBrowserSession(request)
-          ? StandardJsonBucketAuthorization('browser:$browserSessionToken')
+          ? StandardJsonBucketAuthorization(
+              'browser:$browserSessionToken',
+              isAuthority: false,
+            )
           : null,
       standardJsonLedger: _standardJsonLedger,
     )) {

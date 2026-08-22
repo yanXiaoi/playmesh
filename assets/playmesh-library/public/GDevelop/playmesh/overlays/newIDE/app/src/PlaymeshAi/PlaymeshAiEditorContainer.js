@@ -23,6 +23,8 @@ import { type ObjectWithContext } from '../ObjectsList/EnumerateObjects';
 import { type ResourceSearchAndInstallOptions } from '../EditorFunctions';
 import { type ResourceManagementProps } from '../ResourcesList/ResourceSource';
 import { type FileMetadata } from '../ProjectsStorage';
+import { type EventsFunctionsExtensionsState } from '../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
+import { useEnsureExtensionInstalled } from '../AiGeneration/UseEnsureExtensionInstalled';
 import {
   playmeshAiClient,
   type PlaymeshAiApprovalGrant,
@@ -146,6 +148,8 @@ type Props = {|
   setToolbar: (?React.Node) => void,
   extraEditorProps: ?EditorContainerExtraProps,
   resourceManagementProps: ResourceManagementProps,
+  eventsFunctionsExtensionsState: EventsFunctionsExtensionsState,
+  onPreviewOrRefresh: () => Promise<void>,
   onOpenLayout: (
     sceneName: string,
     options?: {|
@@ -311,6 +315,10 @@ const PlaymeshAiEditor: React.ComponentType<{
     const { triggerUnsavedChanges } = React.useContext(
       UnsavedChangesContext
     );
+    const { ensureExtensionInstalled } = useEnsureExtensionInstalled({
+      project: props.project,
+      i18n: props.i18n,
+    });
     const [mode, setMode] = React.useState<PlaymeshAiMode>('chat');
     const [view, setView] = React.useState<PlaymeshAiView>('chat');
     const [sessionState, setSessionState] = React.useState<?PlaymeshAiReadySessionState>(() => {
@@ -486,12 +494,17 @@ const PlaymeshAiEditor: React.ComponentType<{
           props.resourceManagementProps.onFetchNewlyAddedResources,
         onNewResourcesAdded:
           props.resourceManagementProps.onNewResourcesAdded,
+        eventsFunctionsExtensionsState: props.eventsFunctionsExtensionsState,
+        onPreviewOrRefresh: props.onPreviewOrRefresh,
       })
     );
     executorRef.current.onFetchNewlyAddedResources =
       props.resourceManagementProps.onFetchNewlyAddedResources;
     executorRef.current.onNewResourcesAdded =
       props.resourceManagementProps.onNewResourcesAdded;
+    executorRef.current.eventsFunctionsExtensionsState =
+      props.eventsFunctionsExtensionsState;
+    executorRef.current.onPreviewOrRefresh = props.onPreviewOrRefresh;
     const runLoopRef = React.useRef<PlaymeshAiAgentRunLoop>(
       new PlaymeshAiAgentRunLoop({
         step: () => runLoopStepRef.current(),
@@ -531,7 +544,7 @@ const PlaymeshAiEditor: React.ComponentType<{
         props.onProjectItemRenamedOutsideEditor,
       onWillDeleteScene: props.onWillDeleteScene,
       onWillDeleteObject: props.onWillDeleteObject,
-      ensureExtensionInstalled: async () => {},
+      ensureExtensionInstalled,
       onWillInstallExtension: props.onWillInstallExtension,
       onExtensionInstalled: props.onExtensionInstalled,
       getAssetStoreTagForNewObject: () => null,
@@ -2022,6 +2035,10 @@ export const renderPlaymeshAiEditorContainer = (
           setToolbar={setToolbar}
           extraEditorProps={extraEditorProps}
           resourceManagementProps={resourceManagementProps}
+          eventsFunctionsExtensionsState={
+            props.eventsFunctionsExtensionsState
+          }
+          onPreviewOrRefresh={props.onPreviewOrRefresh}
           onOpenLayout={onOpenLayout}
           onSceneEventsModifiedOutsideEditor={
             props.onSceneEventsModifiedOutsideEditor

@@ -184,9 +184,13 @@ export const parseWebIdeReleaseManifest = (
     } catch {
       throw new TypeError(`downloads[${index}].url must be an absolute URL`);
     }
-    if (url.protocol !== 'https:' || url.username || url.password) {
+    if (
+      (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+      url.username ||
+      url.password
+    ) {
       throw new TypeError(
-        `downloads[${index}].url must be credential-free HTTPS`
+        `downloads[${index}].url must be credential-free HTTP or HTTPS`
       );
     }
     return Object.freeze({ name: download.name, url: download.url });

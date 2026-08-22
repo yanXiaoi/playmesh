@@ -32,9 +32,9 @@ Go Server（可选外部服务）
 ## 当前实现边界
 
 第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前正式
-App 为 `4.2.0+28`，搭载 Game SDK `4.1.0`、App Bridge SDK `3.3.0` 与 Developer API /
-OpenAPI `4.3.0`；完整组件矩阵和发布状态见
-`docs/version/README.md`、`docs/version/4.2.0.md` 与 `docs/version/NEXT.md`，本地实现
+App 为 `4.3.0+30`，搭载 Game SDK `4.1.0`、App Bridge SDK `3.3.0` 与 Developer API /
+OpenAPI `5.0.0`；完整组件矩阵和发布状态见
+`docs/version/README.md`、`docs/version/4.3.0.md` 与 `docs/version/NEXT.md`，本地实现
 基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能
 继续作为当前项目、SDK 或 Catalog 的生成基线。
 LAN 发现与 App SDK 已随 4.2.0 发布并完成自动化验证；Android、Windows、macOS、Linux
@@ -859,13 +859,15 @@ SDK 只返回 locale 字符串，不向游戏暴露
 `app.json`、`platform.game.*` 或其他 messages。游戏开发者自行维护业务翻译并按
 该 locale 渲染；Playmesh 不自动改写游戏 DOM、资源、标签或用户内容。
 
-工作区不在浏览器持久化最近打开的项目。项目列表与活动运行项目由 App Gateway 返回；网页只在当前页面会话内保留临时选择，再次进入时使用 App 活动项目或列表首项。顶部只保留项目、运行、保存、导出和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
+工作区只用当前 Origin 的 `localStorage` 持久化最近打开的源码项目 ID，不把它混入
+App 主题、语言或项目文件。再次进入时优先打开该项目；若记录为空或项目已经不存在，
+保持未选择状态并立即打开项目选择菜单，不擅自回退到运行中项目或列表首项。顶部只保留项目、运行、保存、导出和“更多”，项目级新建、复制、设置、删除聚合在项目下拉菜单，其他低频操作聚合在“更多”下拉菜单；两者都按触发按钮实时定位，不占用代码视口。平台能力自检不是一次性的通过/失败提示：测试窗口必须持续调用统一能力测试接口，逐次回显状态、耗时和实际返回数据，直到用户手动关闭窗口。
 
 “导出”先呈现“导出源码”“上传到发布源”“安装包导出”三个同级选择。“导出源码”先保存当前文本缓冲区，再直接复用
 `GET /dev/api/projects/{projectId}/package` 生成 Playmesh 项目包；普通浏览器通过同源
 下载链接交付，App WebView 则通过 GDevelop 已使用的同一原生保存钩子和宿主服务发送经过
 白名单校验的同源包地址，由宿主携带当前 Developer Token 流式写入系统保存目标；项目包
-不在 WebView 内聚合 ZIP，也不 POST 到 GDevelop Blob 暂存接口。“上传到发布源”继续进入既有候选源选择、完整校验、单包导出、
+不在 WebView 内聚合 ZIP，也不 POST 到 GDevelop Blob 暂存接口。“上传到发布源”保存当前文本后直接进入候选源选择、宽松单包导出、
 并行上传、SSE 状态和失败源重试链路。“安装包导出”选择 Android ARM64、Android
 x86_64 或 Windows x64 中的一个目标；导出设置区只含一个可选中转服务器，Runtime
 重新下载控制属于目标维护。主 App 不打包 Runtime 底包：服务从 `App.json` 的 `export`
@@ -893,7 +895,8 @@ SSE 报告 Runtime 下载字节、校验、游戏包构建与原生导出进度�
 `icon.png`、可选 `capabilities.json` 与 `app/`，不等同于外部 TypeScript/Cocos 原始
 工程，并排除 `data/`、`cache/`、`.playmesh/` 与其他私有文件。复用的 `/package`
 仍保留供 CLI 与损坏项目修复使用的宽松导出语义，不在导出前进行完整语义校验；上传到
-发布源则保持严格校验。接收方重新安装时仍必须走完整游戏包校验。
+发布源同样跳过项目语义校验。项目校验函数与 `projects.validate` Operation 继续保留，AI
+提示词、本地运行和重新导入的既有校验要求不变。
 
 复制项目是变更稳定 ID 的正式入口：以当前项目为来源创建新的唯一 ID 和名称，`author` 发布者元数据使用当前 App 用户昵称，只复制发布内容，不复制根目录 `data/`、`cache/`、`.playmesh/`。普通项目设置继续禁止修改 `id`、`author` 和 `lastModifiedAt`。删除项目会删除包、运行数据、缓存和本地历史，正在运行的项目不得删除。
 
@@ -1072,7 +1075,8 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
   编码、空段、`.`、`..`，也不得以 `playmesh` 或 `bucket`（大小写不敏感）作为
   第一段。`app` 是合法第一段，例如 `app/index.html?scene=main` 解析到物理
   `app/app/index.html` 和运行时 `/app/index.html?scene=main`。本地仅解析并透传
-  查询串；go-server 云分发上传另行递归解码并执行外链主动内容扫描。
+  查询串；go-server 云分发上传不因外部 HTTP/WS、协议相对链接或动态
+  `Function` 构造拒绝游戏包。
 - `authority.entry` 声明权威处理端入口路径。支持多人联机的游戏必须提供该入口；单机游戏可以省略。入口必须位于游戏包内，安装时校验目标文件存在且不能越界。
 - `authority.entry` 指向的代码只由创建会话的 App 主机 Authority Runtime 加载，不会被普通玩家页面加载，也不会由 Go Core 解析。
 - `tags` 是可选的开发者自定义标签数组。平台必须按包内输入原样保存和展示，不翻译、不改名、不强制映射为另一种显示文本；标签只用于分类、筛选、展示和测试识别，不改变游戏权限、联机规则或运行入口。

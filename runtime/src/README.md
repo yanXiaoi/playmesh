@@ -45,7 +45,8 @@ FileDescription、ProductName、FileVersion 与 ProductVersion。展示元数据
 与主 App 对齐的运行接线包含：能力确认、WebView 输入接管、Android 返回键菜单、文件
 选择、横竖屏/全屏、页面暂停恢复、Binary Channel、JSON 与二进制 Bucket、私有多人
 头像提交，以及 LAN 分享/加入。上述实现均位于 Runtime 自有模块，不依赖主 App Dart
-源码。
+源码。Runtime 分享面板保留全部非回环 LAN 链接并允许切换二维码；启动与等待 App SDK
+接管输入期间复用 `packages/playmesh_ui` 的统一黑底加载层，只显示 Playmesh 标识与转圈。
 
 ## 全功能固定底包与模块边界
 
@@ -171,7 +172,9 @@ Runtime。AES-GCM 只能在攻击者尚未取得私钥或运行时控制权时�
 
 ## 固定包的可选中转
 
-可在游戏包内的 `playmesh-runtime.json` 中预置一个 go-server HTTP/HTTPS publicURL。
+可在游戏包内的 `playmesh-runtime.json` 中预置一个 go-server HTTP/HTTPS publicURL，并
+通过 `autoApproveCapabilities` 布尔值控制导出程序是否由 SDK 内部直接完成 Playmesh
+能力确认。该值只经私有 bootstrap 字段传递，消费后从公开环境删除。
 Runtime 发布游戏时先保留 LAN 分享，再尽力连接配置的公共中转；中转失败不会破坏
 局域网分享。
 

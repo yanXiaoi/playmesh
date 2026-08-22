@@ -18,6 +18,11 @@ void main() {
     expect(source, contains('<div class="content">'));
     expect(source, contains('error.code = "capability_denied"'));
     expect(
+      source,
+      contains('appInternalRuntime.shouldAutoApproveCapabilities() === true'),
+    );
+    expect(source, contains('await appInternalRuntime.confirmCapabilities()'));
+    expect(
       source.indexOf('await requestCapabilityConsent(appBootstrap);'),
       lessThan(source.indexOf('? connectBrowserFullscreen({')),
     );
@@ -28,6 +33,11 @@ void main() {
 
     expect(source, contains('return request("app.game.exit")'));
     expect(source, contains('return request("app.capabilities.confirm")'));
+    expect(source, contains('shouldAutoApproveCapabilities()'));
+    expect(
+      source,
+      contains('delete bootstrap._playmeshAutoApproveCapabilities'),
+    );
     expect(source, isNot(contains('capability.deny')));
     expect(source, isNot(contains('capability.allow')));
   });
