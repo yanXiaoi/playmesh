@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:playmesh/core/app_media/app_media_adapter.dart';
 import 'package:playmesh/core/app_media/app_media_runtime.dart';
 import 'package:playmesh/core/capabilities/camera/camera_capability_plugin.dart';
+import 'package:playmesh/core/capabilities/capability_plugin.dart';
 import 'package:playmesh/core/capabilities/capability_registry.dart';
 import 'package:playmesh/core/capabilities/vibration/vibration_capability_plugin.dart';
 import 'package:playmesh/core/capabilities/web_permission/web_permission_platform_authorizer.dart';
@@ -220,6 +221,30 @@ void main() {
     );
     expect(unconfirmed['type'], 'app.command.error');
     expect(unconfirmed['error'], contains('能力确认'));
+  });
+
+  test('能力创建失败通过 App Bridge 保留稳定错误码', () async {
+    final bridge = AppWebViewBridge(
+      userId: 'u-capability-error',
+      nickname: '诊断玩家',
+      declaredCapabilities: const ['test.failure'],
+      capabilityRegistry: CapabilityRegistry([
+        _FailingCapabilityPlugin(),
+      ], platform: CapabilityPlatform.WINDOWS),
+    );
+    addTearDown(bridge.close);
+
+    await _command(bridge, 'app.capabilities.confirm', 'confirm-failure');
+    final response = await _command(
+      bridge,
+      'app.capability.create',
+      'create-failure',
+      payload: {'code': 'test.failure', 'options': <String, Object?>{}},
+    );
+
+    expect(response['type'], 'app.command.error');
+    expect(response['code'], 'speech_recognizer_unavailable');
+    expect(response['error'], '系统未安装或未启用语音识别服务');
   });
 
   test('震动能力通过通用插件实例调用原生触觉服务', () async {
@@ -934,6 +959,33 @@ class _FakeDeviceService extends AppDeviceService {
   }) async {
     fullscreenCalls.add((enabled: enabled, orientation: orientation));
   }
+}
+
+class _FailingCapabilityPlugin implements CapabilityPlugin {
+  @override
+  CapabilityDescriptor get descriptor => const CapabilityDescriptor(
+    code: 'test.failure',
+    name: 'Failure test',
+    description: 'Exposes a stable capability failure.',
+    apiVersion: '1.0.0',
+    supportedPlatforms: [CapabilityPlatform.WINDOWS],
+    methods: [],
+    events: [],
+  );
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<CapabilityInstance> create(CapabilityJson options) {
+    throw const CapabilityOperationException(
+      'speech_recognizer_unavailable',
+      '系统未安装或未启用语音识别服务',
+    );
+  }
+
+  @override
+  Future<void> dispose() async {}
 }
 
 class _FakeVibrationDriver implements VibrationDriver {

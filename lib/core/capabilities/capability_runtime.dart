@@ -54,6 +54,7 @@ class CapabilityRuntime {
         send({
           'type': 'app.capability.error',
           'instanceId': instanceId,
+          if (error is CapabilityOperationException) 'code': error.code,
           'error': error.toString(),
         }),
       ),

@@ -7,6 +7,7 @@ import 'sdk_feature_registry.dart';
 
 import '../app_media/app_media_runtime.dart';
 import '../app_media/default_app_media_adapters.dart';
+import '../capabilities/capability_plugin.dart';
 import '../capabilities/capability_registry.dart';
 import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
@@ -204,6 +205,7 @@ class AppWebViewBridge {
           'type': 'app.command.error',
           'requestId': requestId,
           if (error is SdkCommandException) 'code': error.code,
+          if (error is CapabilityOperationException) 'code': error.code,
           'error': _publicAppBridgeError(error),
         }),
       );
@@ -693,6 +695,7 @@ String _encodeAppBridgeMessage(Map<String, Object?> message) {
 
 String _publicAppBridgeError(Object error) {
   if (error is SdkCommandException) return error.message;
+  if (error is CapabilityOperationException) return error.message;
   final message = error.toString();
   if (utf8.encode(message).length > 1024 ||
       message.contains('inviteToken=') ||

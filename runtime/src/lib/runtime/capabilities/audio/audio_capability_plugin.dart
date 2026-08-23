@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
@@ -11,8 +13,29 @@ import '../web_permission/web_permission_platform_authorizer.dart';
 typedef AudioSpeechResultCallback =
     void Function(AudioSpeechRecognitionResult result);
 
+class AudioSpeechInitializationDiagnosis {
+  const AudioSpeechInitializationDiagnosis.available({
+    this.code = 'available',
+    this.message = '系统语音识别服务可用',
+    this.detail = const {},
+  }) : available = true;
+
+  const AudioSpeechInitializationDiagnosis.unavailable({
+    required this.code,
+    required this.message,
+    this.detail = const {},
+  }) : available = false;
+
+  final bool available;
+  final String code;
+  final String message;
+  final CapabilityJson detail;
+}
+
 abstract interface class AudioSpeechRecognitionEngine {
   bool get isListening;
+
+  Future<AudioSpeechInitializationDiagnosis> diagnoseInitializationFailure();
 
   Future<bool> initialize({required void Function(Object error) onError});
 
@@ -35,13 +58,79 @@ class NativeAudioSpeechRecognitionEngine
     : _speech = speech ?? SpeechToText();
 
   final SpeechToText _speech;
+  static const MethodChannel _availabilityChannel = MethodChannel(
+    'playmesh/speech_recognition',
+  );
 
   @override
   bool get isListening => _speech.isListening;
 
   @override
+  Future<AudioSpeechInitializationDiagnosis>
+  diagnoseInitializationFailure() async {
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.windows)) {
+      return const AudioSpeechInitializationDiagnosis.unavailable(
+        code: 'speech_platform_unsupported',
+        message: '当前平台不支持原生语音转文字',
+      );
+    }
+    try {
+      final raw = await _availabilityChannel.invokeMethod<Object?>(
+        'diagnoseInitializationFailure',
+      );
+      if (raw is! Map) {
+        return const AudioSpeechInitializationDiagnosis.unavailable(
+          code: 'speech_bridge_invalid_response',
+          message: '系统语音识别桥返回了无效结果',
+        );
+      }
+      final value = Map<String, Object?>.from(raw);
+      final available = value['available'];
+      final code = value['code'];
+      final message = value['message'];
+      final rawDetail = value['detail'];
+      if (available is! bool || code is! String || message is! String) {
+        return const AudioSpeechInitializationDiagnosis.unavailable(
+          code: 'speech_bridge_invalid_response',
+          message: '系统语音识别桥返回了无效结果',
+        );
+      }
+      final detail = rawDetail is Map
+          ? Map<String, Object?>.from(rawDetail)
+          : const <String, Object?>{};
+      return available
+          ? AudioSpeechInitializationDiagnosis.available(
+              code: code,
+              message: message,
+              detail: detail,
+            )
+          : AudioSpeechInitializationDiagnosis.unavailable(
+              code: code,
+              message: message,
+              detail: detail,
+            );
+    } on MissingPluginException catch (error) {
+      return AudioSpeechInitializationDiagnosis.unavailable(
+        code: 'speech_bridge_unavailable',
+        message: '当前安装缺少系统语音识别桥',
+        detail: {'diagnostic': error.message ?? error.toString()},
+      );
+    } on PlatformException catch (error) {
+      return AudioSpeechInitializationDiagnosis.unavailable(
+        code: 'speech_probe_failed',
+        message: '系统语音识别可用性检查失败',
+        detail: {'diagnostic': error.code},
+      );
+    }
+  }
+
+  @override
   Future<bool> initialize({required void Function(Object error) onError}) {
-    return _speech.initialize(onError: (error) => onError(error));
+    return _speech.initialize(
+      onError: (error) => onError(_speechRecognitionError(error)),
+    );
   }
 
   @override
@@ -280,8 +369,6 @@ class AudioCapabilityPlugin
   bool get isAvailable {
     if (kIsWeb) return false;
     return defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.macOS ||
         defaultTargetPlatform == TargetPlatform.windows;
   }
 
@@ -295,11 +382,24 @@ class AudioCapabilityPlugin
     }
     if (!isAvailable) throw UnsupportedError('当前平台不支持语音转文字');
     if (!_initialized) {
-      final initialized = await _speechEngine.initialize(
-        onError: (error) => _activeInstance?.addError(error),
-      );
+      final bool initialized;
+      try {
+        initialized = await _speechEngine.initialize(
+          onError: (error) =>
+              _activeInstance?.addError(_speechRecognitionError(error)),
+        );
+      } on PlatformException catch (error) {
+        throw _speechPlatformError(error);
+      }
       if (!initialized) {
-        throw UnsupportedError('当前设备的语音识别服务不可用或权限被拒绝');
+        final diagnosis = await _speechEngine.diagnoseInitializationFailure();
+        if (!diagnosis.available) {
+          throw CapabilityOperationException(diagnosis.code, diagnosis.message);
+        }
+        throw const CapabilityOperationException(
+          'speech_engine_initialization_failed',
+          '系统语音识别引擎初始化失败',
+        );
       }
       _initialized = true;
     }
@@ -364,7 +464,10 @@ class _AudioCapabilityInstance implements CapabilityInstance {
       throw const FormatException('pauseFor 不能大于 listenFor');
     }
     if (speechEngine.isListening) {
-      throw StateError('语音识别正在进行中');
+      throw const CapabilityOperationException(
+        'speech_recognizer_busy',
+        '语音识别正在进行中',
+      );
     }
     await speechEngine.listen(
       localeId: localeId.trim(),
@@ -382,7 +485,10 @@ class _AudioCapabilityInstance implements CapabilityInstance {
       },
     );
     if (!speechEngine.isListening) {
-      throw StateError('语音识别未能启动');
+      throw const CapabilityOperationException(
+        'speech_start_failed',
+        '系统语音识别未能开始监听',
+      );
     }
     return {'started': true};
   }
@@ -402,4 +508,67 @@ class _AudioCapabilityInstance implements CapabilityInstance {
     onDisposed();
     await _events.close();
   }
+}
+
+CapabilityOperationException _speechPlatformError(PlatformException error) {
+  return switch (error.code) {
+    'recognizerNotAvailable' => CapabilityOperationException(
+      'speech_recognizer_unavailable',
+      '系统未安装或未启用语音识别服务',
+      cause: error,
+    ),
+    'multipleRequests' => CapabilityOperationException(
+      'speech_recognizer_busy',
+      '系统语音识别正在处理另一个请求',
+      cause: error,
+    ),
+    'missingContext' => CapabilityOperationException(
+      'speech_bridge_unavailable',
+      '系统语音识别桥缺少有效运行上下文',
+      cause: error,
+    ),
+    _ => CapabilityOperationException(
+      'speech_engine_initialization_failed',
+      '系统语音识别引擎初始化失败',
+      cause: error,
+    ),
+  };
+}
+
+CapabilityOperationException _speechRecognitionError(Object error) {
+  if (error is CapabilityOperationException) return error;
+  if (error is PlatformException) return _speechPlatformError(error);
+  if (error is SpeechRecognitionError) {
+    final mapped = switch (error.errorMsg) {
+      'error_permission' => ('speech_permission_denied', '系统拒绝了语音识别所需的录音访问'),
+      'error_audio_error' => ('speech_audio_failed', '系统无法读取语音输入'),
+      'error_busy' => ('speech_recognizer_busy', '系统语音识别服务正忙'),
+      'error_client' => ('speech_client_failed', '系统语音识别客户端失败'),
+      'error_language_not_supported' => (
+        'speech_language_not_supported',
+        '系统语音识别服务不支持指定语言',
+      ),
+      'error_language_unavailable' => (
+        'speech_language_unavailable',
+        '指定语言的系统语音识别资源不可用',
+      ),
+      'error_network' => ('speech_network_failed', '系统语音识别网络请求失败'),
+      'error_network_timeout' => ('speech_network_timeout', '系统语音识别网络请求超时'),
+      'error_no_match' => ('speech_no_match', '系统未识别到匹配文本'),
+      'error_server' => ('speech_server_failed', '系统语音识别服务失败'),
+      'error_server_disconnected' => (
+        'speech_server_disconnected',
+        '系统语音识别服务连接已断开',
+      ),
+      'error_speech_timeout' => ('speech_timeout', '系统未检测到有效语音'),
+      'error_too_many_requests' => ('speech_too_many_requests', '系统语音识别请求过于频繁'),
+      _ => ('speech_recognition_failed', '系统语音识别失败'),
+    };
+    return CapabilityOperationException(mapped.$1, mapped.$2, cause: error);
+  }
+  return CapabilityOperationException(
+    'speech_recognition_failed',
+    '系统语音识别失败',
+    cause: error,
+  );
 }

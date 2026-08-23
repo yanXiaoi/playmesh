@@ -35,6 +35,9 @@ class FlutterWindow : public Win32Window {
   // only the authenticated plaintext of the fixed bundled game package.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       runtime_crypto_channel_;
+
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      speech_recognition_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

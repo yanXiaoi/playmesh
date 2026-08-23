@@ -116,6 +116,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       const state = capabilityInstances.get(message.instanceId);
       if (state?.errorListeners.size) {
         const error = new Error(message.error || "能力插件运行失败");
+        if (typeof message.code === "string") error.code = message.code;
         for (const listener of [...state.errorListeners]) listener(error);
       } else {
         console.error(`Playmesh 能力实例 ${message.instanceId} 运行失败`, message.error);

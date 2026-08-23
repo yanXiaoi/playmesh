@@ -1,8 +1,12 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
+#include <string>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "speech_recognition_host.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +29,38 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  speech_recognition_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          playmesh::speech_recognition::kChannelName,
+          &flutter::StandardMethodCodec::GetInstance());
+  speech_recognition_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<
+             flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() !=
+            playmesh::speech_recognition::kDiagnoseInitializationFailureMethod) {
+          result->NotImplemented();
+          return;
+        }
+        const auto availability =
+            playmesh::speech_recognition::DiagnoseInitializationFailure();
+        flutter::EncodableMap detail;
+        detail[flutter::EncodableValue("stage")] =
+            flutter::EncodableValue(availability.stage);
+        detail[flutter::EncodableValue("diagnostic")] =
+            flutter::EncodableValue(availability.diagnostic);
+        flutter::EncodableMap response;
+        response[flutter::EncodableValue("available")] =
+            flutter::EncodableValue(availability.available);
+        response[flutter::EncodableValue("code")] =
+            flutter::EncodableValue(availability.code);
+        response[flutter::EncodableValue("message")] =
+            flutter::EncodableValue(availability.message);
+        response[flutter::EncodableValue("detail")] =
+            flutter::EncodableValue(detail);
+        result->Success(flutter::EncodableValue(response));
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,8 +76,12 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (speech_recognition_channel_) {
+    speech_recognition_channel_->SetMethodCallHandler(nullptr);
+    speech_recognition_channel_.reset();
+  }
   if (flutter_controller_) {
-    flutter_controller_ = nullptr;
+    flutter_controller_.reset();
   }
 
   Win32Window::OnDestroy();

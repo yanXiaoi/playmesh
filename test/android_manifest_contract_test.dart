@@ -88,6 +88,27 @@ void main() {
       expect(source, contains('runtimeExportExecutor.shutdownNow()'));
     },
   );
+
+  test('Android 主应用与 Runtime 都桥接系统语音识别诊断', () {
+    final appSource = File(
+      'android/app/src/main/java/top/zfjmm/playmesh/MainActivity.java',
+    ).readAsStringSync();
+    final runtimeSource = File(
+      'runtime/src/android/app/src/main/java/'
+      'top/zfjmm/playmesh_runtime/MainActivity.java',
+    ).readAsStringSync();
+
+    for (final source in [appSource, runtimeSource]) {
+      expect(source, contains('"playmesh/speech_recognition"'));
+      expect(source, contains('"diagnoseInitializationFailure"'));
+      expect(source, contains('SpeechRecognizer.isRecognitionAvailable(this)'));
+      expect(
+        source,
+        contains('SpeechRecognizer.isOnDeviceRecognitionAvailable(this)'),
+      );
+      expect(source, contains('"speech_recognizer_unavailable"'));
+    }
+  });
 }
 
 int _occurrences(String source, String value) =>

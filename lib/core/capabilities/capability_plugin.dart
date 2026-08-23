@@ -106,6 +106,18 @@ class CapabilityInstanceEvent {
   final CapabilityJson data;
 }
 
+/// 跨能力宿主和 App SDK 边界保留稳定错误码的公开能力错误。
+class CapabilityOperationException implements Exception {
+  const CapabilityOperationException(this.code, this.message, {this.cause});
+
+  final String code;
+  final String message;
+  final Object? cause;
+
+  @override
+  String toString() => message;
+}
+
 abstract interface class CapabilityInstance {
   Stream<CapabilityInstanceEvent> get events;
 

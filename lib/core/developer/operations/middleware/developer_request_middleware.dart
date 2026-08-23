@@ -40,7 +40,7 @@ class _DeveloperErrorMiddleware implements _DeveloperRequestMiddleware {
         request.response,
         HttpStatus.conflict,
         requestId,
-        'capability_unavailable',
+        error.code,
         error.message,
       );
     } on PlatformException catch (error) {

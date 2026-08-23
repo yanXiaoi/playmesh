@@ -6,8 +6,8 @@
 用户选择下载线路后，App 把清单声明的地址交给系统默认浏览器；清单层不限制协议、凭据或
 Fragment，也不改写 URL。
 
-打包资源只有统一资源渠道目录 `assets/app/App.json`。`assets/app/app_update.json` 只是远端
-动态数据格式示例，不进入 Flutter 资源清单，也不作为运行时回退数据。
+打包资源只有统一资源渠道目录 `assets/app/App.json`。远端动态数据由
+`resources/app/update.json` 提供，不存在内置清单或运行时回退数据。
 
 ## 调用链
 
@@ -23,8 +23,9 @@ Fragment，也不改写 URL。
   -> SemanticVersion 选择版本最大的有效清单
   -> 按当前 TargetPlatform 选择 downloads
   -> EndpointProbeService 并发检测下载线路延迟
-  -> UI 展示当前版本、远端版本、更新说明、线路名称和延迟状态
-  -> 用户点击“浏览器打开”
+  -> UI 展示当前版本、远端版本和紧凑的单行下载线路
+  -> 更新说明通过独立弹窗按需显示
+  -> 用户点击线路或打开图标
   -> url_launcher LaunchMode.externalApplication
   -> 系统默认浏览器
 ```
@@ -45,7 +46,7 @@ Fragment，也不改写 URL。
 - 远端清单只接受 `version`、`releaseNotes` 和已支持的平台字段；未知字段拒绝。
 - 平台字段只包含 `downloads`，下载线路继续复用 `NamedDownloadEndpointList` 的数量、名称
   和 URL 安全校验。
-- 更新说明最多 20000 字符，拒绝不安全控制字符；Flutter 只以纯文本显示。
+- 更新说明最多 20000 字符，拒绝不安全控制字符；Flutter 只在独立弹窗中以纯文本显示。
 - 支持的平台键为 `windows`、`android`、`ios`、`macos`、`linux` 和 `web`。
 
 ## 成功、失败与日志
@@ -64,8 +65,8 @@ Fragment，也不改写 URL。
 - `test/core/update/app_update_models_test.dart`：清单模型、未知字段和 HTTP 链接语义。
 - `test/core/update/app_update_service_test.dart`：并发请求、坏源隔离、最大版本优先、平台
   选择顺序和外部浏览器调用。
-- `test/features/settings/settings_page_test.dart`：版本号、更新说明、线路名称、延迟和浏览器
-  打开交互。
+- `test/features/settings/settings_page_test.dart`：版本号、独立更新说明弹窗、窄屏单行线路、
+  毫秒状态和浏览器打开交互。
 - `flutter analyze lib test`
 - `flutter test`
 

@@ -131,6 +131,31 @@ void main() {
     expect(plugin.instance, isNull);
     await service.dispose();
   });
+
+  test('能力自检真实创建失败时保留平台诊断代码', () async {
+    final plugin = _FakeCapabilityPlugin(
+      createError: const CapabilityOperationException(
+        'speech_recognizer_unavailable',
+        '系统未安装或未启用语音识别服务',
+      ),
+    );
+    final service = DeveloperCapabilityTestService(
+      registry: CapabilityRegistry([
+        plugin,
+      ], platform: CapabilityPlatform.ANDROID),
+      emitEvent: (_) {},
+    );
+
+    final results = await service.run(codes: const ['test.streaming']);
+
+    expect(results.single, containsPair('status', 'failed'));
+    expect(
+      results.single,
+      containsPair('errorCode', 'speech_recognizer_unavailable'),
+    );
+    expect(plugin.createdOptions, isEmpty);
+    await service.dispose();
+  });
 }
 
 class _FakeCapabilityPlugin implements CapabilityPlugin {

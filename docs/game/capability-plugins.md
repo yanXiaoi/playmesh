@@ -97,6 +97,14 @@ await audio.invoke("toText", {
 `alternates` 候选项。识别结束或页面退出后释放实例。该功能不用于持续、常驻录音，
 系统也可能提前结束识别。
 
+创建实例时会先真实初始化系统语音引擎，不以平台注册表或独立预检代替初始化。只有
+真实初始化返回失败后，宿主才执行失败诊断，把“系统没有语音识别服务”“默认录音输入
+不可用”“听写语言资源不可用”和“桥接缺失”等原因区分为稳定错误码。常见错误码包括
+`speech_recognizer_unavailable`、`speech_audio_input_unavailable`、
+`speech_language_unavailable`、`speech_bridge_unavailable` 和
+`speech_engine_initialization_failed`；识别期间的错误会通过 `onError()` 保留同一
+`error.code` 字段。
+
 ## 多平台原生能力
 
 `device.vibration@2.0.0` 使用 `vibration` 插件做跨平台适配，通过 App SDK 创建实例。
@@ -197,10 +205,11 @@ Game SDK 在每次页面加载时展示当前角色声明的能力：
 
 ## 自检
 
-开发者工作区“更多 → 能力测试”读取全平台注册表并调用各插件自己的 `test()`。
-摄像头和 MIDI 插件的自检只报告适配状态，不主动弹系统权限或访问设备。音频插件的
-自检只报告语音转文字接口可用性；`sensor.pose6d` 自检只报告 ARCore 安装与设备支持
-状态。实际权限在创建实例或开始识别时由系统处理。
+开发者工作区“更多 → 能力测试”读取全平台注册表，并对每个当前平台支持的插件使用
+默认参数执行真实 `create({})`，成功后立即 `dispose()`。自检没有独立预检捷径；音频
+插件会真实初始化系统语音引擎，`sensor.pose6d` 会走真实 ARCore 创建路径。创建或释放
+失败时结果为 `failed`，有稳定能力错误码时同时返回 `errorCode`。自检不调用能力方法，
+因此语音实例创建成功后不会自动开始监听。
 
 ```text
 GET  /dev/api/capability-tests

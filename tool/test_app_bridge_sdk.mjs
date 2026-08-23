@@ -347,6 +347,22 @@ await vibration.invoke("vibrate", {
 await vibration.invoke("cancel", {});
 await vibration.dispose();
 
+const erroredCapability = await app.capabilities.create("device.vibration");
+let capabilityError = null;
+const removeCapabilityErrorListener = erroredCapability.onError((error) => {
+  capabilityError = error;
+});
+appInternal.receive({
+  type: "app.capability.error",
+  instanceId: erroredCapability.id,
+  code: "speech_recognizer_busy",
+  error: "系统语音识别服务正忙",
+});
+assert.equal(capabilityError?.code, "speech_recognizer_busy");
+assert.equal(capabilityError?.message, "系统语音识别服务正忙");
+removeCapabilityErrorListener();
+await erroredCapability.dispose();
+
 const mediaSource = {
   type: "playmesh.app.media-source",
   version: 1,

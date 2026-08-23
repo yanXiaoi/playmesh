@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import 'app_media/app_media_runtime.dart';
 import 'app_media/default_app_media_adapters.dart';
+import 'capabilities/capability_plugin.dart';
 import 'capabilities/capability_registry.dart';
 import 'capabilities/capability_runtime.dart';
 import 'capabilities/default_capability_plugins.dart';
@@ -252,6 +253,7 @@ final class RuntimeAppBridge {
           'requestId': requestId,
           if (error is RuntimeAppSdkException) 'code': error.code,
           if (error is RuntimeLanException) 'code': error.code,
+          if (error is CapabilityOperationException) 'code': error.code,
           'error': _publicError(error),
         }),
       );
@@ -848,6 +850,7 @@ final class RuntimeAppSdkException implements Exception {
 String _publicError(Object error) {
   if (error case RuntimeAppSdkException(:final message)) return message;
   if (error case RuntimeLanException(:final message)) return message;
+  if (error case CapabilityOperationException(:final message)) return message;
   final message = error.toString();
   if (utf8.encode(message).length > 1024 ||
       message.contains('inviteToken=') ||

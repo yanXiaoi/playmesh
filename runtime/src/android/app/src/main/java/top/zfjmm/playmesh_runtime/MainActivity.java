@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.speech.SpeechRecognizer;
 import android.util.Log;
 import android.webkit.WebView;
 
@@ -20,6 +21,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +43,8 @@ public final class MainActivity extends FlutterActivity {
     private static final String RUNTIME_KEY_CHANNEL = "playmesh/runtime_key";
     private static final String EXTERNAL_NAVIGATION_CHANNEL =
             "playmesh/external_navigation";
+    private static final String SPEECH_RECOGNITION_CHANNEL =
+            "playmesh/speech_recognition";
     private static final String RUNTIME_GAME_ASSET =
             "flutter_assets/assets/runtime/game.pmp";
     private static final int MAX_RUNTIME_PACKAGE_BYTES =
@@ -77,6 +81,17 @@ public final class MainActivity extends FlutterActivity {
                 getApplicationContext(),
                 messenger
         );
+
+        new MethodChannel(
+                messenger,
+                SPEECH_RECOGNITION_CHANNEL
+        ).setMethodCallHandler((call, result) -> {
+            if (!"diagnoseInitializationFailure".equals(call.method)) {
+                result.notImplemented();
+                return;
+            }
+            result.success(speechInitializationDiagnosis());
+        });
 
         new MethodChannel(
                 messenger,
@@ -194,6 +209,44 @@ public final class MainActivity extends FlutterActivity {
                 );
             }
         });
+    }
+
+    private Map<String, Object> speechInitializationDiagnosis() {
+        final Map<String, Object> detail = new HashMap<>();
+        try {
+            final boolean systemAvailable =
+                    SpeechRecognizer.isRecognitionAvailable(this);
+            boolean onDeviceAvailable = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                onDeviceAvailable =
+                        SpeechRecognizer.isOnDeviceRecognitionAvailable(this);
+            }
+            detail.put("system", systemAvailable);
+            detail.put("onDevice", onDeviceAvailable);
+            final boolean available = systemAvailable || onDeviceAvailable;
+            final Map<String, Object> response = new HashMap<>();
+            response.put("available", available);
+            response.put(
+                    "code",
+                    available ? "available" : "speech_recognizer_unavailable"
+            );
+            response.put(
+                    "message",
+                    available
+                            ? "系统语音识别服务可用"
+                            : "系统未安装或未启用语音识别服务"
+            );
+            response.put("detail", detail);
+            return response;
+        } catch (RuntimeException error) {
+            detail.put("diagnostic", error.getClass().getSimpleName());
+            final Map<String, Object> response = new HashMap<>();
+            response.put("available", false);
+            response.put("code", "speech_probe_failed");
+            response.put("message", "系统语音识别可用性检查失败");
+            response.put("detail", detail);
+            return response;
+        }
     }
 
     private boolean openBrowsableIntentUri(Object rawValue) throws Exception {

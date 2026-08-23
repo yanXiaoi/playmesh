@@ -90,6 +90,8 @@ class DeveloperCapabilityTestService {
     final CapabilityInstance instance;
     try {
       instance = await plugin.create(options);
+    } on CapabilityOperationException catch (error) {
+      throw DeveloperCapabilityUnavailable(error.message, code: error.code);
     } on UnsupportedError catch (error) {
       throw DeveloperCapabilityUnavailable(
         error.message?.toString() ?? error.toString(),
@@ -127,6 +129,7 @@ class DeveloperCapabilityTestService {
           'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
           'instanceId': instanceId,
           'code': code,
+          if (error is CapabilityOperationException) 'errorCode': error.code,
           'error': error.toString(),
         });
       },
@@ -160,6 +163,8 @@ class DeveloperCapabilityTestService {
     final Object? result;
     try {
       result = await open.instance.invoke(method, arguments);
+    } on CapabilityOperationException catch (error) {
+      throw DeveloperCapabilityUnavailable(error.message, code: error.code);
     } on UnsupportedError catch (error) {
       throw DeveloperCapabilityUnavailable(
         error.message?.toString() ?? error.toString(),
@@ -229,6 +234,14 @@ class DeveloperCapabilityTestService {
         status: 'timeout',
         message: '在 ${timeout.inMilliseconds}ms 内未完成能力实例创建',
       );
+    } on CapabilityOperationException catch (error) {
+      return _result(
+        plugin.descriptor,
+        started,
+        status: 'failed',
+        message: error.message,
+        detail: {'errorCode': error.code},
+      );
     } on Object catch (error) {
       return _result(
         plugin.descriptor,
@@ -284,9 +297,13 @@ class _DeveloperCapabilityTestInstance {
 }
 
 class DeveloperCapabilityUnavailable implements Exception {
-  const DeveloperCapabilityUnavailable(this.message);
+  const DeveloperCapabilityUnavailable(
+    this.message, {
+    this.code = 'capability_unavailable',
+  });
 
   final String message;
+  final String code;
 
   @override
   String toString() => message;

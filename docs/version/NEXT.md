@@ -2,11 +2,11 @@
 
 ## 状态
 
-- 状态：App `4.3.0+30` 已于 2026-08-22 完成正式构建并发布；当前没有新的未发布变更。
-- 当前发行基线：App `4.3.0+30`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+- 状态：App `4.3.1+31` 已于 2026-08-23 完成正式构建；当前没有新的未发布变更。
+- 当前发行基线：App `4.3.1+31`、Runtime `1.0.2+5`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
   Relay 协议 `3.0.0`、Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.3.0.md`；本文件保留 4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
+- 最新正式发布日志：`docs/version/4.3.1.md`；本文件保留 4.3.1、4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
   发布归档。
 - Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
   隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
@@ -23,6 +23,16 @@
 ## 未发布变更
 
 - 当前没有新的未发布变更。
+
+## 4.3.1 发布归档
+
+- 修复 `media.microphone@1.1.0` 把系统语音引擎初始化失败统一误报为授权问题。Android
+  与 Windows 的主 App、Runtime 均增加失败诊断桥；能力自检仍完整执行真实创建、初始化和
+  释放，平台诊断只在初始化失败后补充稳定 `errorCode`。
+- App Bridge 命令错误、能力异步错误和 App SDK `Error.code` 保留诊断码；Runtime 与
+  GDevelop 扩展按 SDK 文档同步，Game SDK `4.1.0`、App SDK `3.3.0` 均不升版。
+- “检查更新”弹窗改为克制的短文案；新版本说明独立弹出，下载线路在窄屏下保持单行并直接
+  显示 `xxxms`。App 升级到 `4.3.1+31`，Runtime 底包升级到 `1.0.2+5`。
 
 ## 4.3.0 发布归档
 

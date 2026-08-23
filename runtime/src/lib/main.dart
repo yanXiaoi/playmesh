@@ -45,7 +45,6 @@ final class PlaymeshRuntimeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'Playmesh Runtime',
     theme: ThemeData.dark(useMaterial3: true),
     home: const RuntimeBootstrapPage(),
   );

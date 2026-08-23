@@ -1,6 +1,6 @@
 {
-  "version": "4.3.0",
-  "releaseNotes": "新增 Authority 二进制 RPC 与当前设备本地存储，升级 GDevelop AI 扩展安装和预览工具，重构安装包导出向导、Runtime 分享及统一加载界面，并调整发布源包接收规则。",
+  "version": "4.3.1",
+  "releaseNotes": "修复语音转文字初始化失败被误报为授权问题，能力自检改为完整初始化并返回明确错误码；检查更新界面在窄屏下更紧凑，版本说明独立显示。",
   "windows": {
     "downloads": [
       {

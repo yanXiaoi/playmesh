@@ -2337,7 +2337,7 @@ const typedSubscribeSpecs = [
   { command: 'playmesh.app.ui.onGameMenuClose', name: 'SubscribeGameMenuClose', group: 'App SDK ❯ UI', label: '订阅游戏菜单关闭', description: '只在打开到关闭的真实状态变化后入队。', args: '[]' },
   { command: 'PlaymeshCapabilityHandle.on', name: 'SubscribeDynamicCapabilityEvent', group: 'App SDK ❯ Dynamic capability (advanced)', label: '订阅动态能力事件（高级）', description: '按注册表事件名订阅开放 JSON 数据。', parameters: [handleIdParameter('能力实例 handleId。'), requiredString('EventName', '注册表声明的事件名。')], args: `[${argumentCode('EventName')}]`, handle: 'HandleId' },
   { command: 'PlaymeshCapabilityHandle.addEventListener', name: 'AddDynamicCapabilityEventListener', group: 'App SDK ❯ Dynamic capability (advanced)', label: '添加动态能力 DOM 事件监听（高级）', description: '按 DOM 风格别名订阅开放 JSON 数据；SubscriptionId 用于精确移除。', parameters: [handleIdParameter('能力实例 handleId。'), requiredString('EventName', '注册表声明的事件名。')], args: `[${argumentCode('EventName')}]`, handle: 'HandleId' },
-  { command: 'PlaymeshCapabilityHandle.onError', name: 'SubscribeDynamicCapabilityError', group: 'App SDK ❯ Dynamic capability (advanced)', label: '订阅动态能力错误（高级）', description: '订阅能力实例的非致命 Error，并作为安全错误对象入队。', parameters: [handleIdParameter('能力实例 handleId。')], args: '[]', handle: 'HandleId' },
+  { command: 'PlaymeshCapabilityHandle.onError', name: 'SubscribeDynamicCapabilityError', group: 'App SDK ❯ Dynamic capability (advanced)', label: '订阅动态能力错误（高级）', description: '订阅能力实例的非致命 Error，并把稳定 code 与 message 作为安全错误对象入队。', parameters: [handleIdParameter('能力实例 handleId。')], args: '[]', handle: 'HandleId' },
 ];
 
 const typedHandlerSpecs = [

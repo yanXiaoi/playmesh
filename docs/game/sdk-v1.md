@@ -192,7 +192,8 @@ Orientation 等标准 Web API，不声明 Playmesh 能力。`<input type="file">
 有公开方法或事件的能力实例固定提供 `invoke(method, args)`、`on(event, callback)`、
 `addEventListener(event, callback)`、`removeEventListener(event, callback)`、
 `onError(callback)` 和 `dispose()`；DOM 风格方法是兼容别名，既有 `on()` 仍返回取消
-订阅函数。具体语义以插件 `apiVersion` 为准。
+订阅函数。能力创建、调用或异步事件失败时，`Error.code` 在宿主提供稳定机器码时保留；
+`Error.message` 只用于显示。具体语义以插件 `apiVersion` 为准。
 
 `device.vibration@2.0.0` 是主动调用型插件，创建参数为 `{}`，不产生事件。它通过
 `vibration` 插件公开 `vibrate` 和 `cancel`。`vibrate` 支持默认调用以及

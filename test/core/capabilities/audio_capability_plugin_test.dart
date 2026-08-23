@@ -61,6 +61,7 @@ void main() {
 
     expect(result, {'started': true});
     expect(engine.initializeCount, 1);
+    expect(engine.diagnosisCount, 0);
     expect(engine.localeId, 'zh_CN');
     expect(engine.listenFor, const Duration(seconds: 30));
     expect(engine.pauseFor, const Duration(seconds: 3));
@@ -119,14 +120,74 @@ void main() {
         'listenFor': 10,
         'pauseFor': 2,
       }),
-      throwsStateError,
+      throwsA(
+        isA<CapabilityOperationException>().having(
+          (error) => error.code,
+          'code',
+          'speech_recognizer_busy',
+        ),
+      ),
     );
+  });
+
+  test('完整创建先初始化引擎，失败后才用平台诊断细分原因', () async {
+    final engine = _FakeSpeechRecognitionEngine(
+      initializeResult: false,
+      diagnosisResult: const AudioSpeechInitializationDiagnosis.unavailable(
+        code: 'speech_recognizer_unavailable',
+        message: '系统未安装或未启用语音识别服务',
+      ),
+    );
+    final plugin = AudioCapabilityPlugin(speechEngine: engine);
+    addTearDown(plugin.dispose);
+
+    await expectLater(
+      plugin.create(const {}),
+      throwsA(
+        isA<CapabilityOperationException>().having(
+          (error) => error.code,
+          'code',
+          'speech_recognizer_unavailable',
+        ),
+      ),
+    );
+
+    expect(engine.initializeCount, 1);
+    expect(engine.diagnosisCount, 1);
+  });
+
+  test('真实初始化失败但平台诊断可用时保留初始化失败原因', () async {
+    final engine = _FakeSpeechRecognitionEngine(initializeResult: false);
+    final plugin = AudioCapabilityPlugin(speechEngine: engine);
+    addTearDown(plugin.dispose);
+
+    await expectLater(
+      plugin.create(const {}),
+      throwsA(
+        isA<CapabilityOperationException>().having(
+          (error) => error.code,
+          'code',
+          'speech_engine_initialization_failed',
+        ),
+      ),
+    );
+
+    expect(engine.initializeCount, 1);
+    expect(engine.diagnosisCount, 1);
   });
 }
 
 class _FakeSpeechRecognitionEngine implements AudioSpeechRecognitionEngine {
+  _FakeSpeechRecognitionEngine({
+    this.initializeResult = true,
+    this.diagnosisResult = const AudioSpeechInitializationDiagnosis.available(),
+  });
+
+  final bool initializeResult;
+  final AudioSpeechInitializationDiagnosis diagnosisResult;
   bool initialized = false;
   int initializeCount = 0;
+  int diagnosisCount = 0;
   int cancelCount = 0;
   String? localeId;
   Duration? listenFor;
@@ -138,12 +199,19 @@ class _FakeSpeechRecognitionEngine implements AudioSpeechRecognitionEngine {
   bool isListening = false;
 
   @override
+  Future<AudioSpeechInitializationDiagnosis>
+  diagnoseInitializationFailure() async {
+    diagnosisCount += 1;
+    return diagnosisResult;
+  }
+
+  @override
   Future<bool> initialize({
     required void Function(Object error) onError,
   }) async {
-    initialized = true;
+    initialized = initializeResult;
     initializeCount += 1;
-    return true;
+    return initializeResult;
   }
 
   @override

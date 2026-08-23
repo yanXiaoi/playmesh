@@ -6,7 +6,6 @@ import '../../core/download/endpoint_probe_contract.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/update/app_update_models.dart';
 import '../../core/update/app_update_service.dart';
-import '../../ui/playmesh_ui.dart';
 
 Future<void> showPlaymeshAppUpdateDialog(
   BuildContext context, {
@@ -40,19 +39,20 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       key: const Key('app-update-dialog'),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       title: Row(
         children: [
-          const GradientIcon(
-            icon: Icons.system_update_alt_rounded,
-            size: 42,
-            iconSize: 21,
+          Icon(
+            Icons.system_update_alt_rounded,
+            size: 22,
+            color: Theme.of(context).colorScheme.primary,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(child: Text(context.tr('settings.update_title'))),
         ],
       ),
       content: SizedBox(
-        width: 580,
+        width: 560,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 180),
           child: _loading
@@ -83,8 +83,8 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const LinearProgressIndicator(minHeight: 3),
-        const SizedBox(height: 16),
+        const LinearProgressIndicator(minHeight: 2),
+        const SizedBox(height: 12),
         Text(
           context.tr('settings.update_checking'),
           textAlign: TextAlign.center,
@@ -100,7 +100,7 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
       children: [
         Icon(
           Icons.cloud_off_rounded,
-          size: 44,
+          size: 36,
           color: Theme.of(context).colorScheme.error,
         ),
         const SizedBox(height: 12),
@@ -137,11 +137,11 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: color.withAlpha(22),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: color.withAlpha(90)),
+                color: color.withAlpha(18),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: color.withAlpha(72)),
               ),
               child: Column(
                 children: [
@@ -159,19 +159,19 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _VersionLabel(
                         label: context.tr('settings.update_current_version'),
                         version: result.currentVersion.toString(),
                       ),
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: Icon(
                           Icons.arrow_forward_rounded,
                           color: colors.onSurfaceVariant,
+                          size: 20,
                         ),
                       ),
                       _VersionLabel(
@@ -180,7 +180,7 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Text(
                     context.tr(
                       'settings.update_source_summary',
@@ -196,14 +196,17 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
                 ],
               ),
             ),
-            const SizedBox(height: 18),
-            _SectionLabel(
-              icon: Icons.notes_rounded,
-              label: context.tr('settings.update_release_notes'),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const Key('app-update-release-notes-button'),
+                onPressed: () => _showReleaseNotes(result.releaseNotes),
+                icon: const Icon(Icons.notes_rounded),
+                label: Text(context.tr('settings.update_view_release_notes')),
+              ),
             ),
-            const SizedBox(height: 8),
-            SelectableText(result.releaseNotes),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             _SectionLabel(
               icon: Icons.download_rounded,
               label: context.tr(
@@ -221,7 +224,7 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
             else
               for (final download in result.downloads)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: 7),
                   child: _AppUpdateDownloadTile(
                     download: download,
                     onOpen: () => _openDownload(download),
@@ -270,6 +273,28 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
     );
   }
 
+  Future<void> _showReleaseNotes(String releaseNotes) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        key: const Key('app-update-release-notes-dialog'),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: Text(context.tr('settings.update_release_notes')),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 480),
+          child: SingleChildScrollView(child: SelectableText(releaseNotes)),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('app-update-release-notes-close'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(context.tr('common.close')),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _errorMessage(BuildContext context, Object error) {
     if (error is AppUpdateCheckException) {
       return switch (error.kind) {
@@ -306,7 +331,9 @@ class _VersionLabel extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             version,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontFamily: 'Consolas',
               fontWeight: FontWeight.w800,
             ),
@@ -345,9 +372,8 @@ class _AppUpdateDownloadTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (icon, color, status) = switch (download.probe.state) {
+    final (color, status) = switch (download.probe.state) {
       EndpointProbeState.reachable => (
-        Icons.speed_rounded,
         Theme.of(context).colorScheme.primary,
         context.tr(
           'settings.update_latency',
@@ -355,36 +381,74 @@ class _AppUpdateDownloadTile extends StatelessWidget {
         ),
       ),
       EndpointProbeState.timeout => (
-        Icons.timer_off_outlined,
         Theme.of(context).colorScheme.error,
         context.tr('settings.update_latency_timeout'),
       ),
       EndpointProbeState.unreachable => (
-        Icons.cloud_off_outlined,
         Theme.of(context).colorScheme.error,
         context.tr('settings.update_latency_unreachable'),
       ),
       EndpointProbeState.unsupported => (
-        Icons.help_outline_rounded,
         Theme.of(context).colorScheme.tertiary,
         context.tr('settings.update_latency_unsupported'),
       ),
       EndpointProbeState.probing => (
-        Icons.hourglass_top_rounded,
         Theme.of(context).colorScheme.onSurfaceVariant,
         context.tr('settings.update_latency_checking'),
       ),
     };
-    return Card(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      child: ListTile(
-        leading: Icon(icon, color: color),
-        title: Text(download.endpoint.name),
-        subtitle: Text(status),
-        trailing: OutlinedButton.icon(
-          onPressed: onOpen,
-          icon: const Icon(Icons.open_in_browser_rounded),
-          label: Text(context.tr('settings.update_open_browser')),
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      key: ValueKey('app-update-download-${download.endpoint.url}'),
+      color: colors.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  download.endpoint.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                status,
+                maxLines: 1,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  fontFamily: 'Consolas',
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              IconButton(
+                key: ValueKey(
+                  'app-update-download-open-${download.endpoint.url}',
+                ),
+                tooltip: context.tr('settings.update_open_browser'),
+                onPressed: onOpen,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.open_in_browser_rounded, size: 19),
+              ),
+            ],
+          ),
         ),
       ),
     );

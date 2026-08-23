@@ -58,9 +58,9 @@ void main() {
     );
     await _pumpAsync(tester);
 
-    expect(find.text('Playmesh 4.3.0'), findsOneWidget);
+    expect(find.text('Playmesh 4.3.1'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Playmesh 4.3.0')).dy,
+      tester.getTopLeft(find.text('Playmesh 4.3.1')).dy,
       lessThan(tester.getTopLeft(find.text('Core 0.1.0')).dy),
     );
     expect(find.text('在线'), findsOneWidget);
@@ -163,18 +163,46 @@ void main() {
     await _pumpAsync(tester);
 
     expect(find.byKey(const Key('app-update-dialog')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('app-update-dialog')),
+        matching: find.text('检查更新'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('检查 Playmesh 更新'), findsNothing);
     expect(find.text('发现新版本'), findsOneWidget);
     expect(find.text('4.2.0'), findsOneWidget);
     expect(find.text('4.3.0'), findsOneWidget);
-    expect(find.text('新增手动检查更新。'), findsOneWidget);
+    expect(find.text('新增手动检查更新。'), findsNothing);
+    expect(find.text('查看版本说明'), findsOneWidget);
     expect(find.text('GitHub'), findsOneWidget);
-    expect(find.text('延迟 36 毫秒'), findsOneWidget);
+    expect(find.text('36ms'), findsOneWidget);
+    expect(find.textContaining('延迟'), findsNothing);
 
-    await tester.tap(find.text('浏览器打开'));
+    await tester.tap(find.text('查看版本说明'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('app-update-release-notes-dialog')),
+      findsOneWidget,
+    );
+    expect(find.text('新版本说明'), findsOneWidget);
+    expect(find.text('新增手动检查更新。'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('app-update-release-notes-close')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        const ValueKey(
+          'app-update-download-open-https://example.com/playmesh.exe',
+        ),
+      ),
+    );
     await _pumpAsync(tester);
 
     expect(checker.opened.single.endpoint.name, 'GitHub');
-    expect(find.text('已交给系统默认浏览器打开'), findsOneWidget);
+    expect(find.text('已在浏览器中打开'), findsOneWidget);
   });
 
   testWidgets('keeps update controls usable on a narrow screen', (
@@ -189,7 +217,9 @@ void main() {
       localizedTestApp(
         home: SettingsPage(
           statusProvider: provider,
-          updateChecker: _FakeUpdateChecker(),
+          updateChecker: _FakeUpdateChecker(
+            endpointName: '主线路 · Windows x64 便携版下载',
+          ),
         ),
       ),
     );
@@ -200,7 +230,19 @@ void main() {
     await _pumpAsync(tester);
 
     expect(find.byKey(const Key('app-update-dialog')), findsOneWidget);
-    expect(find.text('新版本说明'), findsOneWidget);
+    expect(find.text('查看版本说明'), findsOneWidget);
+    expect(find.text('新版本说明'), findsNothing);
+    expect(find.text('主线路 · Windows x64 便携版下载'), findsOneWidget);
+    expect(find.text('打开'), findsNothing);
+    expect(find.text('36ms'), findsOneWidget);
+    expect(
+      find.byKey(
+        const ValueKey(
+          'app-update-download-open-https://example.com/playmesh.exe',
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 }
@@ -245,12 +287,15 @@ class _DelayedStatusProvider implements GoCoreStatusProvider {
 }
 
 final class _FakeUpdateChecker implements AppUpdateChecker {
+  _FakeUpdateChecker({this.endpointName = 'GitHub'});
+
+  final String endpointName;
   final List<AppUpdateDownload> opened = [];
 
   @override
   Future<AppUpdateCheckResult> checkForUpdates() async {
     final endpoint = NamedDownloadEndpoint(
-      name: 'GitHub',
+      name: endpointName,
       url: Uri.parse('https://example.com/playmesh.exe'),
     );
     return AppUpdateCheckResult(

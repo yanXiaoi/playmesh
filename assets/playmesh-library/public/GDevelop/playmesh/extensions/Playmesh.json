@@ -8518,7 +8518,7 @@
       "objectGroups": []
     },
     {
-      "description": "订阅能力实例的非致命 Error，并作为安全错误对象入队。",
+      "description": "订阅能力实例的非致命 Error，并把稳定 code 与 message 作为安全错误对象入队。",
       "fullName": "订阅动态能力错误（高级）",
       "functionType": "Action",
       "group": "App SDK（原生 SDK） ❯ 动态能力（高级）",
