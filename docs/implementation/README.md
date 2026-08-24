@@ -7,6 +7,7 @@
 
 | 版本 | 文档 | 范围 |
 | --- | --- | --- |
+| Playmesh `4.5.0+33` | [4.5.0 正式版本日志](../version/4.5.0.md) · [SDK 开发约定](../platform/sdk-development.md) | Core 消息条数限制移除、60 Hz 状态同步、主机 WebView 局域网加入菜单、自定义返回和跨平台连接生命周期、Runtime 1.0.2+7 |
 | Playmesh `4.4.0+32` | [4.4.0 正式版本日志](../version/4.4.0.md) · [在线游戏源与 Catalog API](../catalog-api.md) · [SDK 开发约定](../platform/sdk-development.md) | 在线游戏库分页与详情、App 本地同步 JSON Bucket、GDevelop revision 21、Runtime 1.0.2+6 |
 | Playmesh `4.3.1+31` | [4.3.1 正式版本日志](../version/4.3.1.md) · [手动检查 App 更新](playmesh-4.2.0-app-update.md) · [能力插件开发](../platform/capability-development.md) | 语音引擎失败诊断、完整能力自检、紧凑更新弹窗与 Runtime 1.0.2 |
 | Playmesh `4.1.0+27` | [4.1.0 正式实现与验证](../version/4.1.0.md) | 英文默认 README、多语言 AI 提示词目录与清单、全局 locale/文案复用、Developer API 4.1 locale 查询、工作区语言联动与分语言用户覆盖 |
@@ -15,7 +16,7 @@
 
 ## 使用规则
 
-- 当前行为先查 4.1.0 版本文档，再按领域查看 `docs/game/`、`docs/platform/` 和
+- 当前行为先查 4.5.0 版本文档，再按领域查看 `docs/game/`、`docs/platform/` 和
   `docs/catalog-api.md`；3.0.0 实现文档只作为历史基线。
 - 版本状态与升级原因查 `docs/version/`；实际命令和结果查 `docs/verification/`。
 - App 内置工作区和平台注入 Web UI 都是 App 表面，显示文案只来自各 locale 的

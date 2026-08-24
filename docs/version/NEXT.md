@@ -2,11 +2,11 @@
 
 ## 状态
 
-- 状态：App `4.4.0+32` 已于 2026-08-24 完成正式构建；当前没有新的未发布变更。
-- 当前发行基线：App `4.4.0+32`、Runtime `1.0.2+6`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+- 状态：App `4.5.0+33` 已于 2026-08-24 完成正式构建；当前没有新的未发布变更。
+- 当前发行基线：App `4.5.0+33`、Runtime `1.0.2+7`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
   Relay 协议 `3.0.0`、Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.4.0.md`；本文件保留 4.4.0、4.3.1、4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
+- 最新正式发布日志：`docs/version/4.5.0.md`；本文件保留 4.5.0、4.4.0、4.3.1、4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
   发布归档。
 - Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
   隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
@@ -23,6 +23,21 @@
 ## 未发布变更
 
 - 当前没有新的未发布变更。
+
+## 4.5.0 发布归档
+
+- Go Core 移除主 Session WebSocket 每连接每秒 30 条消息的应用层限制，保留消息大小、
+  鉴权、权限和队列边界；Game SDK 权威 tick 与连续状态输入的公开上限由 20 Hz 提升到
+  60 Hz，生成声明、Manifest、提示词和 GDevelop 扩展同步更新。
+- SDK 居中菜单合并进入/退出全屏按钮，并在分享/邀请后加入当前游戏专用的局域网加入层；
+  该入口复用分享/邀请的主机可见性条件，严格限定 Authority 的 Playmesh WebView，加入端
+  WebView 与普通浏览器都不会显示或触发；弹窗只保留房间列表、扫码和邀请链接输入。
+  App Bridge SDK 兼容新增 `ui.onBack()`：仅在
+  游戏显式配置 `fallbackUi:false` 后处理 Android 返回与 Esc，`false` 阻止退出。
+- 修复 Windows WebView2/移动端的内部 `transport.status` 未转发：主连接正常断开和异常
+  现在与浏览器一致通过 `playmesh.main.lifecycle.onChange()` 产生 `closed/error`。
+- Runtime 宿主同步加入当前游戏的 LAN 加入入口、全屏初始状态和自定义返回接线；底包保持
+  语义版本 `1.0.2`，构建号提升为 `7`，并从本次同一份 SDK 与 Go Core 源码重建三端固定包。
 
 ## 4.4.0 发布归档
 

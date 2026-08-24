@@ -209,6 +209,37 @@ func TestHandlerReturnsLatencyProbeFromAuthorityHost(t *testing.T) {
 	}
 }
 
+func TestSessionWebSocketDoesNotApplyPerSecondMessageLimit(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "unlimited-rate", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	connection := dial(t, server.URL, host)
+	defer connection.CloseNow()
+	readType(t, connection, "session.state")
+
+	const messageCount = 90
+	for sequence := 1; sequence <= messageCount; sequence++ {
+		writeWS(t, connection, map[string]any{
+			"type": "session.ping", "sequence": sequence,
+			"payload": map[string]any{
+				"probeId":      sequence,
+				"clientSentAt": sequence,
+			},
+		})
+	}
+	for sequence := 1; sequence <= messageCount; sequence++ {
+		message := readType(t, connection, "session.pong")
+		if message.Sequence != uint64(sequence) {
+			t.Fatalf("pong sequence = %d, want %d", message.Sequence, sequence)
+		}
+	}
+}
+
 func TestHandlerRejectsLegacyPerformanceMetricMessages(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(NewHandler(NewStore(), logger))

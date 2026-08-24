@@ -287,6 +287,10 @@ for (const eventName of [
 }
 assert.match(game, /openSharePanel\(\): Promise<void>/);
 assert.match(game, /disableSystemMenuTriggers\(\): void/);
+assert.match(
+  game,
+  /onBack\(callback: \(\) => boolean \| Promise<boolean>\): PlaymeshUnsubscribe/,
+);
 assert.match(game, /type PlaymeshAppLanShareLinkType = "lan" \| "wan"/);
 assert.match(game, /interface PlaymeshAppLanShareLink/);
 assert.match(game, /interface PlaymeshLanGame/);

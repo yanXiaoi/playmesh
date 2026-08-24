@@ -237,9 +237,24 @@ Android、Windows、macOS、Linux 支持该宿主能力，iOS/Web 返回明确�
 
 App UI feature 另提供同步无返回值的
 `playmesh.app.ui.disableSystemMenuTriggers()`。方法严格无参数，仅在 `app.ready` 完成后
-单向、幂等移除当前文档的 Escape/Menu/Back 监听 disposer；不影响显式
+单向、幂等禁用当前文档的 Escape/Menu/Back 自动菜单触发；不影响显式
 `showGameSidebar()`、信息/日志覆盖层或已打开层的关闭。平台 UI 配置刷新不能重新绑定，
-WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必须拒绝。
+WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必须拒绝。它不等于
+`configure({fallbackUi:false})`，因此不得单独令 `onBack()` 生效。
+
+`playmesh.app.ui.onBack()` 只在游戏显式配置 `fallbackUi: false` 后处理 Android 系统返回
+和 Esc；回调严格返回 `false` 时阻止退出，返回 `true` 或没有监听器时继续。宿主原生返回
+继续只调用 `appInternalRuntime.handleNativeBack()`，不得感知游戏自定义确认 UI；SDK 只在
+调用回调的当下检查统一 `fallbackUi` 配置，不增加按平台或按弹窗类型的判断。
+
+统一菜单只保留一个全屏状态按钮，并在分享/邀请后提供 App-only 加入入口。该入口必须复用
+分享/邀请的 Authority 主机可见性结果，不得单独按 `lanHost` 存在与否放开；加入端 WebView
+和普通浏览器都不显示。加入层只渲染当前 `gameId` 的 `discoverGames()` 结果、扫码按钮和邀请
+链接输入，不放解释文案；三个入口全部调用现有 `playmesh.app.lan`，不得新增发现或加入旁路。
+
+Game SDK 的 `receive()` 必须把浏览器顶层 `transport.closed/error` 和 WebView/移动端内部
+`transport.status` 统一投影为 `playmesh.main.lifecycle.onChange()` 的 `closed/error`。
+底层可用内部 `lifecycleState` 区分正常关闭与异常，但该字段不得进入公开 SDK。
 
 App SDK 的菜单、信息和日志覆盖层必须在自身 Shadow DOM 中显式使用默认系统光标，
 不能继承游戏用于第一人称或第三人称控制的隐藏光标样式。该行为只作用于 SDK 自有覆盖层，

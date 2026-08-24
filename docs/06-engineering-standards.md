@@ -228,8 +228,19 @@ WebView -> GameAssetGateway -> DevelopmentGameWebResourceProvider
   “所有游戏脚本绝不能读取分享 URL/二维码”不再是有效基线；但平台与 SDK 不得自动把
   URL、token 或 PNG 写入日志、分析、磁盘、崩溃详情、异常消息或跨会话缓存。
 - `playmesh.app.ui.disableSystemMenuTriggers()` 必须严格无参数、仅在 App UI ready 后
-  单向且幂等地移除当前文档的 Escape/Menu/Back 自动监听；不得影响显式菜单/信息/日志
+  单向且幂等地禁用当前文档的 Escape/Menu/Back 自动菜单触发；不得影响显式菜单/信息/日志
   覆盖层 API，配置刷新不得重新绑定，文档刷新恢复默认。旧 boolean setter 不得恢复。
+- `playmesh.app.ui.onBack()` 只允许在游戏显式配置 `fallbackUi: false` 后生效；`false`
+  阻止退出，`true`、无监听器、异常或超时继续退出。资格判断只读取统一兜底 UI 配置，
+  不得按 WebView/移动端/浏览器或 SDK 内部弹窗类型建立分支。
+- 统一菜单的“加入游戏”入口必须与分享/邀请共用 Authority 主机可见性，且额外要求存在
+  App 原生 Bridge；加入端 WebView 和普通浏览器都不得显示或触发该入口。
+- Go Core 主 Session WebSocket 不设置每连接每秒消息条数上限；帧大小、认证、权限和
+  出站队列等既有边界仍保留。SDK `startAuthority.tickRate` 与 `submitState.rateHz` 的公开
+  上限统一为 60 Hz。
+- Windows WebView2、移动端和浏览器的主连接断开统一通过
+  `playmesh.main.lifecycle.onChange()` 输出 `closed/error`；`transport.status` 仅供 SDK 内部
+  重连，不得成为游戏侧平台分支接口。
 - 分享与发现涉及平台能力时，自动化测试和 Manifest/entitlement 检查不能替代跨设备
   实机验收。Android、Windows、macOS、Linux 的发布、发现、丢失、权限、多网卡切换和
   实际加入必须分别记录；未执行项必须明确标为未完成。iOS 自动发现/发布必须稳定返回

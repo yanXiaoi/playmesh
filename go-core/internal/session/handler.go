@@ -525,18 +525,9 @@ func (h *Handler) connect(writer http.ResponseWriter, request *http.Request, ses
 
 func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 	var lastSequence uint64
-	windowStarted, messageCount := time.Now(), 0
 	for {
 		_, data, err := client.conn.Read(ctx)
 		if err != nil {
-			return
-		}
-		if time.Since(windowStarted) >= time.Second {
-			windowStarted, messageCount = time.Now(), 0
-		}
-		messageCount++
-		if messageCount > 30 {
-			_ = client.conn.Close(websocket.StatusPolicyViolation, "消息频率过高")
 			return
 		}
 

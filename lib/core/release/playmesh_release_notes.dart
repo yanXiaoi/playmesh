@@ -1,3 +1,3 @@
-const playmeshVersion = '4.4.0';
-const playmeshBuildNumber = 32;
+const playmeshVersion = '4.5.0';
+const playmeshBuildNumber = 33;
 const playmeshReleaseHighlightCount = 3;

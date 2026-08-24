@@ -42,11 +42,13 @@ FileDescription、ProductName、FileVersion 与 ProductVersion。展示元数据
 身份：Runtime 固定在 `%APPDATA%/top.zfjmm/Playmesh Runtime/games/<gameId SHA-256>/`
 保存该游戏的身份和数据。同名但 gameId 不同的游戏不会重合，游戏改名也不会改变目录。
 
-与主 App 对齐的运行接线包含：能力确认、WebView 输入接管、Android 返回键菜单、文件
-选择、横竖屏/全屏、页面暂停恢复、Binary Channel、JSON 与二进制 Bucket、私有多人
-头像提交，以及 LAN 分享/加入。上述实现均位于 Runtime 自有模块，不依赖主 App Dart
-源码。Runtime 分享面板保留全部非回环 LAN 链接并允许切换二维码；启动与等待 App SDK
-接管输入期间复用 `packages/playmesh_ui` 的统一黑底加载层，只显示 Playmesh 标识与转圈。
+与主 App 对齐的运行接线包含：能力确认、WebView 输入接管、Android 返回键菜单与游戏自定义
+返回、文件选择、横竖屏/全屏、页面暂停恢复、Binary Channel、JSON 与二进制 Bucket、私有
+多人头像提交，以及当前游戏范围内的 LAN 分享/加入；菜单加入入口与分享/邀请一样只对
+Authority 主机显示。上述实现均位于 Runtime 自有模块，
+不依赖主 App Dart 源码。Runtime 分享面板保留全部非回环 LAN 链接并允许切换二维码；启动与
+等待 App SDK 接管输入期间复用 `packages/playmesh_ui` 的统一黑底加载层，只显示 Playmesh
+标识与转圈。
 
 ## 全功能固定底包与模块边界
 

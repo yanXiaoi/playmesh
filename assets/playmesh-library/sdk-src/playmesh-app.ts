@@ -828,14 +828,21 @@ const PLAYMESH_APP_DECLARATION = String.raw`
   let appUiSystemMenuTriggerDisposer = null;
   let appUiSystemMenuTriggersDisabled = false;
   let appUiTogglePending = false;
+  let appUiBackPending = false;
   let appUiConsoleCaptureInstalled = false;
   let appUiPerformanceVisible = false;
+  let appUiFullscreenActive = false;
+  let appUiFullscreenListenerInstalled = false;
   let appUiRenderTimer = null;
+  let appUiJoinLoadGeneration = 0;
+  let appUiJoinGames = new Map();
   const appUiConsoleLogs = [];
   const appUiGameMenuOpenListeners = new Set();
   const appUiGameMenuCloseListeners = new Set();
+  const appUiBackListeners = new Set();
   let appUiGameMenuOpen = false;
   const APP_UI_LOG_LIMIT = 500;
+  const APP_UI_BACK_TIMEOUT_MS = 3000;
   const APP_UI_INPUT_EVENTS = Object.freeze([
     "auxclick",
     "click",
@@ -925,6 +932,91 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       callback,
       "onGameMenuClose",
     );
+  }
+
+  function onAppBack(callback) {
+    return subscribeAppUiEvent(
+      appUiBackListeners,
+      callback,
+      "onBack",
+    );
+  }
+
+  function settleAppUiBackCallback(callback) {
+    try {
+      const result = callback();
+      if (!result || typeof result.then !== "function") {
+        return Promise.resolve(result !== false);
+      }
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (decision) => {
+          if (settled) return;
+          settled = true;
+          if (timer !== undefined) global.clearTimeout?.(timer);
+          resolve(decision);
+        };
+        const timer = global.setTimeout?.(
+          () => finish(true),
+          APP_UI_BACK_TIMEOUT_MS,
+        );
+        timer?.unref?.();
+        Promise.resolve(result).then(
+          (value) => finish(value !== false),
+          (error) => {
+            reportAppUiEventError("返回", error);
+            finish(true);
+          },
+        );
+      });
+    } catch (error) {
+      reportAppUiEventError("返回", error);
+      return Promise.resolve(true);
+    }
+  }
+
+  async function shouldContinueAppUiBack() {
+    const decisions = await Promise.all(
+      [...appUiBackListeners].map(settleAppUiBackCallback),
+    );
+    return decisions.every(Boolean);
+  }
+
+  function beginAppUiBackRequest() {
+    if (appUiBackPending) return true;
+    if (appUiBackListeners.size === 0) return false;
+    appUiBackPending = true;
+    void shouldContinueAppUiBack()
+      .then((shouldExit) => {
+        if (shouldExit) return exitAppUiGame();
+      })
+      .catch((error) => {
+        reportAppUiEventError("返回", error);
+        return exitAppUiGame();
+      })
+      .finally(() => {
+        appUiBackPending = false;
+      });
+    return true;
+  }
+
+  function setAppUiFullscreenActive(active) {
+    appUiFullscreenActive = active === true;
+    refreshAppUiFullscreenControl();
+    return appUiFullscreenActive;
+  }
+
+  function installAppUiFullscreenListener() {
+    if (appUiFullscreenListenerInstalled ||
+        !global.document?.addEventListener) {
+      return;
+    }
+    appUiFullscreenListenerInstalled = true;
+    global.document.addEventListener("fullscreenchange", () => {
+      if (bootstrap?.available !== true) {
+        setAppUiFullscreenActive(Boolean(global.document?.fullscreenElement));
+      }
+    });
   }
 
   function configureAppUi(options = {}) {
@@ -1109,6 +1201,12 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     return typeof configured === "boolean" ? configured : fallback;
   }
 
+  function appUiJoinAvailable() {
+    return nativeSender() !== null &&
+      bootstrap?.available === true &&
+      appUiActionEnabled("share", false);
+  }
+
   function escapeAppUiHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -1285,6 +1383,18 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     return appUiPerformanceVisible;
   }
 
+  function refreshAppUiFullscreenControl() {
+    const button = appFallbackUi?.fullscreen;
+    if (!button || !appUiConfiguration?.messages) return;
+    button.setAttribute?.("aria-pressed", String(appUiFullscreenActive));
+    setAppUiControlLabel(
+      button,
+      appUiFullscreenActive
+        ? "sidebar.exit_fullscreen"
+        : "sidebar.enter_fullscreen",
+    );
+  }
+
   async function restartAppUiGame() {
     hideAppGameSidebar(false);
     try {
@@ -1302,6 +1412,100 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     renderAppUiLogs();
     ui.logsLayer.hidden = false;
     ui.logsClose.focus?.({ preventScroll: true });
+    return true;
+  }
+
+  function setAppUiJoinError(error = null) {
+    const ui = appFallbackUi;
+    if (!ui?.joinError) return;
+    const cancelled = error?.code === "cancelled";
+    ui.joinError.hidden = !error || cancelled;
+    ui.joinError.textContent = !error || cancelled
+      ? ""
+      : appUiText("join.failed");
+  }
+
+  function setAppUiJoinBusy(busy) {
+    const ui = appFallbackUi;
+    if (!ui?.joinLayer) return;
+    const active = busy === true;
+    ui.joinLayer.setAttribute?.("aria-busy", String(active));
+    ui.joinScan.disabled = active;
+    ui.joinInput.disabled = active;
+    ui.joinSubmit.disabled = active;
+    ui.joinRooms.setAttribute?.("aria-disabled", String(active));
+  }
+
+  function renderAppUiJoinGames(games) {
+    const ui = appFallbackUi;
+    if (!ui?.joinRooms) return;
+    appUiJoinGames = new Map(games.map((game) => [game.instanceId, game]));
+    ui.joinRooms.innerHTML = games.map((game) => `
+      <button class="join-room" role="listitem" type="button" data-instance-id="${escapeAppUiHtml(game.instanceId)}">
+        <span class="join-room-name">${escapeAppUiHtml(game.name)}</span>
+        <span class="join-room-host">${escapeAppUiHtml(game.host)}</span>
+      </button>
+    `).join("");
+    ui.joinEmpty.hidden = games.length !== 0;
+  }
+
+  async function loadAppUiJoinGames(generation) {
+    const ui = appFallbackUi;
+    if (!ui || generation !== appUiJoinLoadGeneration) return;
+    ui.joinRooms.innerHTML = "";
+    ui.joinEmpty.hidden = true;
+    setAppUiJoinError();
+    setAppUiJoinBusy(true);
+    try {
+      const games = await appLanApi.discoverGames();
+      if (generation !== appUiJoinLoadGeneration || ui.joinLayer.hidden) return;
+      renderAppUiJoinGames(games);
+    } catch (error) {
+      if (generation !== appUiJoinLoadGeneration || ui.joinLayer.hidden) return;
+      renderAppUiJoinGames([]);
+      setAppUiJoinError(error);
+    } finally {
+      if (generation === appUiJoinLoadGeneration && !ui.joinLayer.hidden) {
+        setAppUiJoinBusy(false);
+      }
+    }
+  }
+
+  async function runAppUiJoin(operation) {
+    const generation = appUiJoinLoadGeneration;
+    setAppUiJoinError();
+    setAppUiJoinBusy(true);
+    try {
+      await operation();
+    } catch (error) {
+      if (generation !== appUiJoinLoadGeneration) return;
+      setAppUiJoinError(error);
+      setAppUiJoinBusy(false);
+    }
+  }
+
+  async function openAppUiJoinGame() {
+    if (!appUiJoinAvailable()) return false;
+    const ui = await ensureAppFallbackUi();
+    if (!ui) return false;
+    const generation = ++appUiJoinLoadGeneration;
+    appUiJoinGames = new Map();
+    ui.joinInput.value = "";
+    ui.joinLayer.hidden = false;
+    ui.joinScan.focus?.({ preventScroll: true });
+    void loadAppUiJoinGames(generation);
+    return true;
+  }
+
+  function closeAppUiJoinGame() {
+    const ui = appFallbackUi;
+    if (!ui || ui.joinLayer.hidden) return false;
+    appUiJoinLoadGeneration += 1;
+    appUiJoinGames = new Map();
+    ui.joinLayer.hidden = true;
+    setAppUiJoinError();
+    if (!ui.layer.hidden) ui.join.focus?.({ preventScroll: true });
+    else restoreAppUiReturnFocus();
     return true;
   }
 
@@ -1490,6 +1694,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;cursor:default;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
       .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;cursor:default;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
       .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
+      .join-dialog{width:min(100%,520px);padding:16px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.dialog-head h2{margin:0}.dialog-close{flex:0 0 38px;width:38px;padding:0!important;font-size:22px!important}.join-rooms{display:grid;gap:6px;max-height:min(34dvh,260px);overflow:auto;overscroll-behavior:contain}.join-room{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;height:auto!important;min-height:48px;padding:9px 12px!important;background:var(--pm-surface-strong)!important;text-align:left}.join-room-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:720}.join-room-host{color:var(--pm-muted);font:12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace}.join-empty,.join-error{padding:13px;color:var(--pm-muted);font-size:13px;text-align:center}.join-error{color:var(--pm-error)}.join-controls{display:grid;gap:8px;margin-top:10px}.join-scan{width:100%;background:#2dd4bf14!important;color:var(--pm-accent)!important;font-weight:720!important}.join-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.join-input{box-sizing:border-box;min-width:0;height:42px;padding:0 12px;border:1px solid var(--pm-border);border-radius:10px;background:var(--pm-surface-strong);color:var(--pm-text);font:14px/1 system-ui,"Microsoft YaHei",sans-serif}.join-input:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.join-submit{background:var(--pm-accent-strong)!important;color:#fff!important;font-weight:720!important}.join-room:disabled,.join-scan:disabled,.join-submit:disabled,.join-input:disabled{opacity:.55;cursor:wait}
       [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
     ${menuButtonMarkup}
@@ -1497,14 +1702,15 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       <button class="action continue" data-action="continue" type="button"><span class="icon" aria-hidden="true">▶</span><span></span></button>
       <button class="action restart" data-action="restart" type="button"><span class="icon" aria-hidden="true">↻</span><span></span></button>
       <button class="action share" data-action="share" type="button"><span class="icon" aria-hidden="true">▦</span><span></span></button>
+      <button class="action join" data-action="join" type="button"><span class="icon" aria-hidden="true">⇥</span><span></span></button>
       <button class="action logs" data-action="logs" type="button"><span class="icon" aria-hidden="true">≡</span><span></span></button>
-      <button class="action enter-fullscreen" data-action="enter-fullscreen" type="button"><span class="icon" aria-hidden="true">⛶</span><span></span></button>
-      <button class="action exit-fullscreen" data-action="exit-fullscreen" type="button"><span class="icon" aria-hidden="true">⊡</span><span></span></button>
+      <button class="action fullscreen" data-action="fullscreen" type="button" aria-pressed="false"><span class="icon" aria-hidden="true">⛶</span><span></span></button>
       <button class="action info" data-action="info" type="button"><span class="icon" aria-hidden="true">ⓘ</span><span></span></button>
       <button class="action performance" data-action="performance" type="button" aria-pressed="false"><span class="icon" aria-hidden="true">◴</span><span></span></button>
     </nav><footer class="foot"><button class="action exit" data-action="exit" type="button"><span class="icon" aria-hidden="true">↩</span><span></span></button></footer></aside></div>
     <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-edit" type="button" hidden></button><button class="info-close" type="button"></button></div></section></div>
     <div class="dialog-layer logs-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="logs-title"></h2><pre class="logs-output" tabindex="0"></pre><div class="dialog-actions"><button class="logs-copy" type="button"></button><button class="logs-clear" type="button"></button><button class="logs-close" type="button"></button></div></section></div>
+    <div class="dialog-layer join-layer" role="dialog" aria-modal="true" aria-labelledby="playmesh-join-title" hidden><section class="dialog join-dialog"><header class="dialog-head"><h2 class="join-title" id="playmesh-join-title"></h2><button class="dialog-close join-close" type="button" aria-label=""></button></header><div class="join-rooms" role="list"></div><div class="join-empty" hidden></div><div class="join-controls"><button class="join-scan" type="button"></button><form class="join-form"><input class="join-input" type="url" autocomplete="off" spellcheck="false"><button class="join-submit" type="submit"></button></form></div><div class="join-error" role="status" hidden></div></section></div>
     <div class="performance-panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
     global.document.body.appendChild(host);
     const query = (selector) => root.querySelector(selector);
@@ -1519,9 +1725,9 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       continueButton: query(".continue"),
       restart: query(".restart"),
       share: query(".share"),
+      join: query(".join"),
       logs: query(".logs"),
-      enterFullscreen: query(".enter-fullscreen"),
-      exitFullscreen: query(".exit-fullscreen"),
+      fullscreen: query(".fullscreen"),
       info: query(".info"),
       performanceButton: query(".performance"),
       exit: query(".exit"),
@@ -1543,6 +1749,16 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       logsCopy: query(".logs-copy"),
       logsClear: query(".logs-clear"),
       logsClose: query(".logs-close"),
+      joinLayer: query(".join-layer"),
+      joinTitle: query(".join-title"),
+      joinClose: query(".join-close"),
+      joinRooms: query(".join-rooms"),
+      joinEmpty: query(".join-empty"),
+      joinScan: query(".join-scan"),
+      joinForm: query(".join-form"),
+      joinInput: query(".join-input"),
+      joinSubmit: query(".join-submit"),
+      joinError: query(".join-error"),
     };
     const ui = appFallbackUi;
     if (ui.menuButton) {
@@ -1556,12 +1772,10 @@ const PLAYMESH_APP_DECLARATION = String.raw`
         global.console?.warn?.("Playmesh 分享界面未能打开", error);
       });
     };
+    ui.join.onclick = () => void openAppUiJoinGame();
     ui.logs.onclick = () => void openAppUiRuntimeLogs();
-    ui.enterFullscreen.onclick = () => {
-      void setAppUiFullscreen(true);
-    };
-    ui.exitFullscreen.onclick = () => {
-      void setAppUiFullscreen(false);
+    ui.fullscreen.onclick = () => {
+      void setAppUiFullscreen(!appUiFullscreenActive);
     };
     ui.info.onclick = () => void openAppUiGameInfo();
     ui.performanceButton.onclick = () => {
@@ -1613,13 +1827,33 @@ const PLAYMESH_APP_DECLARATION = String.raw`
         restoreAppUiReturnFocus();
       }
     };
+    ui.joinClose.onclick = () => closeAppUiJoinGame();
+    ui.joinScan.onclick = () => {
+      void runAppUiJoin(() => appLanApi.scanQrAndJoin());
+    };
+    ui.joinRooms.onclick = (event) => {
+      if (ui.joinLayer.getAttribute?.("aria-busy") === "true") return;
+      const button = event?.target?.closest?.(".join-room");
+      const instanceId = button?.dataset?.instanceId;
+      const game = instanceId ? appUiJoinGames.get(instanceId) : null;
+      if (game) void runAppUiJoin(() => game.join());
+    };
+    ui.joinForm.onsubmit = (event) => {
+      event?.preventDefault?.();
+      const invitationUrl = String(ui.joinInput.value || "").trim();
+      if (!invitationUrl) {
+        ui.joinInput.focus?.({ preventScroll: true });
+        return;
+      }
+      void runAppUiJoin(() => appLanApi.joinByLink(invitationUrl));
+    };
     const sidebarControls = () => [
       ui.continueButton,
       ui.restart,
       ui.share,
+      ui.join,
       ui.logs,
-      ui.enterFullscreen,
-      ui.exitFullscreen,
+      ui.fullscreen,
       ui.info,
       ui.performanceButton,
       ui.exit,
@@ -1673,7 +1907,8 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       return true;
     };
     root.addEventListener("keydown", (event) => {
-      if (!ui.layer.hidden && ui.logsLayer.hidden && ui.infoLayer.hidden) {
+      if (!ui.layer.hidden && ui.logsLayer.hidden && ui.infoLayer.hidden &&
+          ui.joinLayer.hidden) {
         let direction = null;
         if (event.key === "ArrowDown") direction = "down";
         else if (event.key === "ArrowUp") direction = "up";
@@ -1694,7 +1929,8 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       }
       event.preventDefault?.();
       event.stopPropagation?.();
-      if (!ui.logsLayer.hidden) ui.logsClose.onclick();
+      if (!ui.joinLayer.hidden) closeAppUiJoinGame();
+      else if (!ui.logsLayer.hidden) ui.logsClose.onclick();
       else if (!ui.infoLayer.hidden) ui.infoClose.onclick();
       else if (!ui.layer.hidden) hideAppGameSidebar();
     });
@@ -1725,15 +1961,9 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     setAppUiControlLabel(ui.continueButton, "sidebar.continue");
     setAppUiControlLabel(ui.restart, "sidebar.restart");
     setAppUiControlLabel(ui.share, "sidebar.share");
+    setAppUiControlLabel(ui.join, "sidebar.join");
     setAppUiControlLabel(ui.logs, "sidebar.logs");
-    setAppUiControlLabel(
-      ui.enterFullscreen,
-      "sidebar.enter_fullscreen",
-    );
-    setAppUiControlLabel(
-      ui.exitFullscreen,
-      "sidebar.exit_fullscreen",
-    );
+    refreshAppUiFullscreenControl();
     setAppUiControlLabel(ui.info, "sidebar.info");
     setAppUiControlLabel(
       ui.performanceButton,
@@ -1741,10 +1971,10 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     );
     setAppUiControlLabel(ui.exit, "sidebar.exit");
     ui.share.hidden = !appUiActionEnabled("share", false);
+    ui.join.hidden = !appUiJoinAvailable();
     ui.restart.hidden = !appUiActionEnabled("restart");
     ui.logs.hidden = !appUiActionEnabled("logs");
-    ui.enterFullscreen.hidden = !appUiActionEnabled("fullscreen");
-    ui.exitFullscreen.hidden = !appUiActionEnabled("fullscreen");
+    ui.fullscreen.hidden = !appUiActionEnabled("fullscreen");
     ui.info.hidden =
       !appUiActionEnabled("info") ||
       typeof appUiRuntimeAdapter?.getInfo !== "function";
@@ -1759,6 +1989,14 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     }
     ui.infoTitle.textContent = appUiText("info.title");
     ui.logsTitle.textContent = appUiText("logs.title");
+    ui.joinTitle.textContent = appUiText("join.title");
+    ui.joinEmpty.textContent = appUiText("join.empty");
+    ui.joinInput.setAttribute?.("placeholder", appUiText("join.input"));
+    ui.joinInput.setAttribute?.("aria-label", appUiText("join.input"));
+    setAppUiControlLabel(ui.joinScan, "join.scan");
+    setAppUiControlLabel(ui.joinSubmit, "join.action");
+    setAppUiControlLabel(ui.joinClose, "common.close", false);
+    ui.joinClose.textContent = "×";
     setAppUiControlLabel(ui.logsCopy, "logs.copy");
     setAppUiControlLabel(ui.infoEdit, "nickname.edit_action");
     setAppUiControlLabel(ui.infoClose, "common.close");
@@ -1781,6 +2019,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     }
     ui.infoLayer.hidden = true;
     ui.logsLayer.hidden = true;
+    ui.joinLayer.hidden = true;
     ui.layer.hidden = false;
     if (ui.menuButton) ui.menuButton.hidden = true;
     ui.continueButton.focus?.({ preventScroll: true });
@@ -1794,6 +2033,9 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       setAppUiGameMenuOpen(false);
       return Promise.resolve(false);
     }
+    appUiJoinLoadGeneration += 1;
+    appUiJoinGames = new Map();
+    ui.joinLayer.hidden = true;
     ui.layer.hidden = true;
     refreshAppFallbackUi();
     if (restoreFocus) restoreAppUiReturnFocus();
@@ -1809,7 +2051,13 @@ const PLAYMESH_APP_DECLARATION = String.raw`
   }
 
   function handleAppUiNativeBack() {
+    // 只有游戏显式关闭 SDK 兜底面板后，系统返回才交给游戏回调。
+    if (!appUiOptions.fallbackUi) return beginAppUiBackRequest();
     const ui = appFallbackUi;
+    if (ui && !ui.joinLayer.hidden) {
+      closeAppUiJoinGame();
+      return true;
+    }
     if (ui && !ui.logsLayer.hidden) {
       ui.logsClose.onclick();
       return true;
@@ -1822,8 +2070,10 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       void hideAppGameSidebar();
       return true;
     }
-    if (!appUiOptions.fallbackUi || appUiSystemMenuTriggersDisabled) {
-      return false;
+    if (appUiSystemMenuTriggersDisabled) return false;
+    if (!appUiConfiguration?.messages) {
+      appUiTogglePending = true;
+      return true;
     }
     void showAppGameSidebar();
     return true;
@@ -1859,6 +2109,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       } else if (global.document?.fullscreenElement) {
         await global.document.exitFullscreen?.();
       }
+      setAppUiFullscreenActive(enabled);
     } catch (error) {
       global.console?.warn?.("Playmesh 全屏切换失败", error);
     }
@@ -1904,8 +2155,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
   }
 
   function installAppUiKeyboardInterception() {
-    if (appUiSystemMenuTriggersDisabled ||
-        appUiSystemMenuTriggerDisposer ||
+    if (appUiSystemMenuTriggerDisposer ||
         !global.addEventListener) {
       return;
     }
@@ -1937,7 +2187,15 @@ const PLAYMESH_APP_DECLARATION = String.raw`
         code === 461 ||
         code === 10009;
       if (!menu && !back) return;
-      if (!appUiOptions.fallbackUi) return;
+      if (back) {
+        if (appUiSystemMenuTriggersDisabled && appUiOptions.fallbackUi) return;
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        event.stopImmediatePropagation?.();
+        if (!handleAppUiNativeBack()) void exitAppUiGame();
+        return;
+      }
+      if (appUiSystemMenuTriggersDisabled || !appUiOptions.fallbackUi) return;
       event.preventDefault?.();
       event.stopPropagation?.();
       event.stopImmediatePropagation?.();
@@ -1974,13 +2232,13 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     if (appUiSystemMenuTriggersDisabled) return;
     appUiSystemMenuTriggersDisabled = true;
     appUiTogglePending = false;
-    appUiSystemMenuTriggerDisposer?.();
   }
 
   function initializeAppPlatformUi(configuration) {
     appUiConfiguration = resolveAppUiConfiguration(configuration);
     updateAppRuntimeLocale(appUiConfiguration);
     installAppUiConsoleCapture();
+    installAppUiFullscreenListener();
     installAppUiKeyboardInterception();
     if (appUiOptions.fallbackUi) scheduleAppFallbackUi();
     refreshAppFallbackUi();
@@ -2200,6 +2458,9 @@ const PLAYMESH_APP_DECLARATION = String.raw`
         return request("app.device.fullscreen", {
           enabled: enabled === true,
           ...(orientation === undefined ? {} : { orientation }),
+        }).then((result) => {
+          setAppUiFullscreenActive(enabled === true);
+          return result;
         });
       },
       onInput(listener) {
@@ -2232,6 +2493,9 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       },
       onGameMenuClose(callback) {
         return onAppGameMenuClose(callback);
+      },
+      onBack(callback) {
+        return onAppBack(callback);
       },
       openRuntimeLogs() {
         return openAppUiRuntimeLogs();
@@ -2403,6 +2667,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
           declaredCapabilities: [],
         },
       };
+      setAppUiFullscreenActive(false);
       appAutoApproveCapabilities = false;
       appPlatformUiConfiguration = null;
       initializeAppPlatformUi(runtimePlatformUi);
@@ -2412,6 +2677,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     })
     : request("app.bootstrap").then((result) => {
       const privateUi = result?._playmeshPlatformUi;
+      setAppUiFullscreenActive(result?._playmeshFullscreen === true);
       configureAppStorageSync(result?._playmeshAppStorageSync);
       appAutoApproveCapabilities =
         result?._playmeshAutoApproveCapabilities === true;
@@ -2422,6 +2688,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
         : result;
       if (bootstrap && typeof bootstrap === "object") {
         delete bootstrap._playmeshPlatformUi;
+        delete bootstrap._playmeshFullscreen;
         delete bootstrap._playmeshAppStorageSync;
         delete bootstrap._playmeshAutoApproveCapabilities;
       }

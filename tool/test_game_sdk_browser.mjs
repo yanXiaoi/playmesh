@@ -1155,6 +1155,10 @@ assert.equal(selfReconnectEvents[0].player.id, persistedBrowserId);
 
 const reconnectJoins = joins;
 const firstSocket = reconnectPage.__sockets.at(-1);
+const reconnectLifecycleEvents = [];
+const unregisterReconnectLifecycle = reconnectPage.playmesh.main.lifecycle.onChange(
+  (event) => reconnectLifecycleEvents.push(event),
+);
 firstSocket.disconnect();
 while (joins < reconnectJoins + 1 || reconnectPage.__sockets.at(-1) === firstSocket) {
   await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1171,6 +1175,12 @@ assert.equal(
   ),
   true,
 );
+assert.equal(
+  reconnectLifecycleEvents.some((event) => event.state === "closed"),
+  true,
+  "浏览器主连接断开必须继续通过 lifecycle 抽象上报",
+);
+unregisterReconnectLifecycle();
 
 const englishBrowserPage = createPage(null, false, ["en-GB"]);
 await englishBrowserPage.playmesh.ready;

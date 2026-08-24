@@ -123,6 +123,7 @@ const subscribePaths = [
   'playmesh.app.device.onInput',
   'playmesh.app.ui.onGameMenuOpen',
   'playmesh.app.ui.onGameMenuClose',
+  'playmesh.app.ui.onBack',
   'PlaymeshCapabilityHandle.on',
   'PlaymeshCapabilityHandle.addEventListener',
   'PlaymeshCapabilityHandle.onError',
@@ -409,6 +410,9 @@ const expectedAddedInternalFunctionNames = [
   'SubscribeGameMenuClose',
   'HasSubscribeGameMenuCloseEvent',
   'PopSubscribeGameMenuCloseEvent',
+  'SubscribeAppBack',
+  'HasSubscribeAppBackEvent',
+  'PopSubscribeAppBackEvent',
   'SubscribeDynamicCapabilityEvent',
   'HasSubscribeDynamicCapabilityEventEvent',
   'PopSubscribeDynamicCapabilityEventEvent',
@@ -515,6 +519,7 @@ const expectedAddedInternalFunctionNames = [
   'KeepAuthoritySyncState',
   'SetNextAuthoritySyncState',
   'CompleteLifecycleExitCleanup',
+  'CompleteAppBackRequest',
   'IsCameraCapabilityDeclared',
   'IsCameraCapabilityAvailable',
   'IsMicrophoneCapabilityDeclared',
@@ -587,17 +592,17 @@ const appCallablePaths = expectedCallablePaths.filter(
 assert.equal(executePaths.length, 76, 'the execute baseline must stay at 76');
 assert.equal(
   subscribePaths.length,
-  20,
-  'the subscription baseline must stay at 20'
+  21,
+  'the subscription baseline must stay at 21'
 );
 assert.equal(handlerPaths.length, 3, 'the handler baseline must stay at 3');
 assert.equal(
   new Set(expectedCallablePaths).size,
-  99,
-  'the public SDK callable baseline must contain 99 unique paths'
+  100,
+  'the public SDK callable baseline must contain 100 unique paths'
 );
 assert.equal(mainCallablePaths.length, 46);
-assert.equal(appCallablePaths.length, 53);
+assert.equal(appCallablePaths.length, 54);
 
 const extensionSource = await readFile(extensionPath, 'utf8');
 const extension = JSON.parse(extensionSource);
@@ -858,8 +863,8 @@ const handlerMappings = collectMappedPaths(surface.handler);
 assert.equal(executeMappings.size, 76, 'execute must map exactly 76 SDK calls');
 assert.equal(
   subscribeMappings.size,
-  20,
-  'subscribe must map exactly 20 SDK subscriptions'
+  21,
+  'subscribe must map exactly 21 SDK subscriptions'
 );
 assert.equal(handlerMappings.size, 3, 'handler must map exactly 3 SDK handlers');
 
@@ -900,8 +905,8 @@ for (const readyPath of [
 assert.equal(
   expectedCallablePaths.filter(path => allDeclaredCallableMappings.has(path))
     .length,
-  99,
-  'all 99 public callable members must have a declared command mapping'
+  100,
+  'all 100 public callable members must have a declared command mapping'
 );
 
 const featureNames = new Set(
@@ -1827,5 +1832,5 @@ assert.equal(runtime.unsubscribe('passive-exit-subscription'), true);
 assert.equal(exitCleanupCalls, 2);
 
 process.stdout.write(
-  'Playmesh GDevelop extension SDK surface contract passed (99 callable members; ready is automatic).\n'
+  'Playmesh GDevelop extension SDK surface contract passed (100 callable members; ready is automatic).\n'
 );

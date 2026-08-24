@@ -17,6 +17,11 @@ final class RuntimeDisplayController with FullScreenListener {
   Future<void> enter(String orientation) =>
       setFullscreen(true, orientation: orientation);
 
+  Future<bool> isFullscreen() async {
+    if (Platform.isWindows) return windowManager.isFullScreen();
+    return FullScreen.isFullScreen || FullScreen.isFullScreenForced;
+  }
+
   Future<void> setFullscreen(bool enabled, {String? orientation}) async {
     if (_closed) throw StateError('Runtime 显示控制器已关闭');
     if (orientation != null &&

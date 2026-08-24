@@ -18,18 +18,20 @@ void main() {
         expect(request.headers['Authorization'], 'Bearer token-1');
         expect(jsonDecode(request.body), {'nickname': '新昵称'});
         return http.Response.bytes(
-          utf8.encode(jsonEncode({
-            'session': _sessionPayload(
-              connected: true,
-              avatar: null,
-              nickname: '新昵称',
-            ),
-            'player': _playerPayload(
-              connected: true,
-              avatar: null,
-              nickname: '新昵称',
-            ),
-          })),
+          utf8.encode(
+            jsonEncode({
+              'session': _sessionPayload(
+                connected: true,
+                avatar: null,
+                nickname: '新昵称',
+              ),
+              'player': _playerPayload(
+                connected: true,
+                avatar: null,
+                nickname: '新昵称',
+              ),
+            }),
+          ),
           200,
           headers: {'content-type': 'application/json; charset=utf-8'},
         );
@@ -271,7 +273,8 @@ void main() {
       () => messages.any(
         (message) =>
             message['type'] == 'transport.status' &&
-            message['state'] == 'disconnected',
+            message['state'] == 'disconnected' &&
+            message['lifecycleState'] == 'closed',
       ),
     );
     await _waitFor(() => channels.length == 2);
@@ -296,6 +299,16 @@ void main() {
           .where((message) => message['type'] == 'transport.status')
           .map((message) => message['state']),
       containsAllInOrder(['disconnected', 'reconnecting', 'reconnected']),
+    );
+    channels.last.incoming.addError(StateError('socket failed'));
+    await _waitFor(
+      () => messages.any(
+        (message) =>
+            message['type'] == 'transport.status' &&
+            message['state'] == 'disconnected' &&
+            message['lifecycleState'] == 'error' &&
+            (message['error'] as String).contains('socket failed'),
+      ),
     );
 
     await subscription.cancel();
@@ -332,11 +345,7 @@ Map<String, Object?> _sessionPayload({
   'maxPlayers': 4,
   'authorityClientId': 'p-authority',
   'players': [
-    _playerPayload(
-      connected: connected,
-      avatar: avatar,
-      nickname: nickname,
-    ),
+    _playerPayload(connected: connected, avatar: avatar, nickname: nickname),
   ],
 };
 

@@ -1262,6 +1262,36 @@ while (MockWebSocket.last === disconnectedBinarySocket) {
 await binaryChannel.send("p-guest", new Uint8Array([11]));
 assert.equal(MockWebSocket.instances.length >= 2, true);
 
+const transportLifecycleEvents = [];
+const unregisterTransportLifecycle = window.playmesh.main.lifecycle.onChange(
+  (event) => transportLifecycleEvents.push(event),
+);
+receiveMain({
+  type: "transport.message",
+  message: {
+    type: "transport.status",
+    state: "disconnected",
+    lifecycleState: "closed",
+    error: "connection closed",
+  },
+});
+receiveMain({
+  type: "transport.message",
+  message: {
+    type: "transport.status",
+    state: "disconnected",
+    lifecycleState: "error",
+    error: "connection failed",
+  },
+});
+assert.deepEqual(
+  transportLifecycleEvents.map((event) => event.state),
+  ["closed", "error"],
+  "WebView transport.status 必须转发为跨平台 lifecycle 事件",
+);
+assert.equal(transportLifecycleEvents[1].error, "connection failed");
+unregisterTransportLifecycle();
+
 receiveMain({
   type: "lifecycle.event",
   event: "exit",

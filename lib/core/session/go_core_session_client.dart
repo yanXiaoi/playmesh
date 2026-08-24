@@ -518,7 +518,7 @@ class GameSessionConnection {
       channel.sink.add(encoded);
     } on Object catch (error) {
       _outboundQueue.add(encoded);
-      _handleDisconnect(channel, error);
+      _handleDisconnect(channel, error, lifecycleState: 'error');
     }
   }
 
@@ -526,19 +526,28 @@ class GameSessionConnection {
     _subscription = channel.stream.listen(
       _handleMessage,
       onError: (Object error, StackTrace stackTrace) {
-        _handleDisconnect(channel, error);
+        _handleDisconnect(channel, error, lifecycleState: 'error');
       },
-      onDone: () => _handleDisconnect(channel, '连接已关闭'),
+      onDone: () =>
+          _handleDisconnect(channel, '连接已关闭', lifecycleState: 'closed'),
     );
   }
 
-  void _handleDisconnect(WebSocketChannel channel, Object error) {
+  void _handleDisconnect(
+    WebSocketChannel channel,
+    Object error, {
+    required String lifecycleState,
+  }) {
     if (_closed || !identical(_channel, channel)) return;
     _channel = null;
     final subscription = _subscription;
     _subscription = null;
     unawaited(subscription?.cancel());
-    _emitTransportStatus('disconnected', error: error);
+    _emitTransportStatus(
+      'disconnected',
+      error: error,
+      lifecycleState: lifecycleState,
+    );
     _scheduleReconnect();
   }
 
@@ -585,12 +594,18 @@ class GameSessionConnection {
     }
   }
 
-  void _emitTransportStatus(String state, {int? attempt, Object? error}) {
+  void _emitTransportStatus(
+    String state, {
+    int? attempt,
+    Object? error,
+    String? lifecycleState,
+  }) {
     if (_closed || _messages.isClosed) return;
     _messages.add({
       'type': 'transport.status',
       'transport': 'session',
       'state': state,
+      'lifecycleState': ?lifecycleState,
       'attempt': ?attempt,
       'error': ?error?.toString(),
     });

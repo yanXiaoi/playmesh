@@ -1,6 +1,6 @@
 {
-  "version": "4.4.0",
-  "releaseNotes": "在线游戏库分页加载会保留已有内容并支持原页重试，首页与搜索结果可打开完整详情并独立下载；GDevelop 本地存储迁移到当前设备的 App JSON Bucket。",
+  "version": "4.5.0",
+  "releaseNotes": "游戏菜单合并全屏按钮，并为主机 WebView 增加当前游戏局域网加入入口；游戏可在关闭 SDK 兜底面板后接管返回退出；状态同步上限提升到 60 Hz，跨平台连接关闭事件保持一致。",
   "windows": {
     "downloads": [
       {
@@ -17,7 +17,7 @@
     "downloads": [
       {
         "name": "GitHub",
-        "url": "https://github.com/yanXiaoi/playmesh/releases/download/v4.4.0-build32/Playmesh-4.4.0-build32-android-universal.apk"
+        "url": "https://github.com/yanXiaoi/playmesh/releases/download/v4.5.0-build33/Playmesh-4.5.0-build33-android-universal.apk"
       },
       {
         "name": "临时源",

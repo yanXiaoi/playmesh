@@ -231,6 +231,11 @@
           "behavior": "Subscribes to successful open-to-closed SDK game menu transitions and returns an idempotent unsubscribe function"
         },
         {
+          "name": "ui.onBack",
+          "signature": "ui.onBack(callback: () => boolean | Promise<boolean>): PlaymeshUnsubscribe",
+          "behavior": "Handles Android system back and Escape only after fallbackUi is explicitly configured false; false blocks exit and true continues exit"
+        },
+        {
           "name": "ui.restartGame",
           "signature": "ui.restartGame(): void",
           "behavior": "Reloads the current game document"
@@ -516,7 +521,7 @@
       "members": [
         {
           "name": "startAuthority",
-          "signature": "startAuthority(options: {initialState: JsonValue, stateType?: string, tickRate?: 1..20, onInput?: Function, onTick?: Function}): SyncAuthorityController",
+          "signature": "startAuthority(options: {initialState: JsonValue, stateType?: string, tickRate?: 1..60, onInput?: Function, onTick?: Function}): SyncAuthorityController",
           "availability": "Authority Client only",
           "behavior": "Runs an Authority tick, merges continuous inputs and publishes versioned full snapshots"
         },
@@ -526,7 +531,7 @@
         },
         {
           "name": "submitState",
-          "signature": "submitState(key: string, value: JsonValue, options?: {rateHz?: 1..20}): Promise<null>",
+          "signature": "submitState(key: string, value: JsonValue, options?: {rateHz?: 1..60}): Promise<null>",
           "behavior": "Rate-limits and merges the latest continuous input per key"
         },
         {

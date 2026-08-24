@@ -33,8 +33,8 @@ const expectedLibGdFiles = Object.freeze({
     size: 3391975,
   }),
 });
-const expectedFunctionCount = 402;
-const expectedPublicFunctionCount = 362;
+const expectedFunctionCount = 406;
+const expectedPublicFunctionCount = 366;
 const expectedAsyncFunctionCount = 140;
 
 // These are runtime/editor identifiers, not translatable labels. Keep this
@@ -238,6 +238,7 @@ const expectedCommands = Object.freeze([
   'playmesh.app.device.onInput',
   'playmesh.app.ui.onGameMenuOpen',
   'playmesh.app.ui.onGameMenuClose',
+  'playmesh.app.ui.onBack',
   'PlaymeshCapabilityHandle.on',
   'PlaymeshCapabilityHandle.addEventListener',
   'PlaymeshCapabilityHandle.onError',
@@ -684,14 +685,14 @@ const declaredCommands = [
   ...readSurfaceArray('subscribe'),
   ...readSurfaceArray('handler'),
 ];
-assert.equal(expectedCommands.length, 99);
+assert.equal(expectedCommands.length, 100);
 assert.deepEqual(
   declaredCommands,
   expectedCommands,
-  'the 99 stable SDK command paths or their declared order changed'
+  'the 100 stable SDK command paths or their declared order changed'
 );
-assert.equal(new Set(expectedCommands).size, 99);
-assert.equal(selectedCommands.length, 99, 'command selector entries changed');
+assert.equal(new Set(expectedCommands).size, 100);
+assert.equal(selectedCommands.length, 100, 'command selector entries changed');
 assert.deepEqual(
   [...new Set(selectedCommands)].sort(),
   [...expectedCommands].sort(),
@@ -725,10 +726,10 @@ assert.deepEqual(
   'libGD property selectors must expose the exact readable surface'
 );
 const allSdkSelectors = [...selectedCommands, ...selectedProperties];
-assert.equal(allSdkSelectors.length, 116);
-assert.equal(new Set(allSdkSelectors).size, 116, 'SDK selector paths must be unique');
+assert.equal(allSdkSelectors.length, 117);
+assert.equal(new Set(allSdkSelectors).size, 117, 'SDK selector paths must be unique');
 assert.equal(allSdkSelectors.filter(isMainSdkPath).length, 51);
-assert.equal(allSdkSelectors.filter(isAppSdkPath).length, 65);
+assert.equal(allSdkSelectors.filter(isAppSdkPath).length, 66);
 
 serializedExtensions.delete();
 project.delete();
@@ -736,5 +737,5 @@ project.delete();
 process.stdout.write(
   'Playmesh extension passed locked GDevelop 5.6.276 libGD/editor semantics ' +
     `(${extension.eventsFunctions.length} functions, ${asyncFunctionCount} async, ` +
-    '116 stable SDK selectors).\n'
+    '117 stable SDK selectors).\n'
 );

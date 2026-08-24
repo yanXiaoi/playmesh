@@ -29,9 +29,9 @@ const selectors = [
   ".continue",
   ".restart",
   ".share",
+  ".join",
   ".logs",
-  ".enter-fullscreen",
-  ".exit-fullscreen",
+  ".fullscreen",
   ".info",
   ".performance",
   ".exit",
@@ -53,6 +53,16 @@ const selectors = [
   ".logs-copy",
   ".logs-clear",
   ".logs-close",
+  ".join-layer",
+  ".join-title",
+  ".join-close",
+  ".join-rooms",
+  ".join-empty",
+  ".join-scan",
+  ".join-form",
+  ".join-input",
+  ".join-submit",
+  ".join-error",
 ];
 
 function createElement(selector, document) {
@@ -66,10 +76,16 @@ function createElement(selector, document) {
       ".latency",
       ".info-layer",
       ".logs-layer",
+      ".join-layer",
+      ".join-empty",
+      ".join-error",
     ].includes(selector),
     tagName: selector.startsWith(".") ? "BUTTON" : "DIV",
     textContent: "",
     style: {},
+    dataset: {},
+    disabled: false,
+    value: "",
     isConnected: true,
     classList: { toggle() {} },
     onclick: null,
@@ -81,6 +97,9 @@ function createElement(selector, document) {
     },
     querySelector(query) {
       return query === "span:last-child" ? visibleLabel : null;
+    },
+    closest(query) {
+      return query === selector ? element : null;
     },
     addEventListener(type, listener) {
       const current = listeners.get(type) || [];
@@ -118,6 +137,7 @@ function createElement(selector, document) {
 function createPage({
   app = false,
   fallbackUi = true,
+  showShareAction = app,
   sessionState = new Map(),
   localState = new Map(),
 } = {}) {
@@ -173,6 +193,10 @@ function createPage({
           elements[".game-name"].tagName = "P";
           elements[".game-detail"].tagName = "P";
           elements[".logs-output"].tagName = "PRE";
+          elements[".join-title"].tagName = "H2";
+          elements[".join-rooms"].tagName = "DIV";
+          elements[".join-form"].tagName = "FORM";
+          elements[".join-input"].tagName = "INPUT";
           const rootListeners = new Map();
           const root = {
             host,
@@ -236,7 +260,8 @@ function createPage({
   const platformUi = {
     fallbackLocale: "zh-CN",
     actions: {
-      share: app,
+      share: showShareAction,
+      join: showShareAction,
       restart: true,
       logs: true,
       fullscreen: true,
@@ -276,7 +301,12 @@ function createPage({
       warn: (...args) => consoleEntries.push({ level: "warn", args }),
       error: (...args) => consoleEntries.push({ level: "error", args }),
     },
-    location: { reload() {}, replace() {} },
+    location: {
+      reload() {},
+      replace() {
+        window.__exitCount = (window.__exitCount || 0) + 1;
+      },
+    },
     sessionStorage: {
       getItem(key) {
         return sessionState.get(String(key)) ?? null;
@@ -386,6 +416,13 @@ function createPage({
             appBuckets.set(bucket, bucketValues);
           } else if (command.command === "app.storage.clear") {
             appBuckets.set(bucket, new Map());
+          } else if (command.command === "app.lan.discover") {
+            result = [{
+              instanceId: "room-current-game",
+              gameId: "com.playmesh.current-game",
+              name: "客厅房间",
+              host: "192.168.1.23",
+            }];
           }
           window[appInternalKey].receive({
             type: "app.command.result",
@@ -405,6 +442,7 @@ function createPage({
                     ...platformUi.locales[0],
                     actions: platformUi.actions,
                   },
+                  _playmeshFullscreen: false,
                   _playmeshAppStorageSync: {
                     endpoint:
                       "http://127.0.0.1:43101/playmesh/app-storage-sync/v1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -708,7 +746,7 @@ assert.equal(arrowDown.defaultPrevented, true);
 assert.equal(arrowDown.immediatePropagationStopped, true);
 assert.equal(browserPage.document.activeElement, browserUi[".logs"]);
 browserHost.__root.emit("keydown", { key: "ArrowRight" });
-assert.equal(browserPage.document.activeElement, browserUi[".enter-fullscreen"]);
+assert.equal(browserPage.document.activeElement, browserUi[".fullscreen"]);
 browserHost.__root.emit("keydown", { key: "ArrowUp" });
 assert.equal(browserPage.document.activeElement, browserUi[".restart"]);
 browserHost.__root.emit("keydown", { key: "ArrowLeft" });
@@ -855,15 +893,19 @@ assert.equal(
 );
 for (const [key, keyCode] of [
   ["Escape", 27],
-  ["F10", 121],
-  ["ContextMenu", 93],
-  ["Menu", 82],
   ["BrowserBack", 166],
 ]) {
   assert.equal(
     systemMenuPage.dispatchKey(key, keyCode).defaultPrevented,
     false,
   );
+}
+for (const [key, keyCode] of [
+  ["F10", 121],
+  ["ContextMenu", 93],
+  ["Menu", 82],
+]) {
+  assert.equal(systemMenuPage.dispatchKey(key, keyCode).defaultPrevented, false);
 }
 assert.equal(systemMenuUi[".layer"].hidden, true);
 assert.equal(systemMenuInternal.handleNativeBack(), false);
@@ -914,18 +956,51 @@ assert.equal(
 const freshSystemMenuPage = createPage();
 await freshSystemMenuPage.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
+let fallbackBackCalls = 0;
+const stopFallbackBack = freshSystemMenuPage.appSdk.ui.onBack(() => {
+  fallbackBackCalls += 1;
+  return false;
+});
 assert.equal(
   freshSystemMenuPage.dispatchKey("Escape", 27).defaultPrevented,
   true,
 );
+await Promise.resolve();
+assert.equal(fallbackBackCalls, 0);
+stopFallbackBack();
 
 const disabledPage = createPage({ fallbackUi: false });
 await disabledPage.appSdk.ready;
 assert.equal(disabledPage.mounted.length, 0);
 assert.equal(await disabledPage.appSdk.ui.showGameSidebar(), false);
-assert.equal(disabledPage.dispatchKey("Escape", 27).defaultPrevented, false);
+let blockedBackCalls = 0;
+const stopBlockedBack = disabledPage.appSdk.ui.onBack(() => {
+  blockedBackCalls += 1;
+  return false;
+});
+assert.equal(disabledPage.dispatchKey("Escape", 27).defaultPrevented, true);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(blockedBackCalls, 1);
+assert.equal(disabledPage.window.__exitCount || 0, 0);
+assert.equal(disabledPage.window[appInternalKey].handleNativeBack(), true);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(blockedBackCalls, 2);
+assert.equal(disabledPage.window.__exitCount || 0, 0);
+stopBlockedBack();
+stopBlockedBack();
+assert.equal(disabledPage.dispatchKey("Escape", 27).defaultPrevented, true);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(disabledPage.window.__exitCount, 1);
 
-const browserWithoutFloatingButton = createPage();
+const allowedBackPage = createPage({ fallbackUi: false });
+await allowedBackPage.appSdk.ready;
+allowedBackPage.appSdk.ui.onBack(() => true);
+assert.equal(allowedBackPage.window[appInternalKey].handleNativeBack(), true);
+await new Promise((resolve) => setTimeout(resolve, 0));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(allowedBackPage.window.__exitCount, 1);
+
+const browserWithoutFloatingButton = createPage({ showShareAction: true });
 assert.equal(
   browserWithoutFloatingButton.appSdk.ui.initializeBrowser(),
   true,
@@ -943,6 +1018,35 @@ assert.equal(
   await browserWithoutFloatingButton.appSdk.ui.showGameSidebar(),
   true,
 );
+const browserJoinUi = browserWithoutFloatingButton.mounted[0].__elements;
+assert.equal(
+  browserJoinUi[".join"].hidden,
+  true,
+  "普通浏览器即使收到主机动作配置也不得显示加入入口",
+);
+browserJoinUi[".join"].click();
+await Promise.resolve();
+assert.equal(browserJoinUi[".join-layer"].hidden, true);
+assert.equal(
+  browserWithoutFloatingButton.commands.some((command) =>
+    command.startsWith("app.lan.")),
+  false,
+  "普通浏览器不得触发 WebView 专用加入流程",
+);
+
+const joinerPage = createPage({ app: true, showShareAction: false });
+await joinerPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+const joinerUi = joinerPage.mounted[0].__elements;
+assert.equal(joinerUi[".share"].hidden, true);
+assert.equal(
+  joinerUi[".join"].hidden,
+  true,
+  "加入端 WebView 必须与分享邀请一起隐藏加入入口",
+);
+joinerUi[".join"].click();
+await Promise.resolve();
+assert.equal(joinerUi[".join-layer"].hidden, true);
 
 const appPage = createPage({ app: true });
 const earlyEscape = appPage.dispatchKey("Escape", 27);
@@ -992,7 +1096,7 @@ appUi[".continue"].focus();
 appPage.mounted[0].__root.emit("keydown", { key: "ArrowDown" });
 assert.equal(appPage.document.activeElement, appUi[".share"]);
 appPage.mounted[0].__root.emit("keydown", { key: "ArrowRight" });
-assert.equal(appPage.document.activeElement, appUi[".logs"]);
+assert.equal(appPage.document.activeElement, appUi[".join"]);
 assert.equal(
   appPage.mounted[0].__root.html.includes('class="menu-fab"'),
   false,
@@ -1004,6 +1108,65 @@ appPage.mounted[0].__elements[".share"].click();
 assert.equal(appPage.mounted[0].__elements[".layer"].hidden, false);
 await Promise.resolve();
 assert.equal(appPage.commands.includes("app.ui.openSharePanel"), true);
+assert.equal(appUi[".join"].__label.textContent, "加入游戏");
+assert.equal(
+  appPage.mounted[0].__root.html.indexOf('class="action share"') <
+    appPage.mounted[0].__root.html.indexOf('class="action join"'),
+  true,
+);
+appUi[".join"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(appUi[".join-layer"].hidden, false);
+assert.equal(appUi[".join-title"].textContent, "加入游戏");
+assert.equal(appUi[".join-close"].textContent, "×");
+assert.equal(appUi[".join-empty"].textContent, "暂无房间");
+assert.equal(appUi[".join-scan"].__label.textContent, "扫码加入");
+assert.equal(appUi[".join-input"].getAttribute("placeholder"), "输入邀请链接");
+assert.equal(appUi[".join-submit"].__label.textContent, "加入");
+assert.equal(appUi[".join-rooms"].innerHTML.includes("客厅房间"), true);
+assert.equal(appUi[".join-rooms"].innerHTML.includes("192.168.1.23"), true);
+const joinMarkup = appPage.mounted[0].__root.html.split(
+  'class="dialog-layer join-layer"',
+)[1].split('class="performance-panel"')[0];
+assert.equal(joinMarkup.includes("<p"), false, "加入弹窗不得增加解释段落");
+appUi[".join-rooms"].onclick({
+  target: {
+    dataset: { instanceId: "room-current-game" },
+    closest(selector) {
+      return selector === ".join-room" ? this : null;
+    },
+  },
+});
+await Promise.resolve();
+assert.equal(appPage.commands.includes("app.lan.joinDiscovered"), true);
+appUi[".join-close"].click();
+appUi[".join"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+appUi[".join-scan"].click();
+await Promise.resolve();
+assert.equal(appPage.commands.includes("app.lan.scanQr"), true);
+appUi[".join-close"].click();
+appUi[".join"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+appUi[".join-input"].value = "http://192.168.1.23/invite";
+appUi[".join-form"].onsubmit({ preventDefault() {} });
+await Promise.resolve();
+assert.equal(appPage.commands.includes("app.lan.joinByLink"), true);
+appUi[".join-close"].click();
+assert.equal(appUi[".join-layer"].hidden, true);
+assert.equal(
+  appPage.mounted[0].__root.html.includes('class="action enter-fullscreen"'),
+  false,
+);
+assert.equal(
+  appPage.mounted[0].__root.html.includes('class="action exit-fullscreen"'),
+  false,
+);
+assert.equal(appUi[".fullscreen"].__label.textContent, "进入全屏");
+appUi[".fullscreen"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(appPage.commands.includes("app.device.fullscreen"), true);
+assert.equal(appUi[".fullscreen"].__label.textContent, "退出全屏");
 
 const androidMenuPage = createPage();
 await androidMenuPage.appSdk.ready;

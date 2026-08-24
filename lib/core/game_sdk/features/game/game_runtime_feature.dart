@@ -124,8 +124,14 @@ const gameRuntimeSdkSource = SdkSourceFragment(
         global.console?.info?.("Playmesh 主会话 WebSocket 重连成功", details);
       } else if (transport.state === "reconnecting") {
         global.console?.info?.("Playmesh 主会话 WebSocket 正在重连", details);
-      } else {
+      } else if (transport.state === "disconnected") {
         global.console?.warn?.("Playmesh 主会话 WebSocket 已掉线", details);
+        closeBinaryTransport("主会话连接已关闭");
+        stopLatencyProbes();
+        emit(lifecycleListeners, {
+          state: transport.lifecycleState === "error" ? "error" : "closed",
+          error: transport.error,
+        });
       }
     } else if (transport.type === "session.state") {
       emitPlayerConnectionChanges(bootstrap.session, transport.session);

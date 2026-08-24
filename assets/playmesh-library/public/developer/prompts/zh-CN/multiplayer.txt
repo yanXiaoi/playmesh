@@ -21,7 +21,7 @@ SDK：
 - playmesh.main.session.finish(): 仅 Authority 在游戏规则已确认本局真正结束后，请求 Core 切换为 stopped 并清理本局离线成员。SDK 不判断胜负或结束条件；不要把页面隐藏、临时断线或暂停当作游戏结束。
 - playmesh.main.player.getCurrent(): 当前 Player；公共显示端可能为 null。
 - playmesh.main.player.setNickname(name): 多人 Player 页面在普通浏览器和 App WebView 中可用。浏览器把昵称偏好写入当前 origin 的 localStorage，App 由宿主持久化，两者都同步当前 Core。单机和 single_screen_multiplayer 公共 Authority 屏不可用；游戏不得自行改写浏览器缓存、App 资料或 Core 玩家状态。
-- playmesh.main.sync.startAuthority(options): 仅 Authority 可用。initialState 必填并作为公共初始状态；stateType 可选；tickRate 默认为 10，取 1 至 20 的整数，用于设置自动完整快照每秒发送上限，并在配置 onTick 时设置其最高运行频率；onInput 和 onTick 均可选。
+- playmesh.main.sync.startAuthority(options): 仅 Authority 可用。initialState 必填并作为公共初始状态；stateType 可选；tickRate 默认为 10，取 1 至 60 的整数，用于设置自动完整快照每秒发送上限，并在配置 onTick 时设置其最高运行频率；onInput 和 onTick 均可选。
 - controller.getState(): 返回当前 Authority runtime 公共状态的 JSON 副本。
 - controller.setState(nextState, publish?): 整体替换当前公共状态。真实变化进入自动发布流程；publish 默认为 true，使 Promise 等待对应流程结算为快照或 null，发送失败时 reject；传 false 时立即 resolve null，状态变化仍可由后续自动发布窗口同步。
 - controller.publish(targetPlayerIds?): 每次调用都独立构造调用时的当前完整公共状态快照并立即发起发送；显式发布使用独立并发路径，发送频率由游戏调用节奏决定。targetPlayerIds 选择该快照的接收者；省略时选择 Authority Client 和 Session players。
@@ -31,7 +31,7 @@ SDK：
 - onInput(input, context): 每次收到 submitAction 或实际发出的 submitState 输入时运行，可同步或异步返回下一份完整公共状态；返回 undefined 时保持当前状态。context 包含 senderPlayerId、state、inputId、inputType、key、receivedAt、session、members。
 - onTick(context): 仅在配置后运行，以 tickRate 为最高频率且回调互不重叠；可同步或异步返回下一份完整公共状态，返回 undefined 时保持当前状态。context 包含 state、inputs、tick、dt、now、session、members；连续输入值读取自 inputs[playerId][key].value。
 - playmesh.main.sync.submitAction(input): 提交一次性 JSON 业务意图，Promise resolve 为 inputId。
-- playmesh.main.sync.submitState(key, value, {rateHz}): key 必须匹配 ^[A-Za-z0-9._-]{1,64}$；rateHz 默认为 20 且必须在 1 至 20 之间；同一 key 限频并只保留最新值。Promise 在输入进入本地发送队列时 resolve；远端处理结果通过后续 Authority 快照或定向消息体现。
+- playmesh.main.sync.submitState(key, value, {rateHz}): key 必须匹配 ^[A-Za-z0-9._-]{1,64}$；rateHz 默认为 20 且必须在 1 至 60 之间；同一 key 限频并只保留最新值。Promise 在输入进入本地发送队列时 resolve；远端处理结果通过后续 Authority 快照或定向消息体现。
 - playmesh.main.sync.observe(callback)、getSnapshot()、requestSnapshot(): 读取或请求带版本的完整权威快照；只有非 Authority 多人页面会在就绪时自动 requestSnapshot。
 - 玩家专属 JSON 通道：玩家使用 playmesh.main.game.submitAction(action)，Authority 使用 playmesh.main.authority.onService(handler) 返回带 targetPlayerIds 的定向 message，接收端使用 playmesh.main.game.onMessage(callback)；onEvent(callback) 是 onMessage 的兼容别名。
 - authority handler 接收 (action, {senderPlayerId, session, members})，可返回 {targetPlayerIds, message}、结果数组、null 或 Promise；目标通常使用 members[].id，公共显示端需要接收时加入 session.authorityClientId 并去重。

@@ -219,6 +219,7 @@ class AppWebViewBridge {
     String sdkVersion,
   ) async {
     final syncGateway = await _ensureLocalBucketSyncGateway();
+    final fullscreen = await _readFullscreen();
     return {
       '_playmeshPlatformUi': _platformUiConfiguration == null
           ? null
@@ -226,6 +227,7 @@ class AppWebViewBridge {
               ..._platformUiConfiguration!,
               'actions': {
                 'share': showShareAction,
+                'join': showShareAction,
                 'restart': true,
                 'logs': true,
                 'fullscreen': true,
@@ -234,6 +236,7 @@ class AppWebViewBridge {
                 'exit': true,
               },
             },
+      '_playmeshFullscreen': fullscreen,
       if (syncGateway != null)
         '_playmeshAppStorageSync': {
           'endpoint': syncGateway.endpoint.toString(),
@@ -258,6 +261,14 @@ class AppWebViewBridge {
         'declaredCapabilities': _runtimeDeclaredCapabilities,
       },
     };
+  }
+
+  Future<bool> _readFullscreen() async {
+    try {
+      return await deviceService.isFullscreen();
+    } on Object {
+      return false;
+    }
   }
 
   Future<AppLocalBucketSyncGateway?> _ensureLocalBucketSyncGateway() {

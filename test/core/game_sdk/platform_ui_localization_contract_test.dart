@@ -41,14 +41,20 @@ void main() {
         internalResult['_playmeshPlatformUi'],
         containsPair('theme', 'light'),
       );
+      expect(internalResult['_playmeshFullscreen'], isFalse);
 
       final appSource = SdkFeatureRegistry.sdkFile('playmesh-app.js');
       expect(appSource, contains('delete bootstrap._playmeshPlatformUi'));
+      expect(appSource, contains('delete bootstrap._playmeshFullscreen'));
       expect(appSource, contains('const appBootstrapResult = Object.freeze'));
       expect(appSource, contains('return appBootstrapResult'));
       expect(
         SdkFeatureRegistry.sdkFile('playmesh-app.d.ts'),
         isNot(contains('_playmeshPlatformUi')),
+      );
+      expect(
+        SdkFeatureRegistry.sdkFile('playmesh-app.d.ts'),
+        isNot(contains('_playmeshFullscreen')),
       );
     },
   );
@@ -100,6 +106,13 @@ void main() {
       expect(declaration, contains('readonly runtime:'));
       expect(declaration, contains('getLocale(): string'));
       expect(declaration, contains('disableSystemMenuTriggers(): void'));
+      expect(
+        declaration,
+        contains(
+          'onBack(callback: () => boolean | Promise<boolean>): '
+          'PlaymeshUnsubscribe',
+        ),
+      );
       expect(declaration, isNot(contains('setSystemMenuTriggersEnabled')));
       expect(declaration, isNot(contains('platform.ui.configure')));
       expect(declaration, isNot(contains('platformUiMessages')));

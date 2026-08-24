@@ -269,7 +269,7 @@ final class RuntimeAppBridge {
     switch (name) {
       case 'app.bootstrap':
         _requirePayload(payload, const {});
-        return _environment(sdkVersion);
+        return await _environment(sdkVersion);
       case 'app.game.configure':
         return _configureGame(payload);
       case 'app.capabilities.confirm':
@@ -409,8 +409,9 @@ final class RuntimeAppBridge {
     }
   }
 
-  Map<String, Object?> _environment(String sdkVersion) => {
+  Future<Map<String, Object?>> _environment(String sdkVersion) async => {
     '_playmeshPlatformUi': platformUiConfiguration,
+    '_playmeshFullscreen': await _readFullscreen(),
     '_playmeshAutoApproveCapabilities': autoApproveCapabilities,
     'available': true,
     'sdkVersion': sdkVersion,
@@ -439,6 +440,14 @@ final class RuntimeAppBridge {
             onOpenSharePanel != null &&
             _webPermissionRole == AppWebPermissionRole.authority,
       );
+
+  Future<bool> _readFullscreen() async {
+    try {
+      return await display.isFullscreen();
+    } on Object {
+      return false;
+    }
+  }
 
   Future<Map<String, Object?>> _configureGame(
     Map<String, Object?> payload,

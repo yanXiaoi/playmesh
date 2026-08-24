@@ -119,6 +119,44 @@ void main() {
     );
   });
 
+  test('加入入口与分享邀请共用主机可见性条件', () async {
+    const platformUi = {
+      'locale': 'zh-CN',
+      'theme': 'dark',
+      'messages': {'sidebar.title': '游戏菜单'},
+    };
+    final hostBridge = AppWebViewBridge(
+      userId: 'u-host',
+      nickname: '主机玩家',
+      platformUiConfiguration: platformUi,
+      lanHost: _FakeAppLanHost(),
+      onOpenSharePanel: () async {},
+    );
+    final joinerBridge = AppWebViewBridge(
+      userId: 'u-joiner',
+      nickname: '加入玩家',
+      platformUiConfiguration: platformUi,
+      lanHost: _FakeAppLanHost(),
+      showShareAction: false,
+    );
+    addTearDown(hostBridge.close);
+    addTearDown(joinerBridge.close);
+
+    Future<Map<Object?, Object?>> actions(AppWebViewBridge bridge) async {
+      final response = await _command(bridge, 'app.bootstrap', 'visibility');
+      final result = response['result']! as Map;
+      final configuration = result['_playmeshPlatformUi']! as Map;
+      return configuration['actions']! as Map;
+    }
+
+    final hostActions = await actions(hostBridge);
+    final joinerActions = await actions(joinerBridge);
+    expect(hostActions, containsPair('share', true));
+    expect(hostActions, containsPair('join', true));
+    expect(joinerActions, containsPair('share', false));
+    expect(joinerActions, containsPair('join', false));
+  });
+
   test('远程 App 入口由 Game SDK 单向配置终端能力声明', () async {
     final vibrationDriver = _FakeVibrationDriver();
     final bridge = AppWebViewBridge(

@@ -89,6 +89,9 @@ const appDeviceSdkSource = SdkSourceFragment(
         return request("app.device.fullscreen", {
           enabled: enabled === true,
           ...(orientation === undefined ? {} : { orientation }),
+        }).then((result) => {
+          setAppUiFullscreenActive(enabled === true);
+          return result;
         });
       },
       onInput(listener) {
@@ -121,6 +124,9 @@ const appDeviceSdkSource = SdkSourceFragment(
       },
       onGameMenuClose(callback) {
         return onAppGameMenuClose(callback);
+      },
+      onBack(callback) {
+        return onAppBack(callback);
       },
       openRuntimeLogs() {
         return openAppUiRuntimeLogs();
@@ -292,6 +298,7 @@ const appDeviceSdkSource = SdkSourceFragment(
           declaredCapabilities: [],
         },
       };
+      setAppUiFullscreenActive(false);
       appAutoApproveCapabilities = false;
       appPlatformUiConfiguration = null;
       initializeAppPlatformUi(runtimePlatformUi);
@@ -301,6 +308,7 @@ const appDeviceSdkSource = SdkSourceFragment(
     })
     : request("app.bootstrap").then((result) => {
       const privateUi = result?._playmeshPlatformUi;
+      setAppUiFullscreenActive(result?._playmeshFullscreen === true);
       configureAppStorageSync(result?._playmeshAppStorageSync);
       appAutoApproveCapabilities =
         result?._playmeshAutoApproveCapabilities === true;
@@ -311,6 +319,7 @@ const appDeviceSdkSource = SdkSourceFragment(
         : result;
       if (bootstrap && typeof bootstrap === "object") {
         delete bootstrap._playmeshPlatformUi;
+        delete bootstrap._playmeshFullscreen;
         delete bootstrap._playmeshAppStorageSync;
         delete bootstrap._playmeshAutoApproveCapabilities;
       }

@@ -464,8 +464,8 @@ const gameSyncSdkSource = SdkSourceFragment(
       return Promise.reject(new Error("连续输入 key 无效"));
     }
     const rateHz = options.rateHz ?? 20;
-    if (!Number.isFinite(rateHz) || rateHz < 1 || rateHz > 20) {
-      return Promise.reject(new Error("连续输入 rateHz 必须在 1 至 20 之间"));
+    if (!Number.isFinite(rateHz) || rateHz < 1 || rateHz > 60) {
+      return Promise.reject(new Error("连续输入 rateHz 必须在 1 至 60 之间"));
     }
     const existing = pendingStateInputs.get(key) || { lastSentAt: 0, timer: null };
     existing.value = cloneJson(value, "连续输入");
@@ -492,8 +492,8 @@ const gameSyncSdkSource = SdkSourceFragment(
       throw new Error("initialState 为必填项");
     }
     const tickRate = options.tickRate ?? 10;
-    if (!Number.isInteger(tickRate) || tickRate < 1 || tickRate > 20) {
-      throw new Error("tickRate 必须是 1 至 20 的整数");
+    if (!Number.isInteger(tickRate) || tickRate < 1 || tickRate > 60) {
+      throw new Error("tickRate 必须是 1 至 60 的整数");
     }
     const runtime = {
       state: cloneJson(options.initialState, "initialState"),

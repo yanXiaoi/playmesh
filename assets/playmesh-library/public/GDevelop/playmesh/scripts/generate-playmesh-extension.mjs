@@ -128,6 +128,7 @@ const subscribeCommands = [
   'playmesh.app.device.onInput',
   'playmesh.app.ui.onGameMenuOpen',
   'playmesh.app.ui.onGameMenuClose',
+  'playmesh.app.ui.onBack',
   'PlaymeshCapabilityHandle.on',
   'PlaymeshCapabilityHandle.addEventListener',
   'PlaymeshCapabilityHandle.onError',
@@ -1262,13 +1263,15 @@ const runtimeCode = String.raw`(() => {
         const target = command.startsWith("playmesh.") ? resolveDirect(sdk, command) : handleCommand(sdk, command, handleIdInput);
         let callback;
         let requestHandlerId = "";
-        if (command === "playmesh.main.lifecycle.onExit") {
+        if (command === "playmesh.main.lifecycle.onExit" ||
+            command === "playmesh.app.ui.onBack") {
           const configuration = normalized.args[0] && typeof normalized.args[0] === "object" ? normalized.args[0] : {};
           requestHandlerId = configuration.handlerId ? String(configuration.handlerId) : "";
           callback = (event) => {
             try { pushEvent(subscriptionId, command, [event], sdk); }
             catch (error) { recordError(error, { command, handleId: handleIdInput }); }
-            return requestHandlerId ? createRequest(requestHandlerId, command, { event }, sdk, undefined, configuration.callbackTimeoutMs) : undefined;
+            const defaultValue = command === "playmesh.app.ui.onBack" ? true : undefined;
+            return requestHandlerId ? createRequest(requestHandlerId, command, { event }, sdk, defaultValue, configuration.callbackTimeoutMs) : defaultValue;
           };
         } else {
           callback = (...callbackArguments) => {
@@ -2070,7 +2073,7 @@ const typedExecuteSpecs = [
     parameters: [
       requiredVariable('InitialState', '首个完整权威状态变量。'),
       requiredBoolean('UseStateType', '是否显式传入状态类型。'), optionalString('StateType', '状态类型；默认 game。', undefined, 'game'),
-      requiredBoolean('UseTickRate', '是否显式传入每秒 tick 次数。'), optionalNumber('TickRate', '每秒 tick 次数，1～20；默认 10。', 10),
+      requiredBoolean('UseTickRate', '是否显式传入每秒 tick 次数。'), optionalNumber('TickRate', '每秒 tick 次数，1～60；默认 10。', 10),
       requiredBoolean('UseOnInputHandler', '是否将 onInput 回调桥接到请求队列。'), optionalString('OnInputHandlerId', '接收 onInput 请求的处理器 ID。'),
       requiredBoolean('UseOnTickHandler', '是否将 onTick 回调桥接到请求队列。'), optionalString('OnTickHandlerId', '接收 onTick 请求的处理器 ID。'),
       requiredBoolean('UseCallbackTimeout', '是否显式设置回调超时。'), optionalNumber('CallbackTimeoutMs', '回调请求超时毫秒数，100～60000。', 15000),
@@ -2084,8 +2087,8 @@ const typedExecuteSpecs = [
   },
   {
     command: 'playmesh.main.sync.submitState', name: 'SubmitSyncState', group: 'Main SDK ❯ Sync', label: '提交可合并同步状态输入',
-    description: '同一 key 只保留最新连续输入；可选 rateHz 为 1～20。',
-    parameters: [requiredString('Key', '连续输入 key，1～64 个允许字符。'), requiredVariable('Value', '连续输入值 JSON 变量。'), requiredBoolean('UseRateHz', '是否显式传入发送频率。'), optionalNumber('RateHz', '每秒最大发送次数，1～20。', 20)],
+    description: '同一 key 只保留最新连续输入；可选 rateHz 为 1～60。',
+    parameters: [requiredString('Key', '连续输入 key，1～64 个允许字符。'), requiredVariable('Value', '连续输入值 JSON 变量。'), requiredBoolean('UseRateHz', '是否显式传入发送频率。'), optionalNumber('RateHz', '每秒最大发送次数，1～60。', 20)],
     result: '将 SDK 的 null 结果写入变量。',
     args: `(() => { const values = [${argumentCode('Key')}, ${variableCode('Value')}]; if (${argumentCode('UseRateHz')}) values.push({ rateHz: ${argumentCode('RateHz')} }); return values; })()`,
   },
@@ -2339,6 +2342,11 @@ const typedSubscribeSpecs = [
   { command: 'playmesh.app.device.onInput', name: 'SubscribeDeviceInput', group: 'App SDK ❯ Device environment', label: '订阅设备统一输入', description: '订阅开放结构的 App 统一输入事件。', args: '[]' },
   { command: 'playmesh.app.ui.onGameMenuOpen', name: 'SubscribeGameMenuOpen', group: 'App SDK ❯ UI', label: '订阅游戏菜单打开', description: '只在关闭到打开的真实状态变化后入队。', args: '[]' },
   { command: 'playmesh.app.ui.onGameMenuClose', name: 'SubscribeGameMenuClose', group: 'App SDK ❯ UI', label: '订阅游戏菜单关闭', description: '只在打开到关闭的真实状态变化后入队。', args: '[]' },
+  {
+    command: 'playmesh.app.ui.onBack', name: 'SubscribeAppBack', group: 'App SDK ❯ UI', label: '订阅系统返回', description: '仅在显式关闭 SDK 兜底面板后处理 Android 返回与 Esc；处理器返回 false 可阻止退出。',
+    parameters: [requiredBoolean('UseHandler', '是否启用可阻止退出的返回处理器。'), optionalString('HandlerId', '返回请求处理器 ID。'), requiredBoolean('UseCallbackTimeout', '是否显式设置回调等待时间。'), optionalNumber('CallbackTimeoutMs', '返回回调最大等待毫秒数。', 2500)],
+    args: `(() => { if (!${argumentCode('UseHandler')}) return [{}]; const options = { handlerId: ${argumentCode('HandlerId')} }; if (${argumentCode('UseCallbackTimeout')}) options.callbackTimeoutMs = ${argumentCode('CallbackTimeoutMs')}; return [options]; })()`,
+  },
   { command: 'PlaymeshCapabilityHandle.on', name: 'SubscribeDynamicCapabilityEvent', group: 'App SDK ❯ Dynamic capability (advanced)', label: '订阅动态能力事件（高级）', description: '按注册表事件名订阅开放 JSON 数据。', parameters: [handleIdParameter('能力实例 handleId。'), requiredString('EventName', '注册表声明的事件名。')], args: `[${argumentCode('EventName')}]`, handle: 'HandleId' },
   { command: 'PlaymeshCapabilityHandle.addEventListener', name: 'AddDynamicCapabilityEventListener', group: 'App SDK ❯ Dynamic capability (advanced)', label: '添加动态能力 DOM 事件监听（高级）', description: '按 DOM 风格别名订阅开放 JSON 数据；SubscriptionId 用于精确移除。', parameters: [handleIdParameter('能力实例 handleId。'), requiredString('EventName', '注册表声明的事件名。')], args: `[${argumentCode('EventName')}]`, handle: 'HandleId' },
   { command: 'PlaymeshCapabilityHandle.onError', name: 'SubscribeDynamicCapabilityError', group: 'App SDK ❯ Dynamic capability (advanced)', label: '订阅动态能力错误（高级）', description: '订阅能力实例的非致命 Error，并把稳定 code 与 message 作为安全错误对象入队。', parameters: [handleIdParameter('能力实例 handleId。')], args: '[]', handle: 'HandleId' },
@@ -2580,6 +2588,7 @@ const typedResponseFunctions = [
   eventFunction({ name: 'KeepAuthoritySyncState', fullName: '同步回调保持当前状态', description: '响应 onInput/onTick 请求而不替换当前状态。', group: 'Main SDK ❯ Sync', sentence: '同步回调请求 _PARAM1_ 保持当前状态', parameters: [requiredString('RequestId', '同步回调请求 ID。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, null, "keep");`) }),
   eventFunction({ name: 'SetNextAuthoritySyncState', fullName: '同步回调返回下一状态', description: '以变量中的完整 JSON 状态响应 onInput/onTick。', group: 'Main SDK ❯ Sync', sentence: '同步回调请求 _PARAM1_ 返回状态 _PARAM2_', parameters: [requiredString('RequestId', '同步回调请求 ID。'), requiredVariable('State', '下一完整状态变量。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, ${variableCode('State')}, "next");`) }),
   eventFunction({ name: 'CompleteLifecycleExitCleanup', fullName: '完成退出异步清理请求', description: '完成 onExit 的有限等待清理请求。', group: 'Main SDK ❯ Lifecycle', sentence: '完成退出清理请求 _PARAM1_', parameters: [requiredString('RequestId', '退出清理请求 ID。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, null, "void");`) }),
+  eventFunction({ name: 'CompleteAppBackRequest', fullName: '完成系统返回请求', description: '决定继续退出或留在当前游戏。', group: 'App SDK ❯ UI', sentence: '系统返回请求 _PARAM1_ 继续退出：_PARAM2_', parameters: [requiredString('RequestId', '系统返回请求 ID。'), requiredBoolean('ContinueExit', 'true 继续退出；false 阻止退出。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, ${argumentCode('ContinueExit')}, "result");`) }),
 ];
 
 const capabilityByCode = new Map(builtInCapabilityDescriptors.map(descriptor => [descriptor.code, descriptor]));

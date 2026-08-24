@@ -158,6 +158,10 @@ void main() {
         contains('avatar: string | null'),
         contains('openSharePanel(): Promise<void>'),
         contains('disableSystemMenuTriggers(): void'),
+        contains(
+          'onBack(callback: () => boolean | Promise<boolean>): '
+          'PlaymeshUnsubscribe',
+        ),
         contains('type PlaymeshAppLanShareLinkType = "lan" | "wan"'),
         contains('interface PlaymeshAppLanApi'),
         contains('readonly lan: PlaymeshAppLanApi'),

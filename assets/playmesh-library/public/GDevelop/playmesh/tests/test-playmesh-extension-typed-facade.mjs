@@ -113,6 +113,7 @@ playmesh.app.performance.onLatency
 playmesh.app.device.onInput
 playmesh.app.ui.onGameMenuOpen
 playmesh.app.ui.onGameMenuClose
+playmesh.app.ui.onBack
 PlaymeshCapabilityHandle.on
 PlaymeshCapabilityHandle.addEventListener
 PlaymeshCapabilityHandle.onError
@@ -135,10 +136,10 @@ const expectedCommands = Object.freeze([
   ...expectedHandlerCommands,
 ]);
 assert.equal(expectedExecuteCommands.length, 76);
-assert.equal(expectedSubscribeCommands.length, 20);
+assert.equal(expectedSubscribeCommands.length, 21);
 assert.equal(expectedHandlerCommands.length, 3);
-assert.equal(expectedCommands.length, 99);
-assert.equal(new Set(expectedCommands).size, 99);
+assert.equal(expectedCommands.length, 100);
+assert.equal(new Set(expectedCommands).size, 100);
 
 const readJson = async filePath => JSON.parse(await readFile(filePath, 'utf8'));
 const [extension, capabilityDescriptors] = await Promise.all([
@@ -219,7 +220,7 @@ for (const [primitive, commands] of Object.entries(expectedCommandsByPrimitive))
     );
   }
 }
-assert.equal(typedFunctionsByCommand.size, 99);
+assert.equal(typedFunctionsByCommand.size, 100);
 
 for (const command of expectedSubscribeCommands) {
   const subscribeFunction = typedFunctionsByCommand.get(command);
@@ -574,5 +575,5 @@ assert.equal(builtInLeaves.size, capabilityDescriptors.length);
 
 process.stdout.write(
   'Playmesh GDevelop typed facade contract passed ' +
-    '(99 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
+    '(100 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
 );

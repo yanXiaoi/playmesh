@@ -25,6 +25,7 @@ const platformGameUiRequiredKeys = <String>{
   'sidebar.continue',
   'sidebar.restart',
   'sidebar.share',
+  'sidebar.join',
   'sidebar.logs',
   'sidebar.enter_fullscreen',
   'sidebar.exit_fullscreen',
@@ -64,6 +65,12 @@ const platformGameUiRequiredKeys = <String>{
   'logs.empty',
   'logs.copy',
   'logs.copied',
+  'join.title',
+  'join.empty',
+  'join.scan',
+  'join.input',
+  'join.action',
+  'join.failed',
 };
 
 class PlatformGameUiConfiguration {

@@ -414,6 +414,16 @@ assert.deepEqual(
   JSON.parse(JSON.stringify(app.ui.configure({ fallbackUi: false }))),
   { fallbackUi: false, floatingButton: true },
 );
+let appBackCalls = 0;
+const stopAppBack = app.ui.onBack(() => {
+  appBackCalls += 1;
+  return false;
+});
+assert.equal(appInternal.handleNativeBack(), true);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(appBackCalls, 1);
+stopAppBack();
+stopAppBack();
 const commandCountBeforeDisablingSystemMenuTriggers = commands.length;
 assert.equal(app.ui.disableSystemMenuTriggers(), undefined);
 assert.equal(app.ui.disableSystemMenuTriggers(), undefined);
@@ -426,6 +436,7 @@ for (const methodName of [
   "showGameSidebar",
   "onGameMenuOpen",
   "onGameMenuClose",
+  "onBack",
   "restartGame",
   "openSharePanel",
   "openRuntimeLogs",

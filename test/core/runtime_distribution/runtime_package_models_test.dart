@@ -65,6 +65,15 @@ void main() {
       final manifest = RuntimePackageReleaseManifest.parse(
         File('resources/runtime/update.json').readAsStringSync(),
       );
+      final runtimeVersion = RegExp(
+        r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$',
+        multiLine: true,
+      ).firstMatch(File('runtime/src/pubspec.yaml').readAsStringSync());
+      expect(runtimeVersion, isNotNull);
+      expect(
+        manifest.version,
+        'v${runtimeVersion!.group(1)}-build${runtimeVersion.group(2)}',
+      );
 
       const files = {
         RuntimePackageTarget.androidX86:
@@ -88,6 +97,44 @@ void main() {
       }
     },
   );
+
+  test('Runtime host stays aligned with the current App SDK menu contract', () {
+    final ui =
+        jsonDecode(
+              File(
+                'runtime/src/assets/runtime/platform-ui.json',
+              ).readAsStringSync(),
+            )
+            as Map<String, Object?>;
+    final locales = (ui['locales']! as List).cast<Map>();
+    for (final locale in locales) {
+      final messages = locale['messages']! as Map;
+      for (final key in [
+        'sidebar.join',
+        'join.title',
+        'join.empty',
+        'join.scan',
+        'join.input',
+        'join.action',
+        'join.failed',
+      ]) {
+        expect(messages[key], isNotEmpty, reason: '${locale['locale']}: $key');
+      }
+    }
+
+    final platformUi = File(
+      'runtime/src/lib/runtime/runtime_platform_ui.dart',
+    ).readAsStringSync();
+    final appBridge = File(
+      'runtime/src/lib/runtime/runtime_app_bridge.dart',
+    ).readAsStringSync();
+    expect(platformUi, contains("'join': showShareAction"));
+    expect(appBridge, isNot(contains('showJoinAction:')));
+    expect(
+      appBridge,
+      contains("'_playmeshFullscreen': await _readFullscreen()"),
+    );
+  });
 
   test('manifest enforces structure and platform-level SHA only', () {
     Map<String, Object?> validVariant() => {

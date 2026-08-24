@@ -125,6 +125,7 @@ final class RuntimePlatformUiCatalog {
 
 Map<String, bool> _actions(bool showShareAction) => {
   'share': showShareAction,
+  'join': showShareAction,
   'restart': true,
   'logs': true,
   'fullscreen': true,

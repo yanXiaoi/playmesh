@@ -14,8 +14,8 @@ Game SDK `4.1.0`；App SDK 接受 `3.2.0` 或 `3.3.0`，并统一解析到向后
 最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词
 和 CLI/IDEA 均使用最新注册表内容。
 
-Playmesh App `4.2.0+28` 的 `playmesh.app.lan` 与
-`disableSystemMenuTriggers()` 是 App Bridge SDK `3.3.0` 的兼容新增，Game SDK
+Playmesh App `4.2.0+28` 起提供的 `playmesh.app.lan`、统一平台菜单以及本次新增的
+`playmesh.app.ui.onBack()` 都属于 App Bridge SDK `3.3.0` 的兼容扩展，Game SDK
 `4.1.0` 与 App Bridge SDK 版本均保持不变。自动化契约已验证；五个原生平台的跨设备
 发布、发现、权限、网络切换和真实加入仍待实机验收。
 
@@ -418,13 +418,13 @@ if (playmesh.main.session.isAuthority()) {
 }
 
 await playmesh.main.sync.submitAction({ type: "score.add" });
-await playmesh.main.sync.submitState("movement", { x: 1, y: 0 }, { rateHz: 20 });
+await playmesh.main.sync.submitState("movement", { x: 1, y: 0 }, { rateHz: 60 });
 const off = playmesh.main.sync.observe((snapshot) => render(snapshot.state));
 ```
 
-`startAuthority` 仅 Authority 可用，`tickRate` 为 1 至 20 的整数，返回控制器：`getState()`、`setState(nextState, publish?)`、`publish(targetPlayerIds?)` 和 `stop()`。`onInput` 收到可信 `senderPlayerId`、当前状态和输入类型；`onTick` 收到 `dt`、`tick`、按玩家和 key 合并后的连续输入、会话与成员。
+`startAuthority` 仅 Authority 可用，`tickRate` 为 1 至 60 的整数，返回控制器：`getState()`、`setState(nextState, publish?)`、`publish(targetPlayerIds?)` 和 `stop()`。`onInput` 收到可信 `senderPlayerId`、当前状态和输入类型；`onTick` 收到 `dt`、`tick`、按玩家和 key 合并后的连续输入、会话与成员。
 
-`submitAction(payload)` 发送一次性语义输入。`submitState(key, value, {rateHz})` 对同一 key 只保留最新值并把发送频率限制到 1 至 20 Hz，适合方向、摇杆等连续输入。`requestSnapshot()` 可显式请求最新完整快照；SDK 在普通多人页面就绪时也会自动请求。
+`submitAction(payload)` 发送一次性语义输入。`submitState(key, value, {rateHz})` 对同一 key 只保留最新值并把发送频率限制到 1 至 60 Hz，适合方向、摇杆等连续输入。`requestSnapshot()` 可显式请求最新完整快照；SDK 在普通多人页面就绪时也会自动请求。
 
 `getSnapshot()` 返回最近快照，`observe(callback)` 注册时会立即回调已有快照。快照包含 `protocolVersion`、`stateType`、`full`、`revision`、`sequence`、`timestamp`、`sourceTick` 和 JSON `state`。当前实现始终发送完整快照；页面应以最新快照为准，不自行拼接不可信增量。
 
@@ -515,11 +515,12 @@ await playmesh.app.ready;
 playmesh.app.ui.disableSystemMenuTriggers();
 ```
 
-该同步方法严格不接受参数，只为当前 WebView 文档单向、幂等解绑默认的
-Escape/Menu/Back 自动菜单监听。它不禁用 `showGameSidebar()`、`openSharePanel()`、
+该同步方法严格不接受参数，只为当前 WebView 文档单向、幂等禁用默认的
+Escape/Menu/Back 自动菜单触发。它不禁用 `showGameSidebar()`、`openSharePanel()`、
 信息/日志覆盖层，也不阻止原生返回关闭已经显示的平台层。SDK 配置刷新不会重新绑定；
 页面刷新创建新文档后恢复默认监听。ready 前调用同步抛出 `app_not_ready`，任意多余
 参数同步抛出 `invalid_argument` 且不能发生部分解绑；不存在旧的 boolean 启停方法。
+该方法不等于显式关闭兜底面板，也不会令 `onBack()` 生效。
 
 ### 居中游戏菜单
 
@@ -554,13 +555,33 @@ offClose();
 `exitGame()` 请求 App 正常结束当前游戏、执行退出清理并返回上一 App 页面；不需要
 先打开游戏菜单。`showGameSidebar()` 的名称为兼容既有公开契约而保留，不代表菜单仍位于侧边。
 
+菜单把进入/退出全屏合并为一个状态按钮；分享/邀请之后提供“加入游戏”。加入弹窗只显示
+当前游戏 `gameId` 的局域网房间、扫码按钮和邀请链接输入框，不增加说明段落；房间、扫码和
+手工链接全部复用 `playmesh.app.lan` 与宿主统一加入预检。该入口复用“分享/邀请”的主机
+可见性条件：只在检测到原生 Bridge 且当前 WebView 为 Authority/主机时显示；加入端 WebView
+和普通浏览器都没有该入口。
+
 游戏可以在 SDK 就绪前关闭统一兜底 UI：
 
 ```js
 playmesh.app.ui.configure({ fallbackUi: false });
 ```
 
-此时 SDK 不创建游戏菜单、悬浮球、信息层或日志层，也不消费菜单/返回按键。普通浏览器
+此时 SDK 不创建游戏菜单、悬浮球、信息层或日志层。只有在这个配置已显式关闭兜底面板后，
+Android 滑动/按钮返回和 Esc 才会调用 `onBack()`：
+
+```js
+const offBack = playmesh.app.ui.onBack(async () => {
+  return await confirmGameExit(); // false 留在游戏；true 继续退出
+});
+```
+
+没有注册回调时直接继续退出；多个回调中任意一个严格返回 `false` 都会阻止本次退出，
+返回 `true` 则继续。同步异常、Promise reject 或超过有限等待时间按继续退出处理，避免页面
+永久锁死；重复返回在前一次判断完成前只消费事件，不会绕过 `false`。兜底面板仍启用时不会
+调用游戏回调，而是继续由 SDK 处理菜单和内部覆盖层。
+
+普通浏览器
 若仍想使用 SDK 游戏菜单、但由游戏自己的按钮负责打开，可以调用：
 
 ```js
@@ -705,6 +726,10 @@ playmesh.main.lifecycle.onExit((event) => {});
 ```
 
 `event.state` 可能为 `ready`、`pause`、`resume`、`exit`、`closed` 或 `error`；错误事件可能携带 `event.error`。所有方法返回取消订阅函数。
+
+主会话连接断开会在浏览器、Windows WebView2 和移动端统一转换为 `closed` 或 `error`；
+WebView 内部的 `transport.status` 不属于公开 API。正常关闭产生 `closed`，传输异常产生
+`error`，游戏不得按底层运行环境分别监听连接状态。SDK 仍会在内部执行既有重连策略。
 
 `onExit` 处理器可以返回 Promise，宿主会有限等待业务清理。关键进度仍应在状态变化时调用 `setData`，不要只依赖退出回调；最终存储落盘由 App 在 WebView 重启、退出或会话关闭时完成。
 
