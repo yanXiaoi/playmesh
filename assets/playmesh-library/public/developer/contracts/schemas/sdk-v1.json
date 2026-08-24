@@ -478,6 +478,17 @@
       ],
       "description": "Public StorageBucket method names. Sync methods are optional blocking LAN JSON access and do not use binary upload storage."
     },
+    "AppStorageBucketMethodName": {
+      "enum": [
+        "getData",
+        "setData",
+        "getDataSync",
+        "setDataSync",
+        "removeData",
+        "clearData"
+      ],
+      "description": "Public current-device App Bucket method names. Sync methods use localStorage in ordinary browsers and a private loopback capability endpoint in native App WebViews."
+    },
     "PlaymeshBootstrap": {
       "type": "object",
       "required": [

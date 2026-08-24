@@ -301,6 +301,7 @@ const appDeviceSdkSource = SdkSourceFragment(
     })
     : request("app.bootstrap").then((result) => {
       const privateUi = result?._playmeshPlatformUi;
+      configureAppStorageSync(result?._playmeshAppStorageSync);
       appAutoApproveCapabilities =
         result?._playmeshAutoApproveCapabilities === true;
       appPlatformUiConfiguration =
@@ -310,6 +311,7 @@ const appDeviceSdkSource = SdkSourceFragment(
         : result;
       if (bootstrap && typeof bootstrap === "object") {
         delete bootstrap._playmeshPlatformUi;
+        delete bootstrap._playmeshAppStorageSync;
         delete bootstrap._playmeshAutoApproveCapabilities;
       }
       initializeAppPlatformUi(privateUi);

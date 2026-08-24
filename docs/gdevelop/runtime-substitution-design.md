@@ -24,7 +24,7 @@ backend/I/O seam：Playmesh 可以实现该 seam 所需的网络或宿主传输�
 3. Multiplayer、身份和 locale façade 只能通过不可枚举的私有 `Symbol` 协作；不得全局替换
    `fetch`、`WebSocket`、`localStorage` 或 `Peer`。Storage 是经单独审批的唯一例外：锁定的
    `storagetools` seam 只调用公开且精确类型化的
-   `playmesh.main.storage.getBucket(...).getDataSync/setDataSync`，不增加第二个私有入口。
+   `playmesh.app.storage.getBucket(...).getDataSync/setDataSync`，不增加 GDevelop 私有入口。
    同样禁止全局改写 `ApiConfigs`、批量替换官方 host 或把官方端点统一指向无效域名；需要禁用
    的在线服务必须在其精确 service 调用点显式失败关闭。
 4. 通用 Browser HTML5 导出完全保留官方 backend。只有 Playmesh 预览和“发布到
@@ -145,40 +145,39 @@ source policy 另锁定官方 TS 的 Git Blob SHA-1
 `loadedObjects`、Load/Unload、路径和类型判断、exists/delete/clear 行为全部是官方上层语义，
 不得修改。
 
-补丁不再建立私有 façade、启动快照、预热 gate、driver map 或浏览器内持久化副本。它在每次
-官方 load/unload 真正触及底层 I/O 时惰性判断公开 SDK：
+补丁不建立 GDevelop 私有 façade、启动快照、预热 gate、driver map 或浏览器内持久化副本。
+它在每次官方 load/unload 真正触及底层 I/O 时惰性判断公开 SDK：
 
 1. `window.playmesh` 不存在：逐字保留官方 `localStorage` 分支与 `GDJS_` 前缀，通用官方
    Browser HTML5 导出行为不变。
-2. `window.playmesh` 存在且同步能力完整：先等待可同步读取的 Game SDK 身份快照。普通玩家
-   使用 `GDJS/users/<encodeURIComponent(username)>/<name>`；公共 Authority 屏固定使用
-   `GDJS/auth/<name>`；无会话玩家的 App 单机页使用 App identity 的 nickname。首次成功解析
-   后在本页面冻结该目录，避免运行中改名把已加载的 root 写进另一个用户目录。读取固定私有
-   key `$playmesh.gdevelop.root.v1`，不存在时得到 `null`；写入直接提交官方内存中的完整
-   `jsObject` root，而不是序列化字符串。
-3. `window.playmesh` 存在但 `main/storage/getBucket` 或任一同步方法缺失：抛出明确的
-   Game SDK 4.1.0 不兼容错误，绝不 fallback 到 `localStorage`、空 root 或旧 WS 存储。
-4. 已就绪的纯浏览器 solo 没有玩家或 App identity，明确保留官方浏览器 `localStorage`；多人
-   身份尚未就绪，或已就绪的多人参与页仍无玩家身份时明确失败，不得误写 `auth` 或切回本地。
+2. `window.playmesh` 存在且 App 同步能力完整：使用
+   `playmesh.app.storage.getBucket('GDJS/' + name)`。读取固定保留 key
+   `$playmesh.gdevelop.root.v1`，不存在时得到 `null`；写入直接提交官方内存中的完整
+   `jsObject` root，而不是序列化字符串。App WebView 写当前设备的 App Bucket；普通浏览器
+   由同一 App SDK 方法写当前源 `localStorage`。
+3. `window.playmesh` 存在但 `app/storage/getBucket` 或任一同步方法缺失：抛出明确的
+   App Bridge SDK 3.3.0 不兼容错误，绝不 fallback 到官方 `GDJS_` key、空 root、Main Bucket
+   或旧 WS 存储。
 
-能力不能在模块加载时缓存；第一次实际存储 I/O 通过 `gameInfo.getCurrent()` 确认 SDK 已就绪，
-但不异步等待 `playmesh.main.ready`，也不扫描或 hydrate 全部 Bucket。官方 `loadedObjects`、
+能力不能在模块加载时缓存；App SDK 的同步方法在原生 App 中只接受 bootstrap 下发并由 SDK
+立即移除的随机 loopback capability endpoint，未完成 `playmesh.app.ready` 时明确失败；普通
+浏览器直接使用 App SDK 的当前源本地实现。GDevelop 补丁不扫描或 hydrate 全部 Bucket。官方 `loadedObjects`、
 Load/Unload、路径、类型、exists/delete/clear 与临时 load 后自动 unload 的语义保持原样；
 只有实际走到 Unload 才调用同步写入。同步错误在 Playmesh 分支中失败关闭，不被官方
 localStorage 的 catch 吞掉。
 
-用户名是玩家存档唯一逻辑键：同名用户共享、改名在下次页面加载后进入新目录。`users` 与
-`auth` 分域，避免昵称 `auth` 与公共屏碰撞；只对用户名做可逆 URL 编码，原始 GDevelop
-storage file 名不归一化。这里的“目录”是逻辑 Bucket 名；存储层仍用
-`data/json/logical/sha256-{digest}.json` envelope 保存并校验原名；完整 JSON root 上限为
-10 MiB。异步和同步 JSON 统一走同源 HTTP GET/PUT/DELETE、SHA-256、requestId 与
-revision/CAS；同步 XHR 响应丢失只以完全相同请求立即重试一次。Binary upload 仍是独立 POST
-与 `data/data`，不进入上述 envelope。
+存档所有权固定为“当前设备 + 当前游戏”，与玩家昵称、Authority、Session 和加入来源无关；
+改名、房主迁移或同名玩家不会切换或共享 App Bucket。原始 GDevelop storage file 名不归一化，
+作为 `GDJS/<name>` 逻辑 Bucket 名；App 本地存储层使用
+`logical/sha256-{digest}.json` envelope 保存并校验原名。单 Bucket 完整 JSON root 上限为
+10 MiB。原生同步 JSON 通过随机 loopback capability endpoint 和 requestId 重放保护访问当前
+`AppLocalBucketStore`；同步 XHR 响应丢失只以完全相同请求立即重试一次。它不使用 Main Bucket
+的 Authority HTTP 路由、revision/CAS 或 binary upload。
 
 `apply-source-policy.mjs` 是该 TS seam 的唯一修改入口，输出清单记录 preimage Git Blob 和
-post-patch SHA-256。测试必须覆盖无 Playmesh、玩家用户名、公共 `auth`、App 单机身份、身份
-未就绪、页面内改名冻结、纯浏览器 solo 官方本地存储和伪造/残缺 SDK，并断言不存在
-`Symbol.for` 或新 Bootstrap 注入，且多人 Playmesh 分支不 fallback 到 localStorage。
+post-patch SHA-256。测试必须覆盖无 Playmesh 的官方 fallback、App 本地逻辑 Bucket、普通浏览器
+App Bucket、同步方法缺失和伪造/残缺 SDK，并断言不存在 GDevelop 私有 `Symbol.for`，且
+Playmesh 分支不读取 `playmesh.main.storage` 或 fallback 到官方 `GDJS_` key。
 
 ## Multiplayer：保留官方项目 API 与对象同步，适配 Playmesh lobby/backend
 

@@ -8,6 +8,8 @@ const appStorageSdkSource = SdkSourceFragment(
   const APP_STORAGE_BUCKET_PATTERN =
     /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const APP_STORAGE_KEY_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+  const APP_STORAGE_GDEVELOP_ROOT_KEY = "$playmesh.gdevelop.root.v1";
+  let appStorageSyncConfiguration = null;
 
   function validateAppStorageBucket(bucket) {
     if (typeof bucket !== "string" ||
@@ -24,6 +26,31 @@ const appStorageSdkSource = SdkSourceFragment(
         "App Bucket key 只能包含字母、数字、点、下划线和连字符，且长度为 1 至 128",
       );
     }
+  }
+
+  function appStorageUtf8Bytes(value) {
+    if (typeof global.TextEncoder === "function") {
+      return new global.TextEncoder().encode(value);
+    }
+    const encoded = unescape(encodeURIComponent(value));
+    return Uint8Array.from(encoded, (character) => character.charCodeAt(0));
+  }
+
+  function validateSynchronousAppStorageBucket(bucket) {
+    if (typeof bucket !== "string") {
+      throw new TypeError("同步 App Bucket 逻辑名必须是字符串");
+    }
+    const length = appStorageUtf8Bytes(bucket).length;
+    if (length < 1 || length > 4096) {
+      throw new TypeError(
+        "同步 App Bucket 逻辑名必须为 1 至 4096 个 UTF-8 字节",
+      );
+    }
+  }
+
+  function validateSynchronousAppStorageKey(key) {
+    if (key === APP_STORAGE_GDEVELOP_ROOT_KEY) return;
+    validateAppStorageKey(key);
   }
 
   function cloneAppStorageJson(value) {
@@ -51,7 +78,7 @@ const appStorageSdkSource = SdkSourceFragment(
     if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
       throw new Error("App Bucket localStorage 根节点必须是对象");
     }
-    for (const key of Object.keys(decoded)) validateAppStorageKey(key);
+    for (const key of Object.keys(decoded)) validateSynchronousAppStorageKey(key);
     return decoded;
   }
 
@@ -106,24 +133,130 @@ const appStorageSdkSource = SdkSourceFragment(
     }
   }
 
+  function configureAppStorageSync(configuration) {
+    const endpoint = configuration?.endpoint;
+    appStorageSyncConfiguration = typeof endpoint === "string" &&
+        /^http:\/\/127\.0\.0\.1:\d+\/playmesh\/app-storage-sync\/v1\/[A-Za-z0-9_-]{43}$/.test(endpoint)
+      ? Object.freeze({ endpoint })
+      : null;
+  }
+
+  function appStorageBase64Url(bytes) {
+    let binary = "";
+    for (const value of bytes) binary += String.fromCharCode(value);
+    return global.btoa(binary)
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/g, "");
+  }
+
+  function appStorageCallSync(operation, bucket, key, value) {
+    if (nativeSender() === null) {
+      return browserAppStorageCall(
+        operation === "sync.get" ? "get" : "set",
+        bucket,
+        key,
+        value,
+      );
+    }
+    const configuration = appStorageSyncConfiguration;
+    if (!configuration) {
+      throw new Error(
+        "Playmesh App SDK 尚未就绪，App Bucket 同步存储不可用",
+      );
+    }
+    if (typeof global.XMLHttpRequest !== "function") {
+      throw new Error("当前 WebView 不支持 App Bucket 同步 XMLHttpRequest");
+    }
+    const requestId = `app-storage-sync-${Date.now()}-${++sequence}`;
+    const envelope = operation === "sync.get"
+      ? {
+          protocolVersion: "1.0.0",
+          requestId,
+          operation,
+          bucket,
+          key,
+        }
+      : {
+          protocolVersion: "1.0.0",
+          requestId,
+          operation,
+          bucket,
+          key,
+          value,
+        };
+    const body = JSON.stringify(envelope);
+    const method = operation === "sync.get" ? "GET" : "POST";
+    const url = method === "GET"
+      ? `${configuration.endpoint}?payload=${appStorageBase64Url(
+          appStorageUtf8Bytes(body),
+        )}`
+      : configuration.endpoint;
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const xhr = new global.XMLHttpRequest();
+        xhr.open(method, url, false);
+        if (method === "POST") {
+          xhr.setRequestHeader("Content-Type", "text/plain;charset=UTF-8");
+        }
+        xhr.send(method === "POST" ? body : null);
+        const payload = JSON.parse(xhr.responseText || "");
+        if (xhr.status < 200 || xhr.status >= 300 || payload?.error) {
+          const error = new Error(
+            payload?.error?.message || `App Bucket 同步请求失败: HTTP ${xhr.status}`,
+          );
+          if (typeof payload?.error?.code === "string") {
+            error.code = payload.error.code;
+          }
+          throw error;
+        }
+        if (payload?.protocolVersion !== "1.0.0" ||
+            payload?.requestId !== requestId ||
+            !Object.prototype.hasOwnProperty.call(payload, "result")) {
+          throw new Error("App Bucket 同步响应无效");
+        }
+        return payload.result;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("App Bucket 同步请求失败");
+  }
+
   const appStorageApi = Object.freeze({
     getBucket(bucket) {
-      validateAppStorageBucket(bucket);
+      validateSynchronousAppStorageBucket(bucket);
       return Object.freeze({
         getData(key) {
+          validateAppStorageBucket(bucket);
           validateAppStorageKey(key);
           return appStorageCall("get", bucket, key);
         },
         setData(key, value) {
+          validateAppStorageBucket(bucket);
           validateAppStorageKey(key);
           const cloned = cloneAppStorageJson(value);
           return appStorageCall("set", bucket, key, cloned);
         },
+        getDataSync(key) {
+          validateSynchronousAppStorageKey(key);
+          return cloneAppStorageJson(
+            appStorageCallSync("sync.get", bucket, key),
+          );
+        },
+        setDataSync(key, value) {
+          validateSynchronousAppStorageKey(key);
+          const cloned = cloneAppStorageJson(value);
+          appStorageCallSync("sync.set", bucket, key, cloned);
+        },
         removeData(key) {
+          validateAppStorageBucket(bucket);
           validateAppStorageKey(key);
           return appStorageCall("remove", bucket, key);
         },
         clearData() {
+          validateAppStorageBucket(bucket);
           return appStorageCall("clear", bucket);
         },
       });
@@ -137,6 +270,10 @@ interface PlaymeshAppStorageBucket {
   getData<T = PlaymeshJson>(key: string): Promise<T | null>;
   /** 在当前设备写入 JSON 值。 */
   setData(key: string, value: PlaymeshJson): Promise<void>;
+  /** 阻塞读取当前设备的 JSON；不存在时返回 `null`。 */
+  getDataSync<T = PlaymeshJson>(key: string): T | null;
+  /** 阻塞写入当前设备的 JSON；返回时本地文件已提交。 */
+  setDataSync(key: string, value: PlaymeshJson): void;
   /** 在当前设备删除一个 key。 */
   removeData(key: string): Promise<void>;
   /** 清空当前设备上的当前 Bucket。 */
@@ -146,7 +283,7 @@ interface PlaymeshAppStorageBucket {
 interface PlaymeshAppApi {
   /** 当前设备独占的玩家本地 JSON 存储，不通过 Authority 或游戏会话共享。 */
   readonly storage: {
-    /** 获取本地 Bucket；名称规则与 Main Bucket 相同。 @playmesh-completion playmesh.app.storage.getBucket */
+    /** 获取本地 Bucket；异步方法使用标准名称规则，同步方法另支持 1～4096 UTF-8 字节逻辑名。 @playmesh-completion playmesh.app.storage.getBucket */
     getBucket(bucket: string): PlaymeshAppStorageBucket;
   };
 }

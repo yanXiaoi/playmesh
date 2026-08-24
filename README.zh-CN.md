@@ -27,6 +27,10 @@ Playmesh 还把 AI 接入游戏开发全流程：平台会根据当前项目、�
 开发；具备本地工具调用能力的 Agent 则可直接完成文件读取、修改、校验、运行和日志
 诊断。
 
+除了源码开发，Playmesh 还内置基于开源 GDevelop 的可视化编辑器，可通过场景、对象、
+事件和资源完成游戏制作。源码工作区还可以导出 Android APK 或 Windows x64 便携应用包；
+Windows 产物以 ZIP 交付，解压后即可运行其中以游戏命名的 EXE。
+
 Playmesh 采用 MIT 许可证开放开发，欢迎提交 Pull Request。涉及公开 SDK、生成产物、
 多人 Authority、打包或发布流程的较大改动，请先阅读[贡献指南](CONTRIBUTING.md)，
 并在提交前通过 Issue 说明设计和兼容性影响。
@@ -45,6 +49,10 @@ Playmesh 采用 MIT 许可证开放开发，欢迎提交 Pull Request。涉及�
   建立端到端加密连接。
 - 为 HTML/CSS/JavaScript 游戏提供 Authority、状态同步、生命周期、存储、性能和
   设备能力插件。
+- **内置可视化编辑器**：集成开源 GDevelop WebIDE，支持场景、对象、事件、资源、
+  预览、保存和本地历史，无需从编写代码开始制作游戏。
+- **导出独立应用**：可生成 Android ARM64 或 x86_64 APK，以及内含游戏 EXE 的
+  Windows x64 便携 ZIP；导出时还可选择是否内置公共中转服务器。
 - **内置 AI 开发闭环**：为 ChatAI 与 AgentAI 生成完整项目提示词，并提供代码编辑、
   Diff、本地历史、校验、真实运行、日志、对话控制台和 Agent API。
 - 提供 Go 编写的 [`playmesh-cli`](dev-cli/README.md)，支持在 IDEA 等外部 IDE
@@ -119,10 +127,18 @@ flutter run
 | AI 开发总览 | [AI 游戏开发](docs/game/ai-development.md) | 比较两种工作流并了解共同安全边界 |
 | IDEA / CLI | [IDEA 与 CLI 游戏开发](docs/game/idea-cli-development.md) | 在外部 IDE 中编辑本地副本，并发布到目标 App |
 | 网页工作区 | [网页开发者通道](docs/game/web-dev-channel.md) | 在 App 或局域网浏览器中编辑、校验、运行和查看日志 |
+| 可视化编辑器 | [GDevelop 集成文档](docs/gdevelop/README.md) | 使用内置 GDevelop WebIDE 通过场景、对象、事件和资源制作游戏 |
 | 通用契约 | [游戏开发指南](docs/game/development-guide.md) | 理解运行模式、Player/Authority 分层、生命周期和存储 |
 | 包格式 | [游戏包与 main.json](docs/game/package-format.md) | 定义目录、清单、能力声明和发布边界 |
 | SDK API | [Game SDK / App Bridge SDK](docs/game/sdk-v1.md) | 查询当前公开 API、类型、角色限制和错误语义 |
 | 游戏使用设备能力 | [游戏能力使用指南](docs/game/capability-plugins.md) | 使用标准 Web API，并按需声明敏感权限或多平台适配能力 |
+
+### 可视化开发与应用导出
+
+在 App 首页进入“制作游戏”，开启开发者模式后选择“可视化开发”，即可使用内置的
+GDevelop WebIDE 创建和维护完整工程，并进行预览、保存与历史恢复。源码开发工作区的
+“导出 → 安装包导出”当前支持 Android ARM64、Android x86_64 和 Windows x64：Android
+生成 APK，Windows 生成内含游戏 EXE 的便携 ZIP。当前不提供 iOS 或 macOS 应用导出。
 
 ### AI 开发
 

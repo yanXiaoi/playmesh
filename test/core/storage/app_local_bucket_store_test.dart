@@ -71,4 +71,58 @@ void main() {
     expect(() => first.getData('../escape', 'score'), throwsFormatException);
     expect(() => first.getData('save', '../score'), throwsFormatException);
   });
+
+  test('同步 App Bucket 以哈希 envelope 保存 GDevelop 原始逻辑名', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-app-sync-bucket-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final store = AppLocalBucketStore(
+      gameId: 'com.playmesh.gdevelop-local',
+      gameName: 'GDevelop 本地游戏',
+      libraryRoot: root,
+    );
+    const logicalBucket = 'GDJS/玩家/原始存档';
+
+    await store.setSynchronousData(
+      logicalBucket,
+      AppLocalBucketStore.gdevelopStorageRootKey,
+      {'level': 6},
+    );
+    expect(
+      await store.getSynchronousData(
+        logicalBucket,
+        AppLocalBucketStore.gdevelopStorageRootKey,
+      ),
+      {'level': 6},
+    );
+    expect(
+      () => store.getData(
+        logicalBucket,
+        AppLocalBucketStore.gdevelopStorageRootKey,
+      ),
+      throwsFormatException,
+    );
+
+    final logicalDirectory = Directory(
+      '${root.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}GDevelop 本地游戏'
+      '${Platform.pathSeparator}com.playmesh.gdevelop-local'
+      '${Platform.pathSeparator}logical',
+    );
+    final files = await logicalDirectory
+        .list()
+        .where((entry) => entry is File)
+        .cast<File>()
+        .toList();
+    expect(files, hasLength(1));
+    expect(files.single.path, contains('sha256-'));
+    expect(jsonDecode(await files.single.readAsString()), {
+      'format': 'playmesh.app.logical-bucket.v1',
+      'bucket': logicalBucket,
+      'values': {
+        AppLocalBucketStore.gdevelopStorageRootKey: {'level': 6},
+      },
+    });
+  });
 }

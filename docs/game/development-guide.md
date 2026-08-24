@@ -341,8 +341,10 @@ await localSave.setData("settings", {
   处理，游戏不能传入、猜测或枚举文件路径。
 - 普通浏览器以 Bucket 名称本身作为 `localStorage` key；同源浏览器存储仍受浏览器清理、
   隐私模式和配额影响。
-- App Bucket 只支持异步 `getData/setData/removeData/clearData` 和 JSON 值，不支持
-  `upload()`、同步接口或默认跨设备恢复。不要存放凭证、令牌等敏感认证数据。
+- App Bucket 支持异步 `getData/setData/removeData/clearData`，并兼容提供与 Main Bucket
+  同名的同步 JSON 方法 `getDataSync/setDataSync`。同步逻辑 Bucket 名可为 1～4096 UTF-8
+  字节；原生 App 仍只读写当前设备目录，普通浏览器读写当前源 `localStorage`。它不支持
+  `upload()` 或默认跨设备恢复。不要存放凭证、令牌等敏感认证数据。
 
 ## FPS 上报
 

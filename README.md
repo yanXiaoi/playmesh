@@ -17,6 +17,8 @@ Games program only against the stable Game SDK. The same game code does not dist
 
 Playmesh also integrates AI throughout game development. It generates complete ChatAI and AgentAI project prompts from the current project, runtime mode, capability declarations, and SDK. A regular chat AI can assist through structured instructions, while an Agent with local tool access can directly read and change files, validate the project, run it, and diagnose logs.
 
+In addition to source-based development, Playmesh includes a visual editor built on the open-source GDevelop WebIDE. Creators can build with scenes, objects, events, and assets. The source workspace can also export an Android APK or a portable Windows x64 app package; the Windows artifact is delivered as a ZIP containing a game-named EXE.
+
 Playmesh is developed in the open under the MIT License. Pull requests are welcome. Please read the [contribution guide](CONTRIBUTING.md) before submitting substantial changes, especially changes to public SDKs, generated artifacts, multiplayer authority, packaging, or release workflows.
 
 ## What can it run?
@@ -30,6 +32,8 @@ Annual-party mini games, browser-based single-player and multiplayer games, smal
 - **Install-free browser joining:** friends join a LAN game immediately from a QR code or link.
 - **Two-App internet multiplayer:** Apps on different networks establish an end-to-end encrypted connection through an independently deployable Go Server relay.
 - Authority, state synchronization, lifecycle, storage, performance, and device-capability plugins for HTML/CSS/JavaScript games.
+- **Built-in visual editor:** the open-source GDevelop WebIDE provides scenes, objects, events, assets, preview, saving, and local history, so creators do not have to start from code.
+- **Standalone app export:** generate Android ARM64 or x86_64 APKs and Windows x64 portable ZIPs containing the game EXE, with an optional embedded public relay server.
 - **Built-in AI development loop:** complete project prompts for ChatAI and AgentAI, plus editing, diffs, local history, validation, real execution, logs, a Chat Console, and an Agent API.
 - A Go-based [`playmesh-cli`](dev-cli/README.md) for initializing or restoring projects in external IDEs, proxying development resources, production builds and runs, independent log following, and unified adapters for JavaScript, TypeScript, and Cocos Creator 3.x.
 - Android, Android TV, and Windows release builds. Desktop packages include Go Core and the Developer CLI.
@@ -94,10 +98,15 @@ Start with the [game-development documentation index](docs/game/README.md), then
 | AI overview | [AI game development](docs/game/ai-development.md) | Comparing both workflows and understanding their shared safety boundaries |
 | IDEA / CLI | [IDEA and CLI development](docs/game/idea-cli-development.md) | Editing a local copy in an external IDE and publishing it to a target App |
 | Web workspace | [Web developer channel](docs/game/web-dev-channel.md) | Editing, validating, running, and viewing logs in the App or a LAN browser |
+| Visual editor | [GDevelop integration](docs/gdevelop/README.md) | Building with scenes, objects, events, and assets in the bundled GDevelop WebIDE |
 | Shared contract | [Game development guide](docs/game/development-guide.md) | Runtime modes, Player/Authority roles, lifecycle, and storage |
 | Package format | [Game package and main.json](docs/game/package-format.md) | Directories, manifests, capability declarations, and publication boundaries |
 | SDK API | [Game SDK / App Bridge SDK](docs/game/sdk-v1.md) | Public APIs, types, role restrictions, and error semantics |
 | Device capabilities | [Game capability guide](docs/game/capability-plugins.md) | Standard Web APIs and declarations for sensitive or cross-platform capabilities |
+
+### Visual development and app export
+
+Open **Create Games** from the App home screen, enable developer mode, and choose **Visual Development** to create and maintain a complete project in the bundled GDevelop WebIDE, including preview, saving, and history recovery. The source workspace's **Export -> Installation Package Export** flow currently supports Android ARM64, Android x86_64, and Windows x64. Android produces an APK; Windows produces a portable ZIP containing the game EXE. iOS and macOS app export are not currently available.
 
 ### AI development
 

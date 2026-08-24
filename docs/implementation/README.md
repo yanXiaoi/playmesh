@@ -7,6 +7,7 @@
 
 | 版本 | 文档 | 范围 |
 | --- | --- | --- |
+| Playmesh `4.4.0+32` | [4.4.0 正式版本日志](../version/4.4.0.md) · [在线游戏源与 Catalog API](../catalog-api.md) · [SDK 开发约定](../platform/sdk-development.md) | 在线游戏库分页与详情、App 本地同步 JSON Bucket、GDevelop revision 21、Runtime 1.0.2+6 |
 | Playmesh `4.3.1+31` | [4.3.1 正式版本日志](../version/4.3.1.md) · [手动检查 App 更新](playmesh-4.2.0-app-update.md) · [能力插件开发](../platform/capability-development.md) | 语音引擎失败诊断、完整能力自检、紧凑更新弹窗与 Runtime 1.0.2 |
 | Playmesh `4.1.0+27` | [4.1.0 正式实现与验证](../version/4.1.0.md) | 英文默认 README、多语言 AI 提示词目录与清单、全局 locale/文案复用、Developer API 4.1 locale 查询、工作区语言联动与分语言用户覆盖 |
 | Playmesh `4.0.0+26` | [4.0.0 正式实现与验证](../version/4.0.0.md) | 根 Web 运行时、外部工程与 CLI 2.0、Game SDK 4.0 / App SDK 3.2 双命名空间和成对注入、Developer API 4、Catalog/Relay 3、普通网页 ZIP 转换 |

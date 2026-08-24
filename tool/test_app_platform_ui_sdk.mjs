@@ -125,6 +125,7 @@ function createPage({
   const mounted = [];
   const commands = [];
   const consoleEntries = [];
+  const synchronousAppBuckets = new Map();
   const document = {
     activeElement: null,
     body: {
@@ -300,6 +301,11 @@ function createPage({
     },
     history: { length: 1, back() {} },
     queueMicrotask,
+    TextEncoder,
+    Uint8Array,
+    btoa(value) {
+      return Buffer.from(value, "binary").toString("base64");
+    },
     setTimeout,
     clearTimeout,
     addEventListener(type, listener) {
@@ -315,6 +321,51 @@ function createPage({
   };
   if (app) {
     const appBuckets = new Map();
+    window.XMLHttpRequest = class AppStorageXMLHttpRequest {
+      constructor() {
+        this.headers = {};
+        this.status = 0;
+        this.responseText = "";
+      }
+
+      open(method, url, asynchronous) {
+        assert.equal(asynchronous, false);
+        this.method = method;
+        this.url = url;
+      }
+
+      setRequestHeader(name, value) {
+        this.headers[name] = value;
+      }
+
+      send(body) {
+        const encoded = this.method === "GET"
+          ? new URL(this.url).searchParams.get("payload")
+          : null;
+        const raw = this.method === "GET"
+          ? Buffer.from(encoded, "base64url").toString("utf8")
+          : body;
+        const envelope = JSON.parse(raw);
+        const values = synchronousAppBuckets.get(envelope.bucket) || new Map();
+        let result = null;
+        if (envelope.operation === "sync.get") {
+          assert.equal(this.method, "GET");
+          result = values.has(envelope.key) ? values.get(envelope.key) : null;
+        } else {
+          assert.equal(envelope.operation, "sync.set");
+          assert.equal(this.method, "POST");
+          assert.equal(this.headers["Content-Type"], "text/plain;charset=UTF-8");
+          values.set(envelope.key, envelope.value);
+          synchronousAppBuckets.set(envelope.bucket, values);
+        }
+        this.status = 200;
+        this.responseText = JSON.stringify({
+          protocolVersion: "1.0.0",
+          requestId: envelope.requestId,
+          result,
+        });
+      }
+    };
     window.PlaymeshAppBridge = {
       postMessage(raw) {
         const command = JSON.parse(raw);
@@ -353,6 +404,10 @@ function createPage({
                   _playmeshPlatformUi: {
                     ...platformUi.locales[0],
                     actions: platformUi.actions,
+                  },
+                  _playmeshAppStorageSync: {
+                    endpoint:
+                      "http://127.0.0.1:43101/playmesh/app-storage-sync/v1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   },
                 }
               : result,
@@ -426,8 +481,23 @@ assert.equal(await browserBucket.getData("progress"), null);
 await browserBucket.setData("progress", { level: 4 });
 await browserBucket.clearData();
 assert.equal(browserPage.localState.has("player_save"), false);
+browserBucket.setDataSync("settings", { volume: 0.5 });
+assert.equal(
+  JSON.stringify(browserBucket.getDataSync("settings")),
+  JSON.stringify({ volume: 0.5 }),
+);
+const browserGDevelopBucket = browserPage.appSdk.storage.getBucket(
+  "GDJS/原始/浏览器存档",
+);
+browserGDevelopBucket.setDataSync("$playmesh.gdevelop.root.v1", { round: 3 });
+assert.equal(
+  JSON.stringify(
+    browserGDevelopBucket.getDataSync("$playmesh.gdevelop.root.v1"),
+  ),
+  JSON.stringify({ round: 3 }),
+);
 assert.throws(
-  () => browserPage.appSdk.storage.getBucket("bad.bucket"),
+  () => browserPage.appSdk.storage.getBucket("bad.bucket").getData("value"),
   /Bucket 名称/,
 );
 assert.throws(() => browserBucket.getData("bad key"), /key/);
@@ -882,6 +952,17 @@ assert.equal(earlyEscape.defaultPrevented, true);
 assert.equal(appPage.mounted[0].__elements[".layer"].hidden, false);
 await appPage.appSdk.ready;
 const appBucket = appPage.appSdk.storage.getBucket("player_save");
+appBucket.setDataSync("sync_progress", { level: 4 });
+assert.equal(
+  JSON.stringify(appBucket.getDataSync("sync_progress")),
+  JSON.stringify({ level: 4 }),
+);
+const appGDevelopBucket = appPage.appSdk.storage.getBucket("GDJS/本机/存档");
+appGDevelopBucket.setDataSync("$playmesh.gdevelop.root.v1", { level: 7 });
+assert.equal(
+  JSON.stringify(appGDevelopBucket.getDataSync("$playmesh.gdevelop.root.v1")),
+  JSON.stringify({ level: 7 }),
+);
 await appBucket.setData("progress", { level: 5 });
 assert.equal(
   JSON.stringify(await appBucket.getData("progress")),

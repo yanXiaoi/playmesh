@@ -161,6 +161,8 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
                   ),
                   const SizedBox(height: 12),
                   Row(
+                    key: const Key('app-update-version-comparison'),
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _VersionLabel(
                         label: context.tr('settings.update_current_version'),

@@ -246,6 +246,10 @@ function main() {
     ],
     ["gameJoinErrorLocalizationKey(error)", joinErrorKeys],
     [
+      "loading ? 'common.loading' : section.error == null ? 'common.load_more' : 'common.retry'",
+      ["common.loading", "common.load_more", "common.retry"],
+    ],
+    [
       "messageKey",
       [
         "join.nearby_empty",
@@ -260,29 +264,12 @@ function main() {
       ["settings.update_browser_opened", "settings.update_browser_failed"],
     ],
     [
+      "selected == null ? 'creator.gdevelop_choose_zip' : 'creator.gdevelop_change_zip'",
+      ["creator.gdevelop_choose_zip", "creator.gdevelop_change_zip"],
+    ],
+    [
       "state.targetEnabled == false ? 'creator.stopping' : 'creator.starting'",
       ["creator.stopping", "creator.starting"],
-    ],
-    [
-      "switch (risk) { LanEndpointRisk.low => 'creator.lan_risk_low', LanEndpointRisk.caution => 'creator.lan_risk_caution', LanEndpointRisk.high => 'creator.lan_risk_high', }",
-      [
-        "creator.lan_risk_low",
-        "creator.lan_risk_caution",
-        "creator.lan_risk_high",
-      ],
-    ],
-    [
-      "switch (type) { LanAddressType.privateIpv4 => 'creator.lan_type_private_ipv4', LanAddressType.linkLocalIpv4 => 'creator.lan_type_link_local_ipv4', LanAddressType.carrierGradeNatIpv4 => 'creator.lan_type_carrier_nat_ipv4', LanAddressType.benchmarkIpv4 => 'creator.lan_type_benchmark_ipv4', LanAddressType.publicIpv4 => 'creator.lan_type_public_ipv4', LanAddressType.uniqueLocalIpv6 => 'creator.lan_type_unique_local_ipv6', LanAddressType.globalIpv6 => 'creator.lan_type_global_ipv6', LanAddressType.other => 'creator.lan_type_other', }",
-      [
-        "creator.lan_type_private_ipv4",
-        "creator.lan_type_link_local_ipv4",
-        "creator.lan_type_carrier_nat_ipv4",
-        "creator.lan_type_benchmark_ipv4",
-        "creator.lan_type_public_ipv4",
-        "creator.lan_type_unique_local_ipv6",
-        "creator.lan_type_global_ipv6",
-        "creator.lan_type_other",
-      ],
     ],
   ]);
   assert.deepEqual(

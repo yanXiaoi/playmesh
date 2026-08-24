@@ -58,9 +58,9 @@ void main() {
     );
     await _pumpAsync(tester);
 
-    expect(find.text('Playmesh 4.3.1'), findsOneWidget);
+    expect(find.text('Playmesh 4.4.0'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Playmesh 4.3.1')).dy,
+      tester.getTopLeft(find.text('Playmesh 4.4.0')).dy,
       lessThan(tester.getTopLeft(find.text('Core 0.1.0')).dy),
     );
     expect(find.text('在线'), findsOneWidget);
@@ -179,6 +179,22 @@ void main() {
     expect(find.text('GitHub'), findsOneWidget);
     expect(find.text('36ms'), findsOneWidget);
     expect(find.textContaining('延迟'), findsNothing);
+
+    final comparison = find.byKey(const Key('app-update-version-comparison'));
+    final currentLabel = tester.getRect(find.text('当前版本'));
+    final currentVersion = tester.getRect(find.text('4.2.0'));
+    final latestLabel = tester.getRect(find.text('最新版本'));
+    final latestVersion = tester.getRect(find.text('4.3.0'));
+    final comparisonLeft = currentLabel.left < currentVersion.left
+        ? currentLabel.left
+        : currentVersion.left;
+    final comparisonRight = latestLabel.right > latestVersion.right
+        ? latestLabel.right
+        : latestVersion.right;
+    expect(
+      (comparisonLeft + comparisonRight) / 2,
+      closeTo(tester.getCenter(comparison).dx, 1),
+    );
 
     await tester.tap(find.text('查看版本说明'));
     await tester.pumpAndSettle();

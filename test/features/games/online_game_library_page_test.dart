@@ -29,6 +29,7 @@ void main() {
       final second = _source(id: 'second', name: 'API Source β');
       final calls = <String, List<int>>{first.id: <int>[], second.id: <int>[]};
       var secondAvailable = false;
+      final pageTwoGate = Completer<void>();
       late OnlineCatalogGame firstPageOffer;
       final controller = _FakeCatalogController(
         root: root,
@@ -36,6 +37,9 @@ void main() {
         loadHome: (sourceId, page, _) async {
           calls[sourceId]!.add(page);
           final source = sourceId == first.id ? first : second;
+          if (sourceId == first.id && page == 2) {
+            await pageTwoGate.future;
+          }
           if (sourceId == second.id && !secondAvailable) {
             return SourceSectionResult(
               source: source,
@@ -97,6 +101,21 @@ void main() {
       await tester.pump();
       expect(loadMoreButton.focusNode!.hasFocus, isTrue);
       loadMoreButton.onPressed!();
+      await tester.pump();
+
+      expect(calls[first.id], [1, 2]);
+      expect(find.text('first game first / 原样'), findsOneWidget);
+      final loadingMoreButton = tester.widget<OutlinedButton>(loadMore);
+      expect(loadingMoreButton.onPressed, isNull);
+      expect(
+        find.descendant(
+          of: loadMore,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+
+      pageTwoGate.complete();
       await tester.pumpAndSettle();
 
       expect(find.text('first game second / 原样'), findsOneWidget);
@@ -131,6 +150,244 @@ void main() {
       expect(find.text('API tag / 原样'), findsWidgets);
       expect(calls[first.id], [1, 2]);
       expect(calls[second.id], [1, 1]);
+    },
+  );
+
+  testWidgets(
+    'home pagination failure keeps loaded games and retries the page',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final root = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('playmesh-online-page-retry-'),
+      ))!;
+      final source = _source(id: 'retry', name: 'Retry Source');
+      var pageTwoCalls = 0;
+      final controller = _FakeCatalogController(
+        root: root,
+        sources: [source],
+        loadHome: (_, page, _) async {
+          if (page == 1) {
+            return SourceSectionResult(
+              source: source,
+              offers: [
+                _offer(
+                  source,
+                  id: 'com.example.retry.first',
+                  name: 'Loaded game',
+                ),
+              ],
+              total: 2,
+              page: 1,
+            );
+          }
+          pageTwoCalls += 1;
+          if (pageTwoCalls == 1) {
+            return SourceSectionResult(
+              source: source,
+              offers: const [],
+              total: 0,
+              page: 2,
+              error: 'HTTP 503',
+            );
+          }
+          return SourceSectionResult(
+            source: source,
+            offers: [
+              _offer(
+                source,
+                id: 'com.example.retry.second',
+                name: 'Retried game',
+              ),
+            ],
+            total: 2,
+            page: 2,
+          );
+        },
+      );
+      addTearDown(
+        () => tester.runAsync(() async {
+          await controller.close();
+          await root.delete(recursive: true);
+        }),
+      );
+
+      await tester.pumpWidget(
+        localizedTestApp(home: OnlineGameLibraryPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      final loadMore = find.byKey(
+        const ValueKey('catalog-home-load-more-retry'),
+      );
+      await tester.tap(loadMore);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Loaded game'), findsOneWidget);
+      expect(find.textContaining('HTTP 503'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+      expect(pageTwoCalls, 1);
+
+      await tester.tap(loadMore);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Loaded game'), findsOneWidget);
+      expect(find.text('Retried game'), findsOneWidget);
+      expect(find.textContaining('HTTP 503'), findsNothing);
+      expect(pageTwoCalls, 2);
+    },
+  );
+
+  testWidgets(
+    'home card opens online details while quick and detail downloads share flow',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final root = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('playmesh-online-details-'),
+      ))!;
+      final source = _source(id: 'details', name: 'Details Source');
+      final offer = _offer(
+        source,
+        id: 'com.example.details',
+        name: 'Details game',
+        author: 'Details Publisher',
+        version: '2.3.4',
+        packageSizeBytes: 2 * 1024 * 1024,
+      );
+      final controller = _FakeCatalogController(
+        root: root,
+        sources: [source],
+        loadHome: (_, page, _) async => SourceSectionResult(
+          source: source,
+          offers: [offer],
+          total: 1,
+          page: page,
+        ),
+      );
+      addTearDown(
+        () => tester.runAsync(() async {
+          await controller.close();
+          await root.delete(recursive: true);
+        }),
+      );
+
+      await tester.pumpWidget(
+        localizedTestApp(home: OnlineGameLibraryPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(ValueKey('catalog-home-offer-action-${offer.downloadKey}')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(ValueKey('catalog-home-offer-details-${offer.downloadKey}')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(OnlineGameDetailPage), findsOneWidget);
+      expect(find.text('Details game'), findsOneWidget);
+      expect(find.text('Details Publisher'), findsOneWidget);
+      expect(find.text('API remarks / 原样'), findsOneWidget);
+      expect(find.text('API tag / 原样'), findsOneWidget);
+      expect(find.text('Details Source'), findsOneWidget);
+      expect(find.text('2 MB'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('online-game-detail-download')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(controller.startedTask?.game.downloadKey, offer.downloadKey);
+      expect(
+        find.byKey(const ValueKey('catalog-download-progress-dialog')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('取消'));
+      await tester.pump();
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'search card opens details and keeps version picker download shortcut',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final root = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('playmesh-search-details-'),
+      ))!;
+      final source = _source(id: 'search-details', name: 'Search Source');
+      final offer = _offer(
+        source,
+        id: 'com.example.search-details',
+        name: 'Search details game',
+      );
+      final section = SourceSectionResult(
+        source: source,
+        offers: [offer],
+        total: 1,
+        page: 1,
+      );
+      final aggregated = aggregateCatalogOffers(
+        [offer],
+        sourceOrder: [source.id],
+      ).single;
+      final controller = _FakeCatalogController(
+        root: root,
+        sources: [source],
+        loadHome: (_, page, _) async => SourceSectionResult(
+          source: source,
+          offers: [offer],
+          total: 1,
+          page: page,
+        ),
+        search: (_, _, _) async => OnlineCatalogSearchResult(
+          games: [offer],
+          errors: const {},
+          sections: [section],
+        ),
+      );
+      addTearDown(
+        () => tester.runAsync(() async {
+          await controller.close();
+          await root.delete(recursive: true);
+        }),
+      );
+
+      await tester.pumpWidget(
+        localizedTestApp(home: OnlineGameLibraryPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('搜索').first);
+      await tester.pumpAndSettle();
+
+      final quickDownload = find.byKey(
+        ValueKey('catalog-search-download-${aggregated.groupKey}'),
+      );
+      expect(quickDownload, findsOneWidget);
+      await tester.tap(
+        find.byKey(ValueKey('catalog-search-action-${aggregated.groupKey}')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(OnlineGameDetailPage), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.tap(quickDownload);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(
+          ValueKey(
+            'catalog-version-${aggregated.groupKey}-${offer.manifest.version}',
+          ),
+        ),
+        findsOneWidget,
+      );
     },
   );
 
@@ -345,6 +602,12 @@ typedef _HomeLoader =
     );
 typedef _DeclarationRefresher =
     Future<OnlineGameSource> Function(String sourceId);
+typedef _SearchLoader =
+    Future<OnlineCatalogSearchResult> Function(
+      String name,
+      String tag,
+      String description,
+    );
 
 class _FakeCatalogController extends GameCatalogController {
   _FakeCatalogController({
@@ -353,6 +616,7 @@ class _FakeCatalogController extends GameCatalogController {
     List<GameSummary> initialGames = const [],
     this._loadHome,
     this._refreshDeclaration,
+    this._search,
   }) : _sources = [...sources],
        super(
          library: GameLibraryRepository(
@@ -367,6 +631,7 @@ class _FakeCatalogController extends GameCatalogController {
   final List<OnlineGameSource> _sources;
   final _HomeLoader? _loadHome;
   final _DeclarationRefresher? _refreshDeclaration;
+  final _SearchLoader? _search;
   final ChangeNotifier _downloadNotifier = ChangeNotifier();
   GameDownloadTask? startedTask;
 
@@ -391,6 +656,25 @@ class _FakeCatalogController extends GameCatalogController {
 
   @override
   Future<List<int>?> loadOfferIcon(OnlineCatalogGame offer) async => null;
+
+  @override
+  Future<OnlineCatalogSearchResult> search({
+    Map<String, int> pagesBySource = const {},
+    String name = '',
+    String tag = '',
+    String description = '',
+  }) {
+    final loader = _search;
+    if (loader == null) {
+      return super.search(
+        pagesBySource: pagesBySource,
+        name: name,
+        tag: tag,
+        description: description,
+      );
+    }
+    return loader(name, tag, description);
+  }
 
   @override
   Listenable get downloadChanges => _downloadNotifier;

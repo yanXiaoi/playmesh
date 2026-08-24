@@ -54,6 +54,8 @@ playmesh.app.runtime.getLocale
 playmesh.app.storage.getBucket
 PlaymeshAppStorageBucket.getData
 PlaymeshAppStorageBucket.setData
+PlaymeshAppStorageBucket.getDataSync
+PlaymeshAppStorageBucket.setDataSync
 PlaymeshAppStorageBucket.removeData
 PlaymeshAppStorageBucket.clearData
 playmesh.app.performance.getFps
@@ -132,11 +134,11 @@ const expectedCommands = Object.freeze([
   ...expectedSubscribeCommands,
   ...expectedHandlerCommands,
 ]);
-assert.equal(expectedExecuteCommands.length, 74);
+assert.equal(expectedExecuteCommands.length, 76);
 assert.equal(expectedSubscribeCommands.length, 20);
 assert.equal(expectedHandlerCommands.length, 3);
-assert.equal(expectedCommands.length, 97);
-assert.equal(new Set(expectedCommands).size, 97);
+assert.equal(expectedCommands.length, 99);
+assert.equal(new Set(expectedCommands).size, 99);
 
 const readJson = async filePath => JSON.parse(await readFile(filePath, 'utf8'));
 const [extension, capabilityDescriptors] = await Promise.all([
@@ -217,7 +219,7 @@ for (const [primitive, commands] of Object.entries(expectedCommandsByPrimitive))
     );
   }
 }
-assert.equal(typedFunctionsByCommand.size, 97);
+assert.equal(typedFunctionsByCommand.size, 99);
 
 for (const command of expectedSubscribeCommands) {
   const subscribeFunction = typedFunctionsByCommand.get(command);
@@ -572,5 +574,5 @@ assert.equal(builtInLeaves.size, capabilityDescriptors.length);
 
 process.stdout.write(
   'Playmesh GDevelop typed facade contract passed ' +
-    '(97 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
+    '(99 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
 );

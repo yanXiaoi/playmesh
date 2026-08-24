@@ -59,6 +59,8 @@ const executePaths = [
   'playmesh.app.storage.getBucket',
   'PlaymeshAppStorageBucket.getData',
   'PlaymeshAppStorageBucket.setData',
+  'PlaymeshAppStorageBucket.getDataSync',
+  'PlaymeshAppStorageBucket.setDataSync',
   'PlaymeshAppStorageBucket.removeData',
   'PlaymeshAppStorageBucket.clearData',
   'playmesh.app.performance.getFps',
@@ -303,6 +305,8 @@ const expectedAddedInternalFunctionNames = [
   'GetAppStorageBucket',
   'GetAppBucketData',
   'SetAppBucketData',
+  'GetAppBucketDataSync',
+  'SetAppBucketDataSync',
   'RemoveAppBucketData',
   'ClearAppBucketData',
   'GetAppFps',
@@ -580,7 +584,7 @@ const appCallablePaths = expectedCallablePaths.filter(
   sdkPath => !isMainCallablePath(sdkPath)
 );
 
-assert.equal(executePaths.length, 74, 'the execute baseline must stay at 74');
+assert.equal(executePaths.length, 76, 'the execute baseline must stay at 76');
 assert.equal(
   subscribePaths.length,
   20,
@@ -589,11 +593,11 @@ assert.equal(
 assert.equal(handlerPaths.length, 3, 'the handler baseline must stay at 3');
 assert.equal(
   new Set(expectedCallablePaths).size,
-  97,
-  'the public SDK callable baseline must contain 97 unique paths'
+  99,
+  'the public SDK callable baseline must contain 99 unique paths'
 );
 assert.equal(mainCallablePaths.length, 46);
-assert.equal(appCallablePaths.length, 51);
+assert.equal(appCallablePaths.length, 53);
 
 const extensionSource = await readFile(extensionPath, 'utf8');
 const extension = JSON.parse(extensionSource);
@@ -851,7 +855,7 @@ const executeMappings = collectMappedPaths(surface.execute);
 const subscribeMappings = collectMappedPaths(surface.subscribe);
 const handlerMappings = collectMappedPaths(surface.handler);
 
-assert.equal(executeMappings.size, 74, 'execute must map exactly 74 SDK calls');
+assert.equal(executeMappings.size, 76, 'execute must map exactly 76 SDK calls');
 assert.equal(
   subscribeMappings.size,
   20,
@@ -896,8 +900,8 @@ for (const readyPath of [
 assert.equal(
   expectedCallablePaths.filter(path => allDeclaredCallableMappings.has(path))
     .length,
-  97,
-  'all 97 public callable members must have a declared command mapping'
+  99,
+  'all 99 public callable members must have a declared command mapping'
 );
 
 const featureNames = new Set(
@@ -1823,5 +1827,5 @@ assert.equal(runtime.unsubscribe('passive-exit-subscription'), true);
 assert.equal(exitCleanupCalls, 2);
 
 process.stdout.write(
-  'Playmesh GDevelop extension SDK surface contract passed (97 callable members; ready is automatic).\n'
+  'Playmesh GDevelop extension SDK surface contract passed (99 callable members; ready is automatic).\n'
 );

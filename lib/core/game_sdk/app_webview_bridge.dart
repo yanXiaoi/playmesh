@@ -16,6 +16,7 @@ import '../capabilities/web_permission/capability_web_permission.dart';
 import '../platform/app_device_service.dart';
 import '../profile/user_profile_store.dart';
 import '../storage/app_local_bucket_store.dart';
+import '../storage/app_local_bucket_sync_gateway.dart';
 import '../../models/game_summary.dart';
 import '../../models/user_profile.dart';
 
@@ -87,6 +88,7 @@ class AppWebViewBridge {
   final http.Client _httpClient;
   final bool _ownsHttpClient;
   final AppLocalBucketStore? _localBucketStore;
+  Future<AppLocalBucketSyncGateway>? _localBucketSyncGateway;
   late final CapabilityRegistry capabilityRegistry;
   late final AppMediaRuntime mediaRuntime;
   Map<String, Object?>? _platformUiConfiguration;
@@ -216,6 +218,7 @@ class AppWebViewBridge {
     Map<String, Object?> _,
     String sdkVersion,
   ) async {
+    final syncGateway = await _ensureLocalBucketSyncGateway();
     return {
       '_playmeshPlatformUi': _platformUiConfiguration == null
           ? null
@@ -231,6 +234,10 @@ class AppWebViewBridge {
                 'exit': true,
               },
             },
+      if (syncGateway != null)
+        '_playmeshAppStorageSync': {
+          'endpoint': syncGateway.endpoint.toString(),
+        },
       'available': true,
       'sdkVersion': sdkVersion,
       'identity': {
@@ -251,6 +258,12 @@ class AppWebViewBridge {
         'declaredCapabilities': _runtimeDeclaredCapabilities,
       },
     };
+  }
+
+  Future<AppLocalBucketSyncGateway?> _ensureLocalBucketSyncGateway() {
+    final store = _localBucketStore;
+    if (store == null) return Future.value();
+    return _localBucketSyncGateway ??= AppLocalBucketSyncGateway.start(store);
   }
 
   Future<Map<String, Object?>> _configureRuntimeGame(
@@ -673,6 +686,8 @@ class AppWebViewBridge {
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
     await mediaRuntime.dispose();
+    final localBucketSyncGateway = await _localBucketSyncGateway;
+    await localBucketSyncGateway?.close();
     if (_ownsHttpClient) _httpClient.close();
   }
 }

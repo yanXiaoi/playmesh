@@ -102,7 +102,7 @@
     {
       "relativePath": "GDJS/Runtime/events-tools/storagetools.ts",
       "upstreamGitBlobSha": "d61394d79c78e787f488ae63e4185ffff5c9dee3",
-      "postPatchSha256": "137a46e0707e46a6a021200a0b8e56935701a5d5ac310d0c39eff315567d54ec"
+      "postPatchSha256": "999c612839a3056ac066b719e632403b0da79dbeb620c39295536d449280c4f7"
     },
     {
       "relativePath": "newIDE/app/package.json",

@@ -36,14 +36,13 @@ const extractReplacement = description => {
 };
 
 const resolverReplacement = extractReplacement(
-  'add a lazy fail-closed Playmesh synchronous Bucket capability resolver'
+  'add a lazy fail-closed Playmesh App synchronous Bucket capability resolver'
 );
 const resolverMatch = resolverReplacement.match(
   /const playmeshGDevelopRootKey = [\s\S]*?return bucket;\n      };/
 );
 assert.ok(resolverMatch, 'storage resolver source is missing');
 const executableResolver = resolverMatch[0]
-  .replace(': string | null', '')
   .replace('(name: string): any | null', '(name)')
   .replaceAll('(window as any)', 'window');
 const makeResolver = browserWindow =>
@@ -65,6 +64,9 @@ const storageReplacementSource = [
 ].join('\n');
 assert.equal(storageReplacementSource.includes('Symbol.for('), false);
 assert.equal(storageReplacementSource.includes('playmesh.runtime.backends'), false);
+assert.equal(storageReplacementSource.includes('playmesh.main.storage'), false);
+assert.equal(storageReplacementSource.includes('playmesh.app.storage'), true);
+
 const runLoad = ({
   name,
   localStorage,
@@ -116,8 +118,7 @@ const runUnload = ({
 
 const logger = { error() {} };
 
-// Generic official exports have no `window.playmesh` and retain the official
-// localStorage key and serialized-string semantics byte for byte.
+// Generic official exports retain the official localStorage behavior.
 {
   const calls = [];
   const localStorage = {
@@ -132,15 +133,7 @@ const logger = { error() {} };
   const runtime = makeResolver({});
   assert.equal(runtime.playmeshGDevelopRootKey, rootKey);
   assert.equal(runtime.getPlaymeshStorageBucket('存档/一'), null);
-  assert.equal(
-    runLoad({
-      name: '存档/一',
-      localStorage,
-      logger,
-      ...runtime,
-    }),
-    '{"score":7}'
-  );
+  assert.equal(runLoad({ name: '存档/一', localStorage, logger, ...runtime }), '{"score":7}');
   runUnload({
     name: '存档/一',
     jsObject: { score: 8 },
@@ -155,8 +148,8 @@ const logger = { error() {} };
   ]);
 }
 
-// A complete Playmesh SDK scopes the GDevelop file under the current username,
-// reads the reserved root, and writes the root object rather than a string.
+// Playmesh pages use the current device's App Bucket. Authority, player and
+// nickname state are deliberately irrelevant to the local storage scope.
 {
   const calls = [];
   const bucket = {
@@ -170,14 +163,7 @@ const logger = { error() {} };
   };
   const runtime = makeResolver({
     playmesh: {
-      main: {
-        gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-        player: {
-          getCurrent() {
-            return { nickname: '玩家/一号' };
-          },
-        },
-        session: { isAuthority: () => false },
+      app: {
         storage: {
           getBucket(name) {
             calls.push(['getBucket', name]);
@@ -185,29 +171,26 @@ const logger = { error() {} };
           },
         },
       },
+      main: {
+        storage: {
+          getBucket() {
+            throw new Error('GDevelop must not use Main Bucket');
+          },
+        },
+      },
     },
   });
   let localStorageCalls = 0;
   const localStorage = {
-    getItem() {
-      localStorageCalls += 1;
-      return null;
-    },
-    setItem() {
-      localStorageCalls += 1;
-    },
+    getItem() { localStorageCalls += 1; },
+    setItem() { localStorageCalls += 1; },
   };
   assert.equal(
-    runLoad({
-      name: '原始/玩家存档',
-      localStorage,
-      logger,
-      ...runtime,
-    }),
+    runLoad({ name: '原始/本地存档', localStorage, logger, ...runtime }),
     '{"score":9}'
   );
   runUnload({
-    name: '原始/玩家存档',
+    name: '原始/本地存档',
     jsObject: { score: 10 },
     serializedString: '{"score":10}',
     localStorage,
@@ -216,279 +199,44 @@ const logger = { error() {} };
   });
   assert.equal(localStorageCalls, 0);
   assert.deepEqual(calls, [
-    ['getBucket', 'GDJS/users/%E7%8E%A9%E5%AE%B6%2F%E4%B8%80%E5%8F%B7/原始/玩家存档'],
+    ['getBucket', 'GDJS/原始/本地存档'],
     ['getDataSync', rootKey],
-    ['getBucket', 'GDJS/users/%E7%8E%A9%E5%AE%B6%2F%E4%B8%80%E5%8F%B7/原始/玩家存档'],
+    ['getBucket', 'GDJS/原始/本地存档'],
     ['setDataSync', rootKey, { score: 10 }],
   ]);
 }
 
-// A public Authority page always uses the fixed auth directory, even when its
-// App bridge also exposes the host account identity.
-{
-  const calls = [];
-  const bucket = {
-    getDataSync() {
-      return null;
-    },
-    setDataSync() {},
-  };
-  const runtime = makeResolver({
-    playmesh: {
-      app: {
-        identity: {
-          getCurrent() {
-            return { nickname: '主持人' };
-          },
-        },
-      },
-      main: {
-        gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-        player: { getCurrent: () => null },
-        session: { isAuthority: () => true },
-        storage: {
-          getBucket(name) {
-            calls.push(name);
-            return bucket;
-          },
-        },
-      },
-    },
-  });
-  assert.equal(runtime.getPlaymeshStorageBucket('save'), bucket);
-  assert.deepEqual(calls, ['GDJS/auth/save']);
-}
-
-// An Authority page that also represents a participating player is personal,
-// not the public screen, and therefore keeps the player's username scope.
-{
-  const calls = [];
-  const bucket = { getDataSync() {}, setDataSync() {} };
-  const runtime = makeResolver({
-    playmesh: {
-      main: {
-        gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-        player: { getCurrent: () => ({ nickname: '房主玩家' }) },
-        session: { isAuthority: () => true },
-        storage: {
-          getBucket(name) {
-            calls.push(name);
-            return bucket;
-          },
-        },
-      },
-    },
-  });
-  assert.equal(runtime.getPlaymeshStorageBucket('save'), bucket);
-  assert.deepEqual(calls, [
-    'GDJS/users/%E6%88%BF%E4%B8%BB%E7%8E%A9%E5%AE%B6/save',
-  ]);
-}
-
-// A non-Authority App page can use the App identity when it has no session
-// player (for example, an App-hosted solo game).
-{
-  const calls = [];
-  const bucket = { getDataSync() {}, setDataSync() {} };
-  const runtime = makeResolver({
-    playmesh: {
-      app: {
-        identity: { getCurrent: () => ({ nickname: '单机用户' }) },
-      },
-      main: {
-        gameInfo: { getCurrent: () => ({ multiplayer: false }) },
-        player: { getCurrent: () => null },
-        session: { isAuthority: () => false },
-        storage: {
-          getBucket(name) {
-            calls.push(name);
-            return bucket;
-          },
-        },
-      },
-    },
-  });
-  assert.equal(runtime.getPlaymeshStorageBucket('save'), bucket);
-  assert.deepEqual(calls, ['GDJS/users/%E5%8D%95%E6%9C%BA%E7%94%A8%E6%88%B7/save']);
-}
-
-// The resolved scope is frozen for the page lifetime. A mid-session nickname
-// change cannot move an already loaded GDevelop root into another user's save.
-{
-  let nickname = 'auth';
-  const calls = [];
-  const bucket = { getDataSync() {}, setDataSync() {} };
-  const runtime = makeResolver({
-    playmesh: {
-      main: {
-        gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-        player: { getCurrent: () => ({ nickname }) },
-        session: { isAuthority: () => false },
-        storage: {
-          getBucket(name) {
-            calls.push(name);
-            return bucket;
-          },
-        },
-      },
-    },
-  });
-  assert.equal(runtime.getPlaymeshStorageBucket('first'), bucket);
-  nickname = 'renamed';
-  assert.equal(runtime.getPlaymeshStorageBucket('second'), bucket);
-  assert.deepEqual(calls, [
-    'GDJS/users/auth/first',
-    'GDJS/users/auth/second',
-  ]);
-}
-
-// Identity resolution fails closed before SDK bootstrap and may be retried
-// after readiness; it never assigns an unready player to the auth directory.
-{
-  let gameInfo = null;
-  let bucketCalls = 0;
-  const bucket = { getDataSync() {}, setDataSync() {} };
-  const runtime = makeResolver({
-    playmesh: {
-      main: {
-        gameInfo: { getCurrent: () => gameInfo },
-        player: { getCurrent: () => ({ nickname: 'ready-player' }) },
-        session: { isAuthority: () => false },
-        storage: {
-          getBucket() {
-            bucketCalls += 1;
-            return bucket;
-          },
-        },
-      },
-    },
-  });
-  assert.throws(
-    () => runtime.getPlaymeshStorageBucket('save'),
-    /尚未就绪/
-  );
-  assert.equal(bucketCalls, 0);
-  gameInfo = { multiplayer: true };
-  assert.equal(runtime.getPlaymeshStorageBucket('save'), bucket);
-  assert.equal(bucketCalls, 1);
-}
-
-// A Playmesh browser-solo page has no player or App identity today. It keeps
-// the official per-browser localStorage semantics and never enters auth.
-{
-  let bucketCalls = 0;
-  const runtime = makeResolver({
-    playmesh: {
-      main: {
-        gameInfo: { getCurrent: () => ({ multiplayer: false }) },
-        player: { getCurrent: () => null },
-        session: { isAuthority: () => false },
-        storage: {
-          getBucket() {
-            bucketCalls += 1;
-            return { getDataSync() {}, setDataSync() {} };
-          },
-        },
-      },
-    },
-  });
-  const calls = [];
-  const localStorage = {
-    getItem(key) {
-      calls.push(['getItem', key]);
-      return '{"solo":true}';
-    },
-    setItem(key, value) {
-      calls.push(['setItem', key, value]);
-    },
-  };
-  assert.equal(
-    runLoad({
-      name: 'solo-save',
-      localStorage,
-      logger,
-      ...runtime,
-    }),
-    '{"solo":true}'
-  );
-  runUnload({
-    name: 'solo-save',
-    jsObject: { solo: true },
-    serializedString: '{"solo":true}',
-    localStorage,
-    logger,
-    ...runtime,
-  });
-  assert.equal(bucketCalls, 0);
-  assert.deepEqual(calls, [
-    ['getItem', 'GDJS_solo-save'],
-    ['setItem', 'GDJS_solo-save', '{"solo":true}'],
-  ]);
-}
-
-// Any partial/fake Playmesh surface is incompatible. Resolution happens
-// before either official localStorage branch, so it cannot silently fallback.
+// Partial/fake Playmesh App surfaces fail closed without a second local copy.
 for (const playmesh of [
   null,
   {},
-  { main: {} },
-  { main: { storage: {} } },
-  {
-    main: {
-      gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-      player: { getCurrent: () => ({ nickname: '玩家' }) },
-      session: { isAuthority: () => false },
-      storage: { getBucket: () => null },
-    },
-  },
-  {
-    main: {
-      gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-      player: { getCurrent: () => ({ nickname: '玩家' }) },
-      session: { isAuthority: () => false },
-      storage: { getBucket: () => ({ getDataSync() {} }) },
-    },
-  },
-  {
-    main: {
-      gameInfo: { getCurrent: () => ({ multiplayer: true }) },
-      player: { getCurrent: () => ({ nickname: '玩家' }) },
-      session: { isAuthority: () => false },
-      storage: { getBucket: () => ({ setDataSync() {} }) },
-    },
-  },
+  { app: {} },
+  { app: { storage: {} } },
+  { app: { storage: { getBucket: () => null } } },
+  { app: { storage: { getBucket: () => ({ getDataSync() {} }) } } },
+  { app: { storage: { getBucket: () => ({ setDataSync() {} }) } } },
 ]) {
   const runtime = makeResolver({ playmesh });
   let localStorageCalls = 0;
   assert.throws(
-    () =>
-      runLoad({
-        name: 'save',
-        localStorage: {
-          getItem() {
-            localStorageCalls += 1;
-          },
-        },
-        logger,
-        ...runtime,
-      }),
-    /不兼容的 PlayMesh Game SDK.*同步存储/s
+    () => runLoad({
+      name: 'save',
+      localStorage: { getItem() { localStorageCalls += 1; } },
+      logger,
+      ...runtime,
+    }),
+    /不兼容的 PlayMesh App SDK.*同步存储/s
   );
   assert.throws(
-    () =>
-      runUnload({
-        name: 'save',
-        jsObject: { score: 1 },
-        serializedString: '{"score":1}',
-        localStorage: {
-          setItem() {
-            localStorageCalls += 1;
-          },
-        },
-        logger,
-        ...runtime,
-      }),
-    /不兼容的 PlayMesh Game SDK.*同步存储/s
+    () => runUnload({
+      name: 'save',
+      jsObject: { score: 1 },
+      serializedString: '{"score":1}',
+      localStorage: { setItem() { localStorageCalls += 1; } },
+      logger,
+      ...runtime,
+    }),
+    /不兼容的 PlayMesh App SDK.*同步存储/s
   );
   assert.equal(localStorageCalls, 0);
 }
@@ -522,4 +270,4 @@ if (sourceArgumentIndex !== -1) {
   assert.equal(manifestEntry[0].postPatchSha256, digest);
 }
 
-process.stdout.write('GDevelop storagetools three-state runtime contract passed.\n');
+process.stdout.write('GDevelop storagetools App Bucket runtime contract passed.\n');

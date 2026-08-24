@@ -4735,80 +4735,31 @@ await patchFile({
       }
 
       const playmeshGDevelopRootKey = '$playmesh.gdevelop.root.v1';
-      let playmeshGDevelopStorageFolder: string | null = null;
       const getPlaymeshStorageBucket = (name: string): any | null => {
         if (typeof window === 'undefined') return null;
         const playmesh = (window as any).playmesh;
         if (typeof playmesh === 'undefined') return null;
-        const storage = playmesh && playmesh.main && playmesh.main.storage;
+        const storage = playmesh && playmesh.app && playmesh.app.storage;
         if (!storage || typeof storage.getBucket !== 'function') {
           throw new Error(
-            '不兼容的 PlayMesh Game SDK：GDevelop 需要 4.1.0 的同步存储能力。'
+            '不兼容的 PlayMesh App SDK：GDevelop 需要 3.3.0 的本地同步存储能力。'
           );
         }
-        if (playmeshGDevelopStorageFolder === null) {
-          const gameInfoApi = playmesh.main && playmesh.main.gameInfo;
-          const gameInfo =
-            gameInfoApi && typeof gameInfoApi.getCurrent === 'function'
-              ? gameInfoApi.getCurrent()
-              : null;
-          if (gameInfo === null) {
-            throw new Error(
-              'PlayMesh Game SDK 尚未就绪，无法确定 GDevelop 存档用户。'
-            );
-          }
-          const playerApi = playmesh.main && playmesh.main.player;
-          const player =
-            playerApi && typeof playerApi.getCurrent === 'function'
-              ? playerApi.getCurrent()
-              : null;
-          const sessionApi = playmesh.main && playmesh.main.session;
-          const isAuthority =
-            sessionApi && typeof sessionApi.isAuthority === 'function'
-              ? sessionApi.isAuthority()
-              : false;
-          const isPublicAuthority = isAuthority && player === null;
-          const identityApi = playmesh.app && playmesh.app.identity;
-          const identity =
-            identityApi && typeof identityApi.getCurrent === 'function'
-              ? identityApi.getCurrent()
-              : null;
-          const username =
-            player && typeof player.nickname === 'string' && player.nickname
-              ? player.nickname
-              : !isPublicAuthority &&
-                  identity &&
-                  typeof identity.nickname === 'string' &&
-                  identity.nickname
-                ? identity.nickname
-                : null;
-          if (!isPublicAuthority && username === null) {
-            if (gameInfo.multiplayer === false) return null;
-            throw new Error(
-              'PlayMesh 当前页面没有可用于 GDevelop 个人存档的玩家身份。'
-            );
-          }
-          playmeshGDevelopStorageFolder = isPublicAuthority
-            ? 'auth'
-            : 'users/' + encodeURIComponent(username);
-        }
-        const bucket = storage.getBucket(
-          'GDJS/' + playmeshGDevelopStorageFolder + '/' + name
-        );
+        const bucket = storage.getBucket('GDJS/' + name);
         if (
           !bucket ||
           typeof bucket.getDataSync !== 'function' ||
           typeof bucket.setDataSync !== 'function'
         ) {
           throw new Error(
-            '不兼容的 PlayMesh Game SDK：GDevelop 同步存储不可用。'
+            '不兼容的 PlayMesh App SDK：GDevelop 本地同步存储不可用。'
           );
         }
         return bucket;
       };
 
       /** The stored objects that are loaded in memory */`,
-      'add a lazy fail-closed Playmesh synchronous Bucket capability resolver'
+      'add a lazy fail-closed Playmesh App synchronous Bucket capability resolver'
     );
     content = replaceExactly(
       content,

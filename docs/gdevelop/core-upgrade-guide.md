@@ -243,9 +243,10 @@ manifest 派生检查项；源码重放验证还会双向比较 Playmesh-owned �
 13. 普通官方 HTML 导出为零 Playmesh 注入。
 14. 迁移到官方 GDevelop 的工程 JSON 不包含 Playmesh 专属事件或对象。
 15. `storagetools.ts` 仍只在官方两个 localStorage seam 惰性切换同步 Bucket；无 Playmesh 时
-    保持官方存储，玩家使用 `GDJS/users/<username>/...`，公共 Authority 使用 `GDJS/auth/...`，
-    纯浏览器 solo 保持本地存储；多人身份未就绪或 SDK 残缺时明确失败关闭。页面首次解析后
-    冻结 scope，且没有新 Symbol、预载快照或异步 Bootstrap gate。
+    保持官方存储，有 Playmesh 时只使用当前设备的
+    `playmesh.app.storage.getBucket('GDJS/' + name)`。昵称、Authority 和 Session 不参与 scope；
+    App SDK 残缺或同步能力未就绪时明确失败关闭，不得回退 Main Bucket 或官方 `GDJS_` key，
+    且没有 GDevelop 私有 Symbol、预载快照或异步 Bootstrap gate。
 16. 官方 Multiplayer 项目 API、事件名、事件数据格式和 message manager 调用形状不变；
     Playmesh 私有兼容层的大厅展示和 backend 映射按下一项单独验收。
 17. 一个 Playmesh Session 只映射一个虚拟 lobby；玩家自动加入，Authority direct start，guest

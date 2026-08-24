@@ -217,7 +217,7 @@ assert.match(game, /固定 Authority Client/);
 assert.match(game, /只有 Authority 页面可读写，宿主后台会拒绝远程玩家/);
 assert.match(
   game,
-  /interface PlaymeshAppStorageBucket \{[\s\S]*?getData<[\s\S]*?setData\([\s\S]*?removeData\([\s\S]*?clearData\(\): Promise<void>/,
+  /interface PlaymeshAppStorageBucket \{[\s\S]*?getData<[\s\S]*?setData\([\s\S]*?getDataSync<[\s\S]*?setDataSync\([\s\S]*?removeData\([\s\S]*?clearData\(\): Promise<void>/,
 );
 assert.match(
   game,
@@ -494,6 +494,20 @@ assert.deepEqual(storageBucketMembers, [
   "clearData(): Promise<null>",
   "upload(file): Promise<string>",
 ]);
+const appStorageNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.app.storage",
+);
+const appStorageBucketMembers = appStorageNamespace.members.find(
+  (member) => member.name === "getBucket",
+).bucketMembers;
+assert.deepEqual(appStorageBucketMembers, [
+  "getData(key): Promise<JsonValue | null>",
+  "setData(key, value): Promise<null>",
+  "getDataSync(key): JsonValue | null",
+  "setDataSync(key, value): void",
+  "removeData(key): Promise<null>",
+  "clearData(): Promise<null>",
+]);
 assert.deepEqual(sdkSchema.$defs.StorageBucketMethodName.enum, [
   "getData",
   "setData",
@@ -502,6 +516,14 @@ assert.deepEqual(sdkSchema.$defs.StorageBucketMethodName.enum, [
   "removeData",
   "clearData",
   "upload",
+]);
+assert.deepEqual(sdkSchema.$defs.AppStorageBucketMethodName.enum, [
+  "getData",
+  "setData",
+  "getDataSync",
+  "setDataSync",
+  "removeData",
+  "clearData",
 ]);
 assert.match(game, /getDataSync<T = PlaymeshJson>\(key: string\): T \| null;/);
 assert.match(game, /setDataSync\(key: string, value: PlaymeshJson\): void;/);

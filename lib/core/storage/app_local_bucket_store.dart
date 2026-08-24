@@ -29,7 +29,12 @@ final class AppLocalBucketStore {
   }
 
   static const maxBucketJsonBytes = 10 * 1024 * 1024;
+  static const maxSynchronousBucketNameBytes = 4 * 1024;
+  static const gdevelopStorageRootKey = r'$playmesh.gdevelop.root.v1';
+  static const _maxLogicalEnvelopeBytes =
+      maxBucketJsonBytes + maxSynchronousBucketNameBytes * 6 + 512;
   static const _replaceAttempts = 8;
+  static const _mappedBucketFormat = 'playmesh.app.logical-bucket.v1';
   static final _bucketPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');
   static final _keyPattern = RegExp(r'^[A-Za-z0-9._-]{1,128}$');
   static final Map<String, Future<void>> _pathOperations = {};
@@ -66,30 +71,73 @@ final class AppLocalBucketStore {
     return _withBucket(bucket, (_) => _writeBucket(bucket, const {}));
   }
 
+  /// 供 App SDK 的同步 HTTP 通道读取。同步形态与 Main Bucket 一致，
+  /// 允许 GDevelop 使用 1～4096 UTF-8 字节的原始 storage file 逻辑名。
+  Future<Object?> getSynchronousData(String bucket, String key) {
+    _validateSynchronousBucketAndKey(bucket, key);
+    return _withBucket(
+      bucket,
+      (values) => values[key],
+      allowLogicalBucket: true,
+    );
+  }
+
+  /// 供 App SDK 的同步 HTTP 通道写入。数据仍只落在当前设备的 App Bucket
+  /// 目录，不会进入 Authority、Core、Relay 或其他玩家设备。
+  Future<void> setSynchronousData(String bucket, String key, Object? value) {
+    _validateSynchronousBucketAndKey(bucket, key);
+    final cloned = _cloneJson(value);
+    return _withBucket(bucket, (values) async {
+      values[key] = cloned;
+      await _writeBucket(bucket, values, allowLogicalBucket: true);
+    }, allowLogicalBucket: true);
+  }
+
   Future<T> _withBucket<T>(
     String bucket,
-    FutureOr<T> Function(Map<String, Object?> values) action,
-  ) async {
-    final file = await _bucketFile(bucket);
-    return _withPathLock(file.absolute.path, () async {
-      final values = await _readBucket(file);
+    FutureOr<T> Function(Map<String, Object?> values) action, {
+    bool allowLogicalBucket = false,
+  }) async {
+    final location = await _bucketLocation(
+      bucket,
+      allowLogicalBucket: allowLogicalBucket,
+    );
+    return _withPathLock(location.file.absolute.path, () async {
+      final values = await _readBucket(location);
       return action(values);
     });
   }
 
-  Future<Map<String, Object?>> _readBucket(File file) async {
+  Future<Map<String, Object?>> _readBucket(
+    _AppLocalBucketLocation location,
+  ) async {
+    final file = location.file;
     if (!await file.exists()) return {};
-    if (await file.length() > maxBucketJsonBytes) {
+    final maxFileBytes = location.logical
+        ? _maxLogicalEnvelopeBytes
+        : maxBucketJsonBytes;
+    if (await file.length() > maxFileBytes) {
       throw const FormatException('App Bucket JSON 超过 10 MiB');
     }
     final decoded = jsonDecode(await file.readAsString());
     if (decoded is! Map) {
       throw const FormatException('App Bucket JSON 根节点必须是对象');
     }
+    final Map<dynamic, dynamic> decodedValues;
+    if (location.logical) {
+      if (decoded['format'] != _mappedBucketFormat ||
+          decoded['bucket'] != location.bucket ||
+          decoded['values'] is! Map) {
+        throw const FormatException('App Bucket 逻辑名称映射无效');
+      }
+      decodedValues = decoded['values'] as Map;
+    } else {
+      decodedValues = decoded;
+    }
     final values = <String, Object?>{};
-    for (final entry in decoded.entries) {
+    for (final entry in decodedValues.entries) {
       final key = entry.key;
-      if (key is! String || !_keyPattern.hasMatch(key)) {
+      if (key is! String || !_isStoredKey(key)) {
         throw const FormatException('App Bucket JSON 包含无效 key');
       }
       values[key] = entry.value;
@@ -97,12 +145,29 @@ final class AppLocalBucketStore {
     return values;
   }
 
-  Future<void> _writeBucket(String bucket, Map<String, Object?> values) async {
-    final encoded = jsonEncode(values);
-    if (utf8.encode(encoded).length > maxBucketJsonBytes) {
+  Future<void> _writeBucket(
+    String bucket,
+    Map<String, Object?> values, {
+    bool allowLogicalBucket = false,
+  }) async {
+    final location = await _bucketLocation(
+      bucket,
+      allowLogicalBucket: allowLogicalBucket,
+    );
+    final valuesEncoded = jsonEncode(values);
+    if (utf8.encode(valuesEncoded).length > maxBucketJsonBytes) {
       throw const FormatException('App Bucket JSON 超过 10 MiB');
     }
-    final target = await _bucketFile(bucket);
+    final encoded = jsonEncode(
+      location.logical
+          ? {
+              'format': _mappedBucketFormat,
+              'bucket': location.bucket,
+              'values': values,
+            }
+          : values,
+    );
+    final target = location.file;
     await target.parent.create(recursive: true);
     final sequence = _temporarySequence++;
     final temporary = File(
@@ -122,13 +187,31 @@ final class AppLocalBucketStore {
     }
   }
 
-  Future<File> _bucketFile(String bucket) async {
+  Future<_AppLocalBucketLocation> _bucketLocation(
+    String bucket, {
+    required bool allowLogicalBucket,
+  }) async {
     final root = _libraryRoot ?? await PlaymeshLibraryRoot.resolve();
-    return File(
-      '${root.path}${Platform.pathSeparator}data'
-      '${Platform.pathSeparator}${_safeGameNameSegment(gameName)}'
-      '${Platform.pathSeparator}$gameId'
-      '${Platform.pathSeparator}$bucket.json',
+    final gameDirectory =
+        '${root.path}${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}${_safeGameNameSegment(gameName)}'
+        '${Platform.pathSeparator}$gameId';
+    if (_bucketPattern.hasMatch(bucket)) {
+      return _AppLocalBucketLocation(
+        File('$gameDirectory${Platform.pathSeparator}$bucket.json'),
+        bucket,
+      );
+    }
+    if (!allowLogicalBucket) _validateBucket(bucket);
+    _validateSynchronousBucketName(bucket);
+    final digest = sha256.convert(utf8.encode(bucket)).toString();
+    return _AppLocalBucketLocation(
+      File(
+        '$gameDirectory${Platform.pathSeparator}logical'
+        '${Platform.pathSeparator}sha256-$digest.json',
+      ),
+      bucket,
+      logical: true,
     );
   }
 
@@ -148,6 +231,23 @@ final class AppLocalBucketStore {
       );
     }
   }
+
+  static void _validateSynchronousBucketAndKey(String bucket, String key) {
+    _validateSynchronousBucketName(bucket);
+    if (!_isStoredKey(key)) {
+      throw const FormatException('无效的 App Bucket 同步 key');
+    }
+  }
+
+  static void _validateSynchronousBucketName(String bucket) {
+    final length = utf8.encode(bucket).length;
+    if (length < 1 || length > maxSynchronousBucketNameBytes) {
+      throw const FormatException('同步 App Bucket 逻辑名必须为 1 至 4096 个 UTF-8 字节');
+    }
+  }
+
+  static bool _isStoredKey(String key) =>
+      key == gdevelopStorageRootKey || _keyPattern.hasMatch(key);
 
   static void _validateBucket(String bucket) {
     if (!_bucketPattern.hasMatch(bucket)) {
@@ -236,4 +336,12 @@ final class AppLocalBucketStore {
       }
     }
   }
+}
+
+final class _AppLocalBucketLocation {
+  const _AppLocalBucketLocation(this.file, this.bucket, {this.logical = false});
+
+  final File file;
+  final String bucket;
+  final bool logical;
 }

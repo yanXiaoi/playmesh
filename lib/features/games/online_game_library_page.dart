@@ -13,6 +13,7 @@ import '../../core/version/semantic_version.dart';
 import '../../ui/focus/playmesh_shortcuts.dart';
 import '../../ui/game_tags.dart';
 import '../../ui/playmesh_ui.dart';
+import 'game_detail_widgets.dart';
 
 class OnlineGameLibraryPage extends StatefulWidget {
   const OnlineGameLibraryPage({
@@ -207,6 +208,7 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
               loadIcon: widget.controller.loadOfferIcon,
               onRetry: () => _retryHomeSource(source.id),
               onLoadMore: () => _loadMoreHomeSource(source.id),
+              onOpen: _openOfferDetails,
               onDownload: _downloadOffer,
             ),
           );
@@ -296,11 +298,15 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
                   _AggregatedGameTile(
                     key: ValueKey('catalog-search-${result.groupKey}'),
                     result: result,
-                    focusNode: _searchFocusNodeFor(
+                    detailsFocusNode: _searchFocusNodeFor(
                       _searchResultId(result.groupKey),
                     ),
+                    downloadFocusNode: _searchFocusNodeFor(
+                      _searchDownloadId(result.groupKey),
+                    ),
                     loadIcon: widget.controller.loadOfferIcon,
-                    onOpen: () => _openVersionPicker(result),
+                    onOpen: () => _openAggregatedDetails(result),
+                    onDownload: () => _openVersionPicker(result),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -364,18 +370,25 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
     final currentRequest = _homeRequests[sourceId];
     if (currentRequest == null) return;
     final request = currentRequest.then((current) async {
-      if (current.error != null || !current.hasMore) return current;
+      if (!current.hasMore) return current;
       final next = await widget.controller.loadHomeSource(
         sourceId,
         page: current.page + 1,
         cursor: current.nextCursor,
       );
       if (next.error case final error?) {
-        throw FormatException(error);
+        return SourceSectionResult(
+          source: current.source,
+          offers: current.offers,
+          total: current.total,
+          page: current.page,
+          nextCursor: current.nextCursor,
+          error: error,
+          exhausted: current.exhausted,
+        );
       }
-      if (current.nextCursor != null && next.nextCursor == current.nextCursor) {
-        throw const FormatException('游戏源重复返回 cursor，无法继续读取');
-      }
+      final cursorStalled =
+          current.nextCursor != null && next.nextCursor == current.nextCursor;
       final offers = [...current.offers, ...next.offers]
         ..sort(compareOnlineCatalogOffersNewestFirst);
       return SourceSectionResult(
@@ -383,8 +396,12 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
         offers: List.unmodifiable(offers),
         total: next.total,
         page: next.page,
-        nextCursor: next.nextCursor,
-        exhausted: next.offers.isEmpty && next.nextCursor == null,
+        nextCursor: cursorStalled ? null : next.nextCursor,
+        error: cursorStalled ? '游戏源重复返回 cursor，已停止继续读取' : null,
+        exhausted:
+            cursorStalled ||
+            next.exhausted ||
+            (next.offers.isEmpty && next.nextCursor == null),
       );
     });
     setState(() {
@@ -393,6 +410,8 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
   }
 
   String _searchResultId(String groupKey) => 'result:$groupKey';
+
+  String _searchDownloadId(String groupKey) => 'download:$groupKey';
 
   String _searchLoadMoreId(String sourceId) => 'load-more:$sourceId';
 
@@ -405,7 +424,10 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
   }
 
   List<String> _searchFocusIds() => [
-    for (final result in _searchResults) _searchResultId(result.groupKey),
+    for (final result in _searchResults) ...[
+      _searchResultId(result.groupKey),
+      _searchDownloadId(result.groupKey),
+    ],
     for (final section in _searchSections.values)
       if (section.hasMore) _searchLoadMoreId(section.source.id),
   ];
@@ -679,6 +701,30 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
     if (offer != null && mounted) await _downloadOffer(offer);
   }
 
+  Future<void> _openOfferDetails(OnlineCatalogGame offer) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => OnlineGameDetailPage(
+          offer: offer,
+          loadIcon: widget.controller.loadOfferIcon,
+          onDownload: () => _downloadOffer(offer),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAggregatedDetails(AggregatedGameResult result) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => OnlineGameDetailPage(
+          offer: result.representative,
+          loadIcon: widget.controller.loadOfferIcon,
+          onDownload: () => _openVersionPicker(result),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openSources() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -729,6 +775,155 @@ class _OnlineGameLibraryPageState extends State<OnlineGameLibraryPage>
   }
 }
 
+class OnlineGameDetailPage extends StatelessWidget {
+  const OnlineGameDetailPage({
+    super.key,
+    required this.offer,
+    required this.loadIcon,
+    required this.onDownload,
+  });
+
+  final OnlineCatalogGame offer;
+  final Future<List<int>?> Function(OnlineCatalogGame offer) loadIcon;
+  final Future<void> Function() onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final manifest = offer.manifest;
+    final publisher = offer.publisher.isEmpty
+        ? context.tr('common.publisher_unknown')
+        : offer.publisher;
+    final playerRange = manifest.players.min == manifest.players.max
+        ? context.tr(
+            'library.player_count',
+            arguments: {'count': manifest.players.min},
+          )
+        : context.tr(
+            'library.player_range',
+            arguments: {
+              'min': manifest.players.min,
+              'max': manifest.players.max,
+            },
+          );
+    final displayMode =
+        manifest.displayModes.single.manifestValue ==
+            'single_screen_multiplayer'
+        ? context.tr('game.display_single_screen')
+        : context.tr('game.display_multi_screen');
+    String orientationLabel(String value) => value == 'landscape'
+        ? context.tr('library.landscape')
+        : context.tr('library.portrait');
+    final facts = <GameDetailFactData>[
+      GameDetailFactData(
+        icon: Icons.person_outline,
+        label: context.tr('common.publisher'),
+        value: publisher,
+      ),
+      GameDetailFactData(
+        icon: Icons.schedule_outlined,
+        label: context.tr('game.last_uploaded'),
+        value: manifest.lastModifiedAt == null
+            ? context.tr('common.none')
+            : _formatLocalDateTime(context, manifest.lastModifiedAt!),
+        shrinkToFit: true,
+      ),
+      GameDetailFactData(
+        icon: Icons.cloud_outlined,
+        label: context.tr('online.sources'),
+        value: offer.source.name,
+      ),
+      GameDetailFactData(
+        icon: Icons.sell_outlined,
+        label: context.tr('common.version'),
+        value: manifest.version,
+      ),
+      GameDetailFactData(
+        icon: Icons.inventory_2_outlined,
+        label: context.tr('online.downloads.total_size'),
+        value: offer.packageSizeBytes == null
+            ? context.tr('online.downloads.size_unknown')
+            : formatByteSize(offer.packageSizeBytes!),
+      ),
+      GameDetailFactData(
+        icon: Icons.people_outline,
+        label: context.tr('game.players'),
+        value: playerRange,
+      ),
+      GameDetailFactData(
+        icon: Icons.devices_outlined,
+        label: context.tr('game.display_mode'),
+        value: displayMode,
+      ),
+      GameDetailFactData(
+        icon: Icons.screen_rotation_outlined,
+        label: context.tr('game.main_screen'),
+        value: orientationLabel(manifest.orientation.manifestValue),
+      ),
+      if (manifest.controllerOrientation case final controllerOrientation?)
+        GameDetailFactData(
+          icon: Icons.smartphone_outlined,
+          label: context.tr('game.controller'),
+          value: orientationLabel(controllerOrientation.manifestValue),
+        ),
+      GameDetailFactData(
+        icon: Icons.hub_outlined,
+        label: context.tr('game.game_mode'),
+        value: manifest.supportsMultiplayer
+            ? context.tr('library.multiplayer')
+            : context.tr('library.solo'),
+      ),
+      if (manifest.appSdkVersion.isNotEmpty)
+        GameDetailFactData(
+          icon: Icons.integration_instructions_outlined,
+          label: 'App SDK',
+          value: manifest.appSdkVersion,
+        ),
+    ];
+    return Scaffold(
+      appBar: AppBar(title: Text(context.tr('game.details'))),
+      body: PlaymeshBackground(
+        child: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 820),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                children: [
+                  GameDetailContentCard(
+                    header: GameDetailHeader(
+                      icon: _OnlineGameIcon(
+                        offer: offer,
+                        loadIcon: loadIcon,
+                        size: 64,
+                      ),
+                      name: manifest.name,
+                      version: manifest.version,
+                      gameId: manifest.id,
+                    ),
+                    tags: manifest.tags,
+                    description: manifest.remarks,
+                    facts: GameDetailFactGrid(facts: facts),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: FilledButton.icon(
+          key: const ValueKey('online-game-detail-download'),
+          autofocus: true,
+          onPressed: () => unawaited(onDownload()),
+          icon: const Icon(Icons.download_outlined),
+          label: Text(context.tr('online.download')),
+        ),
+      ),
+    );
+  }
+}
+
 Future<GameDownloadStatus?> showGameDownloadProgressDialog(
   BuildContext context, {
   required GameCatalogController controller,
@@ -760,6 +955,7 @@ class _SourceHomeSection extends StatefulWidget {
     required this.loadIcon,
     required this.onRetry,
     required this.onLoadMore,
+    required this.onOpen,
     required this.onDownload,
   });
 
@@ -769,6 +965,7 @@ class _SourceHomeSection extends StatefulWidget {
   final Future<List<int>?> Function(OnlineCatalogGame offer) loadIcon;
   final VoidCallback onRetry;
   final VoidCallback onLoadMore;
+  final ValueChanged<OnlineCatalogGame> onOpen;
   final ValueChanged<OnlineCatalogGame> onDownload;
 
   @override
@@ -788,6 +985,7 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
       widget.loadIcon;
   VoidCallback get onRetry => widget.onRetry;
   VoidCallback get onLoadMore => widget.onLoadMore;
+  ValueChanged<OnlineCatalogGame> get onOpen => widget.onOpen;
   ValueChanged<OnlineCatalogGame> get onDownload => widget.onDownload;
 
   @override
@@ -811,7 +1009,11 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
     super.dispose();
   }
 
-  String _offerFocusId(OnlineCatalogGame offer) => 'offer:${offer.downloadKey}';
+  String _offerDetailsFocusId(OnlineCatalogGame offer) =>
+      'details:${offer.downloadKey}';
+
+  String _offerDownloadFocusId(OnlineCatalogGame offer) =>
+      'download:${offer.downloadKey}';
 
   static const _loadMoreFocusId = 'load-more';
 
@@ -893,7 +1095,8 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
         FutureBuilder<SourceSectionResult>(
           future: request,
           builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
+            final loading = snapshot.connectionState != ConnectionState.done;
+            if (loading && !snapshot.hasData) {
               return const _SectionLoading();
             }
             if (snapshot.hasError) {
@@ -906,7 +1109,7 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
               );
             }
             final section = snapshot.data!;
-            if (section.error != null) {
+            if (section.error != null && section.offers.isEmpty) {
               if (_focusIds.isNotEmpty || _pendingFocusedId != null) {
                 _syncFocusIds(const []);
               }
@@ -921,7 +1124,10 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
               );
             }
             final focusIds = [
-              for (final offer in section.offers) _offerFocusId(offer),
+              for (final offer in section.offers) ...[
+                _offerDetailsFocusId(offer),
+                _offerDownloadFocusId(offer),
+              ],
               if (section.hasMore) _loadMoreFocusId,
             ];
             if (!_sameStringList(_focusIds, focusIds) ||
@@ -931,13 +1137,29 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (section.error case final error?) ...[
+                  _CatalogStatusNotice(
+                    icon: Icons.cloud_off_outlined,
+                    text: context.tr(
+                      'online.home.source_failed',
+                      arguments: {'error': error},
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 for (final (index, offer) in section.offers.indexed) ...[
                   _OfferTile(
                     key: ValueKey('catalog-home-offer-${offer.downloadKey}'),
                     offer: offer,
                     autofocus: widget.autofocus && index == 0,
-                    focusNode: _focusNodeFor(_offerFocusId(offer)),
+                    detailsFocusNode: _focusNodeFor(
+                      _offerDetailsFocusId(offer),
+                    ),
+                    downloadFocusNode: _focusNodeFor(
+                      _offerDownloadFocusId(offer),
+                    ),
                     loadIcon: loadIcon,
+                    onOpen: () => onOpen(offer),
                     onDownload: () => onDownload(offer),
                   ),
                   const SizedBox(height: 8),
@@ -964,9 +1186,28 @@ class _SourceHomeSectionState extends State<_SourceHomeSection> {
                       OutlinedButton.icon(
                         key: ValueKey('catalog-home-load-more-${source.id}'),
                         focusNode: _focusNodeFor(_loadMoreFocusId),
-                        onPressed: onLoadMore,
-                        icon: const Icon(Icons.expand_more),
-                        label: Text(context.tr('common.load_more')),
+                        onPressed: loading ? null : onLoadMore,
+                        icon: loading
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                section.error == null
+                                    ? Icons.expand_more
+                                    : Icons.refresh,
+                              ),
+                        label: Text(
+                          context.tr(
+                            loading
+                                ? 'common.loading'
+                                : section.error == null
+                                ? 'common.load_more'
+                                : 'common.retry',
+                          ),
+                        ),
                       ),
                     ],
                   ],
@@ -985,15 +1226,19 @@ class _OfferTile extends StatelessWidget {
     super.key,
     required this.offer,
     required this.autofocus,
-    required this.focusNode,
+    required this.detailsFocusNode,
+    required this.downloadFocusNode,
     required this.loadIcon,
+    required this.onOpen,
     required this.onDownload,
   });
 
   final OnlineCatalogGame offer;
   final bool autofocus;
-  final FocusNode focusNode;
+  final FocusNode detailsFocusNode;
+  final FocusNode downloadFocusNode;
   final Future<List<int>?> Function(OnlineCatalogGame offer) loadIcon;
+  final VoidCallback onOpen;
   final VoidCallback onDownload;
 
   @override
@@ -1003,59 +1248,65 @@ class _OfferTile extends StatelessWidget {
         ? context.tr('common.publisher_unknown')
         : offer.publisher;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _OnlineGameIcon(offer: offer, loadIcon: loadIcon, size: 54),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    manifest.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '${context.tr('common.publisher')}：'
-                    '$publisher · v${manifest.version}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  if (manifest.remarks.trim().isNotEmpty) ...[
-                    const SizedBox(height: 5),
+      child: InkWell(
+        key: ValueKey('catalog-home-offer-details-${offer.downloadKey}'),
+        focusNode: detailsFocusNode,
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _OnlineGameIcon(offer: offer, loadIcon: loadIcon, size: 54),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      manifest.remarks,
-                      maxLines: 2,
+                      manifest.name,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${context.tr('common.publisher')}：'
+                      '$publisher · v${manifest.version}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (manifest.remarks.trim().isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        manifest.remarks,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    if (manifest.tags.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      GameTagList(tags: manifest.tags, compact: true),
+                    ],
                   ],
-                  if (manifest.tags.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    GameTagList(tags: manifest.tags, compact: true),
-                  ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            IconButton.filledTonal(
-              key: ValueKey('catalog-home-offer-action-${offer.downloadKey}'),
-              focusNode: focusNode,
-              autofocus: autofocus,
-              tooltip: context.tr(
-                'online.download_from_source',
-                arguments: {'source': offer.source.name},
+              const SizedBox(width: 10),
+              IconButton.filledTonal(
+                key: ValueKey('catalog-home-offer-action-${offer.downloadKey}'),
+                focusNode: downloadFocusNode,
+                autofocus: autofocus,
+                tooltip: context.tr(
+                  'online.download_from_source',
+                  arguments: {'source': offer.source.name},
+                ),
+                onPressed: onDownload,
+                icon: const Icon(Icons.download_outlined),
               ),
-              onPressed: onDownload,
-              icon: const Icon(Icons.download_outlined),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1066,15 +1317,19 @@ class _AggregatedGameTile extends StatelessWidget {
   const _AggregatedGameTile({
     super.key,
     required this.result,
-    required this.focusNode,
+    required this.detailsFocusNode,
+    required this.downloadFocusNode,
     required this.loadIcon,
     required this.onOpen,
+    required this.onDownload,
   });
 
   final AggregatedGameResult result;
-  final FocusNode focusNode;
+  final FocusNode detailsFocusNode;
+  final FocusNode downloadFocusNode;
   final Future<List<int>?> Function(OnlineCatalogGame offer) loadIcon;
   final VoidCallback onOpen;
+  final VoidCallback onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -1085,7 +1340,7 @@ class _AggregatedGameTile extends StatelessWidget {
     return Card(
       child: InkWell(
         key: ValueKey('catalog-search-action-${result.groupKey}'),
-        focusNode: focusNode,
+        focusNode: detailsFocusNode,
         onTap: onOpen,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
@@ -1144,7 +1399,13 @@ class _AggregatedGameTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right),
+              IconButton.filledTonal(
+                key: ValueKey('catalog-search-download-${result.groupKey}'),
+                focusNode: downloadFocusNode,
+                tooltip: context.tr('online.download'),
+                onPressed: onDownload,
+                icon: const Icon(Icons.download_outlined),
+              ),
             ],
           ),
         ),

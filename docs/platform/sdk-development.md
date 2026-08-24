@@ -100,7 +100,7 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 | `playmesh.app.ui` | `configure()`、`initializeBrowser()`、`showGameSidebar()`、`restartGame()`、`openSharePanel()`、`openRuntimeLogs()`、`enterFullscreen()`、`exitFullscreen()`、`openGameInfo()`、`setPerformanceVisible()`、`togglePerformance()`、`exitGame()` |
 | `playmesh.app.runtime` | `getLocale()` |
 | `playmesh.app.storage` | `getBucket()` |
-| `PlaymeshAppStorageBucket` | `getData()`、`setData()`、`removeData()`、`clearData()` |
+| `PlaymeshAppStorageBucket` | `getData()`、`setData()`、`getDataSync()`、`setDataSync()`、`removeData()`、`clearData()` |
 | `playmesh.main.session` | `getCurrent()`、`onStateChange()`、`onPlayerJoin()`、`onPlayerLeave()`、`onPlayerReconnect()`、`isAuthority()`、`start()`、`finish()` |
 | `playmesh.main.player` | `getCurrent()`、`setNickname()` |
 | `playmesh.main.game` | `submitAction()`、`onMessage()`、`onEvent()` |
@@ -119,13 +119,17 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 Main Bucket 是 Authority 主机持有、且只允许 Authority 页面读写的游戏数据；需要让
 玩家使用其中结果时，Authority 必须通过正常游戏消息投影所需内容，不能让玩家直接读取
 Bucket。App Bucket 只属于调用页面所在的当前设备，其他玩家和其他设备不能通过会话
-读取。两者 Bucket 名称都匹配
-`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，key 都匹配
+读取。两者异步 Bucket 名称都匹配
+`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，普通 key 都匹配
 `^[A-Za-z0-9._-]{1,128}$`。App WebView 把每个 Bucket 保存为当前设备
 `playmesh-library/data/{游戏名称}/{gameId}/{bucket名称}.json`；游戏名称作为文件段时由
 宿主安全转义，游戏代码不能指定或枚举路径。普通浏览器则直接以 Bucket 名称为
-`localStorage` key。App Bucket 只提供异步 JSON 操作，不提供同步接口、`upload()` 或
-默认跨设备恢复。
+`localStorage` key。App Bucket 另提供与 Main Bucket 同名的 `getDataSync()` / `setDataSync()`：
+同步方法允许 1～4096 UTF-8 字节逻辑 Bucket 名，原生 App 通过 App bootstrap 下发并立即从
+公开结果移除的随机 loopback capability endpoint 阻塞读写当前设备文件，普通浏览器同步读写
+当前源 `localStorage`。逻辑名只进入 SHA-256 文件映射和带原名校验的 envelope，不直接作为
+路径。App Bucket 不提供 `upload()` 或默认跨设备恢复；同步能力也不借道 Authority、Core、
+Relay 或其他设备。本次为 App Bridge SDK `3.3.0` 的兼容补充，不改变 SDK 版本。
 
 `playmesh.main.rpc` 复用已经过会话凭证认证的 Binary WebSocket，并使用 SDK 内部
 RPC 帧直达固定 Authority，不经过 Session WS JSON action，也不创建公开 Binary

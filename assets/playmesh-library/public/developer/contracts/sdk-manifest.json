@@ -327,6 +327,28 @@
       ]
     },
     {
+      "name": "playmesh.app.storage",
+      "members": [
+        {
+          "name": "getBucket",
+          "signature": "getBucket(bucket: string): PlaymeshAppStorageBucket",
+          "constraints": "async methods keep bucket ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$; sync methods accept logical bucket names of 1 to 4096 UTF-8 bytes; ordinary keys keep ^[A-Za-z0-9._-]+$ and 1 to 128 characters; $playmesh.gdevelop.root.v1 is reserved for the GDevelop adapter",
+          "storageAuthority": "Current device and current game only; never Authority, Core, Relay, another player or another device",
+          "bucketMembers": [
+            "getData(key): Promise<JsonValue | null>",
+            "setData(key, value): Promise<null>",
+            "getDataSync(key): JsonValue | null",
+            "setDataSync(key, value): void",
+            "removeData(key): Promise<null>",
+            "clearData(): Promise<null>"
+          ],
+          "nativeStorage": "playmesh-library/data/{safe-game-name}/{gameId}/{bucket}.json or logical/sha256-{digest}.json envelope on the current device",
+          "browserStorage": "Current-origin localStorage using the logical bucket name",
+          "syncTransport": "Blocking GET/POST over a per-WebView random loopback capability endpoint removed from the public bootstrap result; no Main Bucket route or upload support"
+        }
+      ]
+    },
+    {
       "name": "playmesh.main.gameInfo",
       "members": [
         {

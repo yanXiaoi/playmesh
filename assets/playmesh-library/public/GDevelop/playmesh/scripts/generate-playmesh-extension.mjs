@@ -69,6 +69,8 @@ const executeCommands = [
   'playmesh.app.storage.getBucket',
   'PlaymeshAppStorageBucket.getData',
   'PlaymeshAppStorageBucket.setData',
+  'PlaymeshAppStorageBucket.getDataSync',
+  'PlaymeshAppStorageBucket.setDataSync',
   'PlaymeshAppStorageBucket.removeData',
   'PlaymeshAppStorageBucket.clearData',
   'playmesh.app.performance.getFps',
@@ -2151,10 +2153,12 @@ typedExecuteSpecs.push(
   },
   {
     command: 'playmesh.app.storage.getBucket', name: 'GetAppStorageBucket', group: 'App SDK ❯ Storage', label: '获取当前设备存储桶句柄',
-    description: '获取只属于当前设备、不会通过 Authority 或会话共享的 JSON Bucket。', parameters: [requiredString('Bucket', '存储桶名称；规则与 Main Bucket 相同。')], result: '将当前设备存储桶 handleId 写入变量。', args: `[${argumentCode('Bucket')}]`,
+    description: '获取只属于当前设备、不会通过 Authority 或会话共享的 JSON Bucket。', parameters: [requiredString('Bucket', '存储桶名称；同步接口还支持 GDevelop 等运行时使用的逻辑名称。')], result: '将当前设备存储桶 handleId 写入变量。', args: `[${argumentCode('Bucket')}]`,
   },
   { command: 'PlaymeshAppStorageBucket.getData', name: 'GetAppBucketData', group: 'App SDK ❯ Storage', label: '读取当前设备存储桶数据', description: '异步读取当前设备上的 key；不存在时结果为 null。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '存储 key，1～128 个允许字符。')], result: '将 JSON 值或 null 写入变量。', args: `[${argumentCode('Key')}]`, handle: 'HandleId' },
   { command: 'PlaymeshAppStorageBucket.setData', name: 'SetAppBucketData', group: 'App SDK ❯ Storage', label: '写入当前设备存储桶数据', description: '异步写入一个只保存在当前设备的 JSON 值。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '存储 key，1～128 个允许字符。'), requiredVariable('Value', '要写入的 JSON 值变量。')], args: `[${argumentCode('Key')}, ${variableCode('Value')}]`, handle: 'HandleId', void: true },
+  { command: 'PlaymeshAppStorageBucket.getDataSync', name: 'GetAppBucketDataSync', group: 'App SDK ❯ Storage', label: '同步读取当前设备存储桶数据', description: '同步读取当前设备上的 JSON 值；不存在时结果为 null。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '存储 key；运行时保留 key 由对应接线内部使用。')], result: '将 JSON 值或 null 写入变量。', args: `[${argumentCode('Key')}]`, handle: 'HandleId' },
+  { command: 'PlaymeshAppStorageBucket.setDataSync', name: 'SetAppBucketDataSync', group: 'App SDK ❯ Storage', label: '同步写入当前设备存储桶数据', description: '同步写入一个只保存在当前设备的 JSON 值。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '存储 key；运行时保留 key 由对应接线内部使用。'), requiredVariable('Value', '要写入的 JSON 值变量。')], args: `[${argumentCode('Key')}, ${variableCode('Value')}]`, handle: 'HandleId', void: true },
   { command: 'PlaymeshAppStorageBucket.removeData', name: 'RemoveAppBucketData', group: 'App SDK ❯ Storage', label: '删除当前设备存储桶数据', description: '删除当前设备存储桶中的指定 key。', parameters: [handleIdParameter('当前设备存储桶 handleId。'), requiredString('Key', '要删除的存储 key。')], args: `[${argumentCode('Key')}]`, handle: 'HandleId', void: true },
   { command: 'PlaymeshAppStorageBucket.clearData', name: 'ClearAppBucketData', group: 'App SDK ❯ Storage', label: '清空当前设备存储桶', description: '清空当前设备上的当前 Bucket，不影响 Main Bucket。', parameters: [handleIdParameter('当前设备存储桶 handleId。')], args: '[]', handle: 'HandleId', void: true },
   {

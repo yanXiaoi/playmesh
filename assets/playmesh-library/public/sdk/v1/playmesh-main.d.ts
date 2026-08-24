@@ -617,6 +617,10 @@ interface PlaymeshAppStorageBucket {
   getData<T = PlaymeshJson>(key: string): Promise<T | null>;
   /** 在当前设备写入 JSON 值。 */
   setData(key: string, value: PlaymeshJson): Promise<void>;
+  /** 阻塞读取当前设备的 JSON；不存在时返回 `null`。 */
+  getDataSync<T = PlaymeshJson>(key: string): T | null;
+  /** 阻塞写入当前设备的 JSON；返回时本地文件已提交。 */
+  setDataSync(key: string, value: PlaymeshJson): void;
   /** 在当前设备删除一个 key。 */
   removeData(key: string): Promise<void>;
   /** 清空当前设备上的当前 Bucket。 */
@@ -626,7 +630,7 @@ interface PlaymeshAppStorageBucket {
 interface PlaymeshAppApi {
   /** 当前设备独占的玩家本地 JSON 存储，不通过 Authority 或游戏会话共享。 */
   readonly storage: {
-    /** 获取本地 Bucket；名称规则与 Main Bucket 相同。 @playmesh-completion playmesh.app.storage.getBucket */
+    /** 获取本地 Bucket；异步方法使用标准名称规则，同步方法另支持 1～4096 UTF-8 字节逻辑名。 @playmesh-completion playmesh.app.storage.getBucket */
     getBucket(bucket: string): PlaymeshAppStorageBucket;
   };
 }

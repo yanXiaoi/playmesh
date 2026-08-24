@@ -2,11 +2,11 @@
 
 ## 状态
 
-- 状态：App `4.3.1+31` 已于 2026-08-23 完成正式构建；当前没有新的未发布变更。
-- 当前发行基线：App `4.3.1+31`、Runtime `1.0.2+5`、Go Core `0.5.0`、Core 协议 `1.3.0`、
+- 状态：App `4.4.0+32` 已于 2026-08-24 完成正式构建；当前没有新的未发布变更。
+- 当前发行基线：App `4.4.0+32`、Runtime `1.0.2+6`、Go Core `0.5.0`、Core 协议 `1.3.0`、
   Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
   Relay 协议 `3.0.0`、Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.3.1.md`；本文件保留 4.3.1、4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
+- 最新正式发布日志：`docs/version/4.4.0.md`；本文件保留 4.4.0、4.3.1、4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
   发布归档。
 - Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
   隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
@@ -23,6 +23,22 @@
 ## 未发布变更
 
 - 当前没有新的未发布变更。
+
+## 4.4.0 发布归档
+
+- 修复 App 在线游戏库首页的分页显示：加载下一页时保留已展示游戏并在“加载更多”按钮内
+  显示进度，失败时保留已加载项并重试同一页，不再退回第一页或用整段加载/错误状态替换
+  当前内容。每个源继续维护独立页码或 cursor；Catalog API、SDK、Core 与协议版本不变。
+- 在线游戏库首页与搜索结果现在可点击整张游戏卡片进入详情；详情复用本地游戏详情的信息
+  结构，并继续调用同一在线下载流程。首页原快捷下载按钮保留，搜索结果提供独立下载按钮并
+  继续打开既有版本/来源选择器。该项是 App 内兼容新增能力，Catalog API、SDK、Core 与协议
+  版本不变；形成下一次可分发构建时应按 MINOR 递增 App 语义版本并递增构建号。
+- App Bridge SDK `3.3.0` 兼容补充 `playmesh.app.storage` 的同步 JSON 方法
+  `getDataSync/setDataSync`，数据仍归当前设备所有；GDevelop `storagetools` 从 Authority 的
+  `playmesh.main.storage` 迁移到该 App 本地语义空间。Game/App SDK 版本均保持不变；该变更随
+  GDevelop WebIDE Playmesh revision `21` 正式重打包，上游核心版本仍为 `5.6.276`。
+- App 升级到 `4.4.0+32`；Runtime 保持语义版本 `1.0.2` 并以构建号 `6` 重新打包三端底包。
+  Game SDK `4.1.0`、App Bridge SDK `3.3.0` 及其他 Core/API/协议版本均不升级。
 
 ## 4.3.1 发布归档
 
