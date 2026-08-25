@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
 
 import 'runtime_config.dart';
+import 'runtime_sdk_compatibility.dart';
 
 final class RuntimeGameManifest {
   const RuntimeGameManifest({
@@ -109,14 +110,14 @@ final class RuntimeGameManifest {
       _requiredString(manifest, 'sdkVersion'),
       'sdkVersion',
     );
-    if (gameSdkVersion != '4.1.0') {
+    if (!RuntimeSdkCompatibility.supportsGameRequest(gameSdkVersion)) {
       throw FormatException('Runtime 不支持 Game SDK $gameSdkVersion');
     }
     final appSdkVersion = _semanticVersion(
       _requiredString(manifest, 'appSdkVersion'),
       'appSdkVersion',
     );
-    if (appSdkVersion != '3.2.0' && appSdkVersion != '3.3.0') {
+    if (!RuntimeSdkCompatibility.supportsAppRequest(appSdkVersion)) {
       throw FormatException('Runtime 不支持 App SDK $appSdkVersion');
     }
     final tags = _optionalStrings(manifest['tags'], 'tags');

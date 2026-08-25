@@ -221,6 +221,14 @@ void main() {
     expect(manifest.appSdkVersion, '3.2.0');
   });
 
+  test('拒绝未发布的中间 SDK 版本', () {
+    final gameJson = validManifest()..['sdkVersion'] = '4.1.1';
+    final appJson = validManifest()..['appSdkVersion'] = '3.2.1';
+
+    expect(() => GameManifest.fromJson(gameJson), throwsFormatException);
+    expect(() => GameManifest.fromJson(appJson), throwsFormatException);
+  });
+
   test('拒绝不兼容的 App SDK 主版本', () {
     final json = validManifest()..['appSdkVersion'] = '4.0.0';
 

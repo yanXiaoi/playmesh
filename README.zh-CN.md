@@ -131,6 +131,7 @@ flutter run
 | 通用契约 | [游戏开发指南](docs/game/development-guide.md) | 理解运行模式、Player/Authority 分层、生命周期和存储 |
 | 包格式 | [游戏包与 main.json](docs/game/package-format.md) | 定义目录、清单、能力声明和发布边界 |
 | SDK API | [Game SDK / App Bridge SDK](docs/game/sdk-v1.md) | 查询当前公开 API、类型、角色限制和错误语义 |
+| SDK 声明 | [Game SDK 类型](assets/playmesh-library/public/sdk/v1/playmesh-main.d.ts) / [App Bridge SDK 类型](assets/playmesh-library/public/sdk/v1/playmesh-app.d.ts) | 直接查看生成的 TypeScript API 声明 |
 | 游戏使用设备能力 | [游戏能力使用指南](docs/game/capability-plugins.md) | 使用标准 Web API，并按需声明敏感权限或多平台适配能力 |
 
 ### 可视化开发与应用导出

@@ -67,6 +67,7 @@ const platformGameUiRequiredKeys = <String>{
   'logs.copied',
   'join.title',
   'join.empty',
+  'join.scanning',
   'join.scan',
   'join.input',
   'join.action',

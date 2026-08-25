@@ -83,6 +83,16 @@ void main() {
     );
     expect(SdkFeatureRegistry.gameSdkVersion, '4.1.0');
     expect(SdkFeatureRegistry.appSdkVersion, '3.3.0');
+    expect(SdkFeatureRegistry.gameSdkCompatibilityBaselineVersions, ['4.1.0']);
+    expect(SdkFeatureRegistry.appSdkCompatibilityBaselineVersions, [
+      '3.2.0',
+      '3.3.0',
+    ]);
+    expect(SdkFeatureRegistry.gameSdkSupportedRequestVersions, ['4.1.0']);
+    expect(SdkFeatureRegistry.appSdkSupportedRequestVersions, [
+      '3.2.0',
+      '3.3.0',
+    ]);
     expect(
       SdkFeatureRegistry.gameSdkReleases
           .map(
@@ -109,6 +119,15 @@ void main() {
     );
     expect(SdkFeatureRegistry.resolveAppSdkVersion('3.2.0'), '3.3.0');
     expect(SdkFeatureRegistry.resolveAppSdkVersion('3.3.0'), '3.3.0');
+    expect(SdkFeatureRegistry.resolveGameSdkVersion('4.1.0'), '4.1.0');
+    expect(
+      () => SdkFeatureRegistry.resolveAppSdkVersion('3.2.1'),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => SdkFeatureRegistry.resolveGameSdkVersion('4.1.1'),
+      throwsUnsupportedError,
+    );
     expect(
       SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.2.0'),
       SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.3.0'),
@@ -190,7 +209,7 @@ void main() {
     );
   });
 
-  test('版本选择拒绝未注册范围且当前版仍从统一 Dart 源组装', () {
+  test('版本选择拒绝未注册版本且当前版仍从统一 Dart 源组装', () {
     expect(
       SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
       SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
@@ -306,5 +325,19 @@ void main() {
     );
     const openRange = SdkVersionRange('1.0.0', SdkVersionRange.last);
     expect(openRange.supports('999.0.0'), isTrue);
+    expect(
+      () => validateSdkCommandVersionRanges({
+        'game.finite': [
+          const [SdkVersionRange('1.0.0', '4.1.0')],
+        ],
+      }),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('缺少面向后续版本的兼容执行器'),
+        ),
+      ),
+    );
   });
 }

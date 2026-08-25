@@ -38,6 +38,24 @@ assets/playmesh-library/public/sdk/v1/
 
 生成物用于发布、审阅、外部 IDE 和包内资源检查，不是运行时事实源。
 
+## 公开 SDK 向后兼容基线
+
+从当前兼容基线开始，Game SDK 与 App Bridge SDK 的公开契约只允许兼容演进：Game SDK
+永久兼容基线集合为 `4.1.0`，App Bridge SDK 为 `3.2.0`、`3.3.0`。一次升级前
+注册表已经接受的 SDK 请求版本，升级后必须继续接受；兼容版本集合只可扩大，不得缩小。
+本规则不追溯恢复在该基线建立前已经停止支持的历史版本或旧命名空间。
+
+游戏调用端可能长期固定，因此已经公开的命名空间、方法名、参数接受范围、返回结构、事件、
+错误 code 与调用语义不得删除、重命名、收窄或改作其他用途。后续 SDK 不允许破坏性更新，
+也不能用提升 `MAJOR` 版本规避兼容责任。版本演进只允许：
+
+- `PATCH`：不改变公开调用契约的兼容修复、性能修复或实现调整；
+- `MINOR`：增量增加新的命名空间或函数，并保证旧调用不需要修改且行为不变。
+
+兼容不要求永久保存每个历史 Bundle 的独立文件。旧请求版本可以解析到更新的兼容 Bundle，
+但前提是该 Bundle 继续提供旧版本的完整公开契约，并通过所有受支持请求版本的契约回归测试。
+内部实现、Bridge 和执行器可以重构；这些重构不得改变用户调用端可观察到的既有行为。
+
 ## 注册表职责
 
 `SdkFeatureRegistry` 是唯一注册与分发位置，负责：
@@ -45,10 +63,10 @@ assets/playmesh-library/public/sdk/v1/
 - 按 target 和 order 组装 Game/App SDK；
 - 生成 TypeScript、JavaScript 和 `.d.ts`；
 - 建立命令到版本化执行器的索引；
-- 注册 Game/App SDK 当前精确发行；
-- 根据游戏声明精确解析 SDK Bundle；
+- 注册 Game/App SDK 当前 Bundle 及只能追加的明确兼容请求版本集合；
+- 根据游戏声明解析兼容 SDK Bundle；
 - 根据消息携带的实际 Bundle 版本选择对应执行器；
-- 拒绝旧版本、未知版本、格式错误版本和同版本重复执行器；
+- 拒绝兼容基线外版本、未知版本、格式错误版本和同版本重复执行器；
 - 为网关、Developer API、AI 提示词和 SDK 下载提供同一内容。
 
 Bridge 只负责消息解析、上下文构造、统一分发和响应，不重新维护命令 `switch`。
@@ -204,6 +222,10 @@ DOM 焦点，关闭后宿主只发送注册表内部的 `platform.ui.restoreGame
 它不进入 TypeScript、Schema、补全或公开返回值。已打开请求只重聚焦现有关闭按钮，
 关闭后 800 ms 内的 SDK 重开以 `rate_limited` 节流。
 
+SDK 兜底菜单发起分享命令时只禁用“分享/邀请”按钮并在其图标位显示加载环，不能锁定整个
+菜单。主 App 与 Runtime 宿主收到命令后都先提交分享层首帧，再建立分享通道；分享层继续
+复用局域网内容区域的进度状态，避免二维码生成或网关启动推迟弹窗反馈。
+
 App Bridge SDK `3.3.0` 的 `playmesh.app.lan` 是同一 Dart feature 中的网页声明、命令和
 宿主执行器，公开：
 
@@ -226,6 +248,10 @@ SDK feature 只能调用注入的 `AppLanHost` 薄接口，不得引用网卡 re
 multicast wire v1（1 秒公告、4 秒 TTL、单包最多 1200 字节），不提供旧服务发现、第二
 发现栈或已知节点单播适配器；`host` 来自数据报 source IP，而不是 JavaScript 或 payload。
 Android、Windows、macOS、Linux 支持该宿主能力，iOS/Web 返回明确不可用。
+
+统一加入弹窗调用 `discoverGames()` 时只将局域网房间列表标记为 busy，并在该区域显示简短
+的“扫描中”动效；扫码和邀请链接输入不得随发现请求锁定。发现完成、失败或弹窗关闭都必须
+清除列表扫描状态，减少动态效果偏好下不得持续旋转。
 
 `getShareLinks()` 是新的明确安全授权：只允许 Playmesh App WebView 中宿主确认的当前
 本机 Authority/standalone host，返回冻结的 `{url,type,img}` 数组；`url` 是完整 LAN
@@ -281,8 +307,10 @@ SDK 自有覆盖层和悬浮菜单按钮产生的鼠标、Pointer、触摸、点
 5. 在 `sdk_feature_registry.dart` 增加 `part`；把执行器实例加入
    `_gameCommandFeatures` 或 `_appCommandFeatures`；把片段加入
    `sourceFragments`。三处缺一都不算完成注册。
-6. 如果公开签名变化，更新 Feature 内声明模板和版本；如果消息、返回、事件或错误语义
-   不兼容，替换当前精确发行定义并同步更新执行器，不保留旧清单解析或旧命名空间 shim。
+6. 如果增量增加公开函数，更新 Feature 内声明模板并按 `MINOR` 升级版本；不得删除、
+   重命名或收窄既有签名，也不得改变既有消息、返回、事件、错误 code 或调用语义。
+   同步向 `supportedRequestedVersions` 末尾追加新版本，使升级前已接受的每个清单版本
+   继续解析到兼容 Bundle；不能用首尾区间隐式接受未发布版本。
 7. 执行 `node tool/generate_sdk.mjs`，同步静态 SDK、Manifest、Schema、默认模板和
    提示词；再运行 SDK 注册表、浏览器、声明和单一源契约测试。
 8. 不在 Bridge、网关或生成器中增加功能专用旁路。
@@ -302,11 +330,14 @@ fragment.typeScript.trim().isEmpty
 同一 command 的任意两个 supportedVersions 区间相交
   => 失败：同版本存在多个执行器
 
-release.minimumRequestedVersion > release.maximumRequestedVersion
-  => 失败：兼容版本范围无效
+release.supportedRequestedVersions 为空、重复、未严格递增或首项不是永久基线
+  => 失败：兼容请求版本集合无效
 
-同一 target 的两个 release 兼容范围相交
-  => 失败：请求版本可能命中多个发行
+release.bundleVersion 不是 supportedRequestedVersions 最后一项
+  => 失败：版本化兼容元数据不一致
+
+公开 command 没有以 SdkVersionRange.last 结尾的执行器
+  => 失败：后续 Bundle 可能静默丢失既有命令
 ```
 
 ## 完整调用链与精确分发条件
@@ -371,7 +402,9 @@ Bridge 只构造 `GameSdkCommandContext` 或 `AppSdkCommandContext`，随后调�
 
 ### 3. 版本选择与命令命中
 
-版本选择不是“找最接近版本”，而是按已注册且互不重叠的兼容范围精确命中：
+版本选择不是“找最接近版本”，也不是接受最小值与最大值之间的任意数字，而是按
+`supportedRequestedVersions` 中已经发布的明确版本精确命中。SDK 升级时必须向该集合
+追加新版本，不能让原已命中的请求版本失效：
 
 ```text
 requestedVersion == null
@@ -381,12 +414,14 @@ requestedVersion == null
 requestedVersion 不匹配 MAJOR.MINOR.PATCH
   => 失败
 
-requestedVersion 落入某个 release 的
-[minimumRequestedVersion, maximumRequestedVersion]
+requestedVersion 出现在 release.supportedRequestedVersions
   => 命中该 release，并返回其 bundleVersion 对应文件
 
+requestedVersion 位于 min/max 之间但未在集合中列出
+  => 失败；例如当前 App 3.2.1 不会被视为 3.2.0 或 3.3.0
+
 其他值
-  => UnsupportedError，不解析旧版本，不回退
+  => UnsupportedError；兼容基线外或从未支持的版本不做猜测性回退
 ```
 
 命中发行版后执行精确 Map 查询：
@@ -451,7 +486,7 @@ App/Game 资源请求、Developer API、AI 提示词、编辑器补全和 SDK �
 实际提供。
 
 
-## 版本与精确发行
+## 版本与兼容发行
 
 游戏通过 `main.json.sdkVersion/appSdkVersion` 请求 SDK。稳定资源分别为
 `/playmesh/sdk/v1/playmesh-main.js` 与 `/playmesh/sdk/v1/playmesh-app.js`；
@@ -461,7 +496,7 @@ App/Game 资源请求、Developer API、AI 提示词、编辑器补全和 SDK �
 
 ```text
 requestedVersion
-  -> SdkRelease 精确版本
+  -> SdkRelease.supportedRequestedVersions 精确版本
   -> bundleVersion + 对应 SDK 文件
   -> SDK 消息携带实际 bundleVersion
   -> 版本化命令索引
@@ -470,14 +505,19 @@ requestedVersion
 
 规则：
 
-- 当前 Game SDK 只接受 `4.1.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0`，后者统一解析到 `3.3.0` bundle。
-- 低于兼容下限、未知版本或格式错误版本直接失败。
-- 每个 target 可注册明确且互不重叠的请求版本区间；`bundleVersion` 是实际返回和随消息发送的
-  SDK 版本，不要求等于区间下界。当前 App `3.2.0` 请求因此使用 `3.3.0` bundle。
+- 当前 Game SDK 只接受明确版本 `4.1.0`；App Bridge SDK 接受明确版本 `3.2.0`、
+  `3.3.0`，后者都解析到 `3.3.0` bundle；`3.2.1` 等未发布版本不在集合中。
+- 上述版本构成当前兼容基线；后续升级必须继续接受这些版本以及升级前已经新增支持的版本。
+- 兼容基线外、未知或格式错误的版本直接失败；不要求恢复基线建立前已停止支持的历史版本。
+- 每个 target 维护一份只追加的明确请求版本集合；`minimumRequestedVersion` 与
+  `maximumRequestedVersion` 只是集合摘要，不决定是否接受版本。`bundleVersion` 是实际返回和
+  随消息发送的 SDK 版本，当前 App `3.2.0` 请求因此使用 `3.3.0` bundle。
 - 执行器的 `supportedVersions` 只约束当前实际 Bundle 的命令分发，不能扩大 Manifest
   可接受版本。
-- 参数、消息、返回值、事件或错误语义不兼容时升级版本并整体替换当前发行定义；
-  不保留历史发行、旧命名空间 shim 或 Bridge 旁路。
+- SDK 公开契约禁止破坏性更新；不能删除或重命名既有函数，不能收窄参数或返回值，不能
+  改变既有消息、事件、错误 code 和调用语义，也不能通过升级 `MAJOR` 版本绕过该限制。
+- 增量增加新函数属于功能增加而非破坏性更新，使用 `MINOR` 版本；旧调用端无需修改，
+  升级前已接受的请求版本仍须解析并正常运行。
 - 未变化的 Feature 继续复用公共实现，不复制整套 SDK。
 
 ## SDK 消费入口
@@ -575,7 +615,7 @@ Game SDK 的 `.ts`、`.js`、`.d.ts`；不得写死当前版本或构造 `*-empt
 修改公开 SDK 时同步评估：
 
 - Game SDK 或 App Bridge SDK 版本；
-- 精确发行版本和执行器范围；
+- 明确兼容请求版本集合是否保留升级前所有已接受版本；
 - `.d.ts` 与中文 JSDoc；
 - SDK Manifest、Schema 和开发文档；
 - 默认项目模板；
@@ -583,6 +623,7 @@ Game SDK 的 `.ts`、`.js`、`.d.ts`；不得写死当前版本或构造 `*-empt
 - App、Developer API 或 Core 协议是否真正受影响。
 
 不要因为 App 版本变化而机械升级 SDK，也不要在公开签名未变化时制造无意义新执行器。
+任何公开变化都必须先证明旧调用契约保持不变；无法兼容的设计不得进入公开 SDK。
 
 ## 验证清单
 
@@ -590,7 +631,11 @@ Game SDK 的 `.ts`、`.js`、`.d.ts`；不得写死当前版本或构造 `*-empt
 - 网页发送命令与执行器集合一致。
 - 同版本同命令只能命中一个执行器。
 - 未注册版本和非法版本被拒绝。
-- Game `4.1.0` 与 App `3.2.0`/`3.3.0` 能选择当前执行器，App `3.1.0` 被拒绝。
+- Game `4.1.0` 与 App `3.2.0`/`3.3.0` 能选择当前执行器；App `3.1.0` 和未发布的
+  `3.2.1` 被拒绝。
+- 每次 SDK 升级前已接受的全部请求版本在升级后仍能解析并执行原有调用；明确版本集合没有缩小。
+- 新增函数的契约测试不得替代旧函数回归测试；所有基线命名空间、签名、返回、事件、
+  错误 code 与既有调用语义继续通过。
 - Windows head 早加载时，App/Game bootstrap 回包在 navigation completed 后按序且恰好一次
   送达；传统 body 末尾加载行为不变，新导航和 dispose 不泄漏旧 document 消息。
 - `.js` 不包含声明模板，`.d.ts` 不包含版本占位符。

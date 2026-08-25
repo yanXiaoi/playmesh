@@ -12,12 +12,13 @@ import 'capabilities/capability_registry.dart';
 import 'capabilities/capability_runtime.dart';
 import 'capabilities/default_capability_plugins.dart';
 import 'capabilities/web_permission/capability_web_permission.dart';
-import 'runtime_display_controller.dart';
 import 'runtime_app_local_bucket_store.dart';
+import 'runtime_display_controller.dart';
 import 'runtime_lan_host.dart';
 import 'runtime_module_catalog.dart';
 import 'runtime_package.dart';
 import 'runtime_platform_ui.dart';
+import 'runtime_sdk_compatibility.dart';
 
 typedef RuntimeBridgeSender = Future<void> Function(String message);
 
@@ -220,8 +221,9 @@ final class RuntimeAppBridge {
           'sdkVersion 必须是字符串',
         );
       }
-      final sdkVersion = rawSdkVersion as String? ?? game.appSdkVersion;
-      if (sdkVersion != '3.2.0' && sdkVersion != '3.3.0') {
+      final sdkVersion =
+          rawSdkVersion as String? ?? RuntimeSdkCompatibility.appBundleVersion;
+      if (sdkVersion != RuntimeSdkCompatibility.appBundleVersion) {
         throw RuntimeAppSdkException(
           'sdk_unsupported',
           'Runtime 不支持 App SDK $sdkVersion',

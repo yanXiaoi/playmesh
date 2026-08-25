@@ -36,6 +36,28 @@ const developerContracts = path.join(
 );
 function loadDartSdkSources() {
   const registry = fs.readFileSync(sourceRegistryPath, "utf8");
+  function supportedRequestVersions(name) {
+    const block = registry.match(
+      new RegExp(
+        `static const List<String> ${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`,
+      ),
+    )?.[1];
+    if (!block) {
+      throw new Error(`SDK feature 注册表缺少 ${name}`);
+    }
+    const versions = [...block.matchAll(/'(\d+\.\d+\.\d+)'/g)].map(
+      (match) => match[1],
+    );
+    if (!versions.length || new Set(versions).size !== versions.length) {
+      throw new Error(`${name} 必须包含唯一的语义版本`);
+    }
+    for (let index = 1; index < versions.length; index += 1) {
+      if (compareVersions(versions[index - 1], versions[index]) >= 0) {
+        throw new Error(`${name} 必须严格递增`);
+      }
+    }
+    return versions;
+  }
   const partPaths = [
     ...registry.matchAll(/part '([^']*features\/[^']+\.dart)';/g),
   ].map((match) => match[1]);
@@ -121,6 +143,18 @@ function loadDartSdkSources() {
         return targetComparison || left.order - right.order;
       })
       .map((fragment) => fragment.declaration),
+    gameSupportedRequestVersions: supportedRequestVersions(
+      "gameSdkSupportedRequestVersions",
+    ),
+    appSupportedRequestVersions: supportedRequestVersions(
+      "appSdkSupportedRequestVersions",
+    ),
+    gameCompatibilityBaselineVersions: supportedRequestVersions(
+      "gameSdkCompatibilityBaselineVersions",
+    ),
+    appCompatibilityBaselineVersions: supportedRequestVersions(
+      "appSdkCompatibilityBaselineVersions",
+    ),
     fragments,
   };
 }
@@ -506,6 +540,44 @@ const gameSdkVersion = generate({
   },
   declarationFragments: dartSdkSources.declarations,
 });
+const gameSupportedRequestVersions =
+  dartSdkSources.gameSupportedRequestVersions;
+const appSupportedRequestVersions = dartSdkSources.appSupportedRequestVersions;
+for (const [target, versions, bundleVersion, baselineVersions] of [
+  [
+    "Game",
+    gameSupportedRequestVersions,
+    gameSdkVersion,
+    dartSdkSources.gameCompatibilityBaselineVersions,
+  ],
+  [
+    "App",
+    appSupportedRequestVersions,
+    appSdkVersion,
+    dartSdkSources.appCompatibilityBaselineVersions,
+  ],
+]) {
+  if (
+    versions.length < baselineVersions.length ||
+    baselineVersions.some((version, index) => versions[index] !== version)
+  ) {
+    throw new Error(
+      `${target} SDK 兼容请求版本集合不能移除或改写基线 ${baselineVersions.join(", ")}`,
+    );
+  }
+  if (versions.at(-1) !== bundleVersion) {
+    throw new Error(
+      `${target} SDK 当前 Bundle ${bundleVersion} 必须是兼容请求版本集合的最后一项`,
+    );
+  }
+  if (
+    versions.some(
+      (version) => version.split(".")[0] !== versions[0].split(".")[0],
+    )
+  ) {
+    throw new Error(`${target} SDK 兼容请求版本不得跨 MAJOR`);
+  }
+}
 fs.rmSync(path.join(outputDirectory, "playmesh.js"), { force: true });
 fs.rmSync(path.join(outputDirectory, "playmesh.d.ts"), { force: true });
 for (const name of ["playmesh.ts", "playmesh-main.js", "playmesh-main.d.ts"]) {
@@ -548,8 +620,22 @@ updateJson(path.join(developerContracts, "sdk-manifest.json"), (manifest) => {
   if (appVersionMember) appVersionMember.value = appSdkVersion;
   if (manifest.projectRules) {
     manifest.projectRules.gameSdkVersion =
-      `main.json sdkVersion is required and must equal ${gameSdkVersion}`;
+      `main.json sdkVersion is required and must be one of ${gameSupportedRequestVersions.join(", ")}; new projects use ${gameSdkVersion}`;
+    manifest.projectRules.appSdkVersion =
+      `main.json appSdkVersion is required and must be one of ${appSupportedRequestVersions.join(", ")}; new projects use ${appSdkVersion}`;
   }
+  manifest.compatibility = {
+    game: {
+      baselineVersions: dartSdkSources.gameCompatibilityBaselineVersions,
+      bundleVersion: gameSdkVersion,
+      supportedRequestedVersions: gameSupportedRequestVersions,
+    },
+    app: {
+      baselineVersions: dartSdkSources.appCompatibilityBaselineVersions,
+      bundleVersion: appSdkVersion,
+      supportedRequestedVersions: appSupportedRequestVersions,
+    },
+  };
 });
 updateJson(path.join(developerContracts, "schemas", "sdk-v1.json"), (schema) => {
   schema.$defs.PlaymeshBootstrap.properties.sdkVersion.const = gameSdkVersion;
@@ -558,7 +644,9 @@ updateJson(path.join(developerContracts, "schemas", "sdk-v1.json"), (schema) => 
 updateJson(
   path.join(developerContracts, "schemas", "game-manifest.json"),
   (schema) => {
-    schema.properties.sdkVersion.const = gameSdkVersion;
+    delete schema.properties.sdkVersion.const;
+    schema.properties.sdkVersion.enum = gameSupportedRequestVersions;
+    schema.properties.appSdkVersion.enum = appSupportedRequestVersions;
   },
 );
 updateJson(

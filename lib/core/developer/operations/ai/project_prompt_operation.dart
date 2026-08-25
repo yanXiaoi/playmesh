@@ -76,12 +76,12 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
     _requirePromptManifestVersion(
       manifest,
       'sdkVersion',
-      SdkFeatureRegistry.gameSdkVersion,
+      (version) => SdkFeatureRegistry.resolveGameSdkVersion(version),
     );
     _requirePromptManifestVersion(
       manifest,
       'appSdkVersion',
-      SdkFeatureRegistry.appSdkVersion,
+      (version) => SdkFeatureRegistry.resolveAppSdkVersion(version),
     );
     final modes = _stringValues(manifest['modes']);
     final displayModes = _stringValues(manifest['displayModes']);
@@ -351,9 +351,17 @@ String _requiredPromptManifestEntry(
 void _requirePromptManifestVersion(
   Map<String, Object?> manifest,
   String field,
-  String required,
+  String Function(String requestedVersion) resolve,
 ) {
-  if (manifest[field] != required) {
-    throw FormatException('main.json.$field 必须显式声明为 $required');
+  final requested = manifest[field];
+  if (requested is! String) {
+    throw FormatException('main.json.$field 必须显式声明语义版本');
+  }
+  try {
+    resolve(requested);
+  } on FormatException catch (error) {
+    throw FormatException('main.json.$field 不受支持：$error');
+  } on UnsupportedError catch (error) {
+    throw FormatException('main.json.$field 不受支持：$error');
   }
 }

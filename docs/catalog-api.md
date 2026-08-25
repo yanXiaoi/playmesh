@@ -126,7 +126,7 @@ Authorization: Bearer optional-read-token
       "remarks": "游戏描述",
       "author": "发布者名称",
       "version": "2.0.0",
-      "sdkVersion": "4.0.0",
+      "sdkVersion": "4.1.0",
       "appSdkVersion": "3.3.0",
       "orientation": "landscape",
       "modes": ["multiplayer"],

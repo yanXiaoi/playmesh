@@ -834,6 +834,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
   let appUiFullscreenActive = false;
   let appUiFullscreenListenerInstalled = false;
   let appUiRenderTimer = null;
+  let appUiSharePending = false;
   let appUiJoinLoadGeneration = 0;
   let appUiJoinGames = new Map();
   const appUiConsoleLogs = [];
@@ -1395,6 +1396,27 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     );
   }
 
+  function setAppUiSharePending(pending) {
+    appUiSharePending = pending === true;
+    const button = appFallbackUi?.share;
+    if (!button) return;
+    button.disabled = appUiSharePending;
+    button.setAttribute?.("aria-busy", String(appUiSharePending));
+    button.classList?.toggle("pending", appUiSharePending);
+  }
+
+  async function openAppUiShareFromFallback() {
+    if (appUiSharePending) return;
+    setAppUiSharePending(true);
+    try {
+      await openAppSharePanel();
+    } catch (error) {
+      global.console?.warn?.("Playmesh 分享界面未能打开", error);
+    } finally {
+      setAppUiSharePending(false);
+    }
+  }
+
   async function restartAppUiGame() {
     hideAppGameSidebar(false);
     try {
@@ -1436,6 +1458,15 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     ui.joinRooms.setAttribute?.("aria-disabled", String(active));
   }
 
+  function setAppUiJoinScanning(scanning) {
+    const ui = appFallbackUi;
+    if (!ui?.joinResults) return;
+    const active = scanning === true;
+    ui.joinResults.setAttribute?.("aria-busy", String(active));
+    ui.joinRooms.setAttribute?.("aria-disabled", String(active));
+    ui.joinLoading.hidden = !active;
+  }
+
   function renderAppUiJoinGames(games) {
     const ui = appFallbackUi;
     if (!ui?.joinRooms) return;
@@ -1455,7 +1486,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     ui.joinRooms.innerHTML = "";
     ui.joinEmpty.hidden = true;
     setAppUiJoinError();
-    setAppUiJoinBusy(true);
+    setAppUiJoinScanning(true);
     try {
       const games = await appLanApi.discoverGames();
       if (generation !== appUiJoinLoadGeneration || ui.joinLayer.hidden) return;
@@ -1466,7 +1497,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       setAppUiJoinError(error);
     } finally {
       if (generation === appUiJoinLoadGeneration && !ui.joinLayer.hidden) {
-        setAppUiJoinBusy(false);
+        setAppUiJoinScanning(false);
       }
     }
   }
@@ -1503,6 +1534,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     appUiJoinLoadGeneration += 1;
     appUiJoinGames = new Map();
     ui.joinLayer.hidden = true;
+    setAppUiJoinScanning(false);
     setAppUiJoinError();
     if (!ui.layer.hidden) ui.join.focus?.({ preventScroll: true });
     else restoreAppUiReturnFocus();
@@ -1690,12 +1722,13 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       :host([data-theme="light"]){--pm-surface:#f8fafcf5;--pm-surface-strong:#fff;--pm-hover:#e8eef7;--pm-text:#172033;--pm-muted:#5d6b80;--pm-border:#9aabc238;--pm-divider:#24324a14;--pm-overlay:#17203366;--pm-focus:#087f8c;--pm-focus-ring:#087f8c3d;--pm-accent:#0f9f8d;--pm-accent-strong:#087f6d;--pm-error:#b4233f;--pm-log:#edf2f7;--pm-shadow:#17203330;color-scheme:light}
       button{box-sizing:border-box;font:inherit}.menu-fab{position:fixed;right:0;top:36%;z-index:2147483645;display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid #92e6d5;border-radius:13px 0 0 13px;background:#087f6d;color:#fff;box-shadow:0 6px 18px #001b1752,0 2px 6px #001b1738;cursor:grab;isolation:isolate;touch-action:none;user-select:none;-webkit-user-select:none;transition:transform .16s ease,box-shadow .16s ease,border-radius .16s ease}.menu-fab.detached{border-radius:13px}
       .menu-fab::before{content:"";position:absolute;inset:-2px;z-index:-1;border:1px solid #36cbb266;border-radius:16px 0 0 16px;animation:menu-breathe 2.8s ease-in-out infinite;pointer-events:none}.menu-fab.detached::before{border-radius:16px}.menu-fab.detached:hover{transform:translateY(-2px)}.menu-fab:active{transform:scale(.96)}.menu-fab.dragging{cursor:grabbing;transform:none;transition:none}.menu-fab:focus-visible,.dialog button:focus-visible,.logs-output:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.action:focus-visible{outline:0;background:var(--pm-hover);box-shadow:inset 0 0 0 2px var(--pm-focus-ring)}
+      .action.share.pending{cursor:wait}.action.share.pending .icon{font-size:0}.action.share.pending .icon::after{content:"";box-sizing:border-box;width:17px;height:17px;border:2px solid var(--pm-border);border-top-color:var(--pm-accent);border-radius:50%;animation:join-scan .72s linear infinite}@media(prefers-reduced-motion:reduce){.action.share.pending .icon::after{animation:none}}
       .menu-mark{position:relative;display:block;width:22px;transform:translateX(-2px);font:900 20px/1 system-ui}.menu-mark::after{content:"";position:absolute;left:15px;top:3px;width:7px;height:2px;border-radius:2px;background:currentColor;box-shadow:0 5px currentColor,0 10px currentColor}
       .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;cursor:default;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
       .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;cursor:default;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
       .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
-      .join-dialog{width:min(100%,520px);padding:16px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.dialog-head h2{margin:0}.dialog-close{flex:0 0 38px;width:38px;padding:0!important;font-size:22px!important}.join-rooms{display:grid;gap:6px;max-height:min(34dvh,260px);overflow:auto;overscroll-behavior:contain}.join-room{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;height:auto!important;min-height:48px;padding:9px 12px!important;background:var(--pm-surface-strong)!important;text-align:left}.join-room-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:720}.join-room-host{color:var(--pm-muted);font:12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace}.join-empty,.join-error{padding:13px;color:var(--pm-muted);font-size:13px;text-align:center}.join-error{color:var(--pm-error)}.join-controls{display:grid;gap:8px;margin-top:10px}.join-scan{width:100%;background:#2dd4bf14!important;color:var(--pm-accent)!important;font-weight:720!important}.join-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.join-input{box-sizing:border-box;min-width:0;height:42px;padding:0 12px;border:1px solid var(--pm-border);border-radius:10px;background:var(--pm-surface-strong);color:var(--pm-text);font:14px/1 system-ui,"Microsoft YaHei",sans-serif}.join-input:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.join-submit{background:var(--pm-accent-strong)!important;color:#fff!important;font-weight:720!important}.join-room:disabled,.join-scan:disabled,.join-submit:disabled,.join-input:disabled{opacity:.55;cursor:wait}
-      [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
+      .join-dialog{width:min(100%,520px);padding:16px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.dialog-head h2{margin:0}.dialog-close{flex:0 0 38px;width:38px;padding:0!important;font-size:22px!important}.join-results{min-height:58px}.join-rooms{display:grid;gap:6px;max-height:min(34dvh,260px);overflow:auto;overscroll-behavior:contain}.join-room{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;height:auto!important;min-height:48px;padding:9px 12px!important;background:var(--pm-surface-strong)!important;text-align:left}.join-room-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:720}.join-room-host{color:var(--pm-muted);font:12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace}.join-loading{display:flex;align-items:center;justify-content:center;gap:9px;min-height:58px;color:var(--pm-muted);font-size:13px}.join-spinner{box-sizing:border-box;width:17px;height:17px;border:2px solid var(--pm-border);border-top-color:var(--pm-accent);border-radius:50%;animation:join-scan .72s linear infinite}.join-empty,.join-error{padding:13px;color:var(--pm-muted);font-size:13px;text-align:center}.join-error{color:var(--pm-error)}.join-controls{display:grid;gap:8px;margin-top:10px}.join-scan{width:100%;background:#2dd4bf14!important;color:var(--pm-accent)!important;font-weight:720!important}.join-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.join-input{box-sizing:border-box;min-width:0;height:42px;padding:0 12px;border:1px solid var(--pm-border);border-radius:10px;background:var(--pm-surface-strong);color:var(--pm-text);font:14px/1 system-ui,"Microsoft YaHei",sans-serif}.join-input:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.join-submit{background:var(--pm-accent-strong)!important;color:#fff!important;font-weight:720!important}.join-room:disabled,.join-scan:disabled,.join-submit:disabled,.join-input:disabled{opacity:.55;cursor:wait}
+      [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@keyframes join-scan{to{transform:rotate(1turn)}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}.join-spinner{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
     ${menuButtonMarkup}
     <div class="layer" hidden><div class="scrim" aria-hidden="true"></div><aside class="sidebar" role="dialog" aria-modal="true"><header class="head"><span class="brand" aria-hidden="true">P</span><h2 class="title"></h2></header><nav class="actions-list">
@@ -1710,7 +1743,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     </nav><footer class="foot"><button class="action exit" data-action="exit" type="button"><span class="icon" aria-hidden="true">↩</span><span></span></button></footer></aside></div>
     <div class="dialog-layer info-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="info-title"></h2><div class="info-hero"><span class="info-mark" aria-hidden="true">i</span><p class="game-name"></p></div><div class="game-tags-wrap" hidden><span class="game-tags-label"></span><div class="game-tags" role="list"></div></div><dl class="game-detail info-grid"></dl><div class="dialog-actions"><button class="info-edit" type="button" hidden></button><button class="info-close" type="button"></button></div></section></div>
     <div class="dialog-layer logs-layer" role="dialog" aria-modal="true" hidden><section class="dialog"><h2 class="logs-title"></h2><pre class="logs-output" tabindex="0"></pre><div class="dialog-actions"><button class="logs-copy" type="button"></button><button class="logs-clear" type="button"></button><button class="logs-close" type="button"></button></div></section></div>
-    <div class="dialog-layer join-layer" role="dialog" aria-modal="true" aria-labelledby="playmesh-join-title" hidden><section class="dialog join-dialog"><header class="dialog-head"><h2 class="join-title" id="playmesh-join-title"></h2><button class="dialog-close join-close" type="button" aria-label=""></button></header><div class="join-rooms" role="list"></div><div class="join-empty" hidden></div><div class="join-controls"><button class="join-scan" type="button"></button><form class="join-form"><input class="join-input" type="url" autocomplete="off" spellcheck="false"><button class="join-submit" type="submit"></button></form></div><div class="join-error" role="status" hidden></div></section></div>
+    <div class="dialog-layer join-layer" role="dialog" aria-modal="true" aria-labelledby="playmesh-join-title" hidden><section class="dialog join-dialog"><header class="dialog-head"><h2 class="join-title" id="playmesh-join-title"></h2><button class="dialog-close join-close" type="button" aria-label=""></button></header><div class="join-results"><div class="join-rooms" role="list"></div><div class="join-loading" role="status" aria-live="polite" hidden><span class="join-spinner" aria-hidden="true"></span><span class="join-loading-label"></span></div><div class="join-empty" hidden></div></div><div class="join-controls"><button class="join-scan" type="button"></button><form class="join-form"><input class="join-input" type="url" autocomplete="off" spellcheck="false"><button class="join-submit" type="submit"></button></form></div><div class="join-error" role="status" hidden></div></section></div>
     <div class="performance-panel" hidden><span class="fps">-- FPS</span><span class="latency" hidden>-- ms</span></div>`;
     global.document.body.appendChild(host);
     const query = (selector) => root.querySelector(selector);
@@ -1752,7 +1785,10 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       joinLayer: query(".join-layer"),
       joinTitle: query(".join-title"),
       joinClose: query(".join-close"),
+      joinResults: query(".join-results"),
       joinRooms: query(".join-rooms"),
+      joinLoading: query(".join-loading"),
+      joinLoadingLabel: query(".join-loading-label"),
       joinEmpty: query(".join-empty"),
       joinScan: query(".join-scan"),
       joinForm: query(".join-form"),
@@ -1767,11 +1803,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     ui.continueButton.onclick = () => hideAppGameSidebar();
     ui.scrim.onclick = () => hideAppGameSidebar();
     ui.restart.onclick = () => void restartAppUiGame();
-    ui.share.onclick = () => {
-      void openAppSharePanel().catch((error) => {
-        global.console?.warn?.("Playmesh 分享界面未能打开", error);
-      });
-    };
+    ui.share.onclick = () => void openAppUiShareFromFallback();
     ui.join.onclick = () => void openAppUiJoinGame();
     ui.logs.onclick = () => void openAppUiRuntimeLogs();
     ui.fullscreen.onclick = () => {
@@ -1832,7 +1864,8 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       void runAppUiJoin(() => appLanApi.scanQrAndJoin());
     };
     ui.joinRooms.onclick = (event) => {
-      if (ui.joinLayer.getAttribute?.("aria-busy") === "true") return;
+      if (ui.joinLayer.getAttribute?.("aria-busy") === "true" ||
+          ui.joinResults.getAttribute?.("aria-busy") === "true") return;
       const button = event?.target?.closest?.(".join-room");
       const instanceId = button?.dataset?.instanceId;
       const game = instanceId ? appUiJoinGames.get(instanceId) : null;
@@ -1971,6 +2004,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     );
     setAppUiControlLabel(ui.exit, "sidebar.exit");
     ui.share.hidden = !appUiActionEnabled("share", false);
+    setAppUiSharePending(appUiSharePending);
     ui.join.hidden = !appUiJoinAvailable();
     ui.restart.hidden = !appUiActionEnabled("restart");
     ui.logs.hidden = !appUiActionEnabled("logs");
@@ -1990,6 +2024,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     ui.infoTitle.textContent = appUiText("info.title");
     ui.logsTitle.textContent = appUiText("logs.title");
     ui.joinTitle.textContent = appUiText("join.title");
+    ui.joinLoadingLabel.textContent = appUiText("join.scanning");
     ui.joinEmpty.textContent = appUiText("join.empty");
     ui.joinInput.setAttribute?.("placeholder", appUiText("join.input"));
     ui.joinInput.setAttribute?.("aria-label", appUiText("join.input"));

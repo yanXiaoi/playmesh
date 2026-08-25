@@ -612,6 +612,7 @@
   "platform.game.logs.copied": "Copied",
   "platform.game.join.title": "Join game",
   "platform.game.join.empty": "No rooms",
+  "platform.game.join.scanning": "Scanning",
   "platform.game.join.scan": "Scan QR",
   "platform.game.join.input": "Invitation link",
   "platform.game.join.action": "Join",

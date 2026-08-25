@@ -83,7 +83,7 @@ Flutter App
 `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
 唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。当前 Game SDK 只接受
-`4.1.0`；App Bridge SDK 接受 `3.2.0`–`3.3.0` 的清单请求，并统一解析到兼容的
+`4.1.0`；App Bridge SDK 接受明确版本 `3.2.0`、`3.3.0` 的清单请求，并统一解析到兼容的
 `3.3.0` 运行包。更旧或未知版本直接拒绝。所有游戏、
 分享和 Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority
 决定玩法开始和结束条件，SDK 只提交受控会话状态请求。当前变化记录在

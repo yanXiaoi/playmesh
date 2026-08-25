@@ -413,8 +413,9 @@ Playmesh 扩展。Creator 3.8 的公开扩展 API 没有稳定且有文档支持
 CLI 在上传前要求 `main.json.entries.game` 显式存在；单屏多人还要求显式
 `entries.controller`，多人要求显式 `authority.entry`。三者必须指向
 `playmesh/package/app/` 中实际文件，不能依赖模板路径回退。`sdkVersion` 与
-`appSdkVersion` 同样必须显式写入；Game SDK 只支持 `4.0.0`，App SDK 支持
-`3.2.0` 与 `3.3.0`，新建、更新和发布默认写入当前 `3.3.0`。
+`appSdkVersion` 同样必须显式写入；Game SDK 只支持 `4.1.0`，App SDK 支持
+`3.2.0` 与 `3.3.0`；新建、更新以及普通 `dev/run` 会把清单分别写入当前
+`4.1.0`、`3.3.0`。
 
 包根 `playmesh/package/icon.png` 是可选项；文件存在且通过 PNG、大小和尺寸校验时
 才随完整包或每次开发基础包上传，缺少图标不会阻止发布。

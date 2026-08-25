@@ -102,6 +102,7 @@ Start with the [game-development documentation index](docs/game/README.md), then
 | Shared contract | [Game development guide](docs/game/development-guide.md) | Runtime modes, Player/Authority roles, lifecycle, and storage |
 | Package format | [Game package and main.json](docs/game/package-format.md) | Directories, manifests, capability declarations, and publication boundaries |
 | SDK API | [Game SDK / App Bridge SDK](docs/game/sdk-v1.md) | Public APIs, types, role restrictions, and error semantics |
+| SDK declarations | [Game SDK types](assets/playmesh-library/public/sdk/v1/playmesh-main.d.ts) / [App Bridge SDK types](assets/playmesh-library/public/sdk/v1/playmesh-app.d.ts) | Browse the generated TypeScript API declarations directly |
 | Device capabilities | [Game capability guide](docs/game/capability-plugins.md) | Standard Web APIs and declarations for sensitive or cross-platform capabilities |
 
 ### Visual development and app export

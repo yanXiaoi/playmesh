@@ -42,6 +42,10 @@ const sdkRegistrySource = fs.readFileSync(
   "utf8",
 );
 const sdkGeneratorSource = fs.readFileSync("tool/generate_sdk.mjs", "utf8");
+const runtimeSdkCompatibilitySource = fs.readFileSync(
+  "runtime/src/lib/runtime/runtime_sdk_compatibility.dart",
+  "utf8",
+);
 const sdkManifest = JSON.parse(
   fs.readFileSync(
     "assets/playmesh-library/public/developer/contracts/sdk-manifest.json",
@@ -570,15 +574,55 @@ assert.equal("source" in sdkSchema.$defs.Player.properties, false);
 assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
 assert.equal(defaultGameManifest.sdkVersion, "4.1.0");
 assert.equal(defaultGameManifest.appSdkVersion, "3.3.0");
-assert.equal(gameManifestSchema.properties.sdkVersion.const, "4.1.0");
+assert.deepEqual(gameManifestSchema.properties.sdkVersion.enum, ["4.1.0"]);
 assert.equal(
   sdkManifest.projectRules.gameSdkVersion,
-  "main.json sdkVersion is required and must equal 4.1.0",
+  "main.json sdkVersion is required and must be one of 4.1.0; new projects use 4.1.0",
 );
 assert.deepEqual(gameManifestSchema.properties.appSdkVersion.enum, [
   "3.2.0",
   "3.3.0",
 ]);
+assert.equal(
+  sdkManifest.projectRules.appSdkVersion,
+  "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0; new projects use 3.3.0",
+);
+assert.deepEqual(sdkManifest.compatibility, {
+  game: {
+    baselineVersions: ["4.1.0"],
+    bundleVersion: "4.1.0",
+    supportedRequestedVersions: ["4.1.0"],
+  },
+  app: {
+    baselineVersions: ["3.2.0", "3.3.0"],
+    bundleVersion: "3.3.0",
+    supportedRequestedVersions: ["3.2.0", "3.3.0"],
+  },
+});
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /gameBaselineVersions\s*=\s*\[\s*'4\.1\.0',?\s*\]/,
+);
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /appBaselineVersions\s*=\s*\[\s*'3\.2\.0',\s*'3\.3\.0',?\s*\]/,
+);
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /gameBundleVersion = '4\.1\.0'/,
+);
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /appBundleVersion = '3\.3\.0'/,
+);
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /gameRequestedVersions\s*=\s*\[\s*'4\.1\.0',?\s*\]/,
+);
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /appRequestedVersions\s*=\s*\[\s*'3\.2\.0',\s*'3\.3\.0',?\s*\]/,
+);
 assert.equal("permissions" in defaultGameManifest, false);
 assert.equal("icon" in defaultGameManifest, false);
 assert.equal("permissions" in gameManifestSchema.properties, false);

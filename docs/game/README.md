@@ -65,13 +65,13 @@ AI 提示词和操作审批。
   `controller/index.html`
 - 多人 Authority 入口：`authority.entry` 显式必填；默认模板写入
   `static/js/service/index.js`
-- SDK 清单版本：`sdkVersion` 与 `appSdkVersion` 均必填，且必须分别为 `4.0.0`
+- SDK 清单版本：`sdkVersion` 与 `appSdkVersion` 均必填；新保存项目分别写入 `4.1.0`
   与 `3.3.0`
 - 游戏业务 locale：`playmesh.app.runtime.getLocale()`（只返回当前显示端 locale；
   游戏自行提供翻译，不读取 App messages）
 
 URL 中的 `sdk/v1` 是稳定资源路径，不代表游戏声明的语义版本。目标 App 只接受 Game
-SDK `4.0.0`；App SDK `3.2.0` 与 `3.3.0` 均受支持，并解析到当前兼容 bundle。
+SDK `4.1.0`；App SDK `3.2.0` 与 `3.3.0` 均受支持，并解析到当前兼容 bundle。
 
 ## 最小游戏
 

@@ -48,7 +48,8 @@ FileDescription、ProductName、FileVersion 与 ProductVersion。展示元数据
 Authority 主机显示。上述实现均位于 Runtime 自有模块，
 不依赖主 App Dart 源码。Runtime 分享面板保留全部非回环 LAN 链接并允许切换二维码；启动与
 等待 App SDK 接管输入期间复用 `packages/playmesh_ui` 的统一黑底加载层，只显示 Playmesh
-标识与转圈。
+标识与转圈。统一加入弹窗发现房间时只在局域网列表内显示扫描动效；分享命令只让菜单中的
+分享按钮进入等待态，并保证宿主分享层先绘制首帧再准备通道。
 
 ## 全功能固定底包与模块边界
 

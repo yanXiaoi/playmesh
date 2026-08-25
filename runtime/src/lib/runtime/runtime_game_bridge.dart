@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'runtime_package.dart';
 import 'runtime_nickname_coordinator.dart';
+import 'runtime_package.dart';
+import 'runtime_sdk_compatibility.dart';
 import 'runtime_session.dart';
 import 'runtime_storage.dart';
 
@@ -73,7 +74,8 @@ final class RuntimeGameBridge {
       }
       requestId = rawRequestId as String?;
       final sdkVersion = command['sdkVersion'];
-      if (sdkVersion is! String || sdkVersion != game.gameSdkVersion) {
+      if (sdkVersion is! String ||
+          sdkVersion != RuntimeSdkCompatibility.gameBundleVersion) {
         throw FormatException('Runtime 不支持 Game SDK $sdkVersion');
       }
       final name = command['command'];

@@ -29,23 +29,28 @@ enum SdkSourceTarget { game, app }
 
 /// 一个不可变的 SDK 兼容发行版。
 ///
-/// [minimumRequestedVersion] 到 [maximumRequestedVersion] 的游戏声明都会使用
-/// [bundleVersion] 对应的 Dart 源快照。未来出现不兼容升级时，保留旧发行版并新增一项，
-/// 不修改旧项的范围和源文件。
+/// [supportedRequestedVersions] 中的游戏声明都会使用 [bundleVersion] 对应的 Dart
+/// 源快照。SDK 保留明确版本号，但兼容集合只能追加；增量发行统一由最新兼容 Bundle
+/// 承接，不建立破坏旧调用端的发行边界。
 final class SdkRelease {
   SdkRelease._({
     required this.target,
+    required List<String> supportedRequestedVersions,
     required this.minimumRequestedVersion,
     required this.maximumRequestedVersion,
     required this.bundleVersion,
     required Map<String, String> files,
     required Map<String, _GameSdkCommandFeature> gameCommands,
     required Map<String, _AppSdkCommandFeature> appCommands,
-  }) : _files = Map.unmodifiable(files),
+  }) : supportedRequestedVersions = List.unmodifiable(
+         supportedRequestedVersions,
+       ),
+       _files = Map.unmodifiable(files),
        _gameCommands = Map.unmodifiable(gameCommands),
        _appCommands = Map.unmodifiable(appCommands);
 
   final SdkSourceTarget target;
+  final List<String> supportedRequestedVersions;
   final String minimumRequestedVersion;
   final String maximumRequestedVersion;
   final String bundleVersion;
@@ -54,17 +59,17 @@ final class SdkRelease {
   final Map<String, _AppSdkCommandFeature> _appCommands;
 
   bool supports(String requestedVersion) =>
-      _compareSdkVersions(requestedVersion, minimumRequestedVersion) >= 0 &&
-      _compareSdkVersions(requestedVersion, maximumRequestedVersion) <= 0;
+      supportedRequestedVersions.contains(requestedVersion);
 
   Set<String> get commandNames => Set.unmodifiable(
     target == SdkSourceTarget.game ? _gameCommands.keys : _appCommands.keys,
   );
 
-  Map<String, String> toJson() => {
+  Map<String, Object> toJson() => {
     'minimumRequestedVersion': minimumRequestedVersion,
     'maximumRequestedVersion': maximumRequestedVersion,
     'bundleVersion': bundleVersion,
+    'supportedRequestedVersions': supportedRequestedVersions,
   };
 }
 
@@ -87,9 +92,9 @@ class SdkSourceFragment {
 
 /// Dart 执行器支持的 SDK bundle 版本区间。
 ///
-/// 调用契约未修改的执行器以 [last] 作为开放上界，无需随 SDK 升级修改。命令的参数、
-/// 消息、返回值、事件或错误语义不兼容时，旧执行器保留封口区间，新版本目录注册一个
-/// 不重叠的新执行器。
+/// 调用契约未修改的执行器以 [last] 作为开放上界，无需随 SDK 升级修改。允许按 Bundle
+/// 版本替换内部执行器实现，但每个公开命令必须始终存在开放上界的兼容执行器，且不得改变
+/// 参数、消息、返回值、事件或错误语义。
 class SdkVersionRange {
   const SdkVersionRange(this.minimum, this.maximum);
 
@@ -253,6 +258,21 @@ class AppSdkCommandContext {
 final class SdkFeatureRegistry {
   SdkFeatureRegistry._();
 
+  /// 本兼容政策生效时已经公开的 Game 请求版本。该列表不可修改或删除。
+  static const List<String> gameSdkCompatibilityBaselineVersions = ['4.1.0'];
+
+  /// 本兼容政策生效时已经公开的 App 请求版本。该列表不可修改或删除。
+  static const List<String> appSdkCompatibilityBaselineVersions = [
+    '3.2.0',
+    '3.3.0',
+  ];
+
+  /// 已公开并永久保留的 Game SDK 请求版本。新版本只能追加到末尾。
+  static const List<String> gameSdkSupportedRequestVersions = ['4.1.0'];
+
+  /// 已公开并永久保留的 App SDK 请求版本。新版本只能追加到末尾。
+  static const List<String> appSdkSupportedRequestVersions = ['3.2.0', '3.3.0'];
+
   static final List<_GameSdkCommandFeature> _gameCommandFeatures = [
     _GameCoreFeature(),
     _GameSessionFeature(),
@@ -314,8 +334,9 @@ final class SdkFeatureRegistry {
   static final List<SdkRelease> _sdkReleases = _registerSdkReleases([
     SdkRelease._(
       target: SdkSourceTarget.game,
-      minimumRequestedVersion: _runtimeBundle.gameVersion,
-      maximumRequestedVersion: _runtimeBundle.gameVersion,
+      supportedRequestedVersions: gameSdkSupportedRequestVersions,
+      minimumRequestedVersion: gameSdkSupportedRequestVersions.first,
+      maximumRequestedVersion: gameSdkSupportedRequestVersions.last,
       bundleVersion: _runtimeBundle.gameVersion,
       files: _sdkFilesForTarget(_runtimeBundle.files, SdkSourceTarget.game),
       gameCommands: _sdkCommandsForVersion(
@@ -328,10 +349,11 @@ final class SdkFeatureRegistry {
     ),
     SdkRelease._(
       target: SdkSourceTarget.app,
-      // App SDK 3.3.0 only adds APIs to 3.2.0, so both requested versions can
-      // safely share the current runtime bundle.
-      minimumRequestedVersion: '3.2.0',
-      maximumRequestedVersion: _runtimeBundle.appVersion,
+      // App SDK 3.3.0 only adds APIs to 3.2.0, so both explicit request
+      // versions safely share the current runtime bundle.
+      supportedRequestedVersions: appSdkSupportedRequestVersions,
+      minimumRequestedVersion: appSdkSupportedRequestVersions.first,
+      maximumRequestedVersion: appSdkSupportedRequestVersions.last,
       bundleVersion: _runtimeBundle.appVersion,
       files: _sdkFilesForTarget(_runtimeBundle.files, SdkSourceTarget.app),
       gameCommands: const {},
@@ -494,14 +516,55 @@ List<SdkRelease> _registerSdkReleases(Iterable<SdkRelease> releases) {
     if (targetReleases.isEmpty) {
       throw StateError('$target 没有注册 SDK 发行版');
     }
+    if (targetReleases.length != 1) {
+      throw StateError('$target 只能注册一个覆盖全部历史请求版本的兼容 SDK 发行版');
+    }
+    final compatibilityBaseline = switch (target) {
+      SdkSourceTarget.game =>
+        SdkFeatureRegistry.gameSdkCompatibilityBaselineVersions,
+      SdkSourceTarget.app =>
+        SdkFeatureRegistry.appSdkCompatibilityBaselineVersions,
+    };
     SdkRelease? previous;
     for (final release in targetReleases) {
+      final supported = release.supportedRequestedVersions;
+      if (supported.isEmpty || supported.toSet().length != supported.length) {
+        throw StateError('${release.bundleVersion} 的 SDK 兼容版本集合无效');
+      }
+      if (supported.length < compatibilityBaseline.length ||
+          compatibilityBaseline.indexed.any(
+            (entry) => supported[entry.$1] != entry.$2,
+          )) {
+        throw StateError(
+          '${release.bundleVersion} 不能移除或改写 SDK 兼容基线 '
+          '${compatibilityBaseline.join(', ')}',
+        );
+      }
+      for (var index = 0; index < supported.length; index += 1) {
+        _parseSdkVersion(supported[index], 'SDK 兼容请求版本');
+        if (index > 0 &&
+            _compareSdkVersions(supported[index - 1], supported[index]) >= 0) {
+          throw StateError('${release.bundleVersion} 的 SDK 兼容版本必须严格递增');
+        }
+      }
       if (_compareSdkVersions(
             release.minimumRequestedVersion,
             release.maximumRequestedVersion,
           ) >
           0) {
         throw StateError('${release.bundleVersion} 的 SDK 兼容版本范围无效');
+      }
+      if (release.minimumRequestedVersion != supported.first ||
+          release.maximumRequestedVersion != supported.last ||
+          release.bundleVersion != supported.last) {
+        throw StateError('${release.bundleVersion} 的 SDK 版本化兼容元数据不一致');
+      }
+      final baselineMajor = _parseSdkVersion(supported.first, 'SDK 兼容基线').first;
+      if (supported.any(
+        (version) =>
+            _parseSdkVersion(version, 'SDK 兼容请求版本').first != baselineMajor,
+      )) {
+        throw StateError('${release.bundleVersion} 不能跨 MAJOR 建立破坏性 SDK 发行');
       }
       if (!release._files.values.any(
         (source) => source.contains(release.bundleVersion),
@@ -545,13 +608,10 @@ SdkRelease _resolveSdkRelease(
   for (final release in releases) {
     if (release.supports(requested)) return release;
   }
-  final ranges = releases
-      .map(
-        (release) =>
-            '${release.minimumRequestedVersion}-${release.maximumRequestedVersion}',
-      )
+  final versions = releases
+      .expand((release) => release.supportedRequestedVersions)
       .join(', ');
-  throw UnsupportedError('不支持的 $target SDK 版本 $requested；可用范围：$ranges');
+  throw UnsupportedError('不支持的 $target SDK 版本 $requested；可用版本：$versions');
 }
 
 int _compareSdkVersions(String left, String right) {
@@ -781,6 +841,11 @@ void validateSdkCommandVersionRanges(
           }
         }
       }
+    }
+    if (!executors
+        .expand((ranges) => ranges)
+        .any((range) => range.maximum == SdkVersionRange.last)) {
+      throw StateError('$label 命令 ${entry.key} 缺少面向后续版本的兼容执行器');
     }
   }
 }

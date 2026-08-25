@@ -56,7 +56,10 @@ const selectors = [
   ".join-layer",
   ".join-title",
   ".join-close",
+  ".join-results",
   ".join-rooms",
+  ".join-loading",
+  ".join-loading-label",
   ".join-empty",
   ".join-scan",
   ".join-form",
@@ -77,6 +80,7 @@ function createElement(selector, document) {
       ".info-layer",
       ".logs-layer",
       ".join-layer",
+      ".join-loading",
       ".join-empty",
       ".join-error",
     ].includes(selector),
@@ -140,12 +144,16 @@ function createPage({
   showShareAction = app,
   sessionState = new Map(),
   localState = new Map(),
+  deferDiscovery = false,
+  deferSharePanel = false,
 } = {}) {
   const windowListeners = new Map();
   const mounted = [];
   const commands = [];
   const consoleEntries = [];
   const synchronousAppBuckets = new Map();
+  let pendingDiscoveryResult = null;
+  let pendingSharePanelResult = null;
   const document = {
     activeElement: null,
     body: {
@@ -424,7 +432,7 @@ function createPage({
               host: "192.168.1.23",
             }];
           }
-          window[appInternalKey].receive({
+          const response = {
             type: "app.command.result",
             requestId: command.requestId,
             result: command.command === "app.bootstrap"
@@ -449,7 +457,20 @@ function createPage({
                   },
                 }
               : result,
-          });
+          };
+          if (command.command === "app.lan.discover" && deferDiscovery) {
+            pendingDiscoveryResult = () => {
+              window[appInternalKey].receive(response);
+            };
+            return;
+          }
+          if (command.command === "app.ui.openSharePanel" && deferSharePanel) {
+            pendingSharePanelResult = () => {
+              window[appInternalKey].receive(response);
+            };
+            return;
+          }
+          window[appInternalKey].receive(response);
         });
       },
     };
@@ -481,6 +502,18 @@ function createPage({
     gameFocus,
     dispatchKey,
     localState,
+    completeDiscovery() {
+      assert.ok(pendingDiscoveryResult, "没有待完成的局域网发现请求");
+      const complete = pendingDiscoveryResult;
+      pendingDiscoveryResult = null;
+      complete();
+    },
+    completeSharePanel() {
+      assert.ok(pendingSharePanelResult, "没有待完成的分享面板请求");
+      const complete = pendingSharePanelResult;
+      pendingSharePanelResult = null;
+      complete();
+    },
   };
 }
 
@@ -1047,6 +1080,50 @@ assert.equal(
 joinerUi[".join"].click();
 await Promise.resolve();
 assert.equal(joinerUi[".join-layer"].hidden, true);
+
+const pendingUiPage = createPage({
+  app: true,
+  deferDiscovery: true,
+  deferSharePanel: true,
+});
+await pendingUiPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+const pendingUi = pendingUiPage.mounted[0].__elements;
+pendingUi[".share"].click();
+assert.equal(pendingUi[".share"].disabled, true);
+assert.equal(pendingUi[".share"].getAttribute("aria-busy"), "true");
+assert.equal(pendingUi[".join"].disabled, false);
+assert.equal(pendingUi[".fullscreen"].disabled, false);
+assert.equal(
+  pendingUiPage.mounted[0].__root.html.includes(
+    ".action.share.pending .icon::after",
+  ),
+  true,
+);
+await Promise.resolve();
+pendingUiPage.completeSharePanel();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(pendingUi[".share"].disabled, false);
+assert.equal(pendingUi[".share"].getAttribute("aria-busy"), "false");
+
+pendingUi[".join"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(pendingUi[".join-layer"].hidden, false);
+assert.equal(pendingUi[".join-loading"].hidden, false);
+assert.equal(pendingUi[".join-loading-label"].textContent, "扫描中");
+assert.equal(pendingUi[".join-results"].getAttribute("aria-busy"), "true");
+assert.equal(pendingUi[".join-rooms"].getAttribute("aria-disabled"), "true");
+assert.equal(pendingUi[".join-layer"].getAttribute("aria-busy"), null);
+assert.equal(pendingUi[".join-scan"].disabled, false);
+assert.equal(pendingUi[".join-input"].disabled, false);
+assert.equal(pendingUi[".join-submit"].disabled, false);
+pendingUiPage.completeDiscovery();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(pendingUi[".join-loading"].hidden, true);
+assert.equal(pendingUi[".join-results"].getAttribute("aria-busy"), "false");
+assert.equal(pendingUi[".join-rooms"].getAttribute("aria-disabled"), "false");
+assert.equal(pendingUi[".join-rooms"].innerHTML.includes("客厅房间"), true);
+pendingUi[".join-close"].click();
 
 const appPage = createPage({ app: true });
 const earlyEscape = appPage.dispatchKey("Escape", 27);

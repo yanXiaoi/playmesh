@@ -612,6 +612,7 @@
   "platform.game.logs.copied": "已复制",
   "platform.game.join.title": "加入游戏",
   "platform.game.join.empty": "暂无房间",
+  "platform.game.join.scanning": "扫描中",
   "platform.game.join.scan": "扫码加入",
   "platform.game.join.input": "输入邀请链接",
   "platform.game.join.action": "加入",

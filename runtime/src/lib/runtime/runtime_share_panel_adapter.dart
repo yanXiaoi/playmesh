@@ -39,6 +39,8 @@ RuntimeSharePanelPresentation buildRuntimeSharePanelPresentation({
   RuntimeSessionConnection? session,
   String? bundledRelayName,
   int? bundledRelayLatencyMilliseconds,
+  bool lanLoading = false,
+  String? lanError,
 }) {
   final lanLinks = <PlaymeshShareLink>[];
   final internetLinks = <PlaymeshShareLink>[];
@@ -70,6 +72,8 @@ RuntimeSharePanelPresentation buildRuntimeSharePanelPresentation({
           ? null
           : internetLinks.first.id,
       participants: _participants(session?.snapshot),
+      lanLoading: lanLoading,
+      lanError: lanError,
       initialSection: lanLinks.isEmpty && internetLinks.isNotEmpty
           ? PlaymeshShareSection.internet
           : PlaymeshShareSection.lan,
@@ -128,6 +132,9 @@ String runtimeSharePanelTitle({required bool useChinese}) =>
 
 String runtimeShareLinkCopiedMessage({required bool useChinese}) =>
     useChinese ? '链接已复制' : 'Link copied';
+
+String runtimeShareLoadFailedMessage({required bool useChinese}) =>
+    useChinese ? '分享暂不可用' : 'Sharing is unavailable';
 
 String runtimeBundledRelayFallbackName({required bool useChinese}) =>
     useChinese ? '内置中转服务器' : 'Bundled relay server';

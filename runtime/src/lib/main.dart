@@ -291,6 +291,7 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
     with WidgetsBindingObserver {
   late final RuntimeDisplayController _display = RuntimeDisplayController();
   final ValueNotifier<bool> _inputTakenOver = ValueNotifier(false);
+  bool _sharePanelVisible = false;
   late final RuntimeNavigation _navigation = RuntimeNavigation();
   late final RuntimeLanCoordinator _lanHost = RuntimeLanCoordinator(
     game: widget.launch.package.manifest,
@@ -380,93 +381,142 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
   }
 
   Future<void> _openSharePanel() async {
-    await _lanHost.setPublished();
-    final links = await _lanHost.getShareLinks();
-    final session = widget.launch.bridge.session;
-    if (session != null) {
-      try {
-        await session.refreshSnapshot();
-      } on Object catch (error) {
-        debugPrint('Runtime 刷新分享房间玩家失败: $error');
-      }
-    }
-    if (!mounted) return;
+    if (!mounted || _sharePanelVisible) return;
+    _sharePanelVisible = true;
     final useChinese = Platform.localeName.toLowerCase().startsWith('zh');
+    final session = widget.launch.bridge.session;
     final relay = _lanHost.bundledRelayPresentation;
-    final presentation = buildRuntimeSharePanelPresentation(
+    var presentation = buildRuntimeSharePanelPresentation(
       title: runtimeSharePanelTitle(useChinese: useChinese),
-      links: links,
+      links: const <RuntimeLanShareLink>[],
       session: session,
       bundledRelayName: relay == null
           ? null
           : relay.name ??
                 runtimeBundledRelayFallbackName(useChinese: useChinese),
       bundledRelayLatencyMilliseconds: relay?.latencyMilliseconds,
+      lanLoading: true,
     );
     final strings = runtimeSharePanelStrings(useChinese: useChinese);
     final actionMode = Platform.isWindows
         ? PlaymeshShareActionMode.copy
         : PlaymeshShareActionMode.share;
-    var selectedLanLinkId = presentation.model.selectedLanLinkId;
+    String? selectedLanLinkId;
+    BuildContext? shareDialogContext;
+    StateSetter? updateShareDialog;
+    late final Future<void> dialogOperation;
     try {
-      await showDialog<void>(
+      dialogOperation = showDialog<void>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
-          builder: (dialogContext, setDialogState) => Dialog(
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 20,
-            ),
-            clipBehavior: Clip.none,
-            backgroundColor: Colors.transparent,
-            child: PlaymeshSharePanel(
-              model: selectedLanLinkId == null
-                  ? presentation.model
-                  : presentation.selectLanLink(selectedLanLinkId!),
-              strings: strings,
-              actionMode: actionMode,
-              onClose: () => Navigator.of(dialogContext).pop(),
-              onSelectLanLink: (id) {
-                if (presentation.linkForId(id) == null) return;
-                setDialogState(() => selectedLanLinkId = id);
-              },
-              onLinkAction: (link) async {
-                final url = presentation.linkForId(link.id);
-                if (url == null) return;
-                try {
-                  if (Platform.isWindows) {
-                    await Clipboard.setData(
-                      ClipboardData(text: url.toString()),
-                    );
-                    if (mounted) {
-                      ScaffoldMessenger.of(context)
-                        ..hideCurrentSnackBar()
-                        ..showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              runtimeShareLinkCopiedMessage(
-                                useChinese: useChinese,
+          builder: (dialogContext, setDialogState) {
+            shareDialogContext = dialogContext;
+            updateShareDialog = setDialogState;
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 20,
+              ),
+              clipBehavior: Clip.none,
+              backgroundColor: Colors.transparent,
+              child: PlaymeshSharePanel(
+                model: selectedLanLinkId == null
+                    ? presentation.model
+                    : presentation.selectLanLink(selectedLanLinkId!),
+                strings: strings,
+                actionMode: actionMode,
+                onClose: () => Navigator.of(dialogContext).pop(),
+                onSelectLanLink: (id) {
+                  if (presentation.linkForId(id) == null) return;
+                  setDialogState(() => selectedLanLinkId = id);
+                },
+                onLinkAction: (link) async {
+                  final url = presentation.linkForId(link.id);
+                  if (url == null) return;
+                  try {
+                    if (Platform.isWindows) {
+                      await Clipboard.setData(
+                        ClipboardData(text: url.toString()),
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                runtimeShareLinkCopiedMessage(
+                                  useChinese: useChinese,
+                                ),
                               ),
+                              duration: const Duration(seconds: 2),
                             ),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
+                          );
+                      }
+                      return;
                     }
-                    return;
+                    await SharePlus.instance.share(
+                      ShareParams(text: url.toString()),
+                    );
+                  } on Object catch (error) {
+                    debugPrint('Runtime 分享链接操作失败: $error');
                   }
-                  await SharePlus.instance.share(
-                    ShareParams(text: url.toString()),
-                  );
-                } on Object catch (error) {
-                  debugPrint('Runtime 分享链接操作失败: $error');
-                }
-              },
-            ),
-          ),
+                },
+              ),
+            );
+          },
         ),
       );
-    } finally {
-      widget.launch.bridge.restoreGameContentFocus();
+    } on Object {
+      _sharePanelVisible = false;
+      rethrow;
+    }
+    unawaited(
+      dialogOperation.whenComplete(() {
+        _sharePanelVisible = false;
+        if (mounted) widget.launch.bridge.restoreGameContentFocus();
+      }),
+    );
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      await _lanHost.setPublished();
+      final links = await _lanHost.getShareLinks();
+      if (session != null) {
+        try {
+          await session.refreshSnapshot();
+        } on Object catch (error) {
+          debugPrint('Runtime 刷新分享房间玩家失败: $error');
+        }
+      }
+      if (!mounted) return;
+      final nextPresentation = buildRuntimeSharePanelPresentation(
+        title: runtimeSharePanelTitle(useChinese: useChinese),
+        links: links,
+        session: session,
+        bundledRelayName: relay == null
+            ? null
+            : relay.name ??
+                  runtimeBundledRelayFallbackName(useChinese: useChinese),
+        bundledRelayLatencyMilliseconds: relay?.latencyMilliseconds,
+      );
+      if (shareDialogContext?.mounted == true) {
+        updateShareDialog?.call(() {
+          presentation = nextPresentation;
+          selectedLanLinkId = presentation.model.selectedLanLinkId;
+        });
+      }
+    } on Object {
+      if (shareDialogContext?.mounted == true) {
+        updateShareDialog?.call(() {
+          presentation = buildRuntimeSharePanelPresentation(
+            title: runtimeSharePanelTitle(useChinese: useChinese),
+            links: const <RuntimeLanShareLink>[],
+            session: session,
+            lanError: runtimeShareLoadFailedMessage(useChinese: useChinese),
+          );
+          selectedLanLinkId = null;
+        });
+      }
+      rethrow;
     }
   }
 

@@ -1092,6 +1092,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         .whenComplete(() {
           if (identical(_shareOpenOperation, operation)) {
             _shareOpenOperation = null;
+            if (mounted && !_disposing) {
+              setState(() {});
+            }
           }
         });
     _shareOpenOperation = operation;
@@ -1201,6 +1204,14 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         _shareErrorCode = null;
         _publicationErrorCode = null;
       });
+    }
+    if (showOverlay) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted ||
+          _disposing ||
+          !identical(_shareCoordinator, coordinator)) {
+        return;
+      }
     }
     try {
       await coordinator.ensureChannel();
@@ -1427,7 +1438,9 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         selectionEnabled: !relayConnecting,
         refreshEnabled: !relayConnecting && !_relaySourcesLoading,
       ),
-      lanLoading: _shareState?.channel == ShareChannelState.starting,
+      lanLoading:
+          _shareOpenOperation != null ||
+          _shareState?.channel == ShareChannelState.starting,
       lanError: lanError,
       internetLoading: relayConnecting,
     );

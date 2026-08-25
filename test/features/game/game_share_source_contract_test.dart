@@ -142,6 +142,24 @@ void main() {
     expect(appUiSource, contains('captureAppUiReturnFocus();'));
     expect(appUiSource, contains('returnFocus.focus({ preventScroll: true })'));
     expect(appUiSource, contains('request("app.ui.openSharePanel"'));
+    expect(appUiSource, contains('openAppUiShareFromFallback()'));
+    expect(appUiSource, contains('button.classList?.toggle("pending"'));
+    expect(
+      pageSource,
+      contains(
+        'if (showOverlay) {\n'
+        '      await WidgetsBinding.instance.endOfFrame;',
+      ),
+    );
+    expect(pageSource, contains('_shareOpenOperation != null ||'));
+    expect(
+      pageSource,
+      contains(
+        '_shareOpenOperation = null;\n'
+        '            if (mounted && !_disposing) {\n'
+        '              setState(() {});',
+      ),
+    );
     expect(runtimeSource, contains('platform.ui.restoreGameFocus'));
     expect(
       runtimeSource,

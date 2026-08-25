@@ -45,7 +45,9 @@
     },
     "sdkVersion": {
       "type": "string",
-      "const": "4.1.0"
+      "enum": [
+        "4.1.0"
+      ]
     },
     "appSdkVersion": {
       "type": "string",

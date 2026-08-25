@@ -635,11 +635,33 @@
     "publicRoot": "app/",
     "sdkImport": "/playmesh/sdk/v1/playmesh-main.js",
     "appUrlRoot": "/",
-    "gameSdkVersion": "main.json sdkVersion is required and must equal 4.1.0",
-    "appSdkVersion": "main.json appSdkVersion is required and must equal 3.2.0 or 3.3.0; new projects use 3.3.0",
+    "gameSdkVersion": "main.json sdkVersion is required and must be one of 4.1.0; new projects use 4.1.0",
+    "appSdkVersion": "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0; new projects use 3.3.0",
     "gameEntry": "main.json entries.game is required; it is relative to physical app/ and must explicitly identify an HTML file",
     "controllerEntry": "main.json entries.controller is required for single_screen_multiplayer; it is relative to physical app/ and must explicitly identify an HTML file",
     "authorityEntry": "main.json authority.entry is required for multiplayer games; it is relative to physical app/ and must explicitly identify a JavaScript file",
     "validationEndpoint": "/dev/api/projects/{projectId}/validate"
+  },
+  "compatibility": {
+    "game": {
+      "baselineVersions": [
+        "4.1.0"
+      ],
+      "bundleVersion": "4.1.0",
+      "supportedRequestedVersions": [
+        "4.1.0"
+      ]
+    },
+    "app": {
+      "baselineVersions": [
+        "3.2.0",
+        "3.3.0"
+      ],
+      "bundleVersion": "3.3.0",
+      "supportedRequestedVersions": [
+        "3.2.0",
+        "3.3.0"
+      ]
+    }
   }
 }

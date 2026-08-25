@@ -113,6 +113,7 @@ void main() {
         'sidebar.join',
         'join.title',
         'join.empty',
+        'join.scanning',
         'join.scan',
         'join.input',
         'join.action',

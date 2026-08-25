@@ -646,12 +646,20 @@ void main() {
       contains(containsPair('minimumRequestedVersion', '4.1.0')),
     );
     expect(
+      statusJson['gameSdkCompatibility'],
+      contains(containsPair('supportedRequestedVersions', ['4.1.0'])),
+    );
+    expect(
       statusJson['appSdkCompatibility'],
       contains(containsPair('minimumRequestedVersion', '3.2.0')),
     );
     expect(
       statusJson['appSdkCompatibility'],
       contains(containsPair('maximumRequestedVersion', '3.3.0')),
+    );
+    expect(
+      statusJson['appSdkCompatibility'],
+      contains(containsPair('supportedRequestedVersions', ['3.2.0', '3.3.0'])),
     );
 
     final sdkBundle = await http.get(
