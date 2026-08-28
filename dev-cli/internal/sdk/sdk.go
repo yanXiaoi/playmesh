@@ -10,21 +10,14 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/yanXiaoi/playmesh/dev-cli/internal/contract"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/fsutil"
 	manifestmodel "github.com/yanXiaoi/playmesh/dev-cli/internal/manifest"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/target"
 )
 
-const (
-	RequiredGameVersion        = contract.GameSDKVersion
-	RequiredAppVersion         = contract.AppSDKVersion
-	MinimumSupportedAppVersion = contract.MinimumAppSDKVersion
-)
-
 var (
-	gameSDKVersionPattern = regexp.MustCompile(`const\s+PLAYMESH_SDK_VERSION\s*=\s*["'](\d+\.\d+\.\d+)["']`)
-	appSDKVersionPattern  = regexp.MustCompile(`const\s+PLAYMESH_APP_SDK_VERSION\s*=\s*["'](\d+\.\d+\.\d+)["']`)
+	gameSDKVersionPattern = regexp.MustCompile(`const\s+PLAYMESH_SDK_VERSION\s*=\s*["']([^"']+)["']`)
+	appSDKVersionPattern  = regexp.MustCompile(`const\s+PLAYMESH_APP_SDK_VERSION\s*=\s*["']([^"']+)["']`)
 )
 
 type Bundle struct {
@@ -80,12 +73,6 @@ func InstallAt(sdkRoot string, bundle Bundle) (Versions, error) {
 	if err != nil {
 		return Versions{}, err
 	}
-	if versions.Game != bundle.GameSDKVersion || versions.App != bundle.AppSDKVersion {
-		return Versions{}, errors.New("目标 App SDK 文件版本与接口声明不一致")
-	}
-	if err := RequireCurrentVersions(versions); err != nil {
-		return Versions{}, fmt.Errorf("目标 App SDK 版本不受支持: %w", err)
-	}
 	parent := filepath.Dir(sdkRoot)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return Versions{}, err
@@ -123,9 +110,6 @@ func VersionsAt(sdkRoot string) (Versions, error) {
 	if err != nil {
 		return Versions{}, err
 	}
-	if err := RequireCurrentVersions(versions); err != nil {
-		return Versions{}, fmt.Errorf("当前项目 SDK 版本不受支持: %w", err)
-	}
 	return versions, nil
 }
 
@@ -136,25 +120,6 @@ func VersionsFromBytes(game, app []byte) (Versions, error) {
 		return Versions{}, errors.New("无法从当前项目 SDK 文件读取版本")
 	}
 	return Versions{Game: string(gameMatch[1]), App: string(appMatch[1])}, nil
-}
-
-func RequireCurrentVersions(versions Versions) error {
-	if versions.Game == RequiredGameVersion &&
-		IsSupportedAppVersion(versions.App) {
-		return nil
-	}
-	return fmt.Errorf(
-		"仅接受 Game SDK %s 与 App SDK %s 或 %s，实际为 %s 与 %s",
-		RequiredGameVersion,
-		MinimumSupportedAppVersion,
-		RequiredAppVersion,
-		versions.Game,
-		versions.App,
-	)
-}
-
-func IsSupportedAppVersion(version string) bool {
-	return version == MinimumSupportedAppVersion || version == RequiredAppVersion
 }
 
 func UpdateManifestVersions(projectRoot string, versions Versions) (string, error) {

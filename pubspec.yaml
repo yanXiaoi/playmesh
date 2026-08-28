@@ -2,7 +2,7 @@ name: playmesh
 description: "Local-first party game launcher built with Flutter."
 publish_to: 'none'
 
-version: 4.5.0+33
+version: 5.1.0+37
 
 environment:
   sdk: ^3.12.2
@@ -38,6 +38,8 @@ dependencies:
     path: packages/playmesh_share_ui
   playmesh_ui:
     path: packages/playmesh_ui
+  playmesh_database:
+    path: packages/playmesh_database
 
 dev_dependencies:
   flutter_test:

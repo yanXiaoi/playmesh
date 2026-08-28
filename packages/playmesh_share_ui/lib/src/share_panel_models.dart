@@ -25,11 +25,13 @@ class PlaymeshShareParticipant {
     required this.id,
     required this.name,
     required this.connected,
+    this.connectionLabel,
   });
 
   final String id;
   final String name;
   final bool connected;
+  final String? connectionLabel;
 }
 
 @immutable

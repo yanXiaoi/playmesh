@@ -500,7 +500,7 @@
       ],
       "properties": {
         "sdkVersion": {
-          "const": "4.1.0"
+          "const": "4.3.0"
         },
         "gameInfo": {
           "$ref": "#/$defs/GameInfo"
@@ -545,7 +545,7 @@
           "type": "boolean"
         },
         "sdkVersion": {
-          "const": "3.3.0"
+          "const": "3.5.0"
         },
         "identity": {
           "oneOf": [

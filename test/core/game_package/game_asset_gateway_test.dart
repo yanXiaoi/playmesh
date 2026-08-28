@@ -33,6 +33,9 @@ void main() {
       entryPath: 'index.html',
       gameSdkVersion: '4.1.0',
       appSdkVersion: '3.3.0',
+      config: const {
+        'webRuntime': {'multithreading': true},
+      },
       storage: storage,
     );
     addTearDown(gateway.close);
@@ -42,11 +45,13 @@ void main() {
     expect(entry.statusCode, HttpStatus.ok);
     expect(entry.body, contains('/playmesh/sdk/v1/playmesh-app.js'));
     expect(entry.body, contains('/playmesh/sdk/v1/playmesh-main.js'));
+    _expectGameWebViewIsolationHeaders(entry);
 
     final sdk = await http.get(
       gateway.entryUri.resolve('/playmesh/sdk/v1/playmesh-main.js'),
     );
     expect(sdk.statusCode, HttpStatus.ok);
+    _expectGameWebViewIsolationHeaders(sdk);
     expect(
       sdk.body,
       SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
@@ -70,6 +75,7 @@ void main() {
 
     final data = await http.get(gateway.entryUri.resolve('/data/save.json'));
     expect(data.statusCode, HttpStatus.notFound);
+    _expectGameWebViewIsolationHeaders(data);
 
     await storage.setData('save', 'secret', 42);
     await storage.flushAll();
@@ -143,6 +149,35 @@ void main() {
       gateway.entryUri.resolve('/PLAYMESH/sdk/v1/playmesh-main.js'),
     );
     expect(reservedCaseVariant.statusCode, HttpStatus.notFound);
+  });
+
+  test('Web Runtime 多线程未启用时不添加跨源隔离头', () async {
+    final packageRoot = await _createInstalledPackageRoot();
+    addTearDown(() => packageRoot.delete(recursive: true));
+    for (final config in <Object?>[
+      null,
+      const {
+        'webRuntime': {'multithreading': false},
+      },
+      const {
+        'webRuntime': {'multithreading': 'true'},
+      },
+      const {'futureRuntime': true},
+    ]) {
+      final gateway = await startGameAssetGateway(
+        source: InstalledGameWebResourceSource(
+          packageRootPath: packageRoot.path,
+        ),
+        entryPath: 'index.html',
+        config: config,
+      );
+      final response = await http.get(gateway.entryUri);
+      await gateway.close();
+
+      expect(response.statusCode, HttpStatus.ok);
+      expect(response.headers['cross-origin-opener-policy'], isNull);
+      expect(response.headers['cross-origin-embedder-policy'], isNull);
+    }
   });
 
   test('资源网关在启动时拒绝未注册的 SDK 版本', () async {
@@ -558,6 +593,19 @@ void main() {
     final response = await utf8.decoder.bind(socket).join();
     expect(response, startsWith('HTTP/1.1 403'));
   });
+}
+
+void _expectGameWebViewIsolationHeaders(http.Response response) {
+  expect(
+    response.headers['cross-origin-opener-policy'],
+    'same-origin',
+    reason: response.request?.url.toString(),
+  );
+  expect(
+    response.headers['cross-origin-embedder-policy'],
+    'require-corp',
+    reason: response.request?.url.toString(),
+  );
 }
 
 Future<Directory> _createInstalledPackageRoot() async {

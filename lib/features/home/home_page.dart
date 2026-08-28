@@ -7,13 +7,17 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/game_package/game_package_icon.dart';
+import '../../core/game_web/game_invitation_inspector.dart';
+import '../../core/game_web/game_join_coordinator.dart';
 import '../../core/localization/playmesh_localization.dart';
 import '../../core/network/lan_game_discovery_service.dart';
 import '../../models/game_summary.dart';
 import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
 import '../game/game_page.dart';
-import '../game/game_invitation_scanner_page.dart';
+import '../game/game_invitation_scan_flow.dart';
+import '../game/game_join_error_presentation.dart';
+import '../game/game_join_router.dart';
 import '../game/join_game_page.dart';
 import '../developer/game_creation_page.dart';
 import '../games/game_library_page.dart';
@@ -34,6 +38,9 @@ class HomePage extends StatelessWidget {
     this.externalUrlLauncher,
     this.lanGameDiscoveryService,
     this.onNicknameChanged,
+    this.coreControlBaseUriProvider,
+    this.scanAndPrepareInvitation = scanAndPrepareGameInvitation,
+    this.gameJoinRouter = const GameJoinRouter(),
   });
 
   static const profileHeroKey = Key('home-profile-hero');
@@ -61,6 +68,9 @@ class HomePage extends StatelessWidget {
   final Future<bool> Function(Uri uri)? externalUrlLauncher;
   final LanGameDiscoveryService? lanGameDiscoveryService;
   final Future<void> Function(String nickname)? onNicknameChanged;
+  final GameCoreBaseUriProvider? coreControlBaseUriProvider;
+  final GameInvitationScanAndPrepare scanAndPrepareInvitation;
+  final GameJoinRouter gameJoinRouter;
 
   List<GameSummary> get _visibleGames {
     final featured = featuredGame;
@@ -103,19 +113,45 @@ class HomePage extends StatelessWidget {
       GamePage.routeName,
       arguments: GameLaunchArguments(game: game, enterFullscreenOnLaunch: true),
     );
-    void scanAndJoin() => Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        settings: const RouteSettings(
-          name: GameInvitationScannerPage.routeName,
-        ),
-        builder: (_) => GameInvitationScannerPage(
-          initialUserId: user.userId,
-          initialNickname: user.nickname,
-          discoveryService: lanGameDiscoveryService,
-          onNicknameChanged: onNicknameChanged,
-        ),
-      ),
-    );
+    void scanAndJoin() {
+      unawaited(() async {
+        final inspector = DefaultGameInvitationInspector(
+          coreBaseUriProvider: coreControlBaseUriProvider,
+        );
+        RemoteGameLaunch? preparedLaunch;
+        try {
+          final coordinator = GameJoinCoordinator(inspector: inspector);
+          final launch = await scanAndPrepareInvitation(
+            context,
+            coordinator: coordinator,
+            joinContext: const GameJoinContext(),
+          );
+          preparedLaunch = launch;
+          if (launch == null || !context.mounted) return;
+          await gameJoinRouter.push(
+            context,
+            launch: launch,
+            userId: user.userId,
+            nickname: user.nickname,
+            coreControlBaseUri: coreControlBaseUriProvider?.call(),
+            discoveryService: lanGameDiscoveryService,
+            onNicknameChanged: onNicknameChanged,
+          );
+        } on Object catch (error, stackTrace) {
+          if (context.mounted) {
+            await showGameJoinErrorDialog(
+              context,
+              error: error,
+              stackTrace: stackTrace,
+            );
+          }
+        } finally {
+          await preparedLaunch?.close();
+          await inspector.close();
+        }
+      }());
+    }
+
     void openOnline() {
       final callback = onOpenOnline;
       if (callback != null) {

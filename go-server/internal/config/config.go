@@ -20,7 +20,7 @@ import (
 
 const (
 	CatalogAPIVersion         = "3.0.0"
-	RelayProtocolVersion      = "3.0.0"
+	RelayProtocolVersion      = "4.0.0"
 	UserUploadProtocolVersion = "1.0.0"
 )
 
@@ -93,13 +93,21 @@ type Mail struct {
 }
 
 type Relay struct {
-	PublicBaseURL                   string `json:"publicBaseUrl"`
-	TunnelTTLSeconds                int    `json:"tunnelTTLSeconds"`
-	PendingConnectionTimeoutSeconds int    `json:"pendingConnectionTimeoutSeconds"`
-	IdleTimeoutSeconds              int    `json:"idleTimeoutSeconds"`
-	MaxTunnels                      int    `json:"maxTunnels"`
-	MaxConnectionsPerTunnel         int    `json:"maxConnectionsPerTunnel"`
-	MaxConnectionsPerIP             int    `json:"maxConnectionsPerIP"`
+	PublicBaseURL string `json:"publicBaseUrl"`
+	// TunnelTTLSeconds 兼容保留历史字段名；现在表示主机首次附着等待时间和
+	// 每个 peer 的短期 ICE/TURN 凭据寿命，不是在线主机邀请的硬过期时间。
+	TunnelTTLSeconds        int    `json:"tunnelTTLSeconds"`
+	MaxTunnels              int    `json:"maxTunnels"`
+	MaxConnectionsPerTunnel int    `json:"maxConnectionsPerTunnel"`
+	MaxConnectionsPerIP     int    `json:"maxConnectionsPerIP"`
+	TURNUDPListen           string `json:"turnUdpListen"`
+	TURNTCPListen           string `json:"turnTcpListen"`
+	TURNPublicIP            string `json:"turnPublicIp"`
+	TURNPublicPort          int    `json:"turnPublicPort"`
+	TURNRealm               string `json:"turnRealm"`
+	TURNMinPort             int    `json:"turnMinPort"`
+	TURNMaxPort             int    `json:"turnMaxPort"`
+	TURNSharedSecret        string `json:"-"`
 }
 
 type WebUI struct {
@@ -201,13 +209,19 @@ func Default() Config {
 			},
 		},
 		Relay: Relay{
-			PublicBaseURL:                   "http://127.0.0.1:16668",
-			TunnelTTLSeconds:                21600,
-			PendingConnectionTimeoutSeconds: 15,
-			IdleTimeoutSeconds:              120,
-			MaxTunnels:                      1000,
-			MaxConnectionsPerTunnel:         64,
-			MaxConnectionsPerIP:             32,
+			PublicBaseURL:           "http://127.0.0.1:16668",
+			TunnelTTLSeconds:        21600,
+			MaxTunnels:              1000,
+			MaxConnectionsPerTunnel: 64,
+			MaxConnectionsPerIP:     32,
+			TURNUDPListen:           "0.0.0.0:3478",
+			TURNTCPListen:           "0.0.0.0:3478",
+			TURNPublicIP:            "127.0.0.1",
+			TURNPublicPort:          3478,
+			TURNRealm:               "playmesh",
+			TURNMinPort:             49160,
+			TURNMaxPort:             49260,
+			TURNSharedSecret:        "test-turn-shared-secret-at-least-32-bytes",
 		},
 		WebUI: defaultWebUI(),
 		// These values only preserve config.Default() compatibility for unit
@@ -252,6 +266,10 @@ func Load(path string) (Config, error) {
 	if cfg.UploadKeyPepper == "test-upload-key-pepper-at-least-32-bytes" {
 		return Config{}, errors.New("必须在 .env 配置 PLAYMESH_UPLOAD_KEY_PEPPER")
 	}
+	if cfg.SupportsGameRelay &&
+		cfg.Relay.TURNSharedSecret == "test-turn-shared-secret-at-least-32-bytes" {
+		return Config{}, errors.New("必须在 .env 配置 PLAYMESH_TURN_SHARED_SECRET（TURN REST 临时凭据 HMAC 共享密钥，至少 32 字节；参见 .env.example）")
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -279,6 +297,7 @@ func (c Config) Save() error {
 	copyForDisk.Admin.CaptchaIntervalMilliseconds = 0
 	copyForDisk.Mail = Mail{}
 	copyForDisk.UploadKeyPepper = ""
+	copyForDisk.Relay.TURNSharedSecret = ""
 	copyForDisk.ConfigPath = ""
 	data, err := json.MarshalIndent(copyForDisk, "", "  ")
 	if err != nil {
@@ -423,6 +442,10 @@ func (c *Config) applyEnvironment() error {
 	}
 	c.Mail.SendReviewFailures, err = envBool("PLAYMESH_SMTP_SEND_REVIEW_FAILURES", true)
 	c.UploadKeyPepper = os.Getenv("PLAYMESH_UPLOAD_KEY_PEPPER")
+	c.Relay.TURNSharedSecret = envOr(
+		"PLAYMESH_TURN_SHARED_SECRET",
+		c.Relay.TURNSharedSecret,
+	)
 	return err
 }
 
@@ -594,20 +617,36 @@ func (c Config) Validate() error {
 		}
 	}
 	if c.Relay.TunnelTTLSeconds < 1 ||
-		c.Relay.PendingConnectionTimeoutSeconds < 1 ||
-		c.Relay.IdleTimeoutSeconds < 1 ||
 		c.Relay.MaxTunnels < 1 ||
 		c.Relay.MaxConnectionsPerTunnel < 1 ||
 		c.Relay.MaxConnectionsPerIP < 1 {
 		return errors.New("relay 限制必须为正整数")
 	}
 	if c.Relay.TunnelTTLSeconds > 7*24*60*60 ||
-		c.Relay.PendingConnectionTimeoutSeconds > 300 ||
-		c.Relay.IdleTimeoutSeconds > 24*60*60 ||
 		c.Relay.MaxTunnels > 100000 ||
 		c.Relay.MaxConnectionsPerTunnel > 1024 ||
 		c.Relay.MaxConnectionsPerIP > 4096 {
 		return errors.New("relay 限制超过平台允许上界")
+	}
+	if c.SupportsGameRelay {
+		if err := validateListen("relay.turnUdpListen", c.Relay.TURNUDPListen); err != nil {
+			return err
+		}
+		if err := validateListen("relay.turnTcpListen", c.Relay.TURNTCPListen); err != nil {
+			return err
+		}
+		if ip := net.ParseIP(strings.TrimSpace(c.Relay.TURNPublicIP)); ip == nil || ip.To4() == nil {
+			return errors.New("relay.turnPublicIp 必须是公网 IPv4 地址")
+		}
+		if c.Relay.TURNPublicPort < 1 || c.Relay.TURNPublicPort > 65535 ||
+			c.Relay.TURNMinPort < 1024 || c.Relay.TURNMaxPort > 65535 ||
+			c.Relay.TURNMinPort > c.Relay.TURNMaxPort {
+			return errors.New("TURN 公共端口或中继端口范围无效")
+		}
+		if strings.TrimSpace(c.Relay.TURNRealm) == "" ||
+			len(c.Relay.TURNSharedSecret) < 32 {
+			return errors.New("TURN realm 不能为空且共享密钥至少需要 32 字节")
+		}
 	}
 	if c.Mail.Enabled {
 		if c.Mail.Host == "" || c.Mail.Port < 1 || c.Mail.Port > 65535 ||
@@ -833,12 +872,4 @@ func envInt(name string, fallback int) (int, error) {
 
 func (r Relay) TunnelTTL() time.Duration {
 	return time.Duration(r.TunnelTTLSeconds) * time.Second
-}
-
-func (r Relay) PendingConnectionTimeout() time.Duration {
-	return time.Duration(r.PendingConnectionTimeoutSeconds) * time.Second
-}
-
-func (r Relay) IdleTimeout() time.Duration {
-	return time.Duration(r.IdleTimeoutSeconds) * time.Second
 }

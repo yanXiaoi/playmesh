@@ -1,33 +1,78 @@
 package relay
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
-	"io"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"go-server/internal/config"
 )
 
 var (
-	ErrTunnelNotFound  = errors.New("隧道不存在或已过期")
-	ErrTunnelLimit     = errors.New("隧道数量已达上限")
-	ErrConnectionLimit = errors.New("隧道连接数量已达上限")
-	ErrHostUnavailable = errors.New("主机暂时没有可用连接")
-	ErrUnauthorized    = errors.New("隧道凭证无效")
+	ErrTunnelNotFound  = errors.New("WebRTC 会话不存在或已过期")
+	ErrTunnelLimit     = errors.New("WebRTC 会话数量已达上限")
+	ErrConnectionLimit = errors.New("WebRTC 会话玩家数量已达上限")
+	ErrHostUnavailable = errors.New("Authority 信令端当前不可用")
+	ErrUnauthorized    = errors.New("WebRTC 会话凭证无效")
 )
 
 type Credentials struct {
-	TunnelID       string    `json:"tunnelId"`
-	HostLease      string    `json:"hostLease"`
-	JoinCapability string    `json:"joinCapability"`
-	ExpiresAt      time.Time `json:"expiresAt"`
+	Type            string      `json:"type"`
+	ProtocolVersion string      `json:"protocolVersion"`
+	Timestamp       int64       `json:"timestamp"`
+	RequestID       string      `json:"requestId"`
+	TunnelID        string      `json:"tunnelId"`
+	HostLease       string      `json:"hostLease"`
+	JoinCapability  string      `json:"joinCapability"`
+	ExpiresAt       time.Time   `json:"expiresAt"`
+	ICEServers      []ICEServer `json:"iceServers"`
+}
+
+type ICEServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
+type SignalFrame struct {
+	Type            string          `json:"type"`
+	ProtocolVersion string          `json:"protocolVersion"`
+	Timestamp       int64           `json:"timestamp"`
+	RequestID       string          `json:"requestId"`
+	PeerID          string          `json:"peerId,omitempty"`
+	Payload         json.RawMessage `json:"payload,omitempty"`
+	Reason          string          `json:"reason,omitempty"`
+}
+
+type signalPeer struct {
+	conn                    *websocket.Conn
+	connectionConfiguration json.RawMessage
+	mutex                   sync.Mutex
+}
+
+func (p *signalPeer) write(frame SignalFrame) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	frame, err := normalizeSignalFrame(frame)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	return p.conn.Write(ctx, websocket.MessageText, data)
 }
 
 type Manager struct {
@@ -46,25 +91,25 @@ type Tunnel struct {
 	id             string
 	hostLeaseHash  [32]byte
 	capabilityHash [32]byte
-	expiresAt      time.Time
+	attachDeadline time.Time
 	maxConnections int
 
-	mutex       sync.Mutex
-	closed      bool
-	pending     chan net.Conn
-	connections map[net.Conn]struct{}
+	mutex   sync.Mutex
+	closed  bool
+	host    *signalPeer
+	clients map[string]*signalPeer
 }
 
 type Stats struct {
-	Tunnels                int   `json:"tunnels"`
-	PendingHostConnections int   `json:"pendingHostConnections"`
-	TrackedConnections     int   `json:"trackedConnections"`
-	ActivePairs            int64 `json:"activePairs"`
-	TotalPairs             int64 `json:"totalPairs"`
-	BytesHostToClient      int64 `json:"bytesHostToClient"`
-	BytesClientToHost      int64 `json:"bytesClientToHost"`
-	MaxTunnels             int   `json:"maxTunnels"`
-	UpdatedAt              int64 `json:"updatedAt"`
+	Transport          string `json:"transport"`
+	Tunnels            int    `json:"tunnels"`
+	TrackedConnections int    `json:"trackedConnections"`
+	ActivePairs        int64  `json:"activePairs"`
+	TotalPairs         int64  `json:"totalPairs"`
+	BytesHostToClient  int64  `json:"bytesHostToClient"`
+	BytesClientToHost  int64  `json:"bytesClientToHost"`
+	MaxTunnels         int    `json:"maxTunnels"`
+	UpdatedAt          int64  `json:"updatedAt"`
 }
 
 func NewManager(cfg config.Relay) *Manager {
@@ -90,11 +135,11 @@ func (m *Manager) Close() {
 	m.tunnels = make(map[string]*Tunnel)
 	m.mutex.Unlock()
 	for _, tunnel := range tunnels {
-		tunnel.close()
+		m.activePairs.Add(-int64(tunnel.close("服务正在关闭")))
 	}
 }
 
-func (m *Manager) Create() (Credentials, error) {
+func (m *Manager) Create(requestID string) (Credentials, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	if len(m.tunnels) >= m.config.MaxTunnels {
@@ -112,20 +157,44 @@ func (m *Manager) Create() (Credentials, error) {
 	if err != nil {
 		return Credentials{}, err
 	}
-	expiresAt := time.Now().Add(m.config.TunnelTTL())
+	credentialExpiresAt := time.Now().Add(m.config.TunnelTTL())
+	iceServers, err := turnICEServers(
+		m.config, tunnelID, time.Until(credentialExpiresAt),
+	)
+	if err != nil {
+		return Credentials{}, err
+	}
 	m.tunnels[tunnelID] = &Tunnel{
-		id:             tunnelID,
-		hostLeaseHash:  sha256.Sum256([]byte(hostLease)),
+		id: tunnelID, hostLeaseHash: sha256.Sum256([]byte(hostLease)),
 		capabilityHash: sha256.Sum256([]byte(capability)),
-		expiresAt:      expiresAt,
+		attachDeadline: credentialExpiresAt,
 		maxConnections: m.config.MaxConnectionsPerTunnel,
-		pending:        make(chan net.Conn, m.config.MaxConnectionsPerTunnel),
-		connections:    make(map[net.Conn]struct{}),
+		clients:        make(map[string]*signalPeer),
 	}
 	return Credentials{
+		Type: "playmesh.relay.credentials", ProtocolVersion: config.RelayProtocolVersion,
+		Timestamp: time.Now().UnixMilli(), RequestID: requestID,
 		TunnelID: tunnelID, HostLease: hostLease,
-		JoinCapability: capability, ExpiresAt: expiresAt.UTC(),
+		JoinCapability: capability, ExpiresAt: credentialExpiresAt.UTC(),
+		ICEServers: iceServers,
 	}, nil
+}
+
+func normalizeSignalFrame(frame SignalFrame) (SignalFrame, error) {
+	if frame.ProtocolVersion == "" {
+		frame.ProtocolVersion = config.RelayProtocolVersion
+	}
+	if frame.Timestamp == 0 {
+		frame.Timestamp = time.Now().UnixMilli()
+	}
+	if frame.RequestID == "" {
+		requestID, err := randomToken(12)
+		if err != nil {
+			return SignalFrame{}, err
+		}
+		frame.RequestID = requestID
+	}
+	return frame, nil
 }
 
 func (m *Manager) AuthenticateHost(id, lease string) (*Tunnel, error) {
@@ -164,74 +233,179 @@ func (m *Manager) Delete(id string, tunnel *Tunnel) {
 		delete(m.tunnels, id)
 	}
 	m.mutex.Unlock()
-	tunnel.close()
+	m.activePairs.Add(-int64(tunnel.close("WebRTC 会话已关闭")))
 }
 
 func (m *Manager) get(id string) (*Tunnel, error) {
 	m.mutex.RLock()
 	tunnel := m.tunnels[id]
 	m.mutex.RUnlock()
-	if tunnel == nil || time.Now().After(tunnel.expiresAt) {
-		if tunnel != nil {
-			m.Delete(id, tunnel)
-		}
+	if tunnel == nil {
+		return nil, ErrTunnelNotFound
+	}
+	tunnel.mutex.Lock()
+	expired := tunnel.closed ||
+		(tunnel.host == nil && time.Now().After(tunnel.attachDeadline))
+	tunnel.mutex.Unlock()
+	if expired {
+		m.Delete(id, tunnel)
 		return nil, ErrTunnelNotFound
 	}
 	return tunnel, nil
 }
 
-func (m *Manager) AddHost(tunnel *Tunnel, conn net.Conn) error {
-	if !tunnel.add(conn) {
-		return ErrConnectionLimit
+func (m *Manager) AttachHost(tunnel *Tunnel, connection *websocket.Conn) (*signalPeer, error) {
+	peer := &signalPeer{conn: connection}
+	tunnel.mutex.Lock()
+	if tunnel.closed {
+		tunnel.mutex.Unlock()
+		return nil, ErrTunnelNotFound
 	}
-	select {
-	case tunnel.pending <- conn:
-		return nil
-	default:
-		tunnel.remove(conn)
-		return ErrConnectionLimit
+	previous := tunnel.host
+	tunnel.host = peer
+	type attachedClient struct {
+		id            string
+		configuration json.RawMessage
 	}
-}
-
-func (m *Manager) PairClient(tunnel *Tunnel, client net.Conn) error {
-	if !tunnel.add(client) {
-		return ErrConnectionLimit
-	}
-	timer := time.NewTimer(m.config.PendingConnectionTimeout())
-	defer timer.Stop()
-	var host net.Conn
-	select {
-	case host = <-tunnel.pending:
-	case <-timer.C:
-		tunnel.remove(client)
-		return ErrHostUnavailable
-	}
-	go m.pipe(tunnel, host, client)
-	return nil
-}
-
-func (m *Manager) pipe(tunnel *Tunnel, host, client net.Conn) {
-	m.activePairs.Add(1)
-	m.totalPairs.Add(1)
-	defer m.activePairs.Add(-1)
-	hostConnection := host
-	clientConnection := client
-	host = &idleConn{Conn: hostConnection, timeout: m.config.IdleTimeout()}
-	client = &idleConn{Conn: clientConnection, timeout: m.config.IdleTimeout()}
-	var once sync.Once
-	closePair := func() {
-		once.Do(func() {
-			tunnel.remove(hostConnection)
-			tunnel.remove(clientConnection)
+	clients := make([]attachedClient, 0, len(tunnel.clients))
+	for id, client := range tunnel.clients {
+		clients = append(clients, attachedClient{
+			id:            id,
+			configuration: client.connectionConfiguration,
 		})
 	}
-	copyOne := func(destination, source net.Conn, counter *atomic.Int64) {
-		count, _ := io.Copy(destination, source)
-		counter.Add(count)
-		closePair()
+	tunnel.mutex.Unlock()
+	if previous != nil {
+		_ = previous.conn.Close(websocket.StatusPolicyViolation, "Authority 信令连接已被替换")
 	}
-	go copyOne(host, client, &m.bytesClientToHost)
-	copyOne(client, host, &m.bytesHostToClient)
+	for _, client := range clients {
+		_ = peer.write(SignalFrame{
+			Type: "peer.joined", PeerID: client.id,
+			Payload: client.configuration,
+		})
+	}
+	return peer, nil
+}
+
+func (m *Manager) DetachHost(tunnel *Tunnel, peer *signalPeer) {
+	tunnel.mutex.Lock()
+	detached := false
+	if tunnel.host == peer {
+		tunnel.host = nil
+		detached = true
+	}
+	tunnel.mutex.Unlock()
+	if detached {
+		// 邀请的真实租约就是当前 Authority 信令连接。主机断开后立即
+		// 删除隧道，使原二维码和原链接同时失效；替换连接的旧 peer
+		// 不得误删已经接管同一租约的新连接。
+		m.Delete(tunnel.id, tunnel)
+	}
+}
+
+func (m *Manager) AttachClient(tunnel *Tunnel, connection *websocket.Conn) (string, *signalPeer, error) {
+	peerID, err := randomToken(18)
+	if err != nil {
+		return "", nil, err
+	}
+	credentialExpiresAt := time.Now().Add(m.config.TunnelTTL())
+	iceServers, err := turnICEServers(
+		m.config, tunnel.id+":"+peerID, m.config.TunnelTTL(),
+	)
+	if err != nil {
+		return "", nil, err
+	}
+	connectionConfiguration, err := json.Marshal(map[string]any{
+		"iceServers": iceServers,
+		"expiresAt":  credentialExpiresAt.UTC(),
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	peer := &signalPeer{
+		conn: connection, connectionConfiguration: connectionConfiguration,
+	}
+	tunnel.mutex.Lock()
+	if tunnel.closed {
+		tunnel.mutex.Unlock()
+		return "", nil, ErrTunnelNotFound
+	}
+	if tunnel.host == nil {
+		tunnel.mutex.Unlock()
+		return "", nil, ErrHostUnavailable
+	}
+	if len(tunnel.clients) >= tunnel.maxConnections {
+		tunnel.mutex.Unlock()
+		return "", nil, ErrConnectionLimit
+	}
+	tunnel.clients[peerID] = peer
+	host := tunnel.host
+	tunnel.mutex.Unlock()
+	m.activePairs.Add(1)
+	m.totalPairs.Add(1)
+	// 两端必须拿到同一组刚签发的临时 ICE 凭据。先通知主机，再允许
+	// 加入端发送 offer，避免长时间分享后的旧 TURN 凭据被继续复用。
+	if err := host.write(SignalFrame{
+		Type: "peer.joined", PeerID: peerID,
+		Payload: connectionConfiguration,
+	}); err != nil {
+		m.DetachClient(tunnel, peerID, peer)
+		return "", nil, ErrHostUnavailable
+	}
+	if err := peer.write(SignalFrame{
+		Type: "connected", PeerID: peerID,
+		Payload: connectionConfiguration,
+	}); err != nil {
+		m.DetachClient(tunnel, peerID, peer)
+		return "", nil, err
+	}
+	return peerID, peer, nil
+}
+
+func (m *Manager) DetachClient(tunnel *Tunnel, peerID string, peer *signalPeer) {
+	tunnel.mutex.Lock()
+	if tunnel.clients[peerID] != peer {
+		tunnel.mutex.Unlock()
+		return
+	}
+	delete(tunnel.clients, peerID)
+	host := tunnel.host
+	tunnel.mutex.Unlock()
+	m.activePairs.Add(-1)
+	if host != nil {
+		_ = host.write(SignalFrame{Type: "peer.left", PeerID: peerID})
+	}
+}
+
+func (m *Manager) RouteFromHost(tunnel *Tunnel, frame SignalFrame, size int) bool {
+	if frame.PeerID == "" ||
+		(frame.Type != "description" && frame.Type != "candidate" &&
+			frame.Type != "peer.error" && frame.Type != "close") {
+		return false
+	}
+	tunnel.mutex.Lock()
+	client := tunnel.clients[frame.PeerID]
+	tunnel.mutex.Unlock()
+	if client == nil {
+		return true
+	}
+	m.bytesHostToClient.Add(int64(size))
+	return client.write(frame) == nil
+}
+
+func (m *Manager) RouteFromClient(tunnel *Tunnel, peerID string, frame SignalFrame, size int) bool {
+	if frame.Type != "description" && frame.Type != "candidate" && frame.Type != "close" {
+		return false
+	}
+	frame.PeerID = peerID
+	tunnel.mutex.Lock()
+	host := tunnel.host
+	tunnel.mutex.Unlock()
+	if host == nil {
+		return false
+	}
+	m.bytesClientToHost.Add(int64(size))
+	return host.write(frame) == nil
 }
 
 func (m *Manager) Stats() Stats {
@@ -241,16 +415,17 @@ func (m *Manager) Stats() Stats {
 		tunnels = append(tunnels, tunnel)
 	}
 	m.mutex.RUnlock()
-	pending := 0
 	connections := 0
 	for _, tunnel := range tunnels {
 		tunnel.mutex.Lock()
-		pending += len(tunnel.pending)
-		connections += len(tunnel.connections)
+		connections += len(tunnel.clients)
+		if tunnel.host != nil {
+			connections++
+		}
 		tunnel.mutex.Unlock()
 	}
 	return Stats{
-		Tunnels: len(tunnels), PendingHostConnections: pending,
+		Transport: "webrtc-signaling", Tunnels: len(tunnels),
 		TrackedConnections: connections, ActivePairs: m.activePairs.Load(),
 		TotalPairs:        m.totalPairs.Load(),
 		BytesHostToClient: m.bytesHostToClient.Load(),
@@ -259,55 +434,28 @@ func (m *Manager) Stats() Stats {
 	}
 }
 
-// idleConn 在每次读写时刷新超时，避免活跃的大文件传输被固定截止时间中断。
-type idleConn struct {
-	net.Conn
-	timeout time.Duration
-}
-
-func (c *idleConn) Read(buffer []byte) (int, error) {
-	_ = c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
-	return c.Conn.Read(buffer)
-}
-
-func (c *idleConn) Write(buffer []byte) (int, error) {
-	_ = c.Conn.SetWriteDeadline(time.Now().Add(c.timeout))
-	return c.Conn.Write(buffer)
-}
-
-func (t *Tunnel) add(conn net.Conn) bool {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	if t.closed || len(t.connections) >= t.maxConnections*2 {
-		return false
-	}
-	t.connections[conn] = struct{}{}
-	return true
-}
-
-func (t *Tunnel) remove(conn net.Conn) {
-	t.mutex.Lock()
-	delete(t.connections, conn)
-	t.mutex.Unlock()
-	_ = conn.Close()
-}
-
-func (t *Tunnel) close() {
+func (t *Tunnel) close(reason string) int {
 	t.mutex.Lock()
 	if t.closed {
 		t.mutex.Unlock()
-		return
+		return 0
 	}
 	t.closed = true
-	connections := make([]net.Conn, 0, len(t.connections))
-	for conn := range t.connections {
-		connections = append(connections, conn)
+	activeClients := len(t.clients)
+	peers := make([]*signalPeer, 0, len(t.clients)+1)
+	if t.host != nil {
+		peers = append(peers, t.host)
 	}
-	t.connections = make(map[net.Conn]struct{})
+	for _, peer := range t.clients {
+		peers = append(peers, peer)
+	}
+	t.host = nil
+	t.clients = make(map[string]*signalPeer)
 	t.mutex.Unlock()
-	for _, conn := range connections {
-		_ = conn.Close()
+	for _, peer := range peers {
+		_ = peer.conn.Close(websocket.StatusNormalClosure, reason)
 	}
+	return activeClients
 }
 
 func (m *Manager) cleanupLoop() {
@@ -320,7 +468,10 @@ func (m *Manager) cleanupLoop() {
 			m.mutex.RLock()
 			expired := make(map[string]*Tunnel)
 			for id, tunnel := range m.tunnels {
-				if now.After(tunnel.expiresAt) {
+				tunnel.mutex.Lock()
+				shouldExpire := tunnel.host == nil && now.After(tunnel.attachDeadline)
+				tunnel.mutex.Unlock()
+				if shouldExpire {
 					expired[id] = tunnel
 				}
 			}

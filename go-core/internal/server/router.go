@@ -2,11 +2,14 @@ package server
 
 import "net/http"
 
-func NewRouter(healthHandler, sessionHandler http.Handler) http.Handler {
+func NewRouter(healthHandler, sessionHandler http.Handler, optionalHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/health", healthHandler)
 	mux.Handle("/v1/sessions", sessionHandler)
 	mux.Handle("/v1/sessions/", sessionHandler)
+	if len(optionalHandlers) > 0 && optionalHandlers[0] != nil {
+		mux.Handle("/v1/relay/", optionalHandlers[0])
+	}
 	return allowGameSDKOrigins(mux)
 }
 

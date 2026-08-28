@@ -112,12 +112,49 @@ interface PlaymeshRpcRequestOptions {
   timeoutMs?: number;
 }
 
+/** RPC 流请求可发送的字节源。File 继承自 Blob。 */
+type PlaymeshRpcStreamSource = Blob | ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>;
+
+/** RPC 流进度。发送端表示已交给网络栈，接收端表示已被 handler 消费。 */
+type PlaymeshRpcStreamProgressHandler = (
+  transferredBytes: number,
+  totalBytes: number | null,
+) => void;
+
+/** Authority RPC 流请求配置。 */
+interface PlaymeshRpcStreamRequestOptions {
+  /** 整个上传与 Authority 处理的超时毫秒数，必须是 1000～1800000 的整数，默认 300000。 */
+  timeoutMs?: number;
+  /** 流的逻辑文件名；File 默认使用自身名称，其他来源默认 `stream.bin`。 */
+  name?: string;
+  /** 流的媒体类型；Blob 默认使用自身 type，其他来源默认 `application/octet-stream`。 */
+  type?: string;
+  /** 监听 source 已交给浏览器网络栈的字节数；回调抛错不会中断传输。 */
+  onProgress?: PlaymeshRpcStreamProgressHandler;
+}
+
+/** Authority RPC 流监听配置。 */
+interface PlaymeshRpcStreamHandlerOptions {
+  /** 监听 handler 已消费的字节数；回调抛错不会中断传输。 */
+  onProgress?: PlaymeshRpcStreamProgressHandler;
+}
+
 /** Authority RPC handler 收到的可信上下文。 */
 interface PlaymeshRpcContext extends PlaymeshAuthorityContext {
   /** Core 生成的请求 ID，可用于 Authority 业务日志。 */
   requestId: string;
   /** 已通过 SDK 校验的精确监听路径。 */
   path: string;
+}
+
+/** Authority 流请求 handler 收到的可信上下文。 */
+interface PlaymeshRpcStreamContext extends PlaymeshRpcContext {
+  /** SDK 规范化后的逻辑文件名。 */
+  name: string;
+  /** SDK 规范化后的媒体类型。 */
+  type: string;
+  /** 已知的源字节数；ReadableStream 未知长度时为 `null`。 */
+  size: number | null;
 }
 
 /** Binary Channel 的转发方式。`authority` 先由 Authority 审核，`relay` 直接转发。 */
@@ -298,7 +335,7 @@ interface PlaymeshAppBootstrap {
   /** 当前页面是否连接到 Playmesh App 原生 Bridge。 */
   readonly available: boolean;
   /** 当前 App Bridge SDK 版本。 */
-  readonly sdkVersion: "3.3.0";
+  readonly sdkVersion: "3.5.0";
   /** App 自动注入的本机身份；普通浏览器为 `null`。 */
   readonly identity: PlaymeshAppIdentity | null;
   /** App 提供的受控运行环境；普通浏览器为 `null`。 */
@@ -379,6 +416,11 @@ interface PlaymeshStorageBucket {
   clearData(): Promise<void>;
   /** 上传二进制文件；平台以毫秒时间戳重命名并保留安全后缀，返回同源 `/bucket/...` 地址。 */
   upload(file: File): Promise<string>;
+  /**
+   * 流式上传字节源。ReadableStream 必须通过 options.name 提供文件名；实现只保留固定
+   * 大小缓冲并传播背压，不会把完整文件装入内存。
+   */
+  upload(source: PlaymeshRpcStreamSource, options: { name: string; type?: string }): Promise<string>;
 }
 
 interface PlaymeshAppUiOptions {
@@ -387,6 +429,11 @@ interface PlaymeshAppUiOptions {
   /** 普通浏览器是否显示可拖动的悬浮菜单按钮；默认 `true`。 */
   floatingButton?: boolean;
 }
+
+/** Android 系统返回、桌面返回键或浏览器悬浮菜单触发后的后续流程决策。 */
+type PlaymeshSystemMenuDecision = "EXIT" | "NEXT" | "STOP";
+/** @deprecated 使用 `PlaymeshSystemMenuDecision`。 */
+type PlaymeshAppBackDecision = PlaymeshSystemMenuDecision;
 
 interface PlaymeshAppUiApi {
   /** 浏览器专用初始化：启用兜底游戏菜单但不创建悬浮球；App WebView 中返回 `false`。 @playmesh-completion playmesh.app.ui.initializeBrowser */
@@ -400,10 +447,22 @@ interface PlaymeshAppUiApi {
   /** 订阅 SDK 游戏菜单成功关闭事件；只在打开到关闭的真实状态变化后触发。 @playmesh-completion playmesh.app.ui.onGameMenuClose */
   onGameMenuClose(callback: () => void): PlaymeshUnsubscribe;
   /**
-   * 订阅 Android 系统返回和 Esc；仅在 `configure({ fallbackUi: false })` 显式关闭 SDK 兜底面板后生效。
-   * 回调返回 `false` 阻止退出，返回 `true` 继续退出。未订阅时直接继续退出。 @playmesh-completion playmesh.app.ui.onBack
+   * 订阅 Android 系统返回、桌面返回键和浏览器悬浮菜单入口；入口事件到达后、产生默认效果前执行回调。
+   * `EXIT` 直接退出，`NEXT` 继续该入口的默认流程（仍遵守 `fallbackUi`），`STOP` 终止后续流程。
+   * 多个回调会全部执行；`STOP` 优先于 `EXIT`，`EXIT` 优先于 `NEXT`。 @playmesh-completion playmesh.app.ui.onSystemMenuRequest
    */
-  onBack(callback: () => boolean | Promise<boolean>): PlaymeshUnsubscribe;
+  onSystemMenuRequest(
+    callback: () => PlaymeshSystemMenuDecision |
+      Promise<PlaymeshSystemMenuDecision>,
+  ): PlaymeshUnsubscribe;
+  /**
+   * @deprecated 使用 `onSystemMenuRequest()`；此兼容别名具有完全相同的触发与决策语义。
+   * @playmesh-completion playmesh.app.ui.onBack
+   */
+  onBack(
+    callback: () => PlaymeshAppBackDecision |
+      Promise<PlaymeshAppBackDecision>,
+  ): PlaymeshUnsubscribe;
   /** 重新加载当前游戏文档。 @playmesh-completion playmesh.app.ui.restartGame */
   restartGame(): void;
   /** 打开“分享/邀请”；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.ui.openSharePanel */
@@ -427,7 +486,7 @@ interface PlaymeshAppUiApi {
 /** App Bridge 与统一平台 UI 能力。App WebView 和普通浏览器都会注入。 */
 interface PlaymeshAppApi {
   /** 当前 App Bridge SDK 版本。 */
-  readonly version: "3.3.0";
+  readonly version: "3.5.0";
   /** App Bridge 完成身份和能力插件注册表注入后 resolve；原生 Bridge 失败时 reject。 */
   readonly ready: Promise<PlaymeshAppBootstrap>;
   /** 当前页面是否运行在具有 App Bridge 的 Playmesh WebView 中。 @playmesh-completion playmesh.app.isAvailable */
@@ -485,7 +544,7 @@ interface PlaymeshAppApi {
 /** 游戏本体与对局公开 API。所有页面先等待 `playmesh.main.ready`。 */
 interface PlaymeshMainApi {
   /** 当前 Game SDK 版本。 */
-  readonly version: "4.1.0";
+  readonly version: "4.3.0";
   /** SDK、身份、能力确认和会话完成初始化后 resolve；初始化失败时 reject。 */
   readonly ready: Promise<PlaymeshBootstrap>;
   /** 当前页面对应的游戏声明。 */
@@ -549,12 +608,24 @@ interface PlaymeshMainApi {
      */
     request(path: string, data?: any, options?: PlaymeshRpcRequestOptions): Promise<any>;
     /**
+     * 向 Authority 发起字节流请求。File、Blob 和内存字节会由 SDK 自动建立请求体；
+     * ReadableStream 会原样转交给浏览器流式发送。结束由流 EOF 表示。
+     * @playmesh-completion playmesh.main.rpc.requestStream
+     */
+    requestStream(path: string, source: PlaymeshRpcStreamSource, options?: PlaymeshRpcStreamRequestOptions): Promise<any>;
+    /**
      * 监听一个精确 RPC path。只有 Authority Client 可以调用；handler 可以同步返回
      * 可传输值，也可以返回 Promise。
      * @returns 取消监听函数。
      * @playmesh-completion playmesh.main.rpc.onRequest
      */
     onRequest(path: string, handler: (data: any, context: PlaymeshRpcContext) => any | Promise<any>): PlaymeshUnsubscribe;
+    /**
+     * 监听一个精确 RPC 流 path。只有 Authority Client 可以调用；流只能消费一次。
+     * @returns 取消监听函数。
+     * @playmesh-completion playmesh.main.rpc.onStreamRequest
+     */
+    onStreamRequest(path: string, handler: (source: ReadableStream<Uint8Array>, context: PlaymeshRpcStreamContext) => any | Promise<any>, options?: PlaymeshRpcStreamHandlerOptions): PlaymeshUnsubscribe;
   };
   /** 多人会话内的透明二进制分发。SDK 按需维护一条受平台管控的 Binary WebSocket。 */
   readonly binary: {
@@ -616,6 +687,66 @@ interface PlaymeshApi {
 declare const playmesh: PlaymeshApi;
 interface Window { playmesh: PlaymeshApi; }
 
+/** SQLite 可传输参数和结果值。超出 JavaScript 安全整数范围的 INTEGER 以十进制字符串返回。 */
+type PlaymeshDatabaseValue = null | number | string | readonly number[];
+type PlaymeshDatabaseParameter = null | boolean | number | string;
+type PlaymeshDatabaseArguments = readonly PlaymeshDatabaseParameter[] |
+  Readonly<Record<string, PlaymeshDatabaseParameter>>;
+
+interface PlaymeshDatabaseChangeResult {
+  readonly changes: number;
+}
+
+interface PlaymeshDatabaseInsertResult extends PlaymeshDatabaseChangeResult {
+  readonly lastInsertRowId: string;
+}
+
+interface PlaymeshDatabaseDdl {
+  readonly type: "table" | "index";
+  readonly name: string;
+  readonly tableName: string;
+  readonly sql: string;
+}
+
+interface PlaymeshDatabaseTransaction {
+  /** 使用预编译语句查询；支持位置占位符和命名占位符，参数不会拼接到 SQL。 */
+  select<T extends Record<string, PlaymeshDatabaseValue> = Record<string, PlaymeshDatabaseValue>>(sql: string, args?: PlaymeshDatabaseArguments): Promise<T[]>;
+  /** 执行 UPDATE 或受支持的表/索引 DDL。 */
+  update(sql: string, args?: PlaymeshDatabaseArguments): Promise<PlaymeshDatabaseChangeResult>;
+  /** 执行 DELETE。 */
+  delete(sql: string, args?: PlaymeshDatabaseArguments): Promise<PlaymeshDatabaseChangeResult>;
+  /** 执行 INSERT 或 REPLACE。 */
+  insert(sql: string, args?: PlaymeshDatabaseArguments): Promise<PlaymeshDatabaseInsertResult>;
+  /** 返回事务连接内的原生表/索引 DDL；传名称时返回该表及其索引。 */
+  getDDL(name?: string): Promise<PlaymeshDatabaseDdl[]>;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
+interface PlaymeshDatabaseApi {
+  /** 打开或创建当前游戏 `data/db/` 目录下固定的 `_game.db`。 @playmesh-completion playmesh.main.db.open */
+  open(): Promise<{ readonly file: "_game.db" }>;
+  /** 使用预编译语句查询；数组绑定 `?`/`?NNN`。对象键 `name` 绑定 `:name`，也可传完整的 `:name`/`@name`/`$name`。 @playmesh-completion playmesh.main.db.select */
+  select<T extends Record<string, PlaymeshDatabaseValue> = Record<string, PlaymeshDatabaseValue>>(sql: string, args?: PlaymeshDatabaseArguments): Promise<T[]>;
+  /** 执行表级写 SQL。 @playmesh-completion playmesh.main.db.update */
+  update(sql: string, args?: PlaymeshDatabaseArguments): Promise<PlaymeshDatabaseChangeResult>;
+  /** 执行表级写 SQL。 @playmesh-completion playmesh.main.db.delete */
+  delete(sql: string, args?: PlaymeshDatabaseArguments): Promise<PlaymeshDatabaseChangeResult>;
+  /** 执行表级写 SQL。 @playmesh-completion playmesh.main.db.insert */
+  insert(sql: string, args?: PlaymeshDatabaseArguments): Promise<PlaymeshDatabaseInsertResult>;
+  /** 返回原生表/索引 DDL；传名称时返回该表及其索引。 @playmesh-completion playmesh.main.db.getDDL */
+  getDDL(name?: string): Promise<PlaymeshDatabaseDdl[]>;
+  /** 在一条独立 SQLite 连接上开始事务。 @playmesh-completion playmesh.main.db.beginTransaction */
+  beginTransaction(): Promise<PlaymeshDatabaseTransaction>;
+  /** 自动开始事务；回调成功后提交，抛错后回滚并重新抛出原错误。 @playmesh-completion playmesh.main.db.transaction */
+  transaction<T>(callback: (transaction: PlaymeshDatabaseTransaction) => T | Promise<T>): Promise<T>;
+}
+
+interface PlaymeshMainApi {
+  /** Authority 专用 SQLite；多连接 WAL 允许并发读取，但 SQLite 写入仍串行提交。 */
+  readonly db: PlaymeshDatabaseApi;
+}
+
 /** 当前设备独占的 App JSON Bucket；不会与 Authority 或其他玩家共享。 */
 interface PlaymeshAppStorageBucket {
   /** 读取 key；不存在时返回 `null`。 */
@@ -643,7 +774,7 @@ interface PlaymeshAppApi {
 interface PlaymeshAppUiApi {
   /**
    * 解除当前文档用于自动打开系统游戏菜单的按键与返回触发；只能在 `playmesh.app.ready` 完成后调用。
-   * 该操作不等于关闭兜底面板，也不会令 `onBack` 生效；需要自定义返回时应配置 `fallbackUi: false`。
+   * 该操作不等于关闭兜底面板，也不会取消 `onSystemMenuRequest` 回调；`NEXT` 仍会遵守此触发器状态。
    * 本操作单向且幂等，不影响显式打开的平台覆盖层。 @playmesh-completion playmesh.app.ui.disableSystemMenuTriggers
    */
   disableSystemMenuTriggers(): void;
@@ -681,4 +812,39 @@ interface PlaymeshAppLanApi {
 
 interface PlaymeshAppApi {
   readonly lan: PlaymeshAppLanApi;
+}
+
+interface PlaymeshWebRTCIceServer {
+  readonly urls: readonly string[];
+  readonly username?: string;
+  readonly credential?: string;
+}
+
+interface PlaymeshWebRTCSignalingEndpoint {
+  readonly type: "playmesh.webrtc-signaling-endpoint";
+  readonly version: 1;
+  /** Core 生成该描述符时的 Unix 毫秒时间戳。 */
+  readonly timestamp: number;
+  /** 可用于关联本次签发请求的稳定请求 ID。 */
+  readonly requestId: string;
+  /** 业务通道标识；真实隔离键还包含当前 sessionId 与 Core 认证的 playerId。 */
+  readonly identifier: string;
+  /** 一次性票据已经写入查询参数的短期 WebSocket 地址。 */
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly playerId: string;
+  readonly role: string;
+  /** 可直接传给 RTCPeerConnection({ iceServers })。 */
+  readonly iceServers: readonly PlaymeshWebRTCIceServer[];
+}
+
+interface PlaymeshAppSdk {
+  readonly webrtc: {
+    /**
+     * 获取当前多人会话中受身份约束的通用信令端点。Core 只中转 JSON payload，
+     * HTML 自行管理 SDP、ICE、媒体轨道、DataChannel、重启和关闭。
+     * @playmesh-completion playmesh.app.webrtc.getSignalingEndpoint
+     */
+    getSignalingEndpoint(identifier: string): Promise<PlaymeshWebRTCSignalingEndpoint>;
+  };
 }

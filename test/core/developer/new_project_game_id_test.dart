@@ -11,7 +11,7 @@ import 'package:playmesh/models/game_summary.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('new source project game ID matches the shared Android contract', () {
+  test('new project game ID matches the shared Android contract', () {
     final fixture =
         jsonDecode(
               File('test/fixtures/new_project_game_id.json').readAsStringSync(),
@@ -41,7 +41,7 @@ void main() {
   });
 
   test(
-    'only an explicitly marked source creation uses the Android policy',
+    'explicit source and GDevelop creation use the Android policy',
     () async {
       final root = await Directory.systemTemp.createTemp(
         'playmesh-new-project-id-',
@@ -62,15 +62,25 @@ void main() {
       expect(reopened.gameId, 'Com.Example.Game_2');
       expect(reopened.metadata['identityPolicy'], 'android_application_id_v1');
 
-      await expectLater(
-        () => service.createProject(
-          gameId: 'com.example.new-game',
-          name: 'Rejected New Identity',
-          kind: PlaymeshProjectKind.source,
-          requireAndroidApplicationId: true,
-        ),
-        throwsA(isA<FormatException>()),
+      final visual = await service.createProject(
+        gameId: 'Com.Example.Visual_2',
+        name: 'Visual Identity',
+        kind: PlaymeshProjectKind.gdevelop,
+        requireAndroidApplicationId: true,
       );
+      expect(visual.metadata['identityPolicy'], 'android_application_id_v1');
+
+      for (final kind in PlaymeshProjectKind.values) {
+        await expectLater(
+          () => service.createProject(
+            gameId: 'com.example.new-game',
+            name: 'Rejected New Identity',
+            kind: kind,
+            requireAndroidApplicationId: true,
+          ),
+          throwsA(isA<FormatException>()),
+        );
+      }
 
       final legacy = await service.createProject(
         gameId: 'com.example.legacy-game',
@@ -78,15 +88,6 @@ void main() {
         kind: PlaymeshProjectKind.source,
       );
       expect(legacy.metadata.containsKey('identityPolicy'), isFalse);
-      await expectLater(
-        () => service.createProject(
-          gameId: 'com.example.Visual_2',
-          name: 'Visual Identity',
-          kind: PlaymeshProjectKind.gdevelop,
-          requireAndroidApplicationId: true,
-        ),
-        throwsArgumentError,
-      );
     },
   );
 
@@ -125,7 +126,7 @@ void main() {
     },
   );
 
-  test('only source workspace create and CLI init opt into the new rule', () {
+  test('source workspace, GDevelop and CLI init opt into the shared rule', () {
     final operation = File(
       'lib/core/developer/operations/projects/projects_operation.dart',
     ).readAsStringSync();
@@ -137,6 +138,21 @@ void main() {
     ).readAsStringSync();
     final workspaceScript = File(
       'assets/playmesh-library/public/developer/workspace.js',
+    ).readAsStringSync();
+    final gdevelopManifest = File(
+      'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/'
+      'src/PlaymeshManifest/PlaymeshGDevelopManifestController.js',
+    ).readAsStringSync();
+    final gdevelopResolver = File(
+      'lib/core/developer/gdevelop_project_root_resolver.dart',
+    ).readAsStringSync();
+    final gdevelopCreateOperation = File(
+      'lib/core/developer/operations/gdevelop/'
+      'gdevelop_history_operation.dart',
+    ).readAsStringSync();
+    final gdevelopAllocationClient = File(
+      'assets/playmesh-library/public/GDevelop/playmesh/overlays/newIDE/app/'
+      'src/PlaymeshProjectImport/PlaymeshPortableImportAllocationClient.js',
     ).readAsStringSync();
 
     expect(operation, contains('requireAndroidApplicationId: true'));
@@ -155,6 +171,19 @@ void main() {
     expect(
       workspaceScript,
       contains('PlaymeshGameManifest.isValidNewProjectGameId(id)'),
+    );
+    expect(
+      gdevelopManifest,
+      contains('PlaymeshGameManifest.isValidNewProjectGameId(current)'),
+    );
+    expect(gdevelopResolver, contains('isValidPlaymeshNewProjectGameId'));
+    expect(
+      gdevelopCreateOperation,
+      contains('ProjectProvisioningService.validateNewProjectIdentity'),
+    );
+    expect(
+      gdevelopAllocationClient,
+      contains('PlaymeshGameManifest.isValidNewProjectGameId(value)'),
     );
     expect(
       workspaceScript,

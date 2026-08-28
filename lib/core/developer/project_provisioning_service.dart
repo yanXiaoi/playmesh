@@ -110,8 +110,7 @@ class ProjectProvisioningService {
        clock = clock ?? DateTime.now;
 
   static const metadataSchemaVersion = 1;
-  static const _androidApplicationIdIdentityPolicy =
-      'android_application_id_v1';
+  static const androidApplicationIdIdentityPolicy = 'android_application_id_v1';
   static final RegExp _legacyManagedGameIdPattern = RegExp(
     r'^[a-z0-9]+(?:[.-][a-z0-9]+)+$',
   );
@@ -127,64 +126,62 @@ class ProjectProvisioningService {
     required String name,
   }) {
     final normalizedGameId = gameId.trim();
-    final normalizedName = name.trim();
     if (!isValidPlaymeshGameId(normalizedGameId) ||
         !_legacyManagedGameIdPattern.hasMatch(normalizedGameId)) {
       throw const FormatException('项目 ID 必须是小写反向域名格式');
     }
-    if (normalizedName.isEmpty || normalizedName.length > 80) {
-      throw const FormatException('项目名称长度必须为 1 到 80 个字符');
-    }
-    return (gameId: normalizedGameId, name: normalizedName);
+    return (gameId: normalizedGameId, name: validateProjectName(name));
   }
 
-  /// Identity policy used only by the source workspace's create-project API.
-  /// It intentionally does not replace [validateIdentity], because existing
-  /// managed projects may contain a hyphen in their game ID.
-  static ({String gameId, String name}) validateNewSourceIdentity({
+  /// Identity policy shared by every persistent new-project entry point.
+  ///
+  /// It intentionally does not replace [validateIdentity], because opening,
+  /// previewing and updating an existing project must continue accepting its
+  /// previously persisted Playmesh game ID.
+  static ({String gameId, String name}) validateNewProjectIdentity({
     required String gameId,
     required String name,
   }) {
     final normalizedGameId = gameId.trim();
-    final normalizedName = name.trim();
     if (!isValidPlaymeshNewProjectGameId(normalizedGameId)) {
       throw const FormatException(
         '项目 ID 必须是 Android applicationId 格式：至少两段，以点分隔；'
         '每段以英文字母开头，且只能包含英文字母、数字和下划线；最长 64 个字符',
       );
     }
+    return (gameId: normalizedGameId, name: validateProjectName(name));
+  }
+
+  static String validateProjectName(String name) {
+    final normalizedName = name.trim();
     if (normalizedName.isEmpty || normalizedName.length > 80) {
       throw const FormatException('项目名称长度必须为 1 到 80 个字符');
     }
-    return (gameId: normalizedGameId, name: normalizedName);
+    return normalizedName;
   }
 
-  static String validateGameId(String gameId) => validateIdentity(
-    gameId: gameId,
-    // 只复用 gameId 规则；占位名称不会写入磁盘。
-    name: '_',
-  ).gameId;
-
-  static String _validateStoredGameId(
-    String gameId, {
-    required bool allowAndroidApplicationId,
-  }) {
+  /// Accepts both the legacy managed-project identity and the Android
+  /// applicationId identity used by newly created projects. This validator is
+  /// for addressing an already known project; callers that allocate a new
+  /// persistent project must use [validateNewProjectIdentity].
+  static String validateGameId(String gameId) {
     final normalized = gameId.trim();
     if ((_legacyManagedGameIdPattern.hasMatch(normalized) &&
             isValidPlaymeshGameId(normalized)) ||
-        (allowAndroidApplicationId &&
-            isValidPlaymeshNewProjectGameId(normalized))) {
+        isValidPlaymeshNewProjectGameId(normalized)) {
       return normalized;
     }
     throw const FormatException('项目 ID 无效');
   }
 
+  static String _validateStoredGameId(String gameId) => validateGameId(gameId);
+
   static ({String gameId, String name}) _validateStoredIdentity({
     required String gameId,
     required String name,
     required String? identityPolicy,
-  }) => identityPolicy == _androidApplicationIdIdentityPolicy
-      ? validateNewSourceIdentity(gameId: gameId, name: name)
+  }) => identityPolicy == androidApplicationIdIdentityPolicy
+      ? validateNewProjectIdentity(gameId: gameId, name: name)
       : validateIdentity(gameId: gameId, name: name);
 
   Future<ProvisionedProject> createProject({
@@ -195,15 +192,8 @@ class ProjectProvisioningService {
     Map<String, Object?> additionalMetadata = const {},
     Future<void> Function(Directory stagingRoot)? initialize,
   }) {
-    if (requireAndroidApplicationId && kind != PlaymeshProjectKind.source) {
-      throw ArgumentError.value(
-        kind,
-        'kind',
-        'Android applicationId 创建规则只适用于源码项目',
-      );
-    }
     final identity = requireAndroidApplicationId
-        ? validateNewSourceIdentity(gameId: gameId, name: name)
+        ? validateNewProjectIdentity(gameId: gameId, name: name)
         : validateIdentity(gameId: gameId, name: name);
     return _serialize(identity.gameId, () async {
       final projects = await _projectsRoot();
@@ -231,7 +221,7 @@ class ProjectProvisioningService {
           name: identity.name,
           kind: kind,
           identityPolicy: requireAndroidApplicationId
-              ? _androidApplicationIdIdentityPolicy
+              ? androidApplicationIdIdentityPolicy
               : null,
           createdAt: now,
           updatedAt: now,
@@ -264,10 +254,7 @@ class ProjectProvisioningService {
     required String gameId,
     required PlaymeshProjectKind kind,
   }) {
-    final normalized = _validateStoredGameId(
-      gameId,
-      allowAndroidApplicationId: kind == PlaymeshProjectKind.source,
-    );
+    final normalized = _validateStoredGameId(gameId);
     return _serialize(normalized, () async {
       final root = _projectRoot(await _projectsRoot(), normalized);
       if (!await root.exists()) throw ProjectProvisioningMissing(normalized);
@@ -290,10 +277,7 @@ class ProjectProvisioningService {
     required PlaymeshProjectKind kind,
     Map<String, Object?> additionalMetadata = const {},
   }) {
-    final normalizedGameId = _validateStoredGameId(
-      gameId,
-      allowAndroidApplicationId: kind == PlaymeshProjectKind.source,
-    );
+    final normalizedGameId = _validateStoredGameId(gameId);
     return _serialize(normalizedGameId, () async {
       final root = _projectRoot(await _projectsRoot(), normalizedGameId);
       if (!await root.exists()) {
@@ -310,17 +294,24 @@ class ProjectProvisioningService {
           created: false,
         );
       }
-      // Binding an untyped legacy package is not a new-project entry. Keep its
-      // historical identity policy; the Android policy is only persisted by
-      // createProject(requireAndroidApplicationId: true).
-      final identity = validateIdentity(gameId: gameId, name: name);
+      // Binding an untyped package is not a new-project entry. Preserve legacy
+      // IDs, but record the Android policy when the existing ID already meets
+      // that contract so later reads use the matching validator.
+      final usesAndroidApplicationId = isValidPlaymeshNewProjectGameId(
+        normalizedGameId,
+      );
+      final identity = usesAndroidApplicationId
+          ? validateNewProjectIdentity(gameId: gameId, name: name)
+          : validateIdentity(gameId: gameId, name: name);
       final now = clock().toUtc();
       final metadata = _composeMetadata(
         additionalMetadata,
         gameId: identity.gameId,
         name: identity.name,
         kind: kind,
-        identityPolicy: null,
+        identityPolicy: usesAndroidApplicationId
+            ? androidApplicationIdIdentityPolicy
+            : null,
         createdAt: now,
         updatedAt: now,
       );
@@ -342,10 +333,7 @@ class ProjectProvisioningService {
     String? name,
     required Map<String, Object?> Function(Map<String, Object?> current) update,
   }) {
-    final normalized = _validateStoredGameId(
-      gameId,
-      allowAndroidApplicationId: kind == PlaymeshProjectKind.source,
-    );
+    final normalized = _validateStoredGameId(gameId);
     return _serialize(normalized, () async {
       final root = _projectRoot(await _projectsRoot(), normalized);
       if (!await root.exists()) throw ProjectProvisioningMissing(normalized);
@@ -589,7 +577,7 @@ class ProjectProvisioningService {
         name is! String ||
         kind is! String ||
         (identityPolicy != null &&
-            identityPolicy != _androidApplicationIdIdentityPolicy) ||
+            identityPolicy != androidApplicationIdIdentityPolicy) ||
         createdAt is! String ||
         updatedAt is! String ||
         DateTime.tryParse(createdAt) == null ||
@@ -597,10 +585,6 @@ class ProjectProvisioningService {
       throw const FormatException('Playmesh 项目元数据无效');
     }
     final parsedKind = PlaymeshProjectKind.parse(kind);
-    if (identityPolicy == _androidApplicationIdIdentityPolicy &&
-        parsedKind != PlaymeshProjectKind.source) {
-      throw const FormatException('Playmesh 项目元数据无效');
-    }
     final identity = _validateStoredIdentity(
       gameId: gameId,
       name: name,

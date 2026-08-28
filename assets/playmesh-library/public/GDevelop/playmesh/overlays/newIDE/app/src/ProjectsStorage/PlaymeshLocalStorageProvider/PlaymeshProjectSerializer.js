@@ -279,7 +279,7 @@ export const prepareProjectPersistence = async (
   if (
     isUnassignedGDevelopGameId(project.getPackageName()) &&
     existingGameId &&
-    PlaymeshGameManifest.isAndroidPackageName(existingGameId)
+    PlaymeshGameManifest.isValidNewProjectGameId(existingGameId)
   ) {
     project.setPackageName(existingGameId);
   }

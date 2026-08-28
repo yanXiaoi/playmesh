@@ -22,7 +22,7 @@ func TestManifestVersionsComeFromLocalSDK(t *testing.T) {
 	}
 	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.1.0";`)
 	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.3.0";`)
-	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"9.9.9","appSdkVersion":"9.9.9","permissions":["keyboard"],"icon":"app/legacy.png","redundant":{"kept":false}}`)
+	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"9.9.9","appSdkVersion":"9.9.9","config":{"webRuntime":{"multithreading":true},"futureRuntime":{"preserved":true}},"permissions":["keyboard"],"icon":"app/legacy.png","redundant":{"kept":false}}`)
 
 	versions, err := versionsFromSDK(root)
 	if err != nil {
@@ -47,6 +47,10 @@ func TestManifestVersionsComeFromLocalSDK(t *testing.T) {
 	}
 	if _, exists := manifest["redundant"]; exists {
 		t.Fatalf("ordinary unknown field was preserved: %#v", manifest)
+	}
+	config, ok := manifest["config"].(map[string]any)
+	if !ok || config["futureRuntime"] == nil {
+		t.Fatalf("opaque config was not preserved: %#v", manifest)
 	}
 }
 
@@ -89,7 +93,7 @@ func TestInstallSDKUsesPlaymeshDirectoryAndPreservesLegacyState(t *testing.T) {
 	}
 }
 
-func TestInstallSDKRejectsUnsupportedVersionsWithoutWriting(t *testing.T) {
+func TestInstallSDKAcceptsVersionsUnknownToCLI(t *testing.T) {
 	encoded := func(value string) string {
 		return base64.StdEncoding.EncodeToString([]byte(value))
 	}
@@ -98,8 +102,8 @@ func TestInstallSDKRejectsUnsupportedVersionsWithoutWriting(t *testing.T) {
 		game string
 		app  string
 	}{
-		{name: "旧 Game SDK", game: "3.2.0", app: requiredAppSDKVersion},
-		{name: "旧 App SDK", game: requiredGameSDKVersion, app: "3.1.0"},
+		{name: "未来 SDK", game: "99.0.0", app: "88.0.0"},
+		{name: "非语义版本标识", game: "gateway-current", app: "app-next"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -125,53 +129,31 @@ func TestInstallSDKRejectsUnsupportedVersionsWithoutWriting(t *testing.T) {
 					),
 				},
 			}
-			_, err := installSDK(root, bundle)
-			if err == nil || !strings.Contains(err.Error(), "版本不受支持") {
-				t.Fatalf("非当前 SDK 必须被拒绝，得到 %v", err)
+			versions, err := installSDK(root, bundle)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if _, statErr := os.Stat(
-				filepath.Join(root, "playmesh", "sdk"),
-			); !errors.Is(statErr, os.ErrNotExist) {
-				t.Fatalf("拒绝的 SDK 不得写入项目: %v", statErr)
+			if versions.Game != testCase.game || versions.App != testCase.app {
+				t.Fatalf("安装后的版本标识被改写: %#v", versions)
+			}
+			if _, statErr := os.Stat(filepath.Join(
+				root,
+				"playmesh",
+				"sdk",
+				"playmesh-main.js",
+			)); statErr != nil {
+				t.Fatalf("SDK 未写入项目: %v", statErr)
 			}
 		})
 	}
 }
 
-func TestPackagePolicyRequiresExplicitCurrentRuntimeContract(t *testing.T) {
+func TestPackagePolicyRequiresRuntimeStructure(t *testing.T) {
 	cases := []struct {
 		name      string
 		configure func(map[string]any)
 		want      string
 	}{
-		{
-			name: "缺少 Game SDK 版本",
-			configure: func(manifest map[string]any) {
-				delete(manifest, "sdkVersion")
-			},
-			want: "main.json.sdkVersion 必须显式声明为 4.1.0",
-		},
-		{
-			name: "旧 Game SDK 版本",
-			configure: func(manifest map[string]any) {
-				manifest["sdkVersion"] = "3.2.0"
-			},
-			want: "main.json.sdkVersion 必须显式声明为 4.1.0",
-		},
-		{
-			name: "缺少 App SDK 版本",
-			configure: func(manifest map[string]any) {
-				delete(manifest, "appSdkVersion")
-			},
-			want: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
-		},
-		{
-			name: "旧 App SDK 版本",
-			configure: func(manifest map[string]any) {
-				manifest["appSdkVersion"] = "3.1.0"
-			},
-			want: "main.json.appSdkVersion 必须显式声明为 3.2.0 或 3.3.0",
-		},
 		{
 			name: "缺少游戏入口",
 			configure: func(manifest map[string]any) {
@@ -276,23 +258,34 @@ func TestPackagePolicyRequiresExplicitCurrentRuntimeContract(t *testing.T) {
 	}
 }
 
-func TestPackagePolicyAcceptsCompatibleAppSDKVersion(t *testing.T) {
-	manifest := map[string]any{
-		"appSdkVersion": minimumSupportedAppSDKVersion,
-	}
-	if err := requireManifestSDKVersion(
-		manifest,
-		"appSdkVersion",
-		minimumSupportedAppSDKVersion,
-		requiredAppSDKVersion,
-	); err != nil {
-		t.Fatalf("compatible App SDK version should be accepted: %v", err)
+func TestPackagePolicyDoesNotValidateSDKVersions(t *testing.T) {
+	for _, manifest := range []map[string]any{
+		{
+			"id":      "com.example.no-sdk-versions",
+			"entries": map[string]any{"game": "index.html"},
+		},
+		{
+			"id":            "com.example.future-sdk-versions",
+			"sdkVersion":    "999.0.0",
+			"appSdkVersion": "gateway-current",
+			"entries":       map[string]any{"game": "index.html"},
+		},
+	} {
+		root := t.TempDir()
+		encoded, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, filepath.Join(root, "main.json"), string(encoded))
+		if _, _, err := loadPackageManifestLayout(root, false); err != nil {
+			t.Fatalf("SDK version was validated by CLI policy: %v", err)
+		}
 	}
 }
 
 func TestBuildPackageExcludesPlaymeshSDK(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"},"permissions":["keyboard"],"icon":"app/legacy.png","redundant":true}`)
+	writeTestFile(t, filepath.Join(root, "main.json"), `{"id":"com.example.game","sdkVersion":"4.1.0","appSdkVersion":"3.3.0","entries":{"game":"index.html"},"config":{"webRuntime":{"multithreading":true},"futureRuntime":{"preserved":true}},"permissions":["keyboard"],"icon":"app/legacy.png","redundant":true}`)
 	writeTestFile(t, filepath.Join(root, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(root, "app", "index.html"), "<!doctype html>")
 	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), "private")
@@ -336,6 +329,10 @@ func TestBuildPackageExcludesPlaymeshSDK(t *testing.T) {
 	}
 	if _, exists := packedManifest["redundant"]; exists {
 		t.Fatalf("ordinary unknown field entered package: %#v", packedManifest)
+	}
+	config, ok := packedManifest["config"].(map[string]any)
+	if !ok || config["futureRuntime"] == nil {
+		t.Fatalf("opaque config did not enter package: %#v", packedManifest)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +139,95 @@ func TestBinaryRPCPreservesAuthorityErrorCode(t *testing.T) {
 		result.code != "save_rejected" ||
 		result.message != "存档未通过 Authority 校验" {
 		t.Fatalf("rpc error result = %#v", result)
+	}
+}
+
+func TestRPCStreamRoutesHTTPBodyToAuthorityWithoutBinaryPayload(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	payload := bytes.Repeat([]byte("playmesh-stream-"), 8192)
+	type uploadResult struct {
+		status int
+		body   []byte
+		err    error
+	}
+	uploaded := make(chan uploadResult, 1)
+	go func() {
+		query := url.Values{
+			"path":      {"/files/upload"},
+			"timeoutMs": {"5000"},
+			"name":      {"archive.bin"},
+			"size":      {strconv.Itoa(len(payload))},
+		}
+		request, err := http.NewRequest(
+			http.MethodPost,
+			server.URL+"/v1/sessions/"+host.Session.ID+"/rpc-stream?"+query.Encode(),
+			bytes.NewReader(payload),
+		)
+		if err != nil {
+			uploaded <- uploadResult{err: err}
+			return
+		}
+		request.Header.Set("Authorization", "Bearer "+guest.Credential.Token)
+		request.Header.Set("Content-Type", "application/octet-stream")
+		request.ContentLength = -1
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			uploaded <- uploadResult{err: err}
+			return
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		uploaded <- uploadResult{status: response.StatusCode, body: body, err: err}
+	}()
+
+	incoming := readBinaryRPCStreamIncoming(t, hostBinary)
+	if incoming.senderID != guest.Credential.Player.ID ||
+		incoming.path != "/files/upload" ||
+		incoming.name != "archive.bin" ||
+		incoming.contentType != "application/octet-stream" ||
+		incoming.contentLength != int64(len(payload)) {
+		t.Fatalf("rpc stream incoming = %#v", incoming)
+	}
+	consume, err := http.NewRequest(
+		http.MethodGet,
+		server.URL+incoming.consumePath,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consume.Header.Set("Authorization", "Bearer "+host.Credential.Token)
+	response, err := http.DefaultClient.Do(consume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamed, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Equal(streamed, payload) {
+		t.Fatalf("consume status=%d bytes=%d err=%v", response.StatusCode, len(streamed), err)
+	}
+
+	resultPayload := []byte{5, 0, 0, 0, 2, 'o', 'k'}
+	writeBinary(t, hostBinary, binaryRPCResponseFrame(
+		incoming.rpcID,
+		binaryStatusOK,
+		resultPayload,
+		"",
+		"",
+	))
+	result := <-uploaded
+	if result.err != nil || result.status != http.StatusOK ||
+		!bytes.Equal(result.body, resultPayload) {
+		t.Fatalf("upload result = %#v", result)
 	}
 }
 
@@ -897,6 +988,57 @@ type binaryTestRPCIncoming struct {
 	senderID string
 	path     string
 	payload  []byte
+}
+
+type binaryTestRPCStreamIncoming struct {
+	rpcID         uint64
+	senderID      string
+	path          string
+	consumePath   string
+	name          string
+	contentType   string
+	contentLength int64
+}
+
+func readBinaryRPCStreamIncoming(
+	t *testing.T,
+	connection *websocket.Conn,
+) binaryTestRPCStreamIncoming {
+	t.Helper()
+	data := readBinaryServerFrame(t, connection)
+	if len(data) < 28 || data[1] != binaryOpRPCStreamIncoming {
+		t.Fatalf("expected rpc stream incoming, got %x", data)
+	}
+	viewLengths := []int{
+		int(binary.BigEndian.Uint16(data[10:12])),
+		int(binary.BigEndian.Uint16(data[12:14])),
+		int(binary.BigEndian.Uint16(data[14:16])),
+		int(binary.BigEndian.Uint16(data[16:18])),
+		int(binary.BigEndian.Uint16(data[18:20])),
+	}
+	offset := 28
+	values := make([]string, len(viewLengths))
+	for index, length := range viewLengths {
+		if length == 0 || len(data) < offset+length {
+			t.Fatalf("invalid rpc stream incoming: %x", data)
+		}
+		values[index] = string(data[offset : offset+length])
+		offset += length
+	}
+	length := binary.BigEndian.Uint64(data[20:28])
+	contentLength := int64(length)
+	if length == rpcStreamUnknownLength {
+		contentLength = -1
+	}
+	return binaryTestRPCStreamIncoming{
+		rpcID:         binary.BigEndian.Uint64(data[2:10]),
+		senderID:      values[0],
+		path:          values[1],
+		consumePath:   values[2],
+		name:          values[3],
+		contentType:   values[4],
+		contentLength: contentLength,
+	}
 }
 
 func readBinaryRPCIncoming(

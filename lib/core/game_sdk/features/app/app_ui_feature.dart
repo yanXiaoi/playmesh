@@ -29,6 +29,9 @@ const appUiSdkSource = SdkSourceFragment(
   let appUiGameMenuOpen = false;
   const APP_UI_LOG_LIMIT = 500;
   const APP_UI_BACK_TIMEOUT_MS = 3000;
+  const APP_UI_BACK_EXIT = "EXIT";
+  const APP_UI_BACK_NEXT = "NEXT";
+  const APP_UI_BACK_STOP = "STOP";
   const APP_UI_INPUT_EVENTS = Object.freeze([
     "auxclick",
     "click",
@@ -120,19 +123,29 @@ const appUiSdkSource = SdkSourceFragment(
     );
   }
 
-  function onAppBack(callback) {
+  function onAppSystemMenuRequest(callback) {
     return subscribeAppUiEvent(
       appUiBackListeners,
       callback,
-      "onBack",
+      "onSystemMenuRequest",
     );
+  }
+
+  function normalizeAppUiBackDecision(value) {
+    if (value === APP_UI_BACK_STOP) return APP_UI_BACK_STOP;
+    if (value === APP_UI_BACK_NEXT) return APP_UI_BACK_NEXT;
+    if (value === APP_UI_BACK_EXIT) return APP_UI_BACK_EXIT;
+    global.console?.warn?.(
+      "Playmesh 返回回调必须返回 EXIT、NEXT 或 STOP",
+    );
+    return APP_UI_BACK_NEXT;
   }
 
   function settleAppUiBackCallback(callback) {
     try {
       const result = callback();
       if (!result || typeof result.then !== "function") {
-        return Promise.resolve(result !== false);
+        return Promise.resolve(normalizeAppUiBackDecision(result));
       }
       return new Promise((resolve) => {
         let settled = false;
@@ -143,43 +156,48 @@ const appUiSdkSource = SdkSourceFragment(
           resolve(decision);
         };
         const timer = global.setTimeout?.(
-          () => finish(true),
+          () => finish(APP_UI_BACK_NEXT),
           APP_UI_BACK_TIMEOUT_MS,
         );
         timer?.unref?.();
         Promise.resolve(result).then(
-          (value) => finish(value !== false),
+          (value) => finish(normalizeAppUiBackDecision(value)),
           (error) => {
             reportAppUiEventError("返回", error);
-            finish(true);
+            finish(APP_UI_BACK_NEXT);
           },
         );
       });
     } catch (error) {
       reportAppUiEventError("返回", error);
-      return Promise.resolve(true);
+      return Promise.resolve(APP_UI_BACK_NEXT);
     }
   }
 
-  async function shouldContinueAppUiBack() {
+  async function resolveAppUiBackDecision() {
     const decisions = await Promise.all(
       [...appUiBackListeners].map(settleAppUiBackCallback),
     );
-    return decisions.every(Boolean);
+    // 所有监听器都会执行；STOP 具有最高优先级并阻止一切后续流程。
+    if (decisions.includes(APP_UI_BACK_STOP)) return APP_UI_BACK_STOP;
+    if (decisions.includes(APP_UI_BACK_EXIT)) return APP_UI_BACK_EXIT;
+    return APP_UI_BACK_NEXT;
   }
 
-  function beginAppUiBackRequest() {
+  function beginAppUiBackRequest(continueRequest) {
     if (appUiBackPending) return true;
     if (appUiBackListeners.size === 0) return false;
     appUiBackPending = true;
-    void shouldContinueAppUiBack()
-      .then((shouldExit) => {
-        if (shouldExit) return exitAppUiGame();
-      })
-      .catch((error) => {
+    void resolveAppUiBackDecision()
+      .then((decision) => {
+        if (decision === APP_UI_BACK_STOP) return;
+        if (decision === APP_UI_BACK_EXIT) return exitAppUiGame();
+        return continueRequest();
+      }, (error) => {
         reportAppUiEventError("返回", error);
-        return exitAppUiGame();
+        return continueRequest();
       })
+      .catch((error) => reportAppUiEventError("返回后续流程", error))
       .finally(() => {
         appUiBackPending = false;
       });
@@ -700,9 +718,11 @@ const appUiSdkSource = SdkSourceFragment(
     }
   }
 
-  async function openAppUiJoinGame() {
+  function openAppUiJoinGame() {
     if (!appUiJoinAvailable()) return false;
-    const ui = await ensureAppFallbackUi();
+    // 该入口只由已挂载的兜底菜单触发。保持同步可以让首次焦点仍属于
+    // 当前 Enter/Space 用户操作，避免原生 WebView 在微任务后丢失键盘焦点样式。
+    const ui = appFallbackUi;
     if (!ui) return false;
     const generation = ++appUiJoinLoadGeneration;
     appUiJoinGames = new Map();
@@ -983,7 +1003,11 @@ const appUiSdkSource = SdkSourceFragment(
     };
     const ui = appFallbackUi;
     if (ui.menuButton) {
-      ui.menuButton.onclick = () => showAppGameSidebar();
+      ui.menuButton.onclick = () => {
+        if (!beginAppUiBackRequest(showAppGameSidebar)) {
+          void showAppGameSidebar();
+        }
+      };
     }
     ui.continueButton.onclick = () => hideAppGameSidebar();
     ui.scrim.onclick = () => hideAppGameSidebar();
@@ -1124,7 +1148,31 @@ const appUiSdkSource = SdkSourceFragment(
       controls[nextIndex].focus?.({ preventScroll: true });
       return true;
     };
+    const activateFocusedAppUiControl = (event) => {
+      if (event?.repeat || event?.isComposing) return false;
+      const key = event?.key;
+      const code = event?.code;
+      const keyCode = event?.keyCode;
+      if (key !== "Enter" && key !== " " && key !== "Spacebar" &&
+          code !== "NumpadEnter" && code !== "Space" &&
+          keyCode !== 13 && keyCode !== 32) {
+        return false;
+      }
+      const control = root.activeElement || global.document?.activeElement;
+      if (!control || control.tagName !== "BUTTON" ||
+          control.hidden || control.disabled) {
+        return false;
+      }
+      // WebView/TV 对 Shadow DOM 按钮的默认键盘 click 合成并不一致。
+      // 显式激活并取消默认行为，既保留当前可信用户操作，也避免浏览器二次 click。
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      event.stopImmediatePropagation?.();
+      control.click?.();
+      return true;
+    };
     root.addEventListener("keydown", (event) => {
+      if (activateFocusedAppUiControl(event)) return;
       if (!ui.layer.hidden && ui.logsLayer.hidden && ui.infoLayer.hidden &&
           ui.joinLayer.hidden) {
         let direction = null;
@@ -1147,10 +1195,8 @@ const appUiSdkSource = SdkSourceFragment(
       }
       event.preventDefault?.();
       event.stopPropagation?.();
-      if (!ui.joinLayer.hidden) closeAppUiJoinGame();
-      else if (!ui.logsLayer.hidden) ui.logsClose.onclick();
-      else if (!ui.infoLayer.hidden) ui.infoClose.onclick();
-      else if (!ui.layer.hidden) hideAppGameSidebar();
+      event.stopImmediatePropagation?.();
+      if (!handleAppUiNativeBack()) void exitAppUiGame();
     });
     installAppMenuButtonDrag(ui);
     refreshAppFallbackUi();
@@ -1270,9 +1316,9 @@ const appUiSdkSource = SdkSourceFragment(
     return showAppGameSidebar();
   }
 
-  function handleAppUiNativeBack() {
-    // 只有游戏显式关闭 SDK 兜底面板后，系统返回才交给游戏回调。
-    if (!appUiOptions.fallbackUi) return beginAppUiBackRequest();
+  function continueAppUiBack() {
+    // NEXT 只继续当前默认流程；已关闭的兜底面板绝不会被重新打开。
+    if (!appUiOptions.fallbackUi) return false;
     const ui = appFallbackUi;
     if (ui && !ui.joinLayer.hidden) {
       closeAppUiJoinGame();
@@ -1297,6 +1343,14 @@ const appUiSdkSource = SdkSourceFragment(
     }
     void showAppGameSidebar();
     return true;
+  }
+
+  function handleAppUiNativeBack() {
+    // 原生/键盘返回事件到达后先交给游戏决策，再执行该入口原有默认流程。
+    if (beginAppUiBackRequest(() => {
+      if (!continueAppUiBack()) return exitAppUiGame();
+    })) return true;
+    return continueAppUiBack();
   }
 
   function openAppSharePanel() {
@@ -1408,7 +1462,8 @@ const appUiSdkSource = SdkSourceFragment(
         code === 10009;
       if (!menu && !back) return;
       if (back) {
-        if (appUiSystemMenuTriggersDisabled && appUiOptions.fallbackUi) return;
+        if (appUiBackListeners.size === 0 &&
+            appUiSystemMenuTriggersDisabled && appUiOptions.fallbackUi) return;
         event.preventDefault?.();
         event.stopPropagation?.();
         event.stopImmediatePropagation?.();
@@ -1473,7 +1528,7 @@ const appUiSdkSource = SdkSourceFragment(
 interface PlaymeshAppUiApi {
   /**
    * 解除当前文档用于自动打开系统游戏菜单的按键与返回触发；只能在 `playmesh.app.ready` 完成后调用。
-   * 该操作不等于关闭兜底面板，也不会令 `onBack` 生效；需要自定义返回时应配置 `fallbackUi: false`。
+   * 该操作不等于关闭兜底面板，也不会取消 `onSystemMenuRequest` 回调；`NEXT` 仍会遵守此触发器状态。
    * 本操作单向且幂等，不影响显式打开的平台覆盖层。 @playmesh-completion playmesh.app.ui.disableSystemMenuTriggers
    */
   disableSystemMenuTriggers(): void;

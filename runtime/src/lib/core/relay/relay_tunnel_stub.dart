@@ -1,6 +1,8 @@
 import 'relay_tunnel_contract.dart';
 
 Future<RelayHostSession> startRelayHostSession({
+  required Uri coreBaseUri,
+  required String sessionId,
   required Uri serverBaseUri,
   required String sourceToken,
   required String hostPath,
@@ -13,9 +15,9 @@ Future<RelayHostSession> startRelayHostSession({
   throw UnsupportedError('当前平台不支持公共中转主机');
 }
 
-Future<RelayClientGateway> startRelayClientGateway({
+Future<RelayClientSession> startRelayClientSession({
+  required Uri coreBaseUri,
   required Uri invitationUri,
-  required RelayTarget target,
 }) {
   throw UnsupportedError('当前平台不支持公共中转客户端');
 }

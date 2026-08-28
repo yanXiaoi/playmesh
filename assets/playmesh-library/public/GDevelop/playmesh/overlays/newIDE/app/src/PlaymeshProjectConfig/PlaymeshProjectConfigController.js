@@ -38,6 +38,7 @@ export type PlaymeshProjectConfigControllerState = {|
   draftMinPlayers: number,
   draftMaxPlayers: number,
   draftTags: Array<string>,
+  draftWebRuntimeMultithreading: boolean,
   savedGameType: ?PlaymeshProjectGameType,
   revision: number,
   currentRevision: ?number,
@@ -80,6 +81,7 @@ const initialState = () /*: PlaymeshProjectConfigControllerState */ => ({
   draftMinPlayers: 1,
   draftMaxPlayers: 1,
   draftTags: [],
+  draftWebRuntimeMultithreading: false,
   savedGameType: null,
   revision: 0,
   currentRevision: null,
@@ -129,6 +131,7 @@ const draftRequiresSave = (
     minPlayers: number,
     maxPlayers: number,
     tags: Array<string>,
+    webRuntimeMultithreading: boolean,
   |} */
 ) /*: boolean */ => {
   const config = state.config;
@@ -137,7 +140,8 @@ const draftRequiresSave = (
     config.gameType !== draft.gameType ||
     config.minPlayers !== draft.minPlayers ||
     config.maxPlayers !== draft.maxPlayers ||
-    !sameTags(config.tags, draft.tags)
+    !sameTags(config.tags, draft.tags) ||
+    config.webRuntimeMultithreading !== draft.webRuntimeMultithreading
   );
 };
 
@@ -225,6 +229,8 @@ export class PlaymeshProjectConfigController {
         draftMinPlayers: response.config.minPlayers,
         draftMaxPlayers: response.config.maxPlayers,
         draftTags: response.config.tags,
+        draftWebRuntimeMultithreading:
+          response.config.webRuntimeMultithreading,
         savedGameType: response.config.gameType,
         revision: response.config.revision,
         currentRevision: response.config.revision,
@@ -247,6 +253,7 @@ export class PlaymeshProjectConfigController {
         draftMinPlayers: 1,
         draftMaxPlayers: 1,
         draftTags: [],
+        draftWebRuntimeMultithreading: false,
         savedGameType: null,
         revision: 0,
         currentRevision: 0,
@@ -268,6 +275,7 @@ export class PlaymeshProjectConfigController {
       draftMinPlayers: 1,
       draftMaxPlayers: 1,
       draftTags: [],
+      draftWebRuntimeMultithreading: false,
       savedGameType: null,
       revision: 0,
       currentRevision: null,
@@ -295,6 +303,7 @@ export class PlaymeshProjectConfigController {
       draftMinPlayers: 1,
       draftMaxPlayers: 1,
       draftTags: [],
+      draftWebRuntimeMultithreading: false,
       savedGameType: null,
       revision: 0,
       currentRevision: null,
@@ -325,6 +334,7 @@ export class PlaymeshProjectConfigController {
         draftMinPlayers: 1,
         draftMaxPlayers: 1,
         draftTags: [],
+        draftWebRuntimeMultithreading: false,
         savedGameType: null,
         revision: 0,
         currentRevision: null,
@@ -365,6 +375,7 @@ export class PlaymeshProjectConfigController {
       minPlayers: draftMinPlayers,
       maxPlayers: draftMaxPlayers,
       tags: this._state.draftTags,
+      webRuntimeMultithreading: this._state.draftWebRuntimeMultithreading,
     };
     this._setState({
       ...this._state,
@@ -389,6 +400,7 @@ export class PlaymeshProjectConfigController {
       minPlayers: value,
       maxPlayers,
       tags: this._state.draftTags,
+      webRuntimeMultithreading: this._state.draftWebRuntimeMultithreading,
     };
     this._setState({
       ...this._state,
@@ -412,6 +424,7 @@ export class PlaymeshProjectConfigController {
       minPlayers,
       maxPlayers: value,
       tags: this._state.draftTags,
+      webRuntimeMultithreading: this._state.draftWebRuntimeMultithreading,
     };
     this._setState({
       ...this._state,
@@ -434,10 +447,27 @@ export class PlaymeshProjectConfigController {
       minPlayers: this._state.draftMinPlayers,
       maxPlayers: this._state.draftMaxPlayers,
       tags,
+      webRuntimeMultithreading: this._state.draftWebRuntimeMultithreading,
     };
     this._setState({
       ...this._state,
       draftTags: tags,
+      requiresExplicitSave: draftRequiresSave(this._state, draft),
+    });
+  }
+
+  selectWebRuntimeMultithreading(value /*: boolean */) /*: void */ {
+    if (this._state.fieldDisabled || typeof value !== 'boolean') return;
+    const draft = {
+      gameType: this._state.draftGameType,
+      minPlayers: this._state.draftMinPlayers,
+      maxPlayers: this._state.draftMaxPlayers,
+      tags: this._state.draftTags,
+      webRuntimeMultithreading: value,
+    };
+    this._setState({
+      ...this._state,
+      draftWebRuntimeMultithreading: value,
       requiresExplicitSave: draftRequiresSave(this._state, draft),
     });
   }
@@ -449,6 +479,7 @@ export class PlaymeshProjectConfigController {
       attemptedMinPlayers,
       attemptedMaxPlayers,
       attemptedTags,
+      attemptedWebRuntimeMultithreading,
       currentRevision,
       operation,
     } /*: {|
@@ -457,6 +488,7 @@ export class PlaymeshProjectConfigController {
     attemptedMinPlayers: number,
     attemptedMaxPlayers: number,
     attemptedTags: Array<string>,
+    attemptedWebRuntimeMultithreading: boolean,
     currentRevision: number,
     operation: Operation,
   |} */
@@ -475,6 +507,7 @@ export class PlaymeshProjectConfigController {
         draftMinPlayers: attemptedMinPlayers,
         draftMaxPlayers: attemptedMaxPlayers,
         draftTags: attemptedTags,
+        draftWebRuntimeMultithreading: attemptedWebRuntimeMultithreading,
         currentRevision,
         requiresExplicitSave: !baseline.fieldDisabled,
         fieldDisabled: baseline.fieldDisabled,
@@ -500,6 +533,7 @@ export class PlaymeshProjectConfigController {
         draftMinPlayers: attemptedMinPlayers,
         draftMaxPlayers: attemptedMaxPlayers,
         draftTags: attemptedTags,
+        draftWebRuntimeMultithreading: attemptedWebRuntimeMultithreading,
         savedGameType: null,
         revision: currentRevision,
         currentRevision,
@@ -540,6 +574,8 @@ export class PlaymeshProjectConfigController {
     const attemptedMinPlayers = state.draftMinPlayers;
     const attemptedMaxPlayers = state.draftMaxPlayers;
     const attemptedTags = state.draftTags;
+    const attemptedWebRuntimeMultithreading =
+      state.draftWebRuntimeMultithreading;
     const expectedRevision = state.revision;
     const operation = this._startOperation(signal);
     this._setState({
@@ -558,6 +594,7 @@ export class PlaymeshProjectConfigController {
         minPlayers: attemptedMinPlayers,
         maxPlayers: attemptedMaxPlayers,
         tags: attemptedTags,
+        webRuntimeMultithreading: attemptedWebRuntimeMultithreading,
         expectedRevision,
         signal: operation.controller.signal,
       });
@@ -582,6 +619,7 @@ export class PlaymeshProjectConfigController {
           attemptedMinPlayers,
           attemptedMaxPlayers,
           attemptedTags,
+          attemptedWebRuntimeMultithreading,
           currentRevision: error.currentRevision,
           operation,
         });
@@ -612,7 +650,9 @@ export class PlaymeshProjectConfigController {
           latest.config.gameType === attemptedGameType &&
           latest.config.minPlayers === attemptedMinPlayers &&
           latest.config.maxPlayers === attemptedMaxPlayers &&
-          sameTags(latest.config.tags, attemptedTags)
+          sameTags(latest.config.tags, attemptedTags) &&
+          latest.config.webRuntimeMultithreading ===
+            attemptedWebRuntimeMultithreading
         ) {
           this._setState(this._stateFromResponse(gameId, latest));
           return { ok: true, kind: 'saved', config: latest.config };
@@ -632,6 +672,8 @@ export class PlaymeshProjectConfigController {
           draftMinPlayers: attemptedMinPlayers,
           draftMaxPlayers: attemptedMaxPlayers,
           draftTags: attemptedTags,
+          draftWebRuntimeMultithreading:
+            attemptedWebRuntimeMultithreading,
           savedGameType: state.savedGameType,
           revision: state.revision,
           currentRevision: state.currentRevision,
@@ -656,6 +698,8 @@ export class PlaymeshProjectConfigController {
           draftMinPlayers: attemptedMinPlayers,
           draftMaxPlayers: attemptedMaxPlayers,
           draftTags: attemptedTags,
+          draftWebRuntimeMultithreading:
+            attemptedWebRuntimeMultithreading,
           savedGameType: state.savedGameType,
           revision: state.revision,
           currentRevision: state.currentRevision,

@@ -5,9 +5,9 @@
 
 > **三端同步要求：** 对 Game SDK 或 App SDK 的任何修改，都必须同步更新 Runtime 底包和 GDevelop Playmesh 扩展，确保 SDK、Runtime、GDevelop 三端的公开能力、版本与行为一致；任一端未同步不得视为完成。
 
-Playmesh `4.2.0+28` 的 LAN feature 与 UI 自动菜单解绑已接入现有 Game SDK `4.1.0`、
-App Bridge SDK `3.3.0`，属于兼容新增，不提升 SDK 版本。自动化契约已完成；
-Android、Windows、macOS、Linux 的跨设备实机验收仍未完成。iOS 自动发现/发布明确为
+当前工作树以 Playmesh `5.1.0+37`、Game SDK `4.3.0` 与 App Bridge SDK `3.5.0`
+实现 Authority SQLite 数据库能力与 WebRTC 通用信令入口。自动化契约已完成；Android、Windows 与公网 TURN 的跨设备
+实机验收仍待完成。现有 LAN 发现保持原入口和行为；iOS 自动发现/发布仍明确为
 `unsupported`，扫码、手工邀请和分享链接不受影响。
 
 ## 核心原则：逻辑即定义
@@ -41,9 +41,16 @@ assets/playmesh-library/public/sdk/v1/
 ## 公开 SDK 向后兼容基线
 
 从当前兼容基线开始，Game SDK 与 App Bridge SDK 的公开契约只允许兼容演进：Game SDK
-永久兼容基线集合为 `4.1.0`，App Bridge SDK 为 `3.2.0`、`3.3.0`。一次升级前
-注册表已经接受的 SDK 请求版本，升级后必须继续接受；兼容版本集合只可扩大，不得缩小。
+永久兼容基线集合为 `4.1.0`，App Bridge SDK 为 `3.2.0`、`3.3.0`；当前兼容集合再追加
+Game SDK `4.2.0`、`4.3.0` 与 App Bridge SDK `3.4.0`、`3.5.0`。一次升级前注册表已经接受的 SDK 请求版本，
+升级后必须继续接受；兼容版本集合只可扩大，不得缩小。
 本规则不追溯恢复在该基线建立前已经停止支持的历史版本或旧命名空间。
+
+主 App 的发行注册表继续精确枚举已发布请求版本，以保证 Manifest、下载与开发工具的版本
+事实可审计。独立 Runtime 的包清单和宿主握手采用不同门禁：在兼容基线与 Runtime 内置
+Bundle 之间按严格语义版本闭区间接受，并统一运行内置最新 Bundle；高于内置 Bundle、低于
+基线或格式错误的版本拒绝。这样不会因 Runtime 的历史枚举滞后拒绝旧兼容游戏，同时仍防止
+旧 Runtime 猜测执行未来 SDK。
 
 游戏调用端可能长期固定，因此已经公开的命名空间、方法名、参数接受范围、返回结构、事件、
 错误 code 与调用语义不得删除、重命名、收窄或改作其他用途。后续 SDK 不允许破坏性更新，
@@ -99,7 +106,7 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 
 ## 当前公开 SDK 方法
 
-当前 Game SDK 为 `4.1.0`，App Bridge SDK 为 `3.3.0`。下表是当前公开面；
+当前 Game SDK 为 `4.3.0`，App Bridge SDK 为 `3.5.0`。下表是当前公开面；
 精确参数、泛型、返回类型和中文 JSDoc 仍以注册表生成的 `playmesh-main.d.ts` 与
 `playmesh-app.d.ts` 为准。旧 Game 类型文件不兼容、不保留。
 
@@ -114,8 +121,9 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 | `CapabilityHandle` | `id`、`code`、`apiVersion`、`invoke()`、`on()`、`addEventListener()`、`removeEventListener()`、`onError()`、`dispose()` |
 | `playmesh.app.media` | `open()` |
 | `AppMediaSession` | `id`、`source`、`stream`、`state`、`close()` |
+| `playmesh.app.webrtc` | `getSignalingEndpoint(identifier)` |
 | `playmesh.app.device` | `getPlatform()`、`setFullscreen()`、`onInput()` |
-| `playmesh.app.ui` | `configure()`、`initializeBrowser()`、`showGameSidebar()`、`restartGame()`、`openSharePanel()`、`openRuntimeLogs()`、`enterFullscreen()`、`exitFullscreen()`、`openGameInfo()`、`setPerformanceVisible()`、`togglePerformance()`、`exitGame()` |
+| `playmesh.app.ui` | `configure()`、`initializeBrowser()`、`showGameSidebar()`、`onSystemMenuRequest()`、`onBack()`（已废弃）、`restartGame()`、`openSharePanel()`、`openRuntimeLogs()`、`enterFullscreen()`、`exitFullscreen()`、`openGameInfo()`、`setPerformanceVisible()`、`togglePerformance()`、`exitGame()` |
 | `playmesh.app.runtime` | `getLocale()` |
 | `playmesh.app.storage` | `getBucket()` |
 | `PlaymeshAppStorageBucket` | `getData()`、`setData()`、`getDataSync()`、`setDataSync()`、`removeData()`、`clearData()` |
@@ -123,7 +131,7 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 | `playmesh.main.player` | `getCurrent()`、`setNickname()` |
 | `playmesh.main.game` | `submitAction()`、`onMessage()`、`onEvent()` |
 | `playmesh.main.authority` | `onService()` |
-| `playmesh.main.rpc` | `request()`、`onRequest()` |
+| `playmesh.main.rpc` | `request()`、`onRequest()`、`requestStream()`、`onStreamRequest()` |
 | `playmesh.main.binary` | `authorityPlayerId`、`createChannel()`、`joinChannel()` |
 | `BinaryChannel` | `id`、`mode`、`send()`、`sendLatest()`、`onMessage()`、`onForward()`、`close()` |
 | `playmesh.main.sync` | `startAuthority()`、`submitAction()`、`submitState()`、`requestSnapshot()`、`getSnapshot()`、`observe()` |
@@ -132,6 +140,8 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 | `playmesh.app.performance` | `reportFrame()`、`getFps()`、`onFps()`、`getLatency()`、`getLatencyDiagnostics()`、`onLatency()`、`setVisible()` |
 | `playmesh.main.storage` | `getBucket()` |
 | `StorageBucket` | `getData()`、`setData()`、`removeData()`、`clearData()`、`upload()` |
+| `playmesh.main.db` | `open()`、`select()`、`update()`、`delete()`、`insert()`、`getDDL()`、`beginTransaction()`、`transaction()` |
+| `PlaymeshDatabaseTransaction` | `select()`、`update()`、`delete()`、`insert()`、`getDDL()`、`commit()`、`rollback()` |
 
 `playmesh.main.storage` 与 `playmesh.app.storage` 的调用形态相似，但数据所有权不同：
 Main Bucket 是 Authority 主机持有、且只允许 Authority 页面读写的游戏数据；需要让
@@ -149,6 +159,25 @@ Bucket。App Bucket 只属于调用页面所在的当前设备，其他玩家和
 路径。App Bucket 不提供 `upload()` 或默认跨设备恢复；同步能力也不借道 Authority、Core、
 Relay 或其他设备。本次为 App Bridge SDK `3.3.0` 的兼容补充，不改变 SDK 版本。
 
+`playmesh.app.webrtc.getSignalingEndpoint(identifier)` 是 App Bridge SDK `3.4.0` 的
+通用信令入口。它返回当前会话绑定、单次使用、30 秒过期的 WebSocket URL，以及宿主提供的
+ICE server 配置；`identifier` 用于标识一条由游戏定义的逻辑通道。同一用户可以为不同用途
+申请多个标识符，多个加入用户也必须获得彼此隔离的票据和路由。平台只鉴权和转发受限 JSON
+信令，不解释游戏 payload，不替游戏创建媒体轨、PeerConnection 或 DataChannel。
+
+宿主启动 Go Core 时必须复用已有
+`resolveBindableLanIpv4InterfaceAddresses(includeLinkLocal: false)`，把结果作为局域网
+STUN/TURN 监听地址传入，禁止在 Go Core 或 App SDK 内再实现一套网卡遍历。端点返回顺序为
+可用的 Authority 局域网 ICE、当前会话的 Go Server 公网 ICE；各玩家/标识符使用独立短期
+凭据。若地址绑定失败，端点仍可返回公网 ICE 或空数组，不能让 SDK 调用失败，也不能把
+防火墙/AP 隔离误判成媒体解码问题。
+
+网页自行使用浏览器原生 WebRTC 交换 offer/answer 与 ICE candidate，并负责权限请求、媒体
+采集、前后摄像头切换、码率控制、ICE restart 和显式关闭。当前信令拓扑固定为 Authority
+星形：远端只能向 Authority 路由，不能借此枚举或直连其他加入用户。该入口与
+`playmesh.app.media.open()` 相互独立；通用 WebRTC 不要求或签发 `AppMediaSource`，现有
+媒体 API 也不能作为绕过信令票据、会话鉴权或路由约束的通道。
+
 `playmesh.main.rpc` 复用已经过会话凭证认证的 Binary WebSocket，并使用 SDK 内部
 RPC 帧直达固定 Authority，不经过 Session WS JSON action，也不创建公开 Binary
 Channel。所有客户端的 `request(path, data, options?)` 都只返回 Promise；只有
@@ -156,6 +185,20 @@ Authority 可以调用 `onRequest(path, handler)`。handler 可直接返回值�
 公开 `any` 仅代表可传输值：JSON 兼容值以及 `Blob`、`File`、`ArrayBuffer`、
 `Uint8Array`；函数、DOM 对象、循环引用和其他类实例必须在编码前拒绝。Core 只校验
 会话、Authority 身份、path、帧大小、并发和超时，业务 payload 始终作为不透明字节转发。
+
+Game SDK `4.3.0` 的 `requestStream/onStreamRequest` 把大字节源拆成控制面与数据面：Binary
+WebSocket 只通知固定 Authority 并返回小型编码结果；File、Blob、ArrayBuffer、Uint8Array
+或 `ReadableStream<Uint8Array>` 通过 SDK 私有、同会话鉴权的 HTTP body 流向 Core，再由
+一次性 Authority GET 以 `io.Pipe`、32 KiB 有界缓冲和背压转发。结束条件是 HTTP EOF，不能
+增加业务结束字节。流不进入 Binary 帧、JSON/Base64、临时文件或完整内存缓冲；“无完整文件
+缓存”不能写成“零内存占用”。只有固定 Authority 可以注册和消费，游戏不能构造私有端点。
+
+发送和接收 options 都可注册 `(transferredBytes, totalBytes)` 进度回调。发送进度表示 Fetch
+已从 source 拉取字节，接收进度表示 handler 已拉取字节；都不等同于网络确认或磁盘落盘。
+未知 ReadableStream 的总量为 `null`，回调异常只记录、不得改变传输结果。单流上限 512 MiB，
+SDK 每页面与 Core 每玩家最多并发 4 个，Core 每局最多 16 个；默认总超时 5 分钟，可配置
+1 秒至 30 分钟。handler 结果仍走普通 RPC 编码并保持 `4 MiB - 64 KiB` 上限。Authority 可把
+收到的 ReadableStream 直接传给 `StorageBucket.upload(source, {name, type})`，全链路保持背压。
 
 面向游戏开发者的唯一全局对象是 `window.playmesh`，其根级公开成员严格只有
 `ready`、`main` 与 `app`。`window.playmeshApp` 不存在，公开的 `main`/`app`
@@ -186,6 +229,7 @@ app.capability
 app.performance
 app.ui
 app.device
+app.webrtc
 ```
 
 一个 Feature 不应仅为缩短文件而创建，也不能同时拥有多个无关业务域。
@@ -244,6 +288,16 @@ SDK feature 只能调用注入的 `AppLanHost` 薄接口，不得引用网卡 re
 `GameJoinCoordinator` 与邀请预检，并通过 `afterResponse` 在 Bridge 回包后导航。App
 附近列表内部新增的主机昵称、人数、单机标记不扩展公开 SDK，也不增加图标字段或端点。
 
+`joinByLink()` 与 `scanQrAndJoin()` 在主 App 和 Runtime 后端都进入同一个
+`GameJoinCoordinator.prepareLink()`，不执行只属于发布/读取分享信息的 Authority 鉴权。
+邀请准备仍必须校验受控 `entry`、`gameId/gameName`、当前 `expectedGameId`、自邀请和取消；
+Relay 成功准备产生的 client session 与受控 `entry` 校验结果只能单次移交给
+`afterResponse` 导航，不能在准备末尾关闭后由游戏页重建。Dart 预检与 WebView 的 Cookie
+仓库彼此隔离，因此 WebView 必须在已移交的同一 tunnel 中从原邀请入口再次 POST token，
+取得自己的 HttpOnly Cookie 后再进入受控 `entry`；不得直接导航到预检结果。Bridge 回包前
+失效、导航失败、页面替换和 Runtime 关闭均要回收尚未移交或已接管的会话，连接对象不得进入
+公开 SDK 返回值或游戏 JavaScript。
+
 发现 wire 对 SDK 完全不透明。唯一宿主实现使用 `239.255.80.77:53584` 的 IPv4 UDP
 multicast wire v1（1 秒公告、4 秒 TTL、单包最多 1200 字节），不提供旧服务发现、第二
 发现栈或已知节点单播适配器；`host` 来自数据报 source IP，而不是 JavaScript 或 payload。
@@ -265,13 +319,20 @@ App UI feature 另提供同步无返回值的
 `playmesh.app.ui.disableSystemMenuTriggers()`。方法严格无参数，仅在 `app.ready` 完成后
 单向、幂等禁用当前文档的 Escape/Menu/Back 自动菜单触发；不影响显式
 `showGameSidebar()`、信息/日志覆盖层或已打开层的关闭。平台 UI 配置刷新不能重新绑定，
-WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必须拒绝。它不等于
-`configure({fallbackUi:false})`，因此不得单独令 `onBack()` 生效。
+WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必须拒绝。它不会取消
+`onSystemMenuRequest()` 回调；回调返回 `NEXT` 时仍需遵守该触发器状态。
 
-`playmesh.app.ui.onBack()` 只在游戏显式配置 `fallbackUi: false` 后处理 Android 系统返回
-和 Esc；回调严格返回 `false` 时阻止退出，返回 `true` 或没有监听器时继续。宿主原生返回
-继续只调用 `appInternalRuntime.handleNativeBack()`，不得感知游戏自定义确认 UI；SDK 只在
-调用回调的当下检查统一 `fallbackUi` 配置，不增加按平台或按弹窗类型的判断。
+App Bridge SDK `3.5.0` 新增 `playmesh.app.ui.onSystemMenuRequest()`，统一接收 Android
+系统返回、桌面 exe 的返回键和普通浏览器
+悬浮菜单按钮。原始入口事件先到达 SDK，随后在产生菜单显示、覆盖层关闭或退出等默认效果前
+执行所有回调。回调严格返回 `EXIT`、`NEXT` 或 `STOP`：`EXIT` 直接退出，
+`NEXT` 继续该入口原有默认流程，`STOP` 不再执行任何后续流程。宿主原生返回继续只调用
+`appInternalRuntime.handleNativeBack()`，不得感知游戏自定义确认 UI。`NEXT` 必须在回调完成后
+重新执行具体入口的默认动作：返回键重新检查统一 `fallbackUi`、系统菜单触发器和当前覆盖层，
+浏览器悬浮按钮继续显示菜单；`fallbackUi: false` 时返回键不能无条件创建或显示菜单。
+多回调优先级为 `STOP > EXIT > NEXT`；异常、超时或非法返回值按 `NEXT` 继续默认流程。
+原 `onBack()` 继续作为行为完全相同的兼容别名，但在 `.d.ts`、Manifest、文档和 GDevelop
+中标记废弃；不得删除、改变返回类型或建立第二套监听器。
 
 统一菜单只保留一个全屏状态按钮，并在分享/邀请后提供 App-only 加入入口。该入口必须复用
 分享/邀请的 Authority 主机可见性结果，不得单独按 `lanHost` 存在与否放开；加入端 WebView
@@ -280,7 +341,11 @@ WebView 文档刷新恢复默认绑定；旧 boolean setter 和多余参数必�
 
 Game SDK 的 `receive()` 必须把浏览器顶层 `transport.closed/error` 和 WebView/移动端内部
 `transport.status` 统一投影为 `playmesh.main.lifecycle.onChange()` 的 `closed/error`。
-底层可用内部 `lifecycleState` 区分正常关闭与异常，但该字段不得进入公开 SDK。
+底层可用内部 `lifecycleState` 区分正常关闭与异常，但该字段不得进入公开 SDK。平台
+PeerConnection 关闭必须先关闭关联 DataChannel 和本机 socket，以保证该事件可达；不得在
+SDK、Dart 页面或 Go Core 控制面借此自动换路、导航、ICE restart 或新建平台连接。现有
+Session/Binary WebSocket 可以继续尝试原本的本机端点，但该重试不得选择新路线，也不能
+复活已经关闭的 Pion PeerConnection。
 
 App SDK 的菜单、信息和日志覆盖层必须在自身 Shadow DOM 中显式使用默认系统光标，
 不能继承游戏用于第一人称或第三人称控制的隐藏光标样式。该行为只作用于 SDK 自有覆盖层，
@@ -418,7 +483,7 @@ requestedVersion 出现在 release.supportedRequestedVersions
   => 命中该 release，并返回其 bundleVersion 对应文件
 
 requestedVersion 位于 min/max 之间但未在集合中列出
-  => 失败；例如当前 App 3.2.1 不会被视为 3.2.0 或 3.3.0
+  => 失败；例如当前 App 3.2.1 不会被视为 3.2.0、3.3.0、3.4.0 或 3.5.0
 
 其他值
   => UnsupportedError；兼容基线外或从未支持的版本不做猜测性回退
@@ -505,13 +570,17 @@ requestedVersion
 
 规则：
 
-- 当前 Game SDK 只接受明确版本 `4.1.0`；App Bridge SDK 接受明确版本 `3.2.0`、
-  `3.3.0`，后者都解析到 `3.3.0` bundle；`3.2.1` 等未发布版本不在集合中。
+- 当前 Game SDK 接受明确版本 `4.1.0`、`4.2.0`、`4.3.0`，均解析到 `4.3.0` bundle；App Bridge
+  SDK 接受明确版本 `3.2.0`、`3.3.0`、`3.4.0`、`3.5.0`，均解析到 `3.5.0` bundle；`3.2.1`
+  等未发布版本不在集合中。
 - 上述版本构成当前兼容基线；后续升级必须继续接受这些版本以及升级前已经新增支持的版本。
 - 兼容基线外、未知或格式错误的版本直接失败；不要求恢复基线建立前已停止支持的历史版本。
 - 每个 target 维护一份只追加的明确请求版本集合；`minimumRequestedVersion` 与
   `maximumRequestedVersion` 只是集合摘要，不决定是否接受版本。`bundleVersion` 是实际返回和
-  随消息发送的 SDK 版本，当前 App `3.2.0` 请求因此使用 `3.3.0` bundle。
+  随消息发送的 SDK 版本，当前 App `3.2.0` 请求因此使用 `3.5.0` bundle。
+- 上一条描述主 App 的 `SdkFeatureRegistry`。独立 Runtime 使用兼容基线到内置 Bundle 的
+  闭区间门禁，不要求请求版本出现在主 App 的历史发行枚举中；Runtime 的上限仍由实际随包
+  SDK Bundle 决定。
 - 执行器的 `supportedVersions` 只约束当前实际 Bundle 的命令分发，不能扩大 Manifest
   可接受版本。
 - SDK 公开契约禁止破坏性更新；不能删除或重命名既有函数，不能收窄参数或返回值，不能
@@ -631,8 +700,10 @@ Game SDK 的 `.ts`、`.js`、`.d.ts`；不得写死当前版本或构造 `*-empt
 - 网页发送命令与执行器集合一致。
 - 同版本同命令只能命中一个执行器。
 - 未注册版本和非法版本被拒绝。
-- Game `4.1.0` 与 App `3.2.0`/`3.3.0` 能选择当前执行器；App `3.1.0` 和未发布的
-  `3.2.1` 被拒绝。
+- Game `4.1.0`/`4.2.0`/`4.3.0` 与 App `3.2.0`/`3.3.0`/`3.4.0`/`3.5.0` 能选择当前执行器；App
+  `3.1.0` 和未发布的 `3.2.1` 被拒绝。
+- `webrtc.getSignalingEndpoint()` 只在有效会话中签发一次性短 TTL 票据；identifier、
+  信令消息大小/速率、Authority 星形路由和多加入用户隔离均有契约测试。
 - 每次 SDK 升级前已接受的全部请求版本在升级后仍能解析并执行原有调用；明确版本集合没有缩小。
 - 新增函数的契约测试不得替代旧函数回归测试；所有基线命名空间、签名、返回、事件、
   错误 code 与既有调用语义继续通过。

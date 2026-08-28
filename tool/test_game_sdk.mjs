@@ -10,6 +10,7 @@ const standardStorageRequests = [];
 const standardStorageData = new Map();
 const synchronousStorageRequests = [];
 const synchronousStorageLedger = new Map();
+const rpcStreamBodies = new Map();
 let dropNextSynchronousStorageResponse = false;
 const appInternalKey = Symbol.for("playmesh.app.internal.v1");
 const mainInternalKey = Symbol.for("playmesh.main.internal.v1");
@@ -208,6 +209,7 @@ class MockWebSocket {
     this.listeners = new Map();
     this.rpcSequence = 0n;
     this.rpcRequests = new Map();
+    this.rpcStreamRequests = new Map();
     setTimeout(() => {
       this.readyState = MockWebSocket.OPEN;
       this.emit("open", {});
@@ -284,6 +286,33 @@ class MockWebSocket {
       setTimeout(() => this.receive(incoming), 0);
     } else if (operation === 0x07) {
       const rpcId = view.getBigUint64(2);
+      const streamRequest = this.rpcStreamRequests.get(rpcId.toString());
+      if (streamRequest) {
+        this.rpcStreamRequests.delete(rpcId.toString());
+        const responsePayload = data.subarray(11);
+        if (data[10] === 0) {
+          streamRequest.resolve({
+            ok: true,
+            status: 200,
+            async arrayBuffer() {
+              return responsePayload.buffer.slice(
+                responsePayload.byteOffset,
+                responsePayload.byteOffset + responsePayload.byteLength,
+              );
+            },
+          });
+        } else {
+          const codeLength = view.getUint16(11);
+          const code = new TextDecoder().decode(data.subarray(13, 13 + codeLength));
+          const message = new TextDecoder().decode(data.subarray(13 + codeLength));
+          streamRequest.resolve({
+            ok: false,
+            status: 422,
+            async json() { return { error: { code, message } }; },
+          });
+        }
+        return;
+      }
       const requestId = this.rpcRequests.get(rpcId.toString());
       assert.ok(requestId, "Authority RPC response must match a routed request");
       this.rpcRequests.delete(rpcId.toString());
@@ -336,7 +365,7 @@ const gameFocusTarget = {
 };
 const appReadyBootstrap = {
   available: true,
-  sdkVersion: "3.3.0",
+  sdkVersion: "3.5.0",
   capabilityRegistry: [],
   device: {
     platform: "windows",
@@ -355,8 +384,9 @@ const appReadyThenable = {
     return appReadyPromise.then(resolve, reject);
   },
 };
+let webRTCSignalingEndpointProvider = null;
 const appPublicApi = {
-  version: "3.3.0",
+  version: "3.5.0",
   ready: appReadyThenable,
   isAvailable() {
     return true;
@@ -364,6 +394,14 @@ const appPublicApi = {
   runtime: Object.freeze({
     getLocale() {
       return "zh-CN";
+    },
+  }),
+  webrtc: Object.freeze({
+    getSignalingEndpoint(identifier) {
+      if (typeof webRTCSignalingEndpointProvider !== "function") {
+        return Promise.reject(new Error("missing provider"));
+      }
+      return webRTCSignalingEndpointProvider(identifier);
     },
   }),
   capabilities: {
@@ -396,6 +434,9 @@ let appPlatformUiConfiguration = {
 const identityNicknameUpdates = [];
 const appInternalRuntime = {
   publicApi: appPublicApi,
+  registerWebRTCSignalingEndpointProvider(provider) {
+    webRTCSignalingEndpointProvider = provider;
+  },
   takePlatformUiConfiguration() {
     const value = appPlatformUiConfiguration;
     appPlatformUiConfiguration = null;
@@ -441,9 +482,68 @@ globalThis.window = {
   ArrayBuffer,
   DataView,
   Blob,
+  ReadableStream,
   File: MockFile,
   crypto: webcrypto,
   async fetch(url, options) {
+    const parsedUrl = new URL(String(url), "http://playmesh.local");
+    if (parsedUrl.pathname === "/v1/sessions/s-1/rpc-stream" && options.method === "POST") {
+      const socket = MockWebSocket.last;
+      socket.rpcSequence += 1n;
+      const rpcId = socket.rpcSequence;
+      const consumePath = `/v1/sessions/s-1/rpc-streams/stream-${rpcId}`;
+      rpcStreamBodies.set(consumePath, options.body);
+      const fields = [
+        "p-authority",
+        parsedUrl.searchParams.get("path"),
+        consumePath,
+        parsedUrl.searchParams.get("name"),
+        options.headers["Content-Type"],
+      ].map((value) => new TextEncoder().encode(value));
+      const incoming = new Uint8Array(
+        28 + fields.reduce((total, value) => total + value.length, 0),
+      );
+      const view = new DataView(incoming.buffer);
+      incoming[0] = 1;
+      incoming[1] = 0x87;
+      view.setBigUint64(2, rpcId);
+      fields.forEach((value, index) => view.setUint16(10 + index * 2, value.length));
+      const declaredSize = parsedUrl.searchParams.get("size");
+      const knownSize = declaredSize === null
+        ? 0xffffffffffffffffn
+        : BigInt(declaredSize);
+      view.setBigUint64(20, knownSize);
+      let offset = 28;
+      for (const value of fields) {
+        incoming.set(value, offset);
+        offset += value.length;
+      }
+      setTimeout(() => socket.receive(incoming), 0);
+      return new Promise((resolve) => {
+        socket.rpcStreamRequests.set(rpcId.toString(), { resolve });
+      });
+    }
+    if (rpcStreamBodies.has(parsedUrl.pathname) && options.method === "GET") {
+      const source = rpcStreamBodies.get(parsedUrl.pathname);
+      rpcStreamBodies.delete(parsedUrl.pathname);
+      const body = source instanceof ReadableStream
+        ? source
+        : source instanceof Blob
+          ? source.stream()
+          : new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  source instanceof Uint8Array ? source : new Uint8Array(source),
+                );
+                controller.close();
+              },
+            });
+      return {
+        ok: true,
+        status: 200,
+        body,
+      };
+    }
     if (String(url).startsWith("/bucket/_playmesh-json/v1")) {
       const encodedBody = options.body || Buffer.from(
         new URL(String(url), "http://playmesh.local").searchParams.get("payload"),
@@ -506,7 +606,30 @@ globalThis.window = {
         },
       };
     }
-    uploads.push({ url, options });
+    let bodyBytes = null;
+    if (options.body instanceof ReadableStream) {
+      const reader = options.body.getReader();
+      const chunks = [];
+      let length = 0;
+      try {
+        while (true) {
+          const item = await reader.read();
+          if (item.done) break;
+          const chunk = new Uint8Array(item.value);
+          chunks.push(chunk);
+          length += chunk.length;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      bodyBytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bodyBytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+    }
+    uploads.push({ url, options, bodyBytes });
     return {
       ok: true,
       async json() {
@@ -540,7 +663,7 @@ globalThis.window = {
         receiveMain(JSON.stringify({
           type: "sdk.bootstrap",
           requestId: command.requestId,
-          sdkVersion: "4.1.0",
+          sdkVersion: "4.3.0",
           isAuthority: true,
           gameInfo: {
             id: "com.playmesh.test-game",
@@ -612,6 +735,47 @@ globalThis.window = {
             })),
           },
         });
+      } else if (command.command === "webrtc.getSignalingEndpoint") {
+        receiveMain({
+          type: "command.result",
+          requestId: command.requestId,
+          result: {
+            type: "playmesh.webrtc-signaling-endpoint",
+            version: 1,
+            timestamp: 1770000000000,
+            requestId: command.requestId,
+            identifier: command.payload.identifier,
+            url: "ws://127.0.0.1:42000/v1/webrtc/signaling/ticket",
+            expiresAt: "2026-08-25T00:00:30Z",
+            playerId: "p-authority",
+            role: "authority",
+            iceServers: [{ urls: ["stun:relay.example.test:3478"] }],
+          },
+        });
+      } else if (command.command === "db.open") {
+        receiveMain({
+          type: "command.result", requestId: command.requestId,
+          result: { file: "_game.db" },
+        });
+      } else if (command.command === "db.transaction.begin") {
+        receiveMain({
+          type: "command.result", requestId: command.requestId,
+          result: { transactionId: `tx-${command.requestId}` },
+        });
+      } else if (command.command === "db.select" || command.command === "db.transaction.select") {
+        receiveMain({
+          type: "command.result", requestId: command.requestId,
+          result: [{ args: command.payload.args }],
+        });
+      } else if (command.command.startsWith("db.")) {
+        receiveMain({
+          type: "command.result", requestId: command.requestId,
+          result: command.command.endsWith("insert")
+            ? { changes: 1, lastInsertRowId: "1" }
+            : command.command.endsWith("update") || command.command.endsWith("delete")
+              ? { changes: 1 }
+              : null,
+        });
       }
     },
   },
@@ -656,10 +820,59 @@ assert.deepEqual(
   Object.keys(window.playmesh.main.session.getCurrent().players[0]).sort(),
   ["avatar", "connected", "id", "nickname", "role"],
 );
-assert.equal(window.playmesh.main.version, "4.1.0");
+assert.equal(window.playmesh.main.version, "4.3.0");
 assert.deepEqual(Object.keys(window.playmesh).sort(), ["app", "main", "ready"]);
-assert.equal(sdkBootstrap.main.sdkVersion, "4.1.0");
-assert.equal(sdkBootstrap.app.sdkVersion, "3.3.0");
+assert.equal(sdkBootstrap.main.sdkVersion, "4.3.0");
+assert.equal(sdkBootstrap.app.sdkVersion, "3.5.0");
+
+assert.deepEqual(await window.playmesh.main.db.open(), { file: "_game.db" });
+assert.deepEqual(
+  await window.playmesh.main.db.select("SELECT ?2, ?1", ["first", 2]),
+  [{ args: ["first", 2] }],
+);
+assert.deepEqual(
+  await window.playmesh.main.db.select("SELECT :id", { id: 7 }),
+  [{ args: { id: 7 } }],
+);
+assert.deepEqual(
+  await window.playmesh.main.db.select("SELECT @id, $name", {
+    "@id": 8,
+    "$name": "named",
+  }),
+  [{ args: { "@id": 8, "$name": "named" } }],
+);
+const explicitTransaction = await window.playmesh.main.db.beginTransaction();
+await explicitTransaction.insert("INSERT INTO items(name) VALUES (:name)", {
+  name: "transaction",
+});
+await explicitTransaction.commit();
+assert.throws(() => explicitTransaction.select("SELECT 1"), /事务已经结束/);
+const callbackFailure = new Error("callback failed");
+await assert.rejects(
+  window.playmesh.main.db.transaction(async (transaction) => {
+    await transaction.update("UPDATE items SET name = ?", ["changed"]);
+    throw callbackFailure;
+  }),
+  (error) => error === callbackFailure,
+);
+assert.equal(
+  commands.some((command) => command.command === "db.transaction.rollback"),
+  true,
+);
+const signalingEndpoint = await window.playmesh.app.webrtc.getSignalingEndpoint(
+  "camera/main",
+);
+assert.equal(signalingEndpoint.identifier, "camera/main");
+assert.equal(signalingEndpoint.playerId, "p-authority");
+assert.equal(Object.isFrozen(signalingEndpoint), true);
+assert.equal(
+  commands.some(
+    (command) =>
+      command.command === "webrtc.getSignalingEndpoint" &&
+      command.payload.identifier === "camera/main",
+  ),
+  true,
+);
 const unrelatedPlatformFocusTarget = { isConnected: true };
 window.document.activeElement = unrelatedPlatformFocusTarget;
 receiveMain({ type: "platform.ui.restoreGameFocus" });
@@ -1042,6 +1255,62 @@ assert.equal(received.correct, true, "RPC 内部响应不能泄漏到 game.onMes
 unregisterRpc();
 unregisterRpc();
 
+let rpcStreamContext = null;
+const rpcStreamSendProgress = [];
+const rpcStreamReceiveProgress = [];
+const unregisterRpcStream = window.playmesh.main.rpc.onStreamRequest(
+  "/files/store",
+  async (source, context) => {
+    rpcStreamContext = context;
+    return bucket.upload(source, { name: context.name, type: context.type });
+  },
+  {
+    onProgress(transferredBytes, totalBytes) {
+      rpcStreamReceiveProgress.push([transferredBytes, totalBytes]);
+    },
+  },
+);
+assert.throws(
+  () => window.playmesh.main.rpc.onStreamRequest("/files/store", () => null),
+  (error) => error?.code === "rpc_path_registered",
+);
+assert.throws(
+  () => window.playmesh.main.rpc.onStreamRequest(
+    "/files/invalid-progress",
+    () => null,
+    { onProgress: "invalid" },
+  ),
+  (error) => error?.code === "rpc_progress_invalid",
+);
+const streamFrameOffset = binaryFrames.length;
+const streamedUrl = await window.playmesh.main.rpc.requestStream(
+  "/files/store",
+  new MockFile(Uint8Array.from([12, 0, 255, 33]), "large-save.bin", {
+    type: "application/octet-stream",
+  }),
+  {
+    onProgress(transferredBytes, totalBytes) {
+      rpcStreamSendProgress.push([transferredBytes, totalBytes]);
+    },
+  },
+);
+assert.equal(streamedUrl, "/bucket/fishing_save/1777777777777.bin");
+assert.equal(rpcStreamContext.path, "/files/store");
+assert.equal(rpcStreamContext.senderPlayerId, "p-authority");
+assert.equal(rpcStreamContext.name, "large-save.bin");
+assert.equal(rpcStreamContext.type, "application/octet-stream");
+assert.equal(rpcStreamContext.size, 4);
+assert.deepEqual(rpcStreamSendProgress, [[0, 4], [4, 4]]);
+assert.deepEqual(rpcStreamReceiveProgress, [[0, 4], [4, 4]]);
+assert.deepEqual([...uploads.at(-1).bodyBytes], [12, 0, 255, 33]);
+assert.equal(
+  binaryFrames.slice(streamFrameOffset).some((frame) => frame[1] === 0x06),
+  false,
+  "RPC stream bytes must not enter the Binary RPC request frame",
+);
+unregisterRpcStream();
+unregisterRpcStream();
+
 const unregisterFailingRpc = window.playmesh.main.rpc.onRequest(
   "/player/reject",
   () => {
@@ -1298,4 +1567,4 @@ receiveMain({
   requestId: "test-exit",
 });
 
-console.log("Game SDK bridge and Binary reconnect contract passed");
+console.log("Game SDK bridge, Binary reconnect, and lifecycle contract passed");

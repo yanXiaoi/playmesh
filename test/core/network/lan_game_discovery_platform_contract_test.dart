@@ -66,6 +66,33 @@ void main() {
     expect(source, isNot(matches(RegExp(r'print\s*\('))));
     expect(source, isNot(contains('debugPrint')));
   });
+
+  test('主 App 与 Runtime 复用可绑定 IPv4 解析结果启动 Core TURN', () {
+    final appHost = File(
+      'lib/core/lifecycle/go_core_host_factory_io.dart',
+    ).readAsStringSync();
+    final runtimeHost = File(
+      'runtime/src/lib/runtime/runtime_go_core.dart',
+    ).readAsStringSync();
+    final appAndroid = File(
+      'android/app/src/main/java/top/zfjmm/playmesh/MainActivity.java',
+    ).readAsStringSync();
+    final runtimeAndroid = File(
+      'runtime/src/android/app/src/main/java/top/zfjmm/playmesh_runtime/MainActivity.java',
+    ).readAsStringSync();
+
+    for (final source in [appHost, runtimeHost]) {
+      expect(source, contains('resolveBindableLanIpv4InterfaceAddresses('));
+      expect(source, contains('includeLinkLocal: false'));
+      expect(source, contains("'localTurnAddresses'"));
+      expect(source, contains("'-local-turn-addresses'"));
+      expect(source, isNot(contains('NetworkInterface.list(')));
+    }
+    for (final source in [appAndroid, runtimeAndroid]) {
+      expect(source, contains('Mobile.startWithLocalTURNAddresses('));
+      expect(source, contains('localTurnAddresses'));
+    }
+  });
 }
 
 int _occurrences(String source, String value) =>

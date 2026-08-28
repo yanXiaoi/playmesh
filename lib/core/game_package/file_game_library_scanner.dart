@@ -165,6 +165,7 @@ class FileGameLibraryScanner {
       controllerOrientation: manifest.controllerOrientation,
       tags: manifest.tags,
       capabilities: capabilities,
+      config: manifest.config,
       entry: LocalGameEntry(
         gameEntryPath: manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,

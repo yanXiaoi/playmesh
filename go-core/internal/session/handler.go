@@ -24,13 +24,22 @@ const maxMessageBytes = 64 * 1024
 const maxAvatarBytes = 512 * 1024
 
 type Handler struct {
-	store         *Store
-	logger        *slog.Logger
-	mutex         sync.Mutex
-	rooms         map[string]map[string]*peer
-	avatarPending map[string]map[string]string
-	avatarWaiters map[string]map[string][]chan avatarWriteResult
-	binary        *binaryHub
+	store                   *Store
+	logger                  *slog.Logger
+	mutex                   sync.Mutex
+	rooms                   map[string]map[string]*peer
+	avatarPending           map[string]map[string]string
+	avatarWaiters           map[string]map[string][]chan avatarWriteResult
+	binary                  *binaryHub
+	webRTC                  *webRTCSignalingBroker
+	connectionModeResolver  func(remoteAddress string) (string, bool)
+	webRTCICEServerProvider func(sessionID, playerID, identifier string) []WebRTCICEServer
+}
+
+type WebRTCICEServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
 }
 
 type peer struct {
@@ -79,12 +88,26 @@ type sessionResponse struct {
 }
 
 func NewHandler(store *Store, logger *slog.Logger) *Handler {
-	return &Handler{
+	handler := &Handler{
 		store: store, logger: logger, rooms: make(map[string]map[string]*peer),
 		avatarPending: make(map[string]map[string]string),
 		avatarWaiters: make(map[string]map[string][]chan avatarWriteResult),
 		binary:        newBinaryHub(logger),
 	}
+	handler.webRTC = newWebRTCSignalingBroker(handler)
+	return handler
+}
+
+func (h *Handler) SetConnectionModeResolver(
+	resolver func(remoteAddress string) (string, bool),
+) {
+	h.connectionModeResolver = resolver
+}
+
+func (h *Handler) SetWebRTCICEServerProvider(
+	provider func(sessionID, playerID, identifier string) []WebRTCICEServer,
+) {
+	h.webRTCICEServerProvider = provider
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -112,7 +135,29 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.connect(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/ws"))
 	case strings.HasSuffix(path, "/binary") && request.Method == http.MethodGet:
 		h.connectBinary(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/binary"))
-	case strings.HasPrefix(path, "/") && request.Method == http.MethodGet:
+	case strings.HasSuffix(path, "/rpc-stream") && request.Method == http.MethodPost:
+		h.uploadRPCStream(
+			writer,
+			request,
+			strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/rpc-stream"),
+		)
+	case strings.HasSuffix(path, "/webrtc/signaling-endpoints") && request.Method == http.MethodPost:
+		h.webRTC.createEndpoint(
+			writer,
+			request,
+			strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/webrtc/signaling-endpoints"),
+		)
+	case strings.HasSuffix(path, "/webrtc/signaling") && request.Method == http.MethodGet:
+		h.webRTC.connect(
+			writer,
+			request,
+			strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/webrtc/signaling"),
+		)
+	case request.Method == http.MethodGet:
+		if sessionID, token, ok := parseRPCStreamConsumePath(path); ok {
+			h.consumeRPCStream(writer, request, sessionID, token)
+			return
+		}
 		h.snapshot(writer, request, strings.TrimPrefix(path, "/"))
 	default:
 		writeError(writer, http.StatusNotFound, "route_not_found", "会话接口不存在")
@@ -156,7 +201,7 @@ func (h *Handler) join(writer http.ResponseWriter, request *http.Request) {
 	if !decodeBody(writer, request, &body) {
 		return
 	}
-	access, err := joinAccessForRequest(request, body.Source)
+	access, connectionMode, err := h.joinAccessForRequest(request, body.Source)
 	if err != nil {
 		writeStoreError(writer, err)
 		return
@@ -164,6 +209,7 @@ func (h *Handler) join(writer http.ResponseWriter, request *http.Request) {
 	snapshot, credential, err := h.store.Join(JoinInput{
 		JoinCode: body.JoinCode, Nickname: body.Nickname,
 		ShareToken: body.ShareToken, PlayerID: body.PlayerID, Access: access,
+		ConnectionMode: connectionMode,
 	})
 	if err != nil {
 		writeStoreError(writer, err)
@@ -222,6 +268,7 @@ func (h *Handler) finish(writer http.ResponseWriter, request *http.Request, sess
 	}
 	writeJSON(writer, http.StatusOK, snapshot)
 	h.broadcast(snapshot.ID, serverMessage{Type: "session.state", Session: &snapshot})
+	h.webRTC.disconnectSession(snapshot.ID, "会话已结束")
 	h.binary.closeSessionChannels(snapshot.ID, "会话已结束")
 	h.mutex.Lock()
 	delete(h.avatarPending, snapshot.ID)
@@ -514,6 +561,7 @@ func (h *Handler) connect(writer http.ResponseWriter, request *http.Request, ses
 
 	defer func() {
 		if h.removePeer(sessionID, player.ID, client) {
+			h.webRTC.disconnectPlayer(sessionID, player.ID, "主会话连接已关闭")
 			h.binary.disconnect(sessionID, player.ID)
 			snapshot := h.store.SetConnected(record, player.ID, false)
 			h.broadcast(sessionID, serverMessage{Type: "session.state", Session: &snapshot})
@@ -812,20 +860,29 @@ func bearerToken(request *http.Request) string {
 	return strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
 }
 
-func joinAccessForRequest(request *http.Request, claimedSource string) (playerAccess, error) {
+func (h *Handler) joinAccessForRequest(
+	request *http.Request,
+	claimedSource string,
+) (playerAccess, string, error) {
+	if h.connectionModeResolver != nil {
+		if mode, ok := h.connectionModeResolver(request.RemoteAddr); ok &&
+			(mode == "direct" || mode == "relay") {
+			return playerAccessServer, mode, nil
+		}
+	}
 	source, err := normalizeClaimedPlayerSource(claimedSource)
 	if err != nil {
-		return playerAccessLANHTML, err
+		return playerAccessLANHTML, "lan", err
 	}
-	// Relay is a distinct, non-avatar identity even when its final hop reaches
-	// Authority Core through a loopback bridge with tunnel-like Host metadata.
+	// “server” 只能由 Pion 候选对与 DataChannel 到 Core 的受控 TCP 连接证明；
+	// HTML 提交的 source 只是兼容字段，不能自己声明直连或 TURN 中转。
 	if source == "server" {
-		return playerAccessServer, nil
+		return playerAccessLANHTML, "lan", ErrUnauthorized
 	}
 	if isTrustedLANAppRequest(request) {
-		return playerAccessLANApp, nil
+		return playerAccessLANApp, "lan", nil
 	}
-	return playerAccessLANHTML, nil
+	return playerAccessLANHTML, "lan", nil
 }
 
 func isTrustedLANAppRequest(request *http.Request) bool {

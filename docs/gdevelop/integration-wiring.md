@@ -22,6 +22,7 @@
 | --- | --- |
 | 官方 folder-project 拆分/重组 | `PlaymeshProjectFiles`、`PlaymeshProjectSerializer`、Playmesh local storage provider |
 | 当前工程与历史写入 | `PlaymeshProjectStore`、App 的 `GDevelopProjectHistoryAdapter` 和 direct-current store |
+| Playmesh 项目配置 | `PlaymeshProjectConfigSection`、`PlaymeshProjectConfigController`、`PlaymeshProjectConfigClient`、App 的 `GDevelopProjectConfigController` 与 `gdevelop_project_config` operation |
 | portable 导入/导出 | `PlaymeshPortableProjectImporter`、`PlaymeshRawProjectJsonReader`、`PlaymeshDownloadProjectArchive` |
 | allocation 与恢复 | `/workspace/project-files` 路由及 project allocation/restore/rekey coordinator |
 
@@ -37,6 +38,7 @@
 | WebIDE 生成模块 | `apply-source-policy.mjs` 生成的 `PlaymeshShared/GDevelop*Source.js` |
 | 官方最低层 I/O seam | `apply-source-policy.mjs` 对锁定 Multiplayer、PlayerAuthentication 与 storage 文件的精确补丁 |
 | 预览/发布替换 | Playmesh runtime substitution registry、预览 launcher 与发布 file-map 处理链 |
+| Playmesh 清单配置投影 | `PlaymeshGDevelopManifestController` 从项目 sidecar 接收 `webRuntimeMultithreading`，预览与发布 controller 复用同一构建器 |
 
 ## 重放与打包
 

@@ -28,10 +28,13 @@
 
 ## 当前基线
 
-- 当前正式发行：App `4.5.0+33`、Game SDK `4.1.0`、App Bridge SDK `3.3.0`、
-  Go Core `0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-  Developer API `5.0.0`、Developer CLI `2.0.0`
-- 当前版本详细日志：`docs/version/4.5.0.md`
+- 当前工作树：App `5.1.0+37`、Runtime `2.1.0+11`、Game SDK `4.3.0`、App Bridge SDK
+  `3.5.0`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议
+  `4.0.0`、GDevelop Playmesh 扩展 `2.1.0`、Developer API `5.0.0`、Developer CLI
+  `2.0.0`。本轮未重建主 App、Runtime 三端固定底包或 Go Server 包；现有 Runtime
+  APK/ZIP 不包含当前 App Bucket 同步修复与 RPC Stream，发布前必须重建并更新真实哈希。
+  当前工作树尚未发布或完成跨设备手工验收。
+- 最近已归档版本详细日志：`docs/version/5.0.1.md`
 - 最新正式发行详细日志：`docs/version/4.5.0.md`
 - 当前开发临时日志：`docs/version/NEXT.md`（没有未发布变更时只记录发行基线）
 - 当前本地实现索引：`docs/implementation/README.md`（3.0.0 文档只作为历史基线）

@@ -3,7 +3,6 @@ package cocos
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -518,66 +517,6 @@ func TestCocosProjectOrientationUsesLatestBuildProfileAndDesignResolution(
 			orientation,
 			found,
 		)
-	}
-}
-
-func TestCocosUploadConfigurationIsWrittenByCommonLayer(t *testing.T) {
-	root := t.TempDir()
-	packageRoot := filepath.Join(root, "playmesh", "package")
-	writeCocosTestFile(
-		t,
-		filepath.Join(root, "settings", "v2", "packages", "project.json"),
-		`{"general":{"designResolution":{"width":240,"height":426}}}`,
-	)
-	writeCocosTestFile(
-		t,
-		filepath.Join(packageRoot, "main.json"),
-		`{
-		  "id":"com.example.orientation",
-		  "orientation":"landscape",
-		  "displayModes":["multi_screen"],
-		  "entries":{
-		    "game":"old.html",
-		    "controller":"controller/index.html"
-		  }
-		}`,
-	)
-	value := project.Context{
-		WorkspaceRoot: root,
-		ProjectRoot:   root,
-		PackageRoot:   packageRoot,
-		Config: &project.Config{
-			Integration: &project.IntegrationConfig{
-				Type:            "cocos",
-				Platform:        "web-mobile",
-				OutputDirectory: ".",
-				Entry:           "index.html",
-			},
-		},
-	}
-	if err := (Cocos{}).PrepareUpload(
-		t.Context(),
-		value,
-	); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(packageRoot, "main.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest map[string]any
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	if manifest["orientation"] != "portrait" {
-		t.Fatalf("Cocos orientation was not synchronized: %#v", manifest)
-	}
-	entries, _ := manifest["entries"].(map[string]any)
-	if entries["game"] != "index.html" {
-		t.Fatalf("Cocos game entry was not synchronized: %#v", entries)
-	}
-	if _, exists := entries["controller"]; exists {
-		t.Fatalf("irrelevant controller entry was not removed: %#v", entries)
 	}
 }
 

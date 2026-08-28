@@ -70,8 +70,10 @@ const synchronousStorageRequests = [];
 const synchronousStorageLedger = new Map();
 const uploadCommands = [];
 const nicknameCommands = [];
+const signalingCommands = [];
 const joinCommands = [];
 const joinUrls = [];
+const rpcStreamUploadCommands = [];
 let joins = 0;
 
 function browserBucketRevision(bucket) {
@@ -547,6 +549,42 @@ function createPage(
           }),
         };
       }
+      if (new URL(requestUrl).pathname === "/v1/sessions/s-1/rpc-stream") {
+        let bodyBytes;
+        if (options.body instanceof ReadableStream) {
+          const chunks = [];
+          let length = 0;
+          const reader = options.body.getReader();
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            chunks.push(chunk.value);
+            length += chunk.value.byteLength;
+          }
+          bodyBytes = new Uint8Array(length);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bodyBytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+        } else if (options.body instanceof Blob) {
+          bodyBytes = new Uint8Array(await options.body.arrayBuffer());
+        } else {
+          bodyBytes = options.body instanceof Uint8Array
+            ? options.body
+            : new Uint8Array(options.body);
+        }
+        rpcStreamUploadCommands.push({ url: requestUrl, options, bodyBytes });
+        const encoded = Uint8Array.from([
+          5, 0, 0, 0, 6,
+          ...new TextEncoder().encode("stored"),
+        ]);
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => encoded.buffer,
+        };
+      }
       if (requestUrl.endsWith("/players/me")) {
         const command = JSON.parse(options.body);
         nicknameCommands.push({ ...command, url: requestUrl, headers: options.headers });
@@ -569,6 +607,25 @@ function createPage(
                 source: "lan_html", latencyMs: 11,
               }],
             },
+          }),
+        };
+      }
+      if (requestUrl.endsWith("/webrtc/signaling-endpoints")) {
+        const command = JSON.parse(options.body);
+        signalingCommands.push({ ...command, url: requestUrl, headers: options.headers });
+        return {
+          ok: true,
+          json: async () => ({
+            type: "playmesh.webrtc-signaling-endpoint",
+            version: 1,
+            timestamp: command.timestamp,
+            requestId: command.requestId,
+            identifier: command.identifier,
+            webSocketPath: "/v1/webrtc/signaling/ticket",
+            expiresAt: "2026-08-25T00:00:30Z",
+            playerId: currentPlayerId,
+            role: "player",
+            iceServers: [{ urls: ["turn:relay.example.test:3478?transport=udp"] }],
           }),
         };
       }
@@ -619,6 +676,8 @@ function createPage(
     ArrayBuffer,
     DataView,
     Blob,
+    ReadableStream,
+    AbortController,
     crypto: webcrypto,
     TextEncoder,
     TextDecoder,
@@ -690,10 +749,10 @@ function createPage(
   window.window = window;
   if (appIdentity) {
     const publicAppApi = {
-      version: "3.3.0",
+      version: "3.5.0",
       ready: Promise.resolve({
         available: true,
-        sdkVersion: "3.3.0",
+        sdkVersion: "3.5.0",
         runtime: {
           coreBase: "http://127.0.0.1:43000/",
           playerSource: "lan_app",
@@ -875,9 +934,24 @@ assert.strictEqual(
   "根 ready 的 app 结果必须与 playmesh.app.ready 保持同一引用",
 );
 assert.deepEqual(Object.keys(firstPage.playmesh).sort(), ["app", "main", "ready"]);
-assert.equal(firstBootstrap.main.sdkVersion, "4.1.0");
-assert.equal(firstPage.playmesh.app.version, "3.3.0");
+assert.equal(firstBootstrap.main.sdkVersion, "4.3.0");
+assert.equal(firstPage.playmesh.app.version, "3.5.0");
 assert.equal(firstBootstrap.app.available, false);
+const signalingEndpoint = await firstPage.playmesh.app.webrtc.getSignalingEndpoint(
+  "camera/main",
+);
+assert.equal(signalingEndpoint.identifier, "camera/main");
+assert.equal(
+  signalingEndpoint.url,
+  "ws://192.168.1.20:42000/v1/webrtc/signaling/ticket",
+);
+assert.equal(signalingCommands.length, 1);
+assert.equal(signalingCommands[0].type, "playmesh.webrtc-signaling-endpoint.request");
+assert.equal(signalingCommands[0].headers.Authorization, "Bearer player-token-1");
+await assert.rejects(
+  firstPage.playmesh.app.webrtc.getSignalingEndpoint("bad identifier"),
+  /identifier/,
+);
 assert.equal(JSON.stringify(firstBootstrap).includes("sidebar.title"), false);
 assert.equal(Object.isFrozen(firstPage.playmesh.main.gameInfo), true);
 const currentGameInfo = firstPage.playmesh.main.gameInfo.getCurrent();
@@ -972,6 +1046,72 @@ browserRpcSocket.emit("message", {
 assert.equal((await browserRpcOperation).level, 7);
 assert.deepEqual(rpcMessages, [], "RPC 内部响应不能泄漏到 game.onMessage");
 unsubscribeRpcMessages();
+const browserStreamProgress = [];
+const browserStreamResult = await firstPage.playmesh.main.rpc.requestStream(
+  "/files/store",
+  new Blob([Uint8Array.from([1, 0, 255, 9])], { type: "application/octet-stream" }),
+  {
+    name: "guest-save.bin",
+    onProgress(transferredBytes, totalBytes) {
+      browserStreamProgress.push([transferredBytes, totalBytes]);
+    },
+  },
+);
+assert.equal(browserStreamResult, "stored");
+assert.equal(rpcStreamUploadCommands.length, 1);
+const browserStreamUpload = rpcStreamUploadCommands[0];
+const browserStreamUrl = new URL(browserStreamUpload.url);
+assert.equal(browserStreamUrl.origin, "http://192.168.1.20:42000");
+assert.equal(browserStreamUrl.pathname, "/v1/sessions/s-1/rpc-stream");
+assert.equal(browserStreamUrl.searchParams.get("path"), "/files/store");
+assert.equal(browserStreamUrl.searchParams.get("name"), "guest-save.bin");
+assert.equal(browserStreamUrl.searchParams.get("size"), "4");
+assert.equal(
+  browserStreamUpload.options.headers.Authorization,
+  "Bearer player-token-1",
+);
+assert.deepEqual(
+  [...browserStreamUpload.bodyBytes],
+  [1, 0, 255, 9],
+);
+assert.deepEqual(browserStreamProgress, [[0, 4], [4, 4]]);
+assert.equal(browserStreamUpload.options.duplex, "half");
+const unknownStreamProgress = [];
+const unknownStreamResult = await firstPage.playmesh.main.rpc.requestStream(
+  "/files/store",
+  new ReadableStream({
+    start(controller) {
+      controller.enqueue(Uint8Array.from([7, 8]));
+      controller.close();
+    },
+  }),
+  {
+    name: "unknown-size.bin",
+    onProgress(transferredBytes, totalBytes) {
+      unknownStreamProgress.push([transferredBytes, totalBytes]);
+    },
+  },
+);
+assert.equal(unknownStreamResult, "stored");
+assert.equal(
+  new URL(rpcStreamUploadCommands[1].url).searchParams.has("size"),
+  false,
+);
+assert.deepEqual(rpcStreamUploadCommands[1].bodyBytes, Uint8Array.from([7, 8]));
+assert.deepEqual(unknownStreamProgress, [[0, null], [2, null]]);
+await assert.rejects(
+  firstPage.playmesh.main.rpc.requestStream(
+    "/files/store",
+    Uint8Array.from([1]),
+    { onProgress: true },
+  ),
+  (error) => error?.code === "rpc_progress_invalid",
+);
+assert.equal(
+  browserRpcSocket.sent.filter((frame) => frame[1] === 0x06).length,
+  1,
+  "browser stream bytes must use HTTP instead of another Binary RPC request",
+);
 assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), true);
 assert.equal(
   firstPage.__mountedHosts.includes("playmesh-browser-fullscreen"),
@@ -1110,9 +1250,11 @@ assert.deepEqual(
   synchronousStorageRequests.slice(-3).map((request) => request.method),
   ["GET", "PUT", "GET"],
 );
-const uploadedFile = { name: "avatar.png", size: 4 };
+const uploadedFile = new Blob([Uint8Array.from([1, 2, 3, 4])], {
+  type: "image/png",
+});
 assert.equal(
-  await hostBucket.upload(uploadedFile),
+  await hostBucket.upload(uploadedFile, { name: "avatar.png" }),
   "/bucket/browser_save/1770000000000.png",
 );
 assert.equal(uploadCommands.length, 1);
@@ -1361,4 +1503,4 @@ assert.equal(
 );
 browserLocalStorage.set("playmesh.nickname.v1", cachedNickname);
 
-console.log("Game SDK browser identity, fullscreen, logging, and reconnect contract passed");
+console.log("Game SDK browser identity, fullscreen, logging, reconnect, and lifecycle contract passed");

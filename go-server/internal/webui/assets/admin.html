@@ -184,11 +184,16 @@
             <h3 data-i18n="admin.config.relay"></h3>
             <div class="filters">
               <label data-i18n-label="admin.config.tunnel_ttl"><input name="tunnelTTL" type="number" min="1"></label>
-              <label data-i18n-label="admin.config.pending_timeout"><input name="pendingTimeout" type="number" min="1"></label>
-              <label data-i18n-label="admin.config.idle_timeout"><input name="idleTimeout" type="number" min="1"></label>
               <label data-i18n-label="admin.config.max_tunnels"><input name="maxTunnels" type="number" min="1"></label>
               <label data-i18n-label="admin.config.max_per_tunnel"><input name="maxPerTunnel" type="number" min="1"></label>
               <label data-i18n-label="admin.config.max_per_ip"><input name="maxPerIP" type="number" min="1"></label>
+              <label class="wide" data-i18n-label="admin.config.turn_udp_listen"><input name="turnUdpListen" required></label>
+              <label class="wide" data-i18n-label="admin.config.turn_tcp_listen"><input name="turnTcpListen" required></label>
+              <label data-i18n-label="admin.config.turn_public_ip"><input name="turnPublicIp" required></label>
+              <label data-i18n-label="admin.config.turn_public_port"><input name="turnPublicPort" type="number" min="1" max="65535"></label>
+              <label data-i18n-label="admin.config.turn_realm"><input name="turnRealm" required></label>
+              <label data-i18n-label="admin.config.turn_min_port"><input name="turnMinPort" type="number" min="1024" max="65535"></label>
+              <label data-i18n-label="admin.config.turn_max_port"><input name="turnMaxPort" type="number" min="1024" max="65535"></label>
               <label class="choice-field"><input name="supportsRelay" type="checkbox"><span data-i18n="admin.config.supports_relay"></span></label>
             </div>
             <label data-i18n-label="admin.config.whitelist">

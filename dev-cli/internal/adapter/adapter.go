@@ -28,29 +28,6 @@ type Adapter interface {
 	PrepareRelease(context.Context, project.Context) error
 }
 
-// UploadPreparer is an optional adapter boundary invoked immediately before
-// the common CLI layer packages the project directory. The adapter owns all
-// engine-specific reads, transformations, validation, and writes. Once this
-// method returns, the CLI packages the existing project package directory.
-type UploadPreparer interface {
-	PrepareUpload(
-		context.Context,
-		project.Context,
-	) error
-}
-
-func PrepareUpload(
-	ctx context.Context,
-	value Adapter,
-	projectContext project.Context,
-) error {
-	preparer, ok := value.(UploadPreparer)
-	if !ok {
-		return nil
-	}
-	return preparer.PrepareUpload(ctx, projectContext)
-}
-
 type Registry struct {
 	adapters map[string]Adapter
 	platform map[string]struct{}

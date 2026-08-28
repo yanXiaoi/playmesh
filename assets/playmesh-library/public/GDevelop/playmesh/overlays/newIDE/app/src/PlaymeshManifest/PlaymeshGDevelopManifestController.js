@@ -39,6 +39,11 @@ export type GDevelopGameManifest = {|
     controller?: string,
   |},
   tags: Array<string>,
+  config: {|
+    webRuntime: {|
+      multithreading: boolean,
+    |},
+  |},
   authority?: {|
     entry: string,
   |},
@@ -99,8 +104,8 @@ export const ensureGDevelopGameId = (
 ) /*: string */ => {
   const current = String(project.getPackageName() || '').trim();
   if (!isUnassignedGDevelopGameId(current)) {
-    if (!PlaymeshGameManifest.isAndroidPackageName(current)) {
-      throw new Error('GDevelop packageName 不是有效的小写 Android 包名。');
+    if (!PlaymeshGameManifest.isValidNewProjectGameId(current)) {
+      throw new Error('GDevelop packageName 不是有效的 Android applicationId。');
     }
     return current;
   }
@@ -193,6 +198,7 @@ export const buildGDevelopGameManifest = (
     controllerOrientation,
     authorityEntry,
     tags = [],
+    webRuntimeMultithreading = false,
   } /*: {|
   project: gdProject,
   gameId?: string,
@@ -209,12 +215,13 @@ export const buildGDevelopGameManifest = (
   controllerOrientation?: PlaymeshOrientation,
   authorityEntry?: string,
   tags?: Array<string>,
+  webRuntimeMultithreading?: boolean,
 |} */
 ) /*: GDevelopGameManifest */ => {
   const resolvedGameId =
     gameId === undefined ? ensureGDevelopGameId(project) : gameId.trim();
-  if (!PlaymeshGameManifest.isAndroidPackageName(resolvedGameId)) {
-    throw new Error('Playmesh gameId 不是有效的小写 Android 包名。');
+  if (!PlaymeshGameManifest.isValidNewProjectGameId(resolvedGameId)) {
+    throw new Error('Playmesh gameId 不是有效的 Android applicationId。');
   }
   return (PlaymeshGameManifest.buildGameManifest({
     id: resolvedGameId,
@@ -235,6 +242,11 @@ export const buildGDevelopGameManifest = (
     controllerOrientation,
     authorityEntry,
     tags,
+    config: {
+      webRuntime: {
+        multithreading: webRuntimeMultithreading === true,
+      },
+    },
   }) /*: GDevelopGameManifest */);
 };
 

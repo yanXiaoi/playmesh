@@ -70,6 +70,31 @@ for (const fixture of fixtures.builderCases) {
     fixture.name
   );
 }
+const opaqueConfig = {
+  webRuntime: { multithreading: true },
+  futureRuntime: { untouched: ['value'] },
+};
+const configManifest = manifestApi.buildGameManifest({
+  ...fixtures.builderCases[0].input,
+  config: opaqueConfig,
+});
+assert.deepEqual(configManifest.config, opaqueConfig);
+assert.equal(manifestApi.validateGameManifest(configManifest).valid, true);
+assert.equal(
+  manifestApi.readGameManifestConfigValue(opaqueConfig, [
+    'webRuntime',
+    'multithreading',
+  ]),
+  true
+);
+for (const [config, path] of [
+  [null, ['webRuntime']],
+  ['opaque', ['webRuntime']],
+  [opaqueConfig, []],
+  [opaqueConfig, ['webRuntime', 'missing']],
+]) {
+  assert.equal(manifestApi.readGameManifestConfigValue(config, path), null);
+}
 for (const fixture of fixtures.validationCases) {
   const result = manifestApi.validateGameManifest(fixtureManifest(fixture));
   assert.equal(result.valid, fixture.valid, fixture.name);
@@ -104,11 +129,6 @@ const androidGameId = manifestApi.generateGameId({
   randomValues: fill(0),
 });
 assert.equal(androidGameId, 'com.playmesh.game.gaaaaaaaaaa');
-assert.equal(manifestApi.isAndroidPackageName(androidGameId), true);
-assert.equal(
-  manifestApi.isAndroidPackageName('com.playmesh.game-aaaaaaaaaa'),
-  false
-);
 const newProjectIdFixture = JSON.parse(
   await readFile(
     path.resolve(repositoryRoot, 'test/fixtures/new_project_game_id.json'),
@@ -257,6 +277,18 @@ const updatedManifest = controller.buildGDevelopGameManifest({
 assert.equal(firstManifest.id, firstGameId);
 assert.equal(updatedManifest.id, firstGameId);
 assert.equal(updatedManifest.version, '1.0.1');
+assert.deepEqual(updatedManifest.config, {
+  webRuntime: { multithreading: false },
+});
+const threadedManifest = controller.buildGDevelopGameManifest({
+  project,
+  sdkVersion: '4.1.0',
+  appSdkVersion: '3.3.0',
+  webRuntimeMultithreading: true,
+});
+assert.deepEqual(threadedManifest.config, {
+  webRuntime: { multithreading: true },
+});
 const stableMetadataGameId = 'com.playmesh.game.gmetadata01';
 const metadataManifest = controller.buildGDevelopGameManifest({
   project,

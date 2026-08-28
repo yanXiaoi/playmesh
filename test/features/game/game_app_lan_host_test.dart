@@ -195,14 +195,22 @@ void main() {
     expect(harness.replacements, hasLength(1));
   });
 
-  test('remote host 仍可准备加入，但发布和分享读取返回 not_authority', () async {
+  test('非 Authority 的 SDK 链接/扫码加入共用预检后端，只有发布和分享读取被拒绝', () async {
     final harness = _HostHarness(isAuthority: false);
     addTearDown(harness.close);
 
-    final action = await harness.host.prepareInvitationJoin(
+    final linkAction = await harness.host.prepareInvitationJoin(
       _invitationUrl('192.168.1.20'),
     );
-    expect(action, isA<AppLanJoinAction>());
+    final qrAction = await harness.host.prepareQrJoin();
+
+    expect(linkAction, isA<AppLanJoinAction>());
+    expect(qrAction, isA<AppLanJoinAction>());
+    expect(
+      harness.inspector.calls.map((invitation) => invitation.entryUri.host),
+      ['192.168.1.20', '192.168.1.30'],
+      reason: '链接与扫码必须共同进入 GameJoinCoordinator 的邀请预检',
+    );
     expect(harness.replacements, isEmpty);
 
     await expectLater(

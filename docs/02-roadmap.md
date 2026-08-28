@@ -69,7 +69,13 @@
 - 游戏库：开发者工作区新建项目与用户导入项目直接进入统一
   `packages/{gameId}/` 目录，并共用已安装资源流程。
 
-所有游戏联机通讯必须经由 SDK。游戏页面不得创建 WebSocket、访问 Go 地址或自行定义联机连接；App 在 Game SDK 与 Go Core WS 之间中转。SDK 负责易用性、重连、状态合并和传感器限频，Go Core 只负责通用连接、会话和消息转发。创建会话时必须把当前 App 游戏运行端登记为独立的 `authorityClientId`：大屏主机不属于 `players`；普通多屏主机可同时作为 Player，但 Authority 与玩家进入顺序无关。
+普通 Session、Authority、RPC、Binary 和状态同步通讯必须经由 SDK，游戏不得直接拼接
+Go Core 地址。App SDK `3.4.0` 的唯一例外是
+`playmesh.app.webrtc.getSignalingEndpoint(identifier)`：页面可以用返回的受会话约束短期
+地址建立浏览器原生 WebRTC，但仍不能绕过 Core 自行获取会话凭据。SDP、媒体、DataChannel
+和生命周期由游戏负责；Core 只中转信令。创建会话时必须把当前 App 游戏运行端登记为
+独立的 `authorityClientId`：大屏主机不属于 `players`；普通多屏主机可同时作为 Player，
+但 Authority 与玩家进入顺序无关。
 
 验收：
 
@@ -168,8 +174,9 @@ AI 心智负担要求：
 - 至少检查并更新：`docs/00-context.md`、`docs/01-architecture.md`、`docs/02-roadmap.md`、`docs/05-next-steps.md`、`docs/06-engineering-standards.md`、`docs/game/README.md`、`docs/game/development-guide.md`、`docs/game/sdk-v1.md`、`docs/game/web-dev-channel.md`、`assets/playmesh-library/public/developer/contracts/sdk-manifest.json`、`assets/playmesh-library/public/developer/contracts/schemas/sdk-v1.json` 和 `assets/playmesh-library/public/developer/prompts/`。Developer OpenAPI 必须由运行时操作注册表生成，不维护静态副本。
 - 如果新增 `playmesh.main.sync` 或等价能力导致 SDK 版本、模板结构或 AI 可读契约变化，
   必须更新当前契约，并同步更新最小数据流说明和开发者工作区校验规则。默认模板与
-  AI 契约只暴露当前版本；运行时由 Dart 注册表接受 Game SDK `4.1.0`，并把 App
-  Bridge SDK 明确版本 `3.2.0`、`3.3.0` 的兼容请求解析到 `3.3.0` bundle。集合外版本直接拒绝，
+  AI 契约只暴露当前版本；运行时由 Dart 注册表只接受 Game SDK `4.1.0`，同时把
+  App Bridge SDK 明确版本 `3.2.0`、`3.3.0`、`3.4.0` 的兼容请求
+  解析到 `3.4.0` bundle。集合外版本直接拒绝，
   不通过静态文件或网关旁路适配。
 
 验收：
@@ -227,6 +234,33 @@ AI 心智负担要求：
 完成归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
 第六阶段是最后一个阶段。后续更改不再新增阶段、阶段中间状态或阶段完成文档，改为按实际发布版本维护 `docs/version/{MAJOR.MINOR.PATCH}.md` 详细更新日志，并同步 App 内简略更新日志。版本与日志规则见 `docs/version/README.md` 和 `docs/06-engineering-standards.md`。
+
+### Playmesh 5.1.0 Runtime 对齐与 RPC Stream（源码完成，未打包）
+
+- Runtime 源码补齐 App Bucket 同步端点和逻辑 Bucket 同步读写；现有固定 APK/ZIP 尚未重建。
+- Game SDK `4.3.0` 增加 `rpc.requestStream/onStreamRequest`，大字节体经一次性鉴权 HTTP
+  数据面以 EOF、背压和有界缓冲转发，Binary WS 只承载控制与小型结果。
+- 发送端和接收端均支持 `(transferredBytes, totalBytes)` 进度监听；未知总量为 `null`，
+  回调错误不改变传输结果。Authority 可把接收流直接传给 `storage.upload()`。
+- 自动化已覆盖普通局域网浏览器发送、固定 Authority 接收/转存、Core guest-to-host 流转发、
+  版本/声明/Manifest 和 Runtime App Bucket；本轮未构建任何分发包。
+
+### Playmesh 5.0.1 扫码加入诊断修复（代码完成，待跨设备验收）
+
+- Windows 组合模式 WebView 已补齐鼠标进入时的实时 `MOVE` 与离开时的 `LEAVE`，新文档
+  加载先恢复普通箭头，不缓存或跨游戏复用网页光标；`cursor: none` 在非全屏窗口内也应
+  生效。现有 Windows Runtime 固定包早于该修复，发布前仍需重建和手工验收。
+- 首页和“加入对局”页的扫码入口已收口到唯一的二维码采集方法，并与手工输入共同进入同一
+  邀请准备方法；LAN 与 Relay 保留严格解析，并在每次操作时动态读取当前 Go Core 地址。
+  Relay 4 的 Core 未就绪错误不再被误报为无效链接。
+- 加入页从预检开始到导航完成显示不可操作、不可返回的全页“正在加入”遮罩，不再让页面在
+  无反馈状态下等待。
+- App、App Bridge 与 Runtime 的加入错误已保留稳定 code、原始类型、完整 cause 链和可用
+  堆栈；界面只脱敏邀请 URL、内部 URL、Token 与凭据，其余业务原因原样显示。
+- Runtime `2.0.1+9` 的 Android x86_64、Android ARM64 和 Windows x64 固定底包已从当前
+  源码重建并更新内置哈希清单；自动化和包内 Relay 4 标记检查完成。
+- 仍需两台真实设备覆盖公网 TURN 分享、首页扫码、“加入对局”页扫码、相机权限、运营网络
+  与 NAT/端口策略；完成前不得标记跨设备验收完成。详细事实见 `docs/version/5.0.1.md`。
 
 ### Playmesh 4.2.0 局域网发现与 App SDK（已发布，待补实机验收）
 

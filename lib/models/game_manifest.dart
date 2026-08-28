@@ -4,6 +4,8 @@ import 'game_package_layout.dart';
 import '../core/game_sdk/sdk_feature_registry.dart';
 import '../core/version/semantic_version.dart';
 
+export 'game_manifest_config.dart';
+
 const maxGameTagCount = 5;
 
 enum GameMode {
@@ -62,7 +64,9 @@ class GameManifest {
     required this.tags,
     required this.entries,
     this.authority,
-  });
+    this.config,
+    bool? hasConfig,
+  }) : hasConfig = hasConfig ?? config != null;
 
   factory GameManifest.fromJson(
     Map<String, Object?> json, {
@@ -210,6 +214,8 @@ class GameManifest {
       tags: List.unmodifiable(tags),
       entries: entries,
       authority: authority,
+      config: json['config'],
+      hasConfig: json.containsKey('config'),
     );
   }
 
@@ -229,6 +235,8 @@ class GameManifest {
   final List<String> tags;
   final GameEntriesManifest entries;
   final GameAuthorityManifest? authority;
+  final Object? config;
+  final bool hasConfig;
 
   bool get supportsMultiplayer => modes.contains(GameMode.multiplayer);
 
@@ -257,6 +265,7 @@ class GameManifest {
     if (authority case final authority?) {
       json['authority'] = {'entry': authority.entry};
     }
+    if (hasConfig) json['config'] = config;
     return json;
   }
 }
@@ -281,6 +290,7 @@ Map<String, Object?> projectGameManifestJson(Map<String, Object?> source) {
     'entries',
     'tags',
     'authority',
+    'config',
   ]);
   _projectNestedJsonObject(projected, 'players', const ['min', 'max']);
   _projectNestedJsonObject(projected, 'entries', const ['game', 'controller']);

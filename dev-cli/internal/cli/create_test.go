@@ -35,6 +35,7 @@ func TestInitJavaScriptUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *te
 		    "controller":"controller/index.html"
 		  },
 		  "authority":{"entry":"static/js/service/index.js"}
+		  ,"config":{"webRuntime":{"multithreading":true}}
 		}`,
 		rootIconName:                string(validRootIcon(t)),
 		"capabilities.json":         `{"required":["sensor.accelerometer"]}`,
@@ -116,6 +117,7 @@ func TestInitJavaScriptUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *te
 		"6",
 		"services/authority.js",
 		"体感, 聚会",
+		"2",
 		"1",
 		"controls/pad.html",
 		"1",
@@ -133,6 +135,9 @@ func TestInitJavaScriptUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *te
 	}
 	if request.MinPlayers != 3 || request.MaxPlayers != 6 || request.ClientID != "cli" {
 		t.Fatalf("player options were not forwarded: %#v", request)
+	}
+	if !request.WebRuntimeMultithreading {
+		t.Fatalf("web runtime multithreading was not forwarded: %#v", request)
 	}
 	if len(request.RequiredCapabilities) != 1 || request.RequiredCapabilities[0] != "sensor.accelerometer" {
 		t.Fatalf("capabilities were not forwarded: %#v", request.RequiredCapabilities)
@@ -176,6 +181,11 @@ func TestInitJavaScriptUsesDeveloperProjectAPIAndDownloadsCurrentDirectory(t *te
 			"single-screen controller entry did not use CLI input: %#v",
 			entries,
 		)
+	}
+	config := manifest["config"].(map[string]any)
+	webRuntime := config["webRuntime"].(map[string]any)
+	if webRuntime["multithreading"] != true {
+		t.Fatalf("downloaded project did not preserve web runtime config: %#v", config)
 	}
 }
 

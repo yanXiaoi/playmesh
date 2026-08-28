@@ -39,6 +39,7 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
         'type': 'array',
         'items': {'type': 'string'},
       },
+      'webRuntimeMultithreading': {'type': 'boolean'},
       'clientId': {'type': 'string'},
     },
   };
@@ -70,6 +71,7 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
         'orientation': 'landscape',
         'minPlayers': 1,
         'maxPlayers': 1,
+        'webRuntimeMultithreading': false,
       },
     ),
   ];
@@ -126,6 +128,8 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
         controllerRequiredCapabilities: _stringValues(
           body['controllerRequiredCapabilities'],
         ),
+        webRuntimeMultithreading:
+            body['webRuntimeMultithreading'] as bool? ?? false,
         requireAndroidApplicationId: true,
       ),
     );

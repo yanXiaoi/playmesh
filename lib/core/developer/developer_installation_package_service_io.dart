@@ -65,7 +65,7 @@ final class GameCatalogDeveloperInstallationPackageRelayServerCatalog
     return probe.source.enabled &&
         probe.supportsGameRelay &&
         relay != null &&
-        relay.transport == 'playmesh-tcp-upgrade' &&
+        relay.transport == 'playmesh-webrtc-datachannel' &&
         relay.protocolVersion == relayProtocolVersion;
   }
 

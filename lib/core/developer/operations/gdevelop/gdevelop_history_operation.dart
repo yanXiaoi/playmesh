@@ -26,7 +26,11 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
     'type': 'object',
     'required': ['gameId', 'origin'],
     'properties': {
-      'gameId': {'type': 'string'},
+      'gameId': {
+        'type': 'string',
+        'maxLength': 64,
+        'pattern': r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$',
+      },
       'origin': {
         'type': 'string',
         'enum': ['create', 'import', 'duplicate'],
@@ -545,13 +549,17 @@ class _GDevelopHistoryOperation implements _DeveloperHttpOperation {
       }.contains(parsedOrigin)) {
         throw const FormatException('GDevelop create origin 无效');
       }
+      final identity = ProjectProvisioningService.validateNewProjectIdentity(
+        gameId: gameId,
+        name: body['name'] as String? ?? gameId,
+      );
       final created = await gateway.gdevelopRestoreTransactions
-          .runProjectAllocation(gameId, () async {
+          .runProjectAllocation(identity.gameId, () async {
             final info = await gateway.gdevelopHistory.createProjectRoot(
-              gameId: gameId,
+              gameId: identity.gameId,
               origin: parsedOrigin,
               fileIdentifier: body['fileIdentifier'] as String?,
-              name: body['name'] as String?,
+              name: identity.name,
             );
             final configInitialized = await gateway.gdevelopProjectConfig
                 .initializeNewProject(info.gameId);

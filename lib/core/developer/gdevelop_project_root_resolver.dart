@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../models/game_id.dart';
 import '../library/playmesh_library_root.dart';
 import 'project_provisioning_service.dart';
 
@@ -204,7 +205,7 @@ class FileSystemGDevelopProjectRootResolver
     final normalizedFileIdentifier = _normalizeOptionalFileIdentifier(
       fileIdentifier,
     );
-    final normalizedName = _normalizeOptionalName(name, gameId: normalized);
+    final normalizedName = _normalizeOptionalName(name);
     return _serializeProject(normalized, () async {
       await _retryCleanup(normalized);
       final provisioning = await _provisioning();
@@ -218,6 +219,9 @@ class FileSystemGDevelopProjectRootResolver
             gameId: normalized,
             name: fallbackName,
             kind: PlaymeshProjectKind.gdevelop,
+            requireAndroidApplicationId: isValidPlaymeshNewProjectGameId(
+              normalized,
+            ),
             additionalMetadata: {
               'fileIdentifiers': [?normalizedFileIdentifier],
             },
@@ -250,6 +254,9 @@ class FileSystemGDevelopProjectRootResolver
               gameId: normalized,
               name: fallbackName,
               kind: PlaymeshProjectKind.gdevelop,
+              requireAndroidApplicationId: isValidPlaymeshNewProjectGameId(
+                normalized,
+              ),
               additionalMetadata: {
                 'fileIdentifiers': [?normalizedFileIdentifier],
               },
@@ -344,7 +351,7 @@ class FileSystemGDevelopProjectRootResolver
     final normalizedFileIdentifier = _normalizeOptionalFileIdentifier(
       fileIdentifier,
     );
-    final normalizedName = _normalizeOptionalName(name, gameId: normalized);
+    final normalizedName = _normalizeOptionalName(name);
     return _serializeProject(normalized, () async {
       final project = await (await _provisioning()).updateMetadata(
         gameId: normalized,
@@ -627,12 +634,9 @@ String? _normalizeOptionalFileIdentifier(String? value) {
   return normalized;
 }
 
-String? _normalizeOptionalName(String? value, {required String gameId}) {
+String? _normalizeOptionalName(String? value) {
   if (value == null) return null;
-  return ProjectProvisioningService.validateIdentity(
-    gameId: gameId,
-    name: value,
-  ).name;
+  return ProjectProvisioningService.validateProjectName(value);
 }
 
 List<String> _metadataFileIdentifiers(Map<String, Object?> metadata) {

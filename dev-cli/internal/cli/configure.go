@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/fsutil"
+	manifestcontract "github.com/yanXiaoi/playmesh/dev-cli/internal/manifest"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/project"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/webpath"
 )
@@ -26,23 +27,24 @@ type configureRequest struct {
 }
 
 type configureManifest struct {
-	ID                    string   `json:"id,omitempty"`
-	Name                  string   `json:"name"`
-	Version               string   `json:"version"`
-	SDKVersion            string   `json:"sdkVersion,omitempty"`
-	AppSDKVersion         string   `json:"appSdkVersion,omitempty"`
-	Remarks               string   `json:"remarks"`
-	Tags                  []string `json:"tags"`
-	Orientation           string   `json:"orientation"`
-	Mode                  string   `json:"mode"`
-	DisplayMode           string   `json:"displayMode"`
-	ControllerOrientation string   `json:"controllerOrientation,omitempty"`
-	ControllerEntry       string   `json:"controllerEntry,omitempty"`
-	AuthorityEntry        string   `json:"authorityEntry,omitempty"`
-	MinPlayers            int      `json:"minPlayers"`
-	MaxPlayers            int      `json:"maxPlayers"`
-	HasControllerEntry    bool     `json:"hasControllerEntry,omitempty"`
-	HasAuthorityEntry     bool     `json:"hasAuthorityEntry,omitempty"`
+	ID                       string   `json:"id,omitempty"`
+	Name                     string   `json:"name"`
+	Version                  string   `json:"version"`
+	SDKVersion               string   `json:"sdkVersion,omitempty"`
+	AppSDKVersion            string   `json:"appSdkVersion,omitempty"`
+	Remarks                  string   `json:"remarks"`
+	Tags                     []string `json:"tags"`
+	Orientation              string   `json:"orientation"`
+	Mode                     string   `json:"mode"`
+	DisplayMode              string   `json:"displayMode"`
+	ControllerOrientation    string   `json:"controllerOrientation,omitempty"`
+	ControllerEntry          string   `json:"controllerEntry,omitempty"`
+	AuthorityEntry           string   `json:"authorityEntry,omitempty"`
+	MinPlayers               int      `json:"minPlayers"`
+	MaxPlayers               int      `json:"maxPlayers"`
+	WebRuntimeMultithreading bool     `json:"webRuntimeMultithreading"`
+	HasControllerEntry       bool     `json:"hasControllerEntry,omitempty"`
+	HasAuthorityEntry        bool     `json:"hasAuthorityEntry,omitempty"`
 }
 
 type configureCapabilities struct {
@@ -242,8 +244,13 @@ func readConfigureRequest(
 			AuthorityEntry:        nestedString(manifest["authority"], "entry"),
 			MinPlayers:            anyInteger(players["min"]),
 			MaxPlayers:            anyInteger(players["max"]),
-			HasControllerEntry:    anyString(entries["controller"]) != "",
-			HasAuthorityEntry:     nestedString(manifest["authority"], "entry") != "",
+			WebRuntimeMultithreading: manifestcontract.ConfigValue(
+				manifest["config"],
+				"webRuntime",
+				"multithreading",
+			) == true,
+			HasControllerEntry: anyString(entries["controller"]) != "",
+			HasAuthorityEntry:  nestedString(manifest["authority"], "entry") != "",
 		},
 		Capabilities: configureCapabilities{
 			Required: []string{},
@@ -446,6 +453,20 @@ func promptConfigureRequestWithCapabilities(
 		return configureRequest{}, err
 	}
 	current.Manifest.Tags = splitUnique(tags)
+	webRuntimeMultithreading, err := promptChoice(
+		reader,
+		"Web Runtime 多线程",
+		[]promptOption{
+			{value: "false", label: "关闭（兼容现有游戏）"},
+			{value: "true", label: "开启（需要跨源隔离资源）"},
+		},
+		map[bool]int{false: 0, true: 1}[current.Manifest.WebRuntimeMultithreading],
+	)
+	if err != nil {
+		return configureRequest{}, err
+	}
+	current.Manifest.WebRuntimeMultithreading =
+		webRuntimeMultithreading == "true"
 	if current.Manifest.DisplayMode == "single_screen_multiplayer" {
 		current.Manifest.ControllerOrientation, err = promptChoice(
 			reader,
@@ -596,6 +617,20 @@ func applyConfigureRequest(
 		delete(manifest, "controllerOrientation")
 	}
 	manifest["entries"] = entries
+	config, ok := manifest["config"].(map[string]any)
+	if !ok {
+		config = map[string]any{}
+	}
+	webRuntime, ok := manifestcontract.ConfigValue(
+		config,
+		"webRuntime",
+	).(map[string]any)
+	if !ok {
+		webRuntime = map[string]any{}
+	}
+	webRuntime["multithreading"] = request.Manifest.WebRuntimeMultithreading
+	config["webRuntime"] = webRuntime
+	manifest["config"] = config
 
 	capabilities := map[string]any{
 		"required": uniqueTrimmed(request.Capabilities.Required),

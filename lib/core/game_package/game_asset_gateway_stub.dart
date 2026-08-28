@@ -7,6 +7,7 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
   required String entryPath,
   String? gameSdkVersion,
   String? appSdkVersion,
+  Object? config,
   GameStorageService? storage,
 }) {
   throw UnsupportedError('当前平台不支持本地游戏资源网关');

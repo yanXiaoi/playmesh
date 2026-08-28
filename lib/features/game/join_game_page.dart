@@ -10,8 +10,9 @@ import '../../core/localization/playmesh_localization.dart';
 import '../../core/network/lan_game_discovery_service.dart';
 import '../../models/user_profile.dart';
 import '../../ui/playmesh_ui.dart';
-import 'game_invitation_scanner_page.dart';
+import 'game_invitation_scan_flow.dart';
 import 'game_join_error_localization.dart';
+import 'game_join_error_presentation.dart';
 import 'game_join_router.dart';
 
 class JoinGamePage extends StatefulWidget {
@@ -24,9 +25,16 @@ class JoinGamePage extends StatefulWidget {
     this.joinCoordinator,
     this.joinRouter = const GameJoinRouter(),
     this.onNicknameChanged,
+    this.coreControlBaseUri,
+    this.coreControlBaseUriProvider,
+    this.scanAndPrepareInvitation = scanAndPrepareGameInvitation,
+    this.prepareInvitation = prepareGameInvitation,
   });
 
   static const routeName = '/join-game';
+  static const scanButtonKey = ValueKey('join-scan-button');
+  static const submitButtonKey = ValueKey('join-submit-button');
+  static const joiningOverlayKey = ValueKey('join-joining-overlay');
 
   final String initialUserId;
   final String initialNickname;
@@ -35,6 +43,10 @@ class JoinGamePage extends StatefulWidget {
   final GameJoinPreparationService? joinCoordinator;
   final GameJoinRouter joinRouter;
   final Future<void> Function(String nickname)? onNicknameChanged;
+  final Uri? coreControlBaseUri;
+  final GameCoreBaseUriProvider? coreControlBaseUriProvider;
+  final GameInvitationScanAndPrepare scanAndPrepareInvitation;
+  final GameInvitationPrepare prepareInvitation;
 
   @override
   State<JoinGamePage> createState() => _JoinGamePageState();
@@ -60,6 +72,7 @@ class _JoinGamePageState extends State<JoinGamePage>
   bool _lifecycleResumed = true;
   bool _joining = false;
   String? _joinErrorKey;
+  String? _joinErrorDiagnostic;
 
   @override
   void initState() {
@@ -70,7 +83,10 @@ class _JoinGamePageState extends State<JoinGamePage>
     _ownsDiscoveryService = injectedDiscovery == null;
     final injectedCoordinator = widget.joinCoordinator;
     if (injectedCoordinator == null) {
-      final inspector = DefaultGameInvitationInspector();
+      final inspector = DefaultGameInvitationInspector(
+        coreBaseUri: widget.coreControlBaseUri,
+        coreBaseUriProvider: widget.coreControlBaseUriProvider,
+      );
       _ownedInspector = inspector;
       _joinCoordinator = GameJoinCoordinator(
         inspector: inspector,
@@ -139,129 +155,180 @@ class _JoinGamePageState extends State<JoinGamePage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(context.tr('join.title'))),
-      body: PlaymeshBackground(
-        child: SafeArea(
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                ResponsivePage(
-                  maxWidth: 680,
-                  child: EntranceAnimation(child: _buildNearbyGamesCard()),
-                ),
-                const SizedBox(height: 14),
-                ResponsivePage(
-                  maxWidth: 680,
-                  child: EntranceAnimation(
-                    delay: const Duration(milliseconds: 70),
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(22),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                const GradientIcon(
-                                  icon: Icons.qr_code_scanner_rounded,
-                                  size: 56,
-                                  iconSize: 28,
-                                ),
-                                const SizedBox(width: 15),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        context.tr('join.host_title'),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                      ),
-                                      const SizedBox(height: 3),
-                                      Text(context.tr('join.subtitle')),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (_scannerSupported) ...[
-                              const SizedBox(height: 22),
-                              FilledButton.tonalIcon(
-                                onPressed: _joining ? null : _scanInvitation,
-                                icon: const Icon(Icons.qr_code_scanner),
-                                label: Text(context.tr('join.scan')),
-                              ),
-                              Padding(
-                                padding: EdgeInsets.symmetric(vertical: 18),
-                                child: Row(
-                                  children: [
-                                    const Expanded(child: Divider()),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                      ),
-                                      child: Text(context.tr('join.manual')),
-                                    ),
-                                    const Expanded(child: Divider()),
-                                  ],
-                                ),
-                              ),
-                            ] else
-                              const SizedBox(height: 22),
-                            TextFormField(
-                              controller: _invitationController,
-                              decoration: InputDecoration(
-                                labelText: context.tr('join.invite_link'),
-                                hintText: context.tr('join.invite_hint'),
-                                helperText: context.tr('join.invite_helper'),
-                                prefixIcon: const Icon(Icons.link_rounded),
-                              ),
-                              keyboardType: TextInputType.url,
-                              textInputAction: TextInputAction.go,
-                              autocorrect: false,
-                              enableSuggestions: false,
-                              validator: _validateInvitation,
-                              onFieldSubmitted: _joining
-                                  ? null
-                                  : (_) => _joinFromInput(),
-                            ),
-                            const SizedBox(height: 8),
-                            FilledButton.icon(
-                              onPressed: _joining ? null : _joinFromInput,
-                              icon: const Icon(Icons.login),
-                              label: Text(
-                                _joining
-                                    ? context.tr('join.joining')
-                                    : context.tr('join.submit'),
-                              ),
-                            ),
-                            if (_joinErrorKey != null) ...[
-                              const SizedBox(height: 12),
-                              Text(
-                                context.tr(_joinErrorKey!),
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
-                            ],
-                          ],
+    return PopScope(
+      canPop: !_joining,
+      child: Stack(
+        children: [
+          Scaffold(
+            appBar: AppBar(title: Text(context.tr('join.title'))),
+            body: PlaymeshBackground(
+              child: SafeArea(
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    children: [
+                      ResponsivePage(
+                        maxWidth: 680,
+                        child: EntranceAnimation(
+                          child: _buildNearbyGamesCard(),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 14),
+                      ResponsivePage(
+                        maxWidth: 680,
+                        child: EntranceAnimation(
+                          delay: const Duration(milliseconds: 70),
+                          child: Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(22),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const GradientIcon(
+                                        icon: Icons.qr_code_scanner_rounded,
+                                        size: 56,
+                                        iconSize: 28,
+                                      ),
+                                      const SizedBox(width: 15),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              context.tr('join.host_title'),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleLarge
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(context.tr('join.subtitle')),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_scannerSupported) ...[
+                                    const SizedBox(height: 22),
+                                    FilledButton.tonalIcon(
+                                      key: JoinGamePage.scanButtonKey,
+                                      onPressed: _joining
+                                          ? null
+                                          : _scanInvitation,
+                                      icon: const Icon(Icons.qr_code_scanner),
+                                      label: Text(context.tr('join.scan')),
+                                    ),
+                                    Padding(
+                                      padding: EdgeInsets.symmetric(
+                                        vertical: 18,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Expanded(child: Divider()),
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                            ),
+                                            child: Text(
+                                              context.tr('join.manual'),
+                                            ),
+                                          ),
+                                          const Expanded(child: Divider()),
+                                        ],
+                                      ),
+                                    ),
+                                  ] else
+                                    const SizedBox(height: 22),
+                                  TextFormField(
+                                    controller: _invitationController,
+                                    decoration: InputDecoration(
+                                      labelText: context.tr('join.invite_link'),
+                                      hintText: context.tr('join.invite_hint'),
+                                      helperText: context.tr(
+                                        'join.invite_helper',
+                                      ),
+                                      prefixIcon: const Icon(
+                                        Icons.link_rounded,
+                                      ),
+                                    ),
+                                    keyboardType: TextInputType.url,
+                                    textInputAction: TextInputAction.go,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                    validator: _validateInvitation,
+                                    onFieldSubmitted: _joining
+                                        ? null
+                                        : (_) => _joinFromInput(),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  FilledButton.icon(
+                                    key: JoinGamePage.submitButtonKey,
+                                    onPressed: _joining ? null : _joinFromInput,
+                                    icon: const Icon(Icons.login),
+                                    label: Text(
+                                      _joining
+                                          ? context.tr('join.joining')
+                                          : context.tr('join.submit'),
+                                    ),
+                                  ),
+                                  if (_joinErrorKey != null) ...[
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      context.tr(_joinErrorKey!),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
+                                      ),
+                                    ),
+                                    if (_joinErrorDiagnostic != null) ...[
+                                      const SizedBox(height: 10),
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          context.tr('join.error_details'),
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelMedium,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      SelectableText(
+                                        _joinErrorDiagnostic!,
+                                        key: gameJoinErrorDetailsKey,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(fontFamily: 'monospace'),
+                                      ),
+                                    ],
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (_joining)
+            Positioned.fill(
+              key: JoinGamePage.joiningOverlayKey,
+              child: GameInvitationJoiningOverlay(
+                label: context.tr('join.joining'),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -560,17 +627,14 @@ class _JoinGamePageState extends State<JoinGamePage>
   }
 
   Future<void> _scanInvitation() async {
-    await _runJoin(() async {
-      final raw = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => const GameInvitationScannerPage()),
-      );
-      if (raw == null || !mounted) return null;
-      _invitationController.text = raw.trim();
-      return _joinCoordinator.prepareLink(
-        raw,
-        context: const GameJoinContext(),
-      );
-    });
+    await _runJoin(
+      () => widget.scanAndPrepareInvitation(
+        context,
+        coordinator: _joinCoordinator,
+        joinContext: const GameJoinContext(),
+        onScanned: (raw) => _invitationController.text = raw,
+      ),
+    );
   }
 
   String? _validateInvitation(String? value) {
@@ -585,9 +649,10 @@ class _JoinGamePageState extends State<JoinGamePage>
   Future<void> _joinFromInput() async {
     if (!_formKey.currentState!.validate()) return;
     await _runJoin(
-      () => _joinCoordinator.prepareLink(
-        _invitationController.text,
-        context: const GameJoinContext(),
+      () => widget.prepareInvitation(
+        _invitationController.text.trim(),
+        coordinator: _joinCoordinator,
+        joinContext: const GameJoinContext(),
       ),
     );
   }
@@ -605,13 +670,16 @@ class _JoinGamePageState extends State<JoinGamePage>
     bool retainDiscoveryForPreparation = false,
   }) async {
     if (_joining) return;
+    RemoteGameLaunch? preparedLaunch;
     setState(() {
       _joining = true;
       _joinErrorKey = null;
+      _joinErrorDiagnostic = null;
     });
     try {
       if (!retainDiscoveryForPreparation) await _stopDiscovery();
       final launch = await prepare();
+      preparedLaunch = launch;
       if (launch == null || !mounted) return;
       if (retainDiscoveryForPreparation) {
         // Coordinator 会在预检后再次核对短期候选；必须等准备完成后再释放
@@ -624,16 +692,34 @@ class _JoinGamePageState extends State<JoinGamePage>
         launch: launch,
         userId: widget.initialUserId,
         nickname: widget.initialNickname,
+        coreControlBaseUri:
+            widget.coreControlBaseUriProvider?.call() ??
+            widget.coreControlBaseUri,
         discoveryService: _discoveryService,
         onNicknameChanged: widget.onNicknameChanged,
       );
-    } on GameJoinException catch (error) {
+    } on GameJoinException catch (error, stackTrace) {
       if (mounted) {
-        setState(() => _joinErrorKey = gameJoinErrorLocalizationKey(error));
+        setState(() {
+          _joinErrorKey = gameJoinErrorLocalizationKey(error);
+          _joinErrorDiagnostic = gameJoinErrorDetails(
+            error,
+            stackTrace: stackTrace,
+          );
+        });
       }
-    } on Object {
-      if (mounted) setState(() => _joinErrorKey = 'join.invalid_invite');
+    } on Object catch (error, stackTrace) {
+      if (mounted) {
+        setState(() {
+          _joinErrorKey = 'join.failed';
+          _joinErrorDiagnostic = gameJoinErrorDetails(
+            error,
+            stackTrace: stackTrace,
+          );
+        });
+      }
     } finally {
+      await preparedLaunch?.close();
       if (mounted) {
         setState(() => _joining = false);
         if (_lifecycleResumed) unawaited(_startDiscovery());

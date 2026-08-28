@@ -101,7 +101,7 @@ void main() {
     expect(presence?.maxPlayers, isNull);
   });
 
-  test('多人 presence 只消费 session 快照消息、去重并使用注入的主机昵称', () {
+  test('多人 presence 只消费 session 快照消息并使用注入的主机昵称', () {
     final source = File(
       'lib/core/game_web/game_share_coordinator.dart',
     ).readAsStringSync();
@@ -118,7 +118,11 @@ void main() {
 
     expect(provider, contains('required this.hostNickname'));
     expect(provider, contains("where((message) => message['session'] is Map)"));
-    expect(provider, contains('.distinct()'));
+    expect(
+      provider,
+      isNot(contains('.distinct()')),
+      reason: '人数相同时昵称、在线状态或连接方式仍可能变化',
+    );
     expect(source, contains('hostNickname: hostNickname'));
     expect(
       source,
@@ -130,6 +134,42 @@ void main() {
       source,
       isNot(contains('hostNickname: connection.currentPlayer.nickname')),
     );
+  });
+
+  test('玩家在线状态变化会发布 Coordinator 状态以刷新已打开的房间面板', () async {
+    final harness = await _Harness.create();
+    addTearDown(harness.dispose);
+    await harness.coordinator.ensureChannel();
+    final observed = <GameShareCoordinatorState>[];
+    final subscription = harness.coordinator.states.listen(observed.add);
+    addTearDown(subscription.cancel);
+    final changed = LanGamePresence.multiplayer(
+      hostNickname: '测试房主',
+      playerCount: 2,
+      maxPlayers: _game.maxPlayers,
+    );
+
+    harness.accessProvider.emitPresence(changed);
+    await _waitUntil(() => observed.any((state) => state.presence == changed));
+
+    expect(harness.coordinator.state.presence, changed);
+    expect(harness.coordinator.state.channel, ShareChannelState.active);
+  });
+
+  test('在线人数未变的 Session 快照也会刷新已打开的房间面板', () async {
+    final harness = await _Harness.create();
+    addTearDown(harness.dispose);
+    await harness.coordinator.ensureChannel();
+    final observed = <GameShareCoordinatorState>[];
+    final subscription = harness.coordinator.states.listen(observed.add);
+    addTearDown(subscription.cancel);
+    final unchangedPresence = harness.coordinator.state.presence!;
+
+    harness.accessProvider.emitPresence(unchangedPresence);
+    await _waitUntil(() => observed.isNotEmpty);
+
+    expect(observed.last.presence, unchangedPresence);
+    expect(harness.coordinator.state.channel, ShareChannelState.active);
   });
 
   test('首次发布等待注册时保留最新 presence 并在提交后补发', () async {
@@ -590,6 +630,28 @@ void main() {
     expect(session.closeCalls, 1, reason: '失败 session 不应继续保存在 coordinator 中');
   });
 
+  test('Relay factory 的原始异常不会被协调器替换', () async {
+    final harness = await _Harness.create();
+    addTearDown(harness.dispose);
+
+    await expectLater(
+      harness.coordinator.connectRelay(_relayRequest),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          '未配置 Relay session',
+        ),
+      ),
+    );
+
+    expect(
+      harness.coordinator.state.relayStatus,
+      RelayConnectionStatus.disconnected,
+    );
+    expect(harness.coordinator.state.relayFailureCode, 'relay_unavailable');
+  });
+
   test('Relay 快照构建失败时回滚 WAN、session、订阅和二维码保留集', () async {
     final lan = _lanInvitation('192.168.1.20', 4100, 'lan');
     final wan = Uri.parse(
@@ -603,7 +665,7 @@ void main() {
 
     await expectLater(
       harness.coordinator.connectRelay(_relayRequest),
-      throwsA(_shareExceptionWithCode('share_unavailable')),
+      throwsA(_shareExceptionWithCode('qr_generation_failed')),
     );
 
     expect(session.closeCalls, 1);
@@ -881,6 +943,7 @@ final class _FakeAccessProvider implements GameShareAccessProvider {
       currentPresence: () => _presence,
       presenceChanges: _presences.stream,
       coreEndpoint: coreEndpoint,
+      sessionId: 's_test_room',
       joinCode: 'ABC123',
       release: () async {
         releaseCalls += 1;
@@ -1043,16 +1106,19 @@ final class _FakeGameRelayHostFactory implements GameRelayHostFactory {
   Uri? authorityWebBaseUri;
   Uri? authorityCoreBaseUri;
   Uri? authorityEntryUri;
+  String? sessionId;
 
   @override
   Future<RelayHostSession> start({
     required GameRelayHostRequest request,
+    required String sessionId,
     required Uri authorityWebBaseUri,
     required Uri authorityCoreBaseUri,
     required Uri authorityEntryUri,
   }) {
     startCalls += 1;
     this.request = request;
+    this.sessionId = sessionId;
     this.authorityWebBaseUri = authorityWebBaseUri;
     this.authorityCoreBaseUri = authorityCoreBaseUri;
     this.authorityEntryUri = authorityEntryUri;

@@ -639,15 +639,17 @@ void main() {
     final baseUrls = (statusJson['baseUrls']! as List).cast<String>();
     expect(baseUrls, isNotEmpty);
     expect(baseUrls, contains(base.toString()));
-    expect(statusJson['gameSdkVersion'], '4.1.0');
-    expect(statusJson['appSdkVersion'], '3.3.0');
+    expect(statusJson['gameSdkVersion'], '4.3.0');
+    expect(statusJson['appSdkVersion'], '3.5.0');
     expect(
       statusJson['gameSdkCompatibility'],
       contains(containsPair('minimumRequestedVersion', '4.1.0')),
     );
     expect(
       statusJson['gameSdkCompatibility'],
-      contains(containsPair('supportedRequestedVersions', ['4.1.0'])),
+      contains(
+        containsPair('supportedRequestedVersions', ['4.1.0', '4.2.0', '4.3.0']),
+      ),
     );
     expect(
       statusJson['appSdkCompatibility'],
@@ -655,11 +657,18 @@ void main() {
     );
     expect(
       statusJson['appSdkCompatibility'],
-      contains(containsPair('maximumRequestedVersion', '3.3.0')),
+      contains(containsPair('maximumRequestedVersion', '3.5.0')),
     );
     expect(
       statusJson['appSdkCompatibility'],
-      contains(containsPair('supportedRequestedVersions', ['3.2.0', '3.3.0'])),
+      contains(
+        containsPair('supportedRequestedVersions', [
+          '3.2.0',
+          '3.3.0',
+          '3.4.0',
+          '3.5.0',
+        ]),
+      ),
     );
 
     final sdkBundle = await http.get(
@@ -667,15 +676,15 @@ void main() {
     );
     expect(sdkBundle.statusCode, HttpStatus.ok);
     final sdkBundleJson = jsonDecode(sdkBundle.body) as Map;
-    expect(sdkBundleJson['gameSdkVersion'], '4.1.0');
-    expect(sdkBundleJson['appSdkVersion'], '3.3.0');
+    expect(sdkBundleJson['gameSdkVersion'], '4.3.0');
+    expect(sdkBundleJson['appSdkVersion'], '3.5.0');
     expect(
       sdkBundleJson['gameSdkCompatibility'],
-      contains(containsPair('bundleVersion', '4.1.0')),
+      contains(containsPair('bundleVersion', '4.3.0')),
     );
     expect(
       sdkBundleJson['appSdkCompatibility'],
-      contains(containsPair('bundleVersion', '3.3.0')),
+      contains(containsPair('bundleVersion', '3.5.0')),
     );
     expect(
       (sdkBundleJson['files'] as Map).keys,
@@ -1012,7 +1021,7 @@ void main() {
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-main.d.ts ====='),
     );
-    expect(aiPrompt.body, contains('readonly version: "4.1.0"'));
+    expect(aiPrompt.body, contains('readonly version: "4.3.0"'));
     expect(
       aiPrompt.body,
       contains('===== BEGIN SDK DECLARATION: playmesh-app.d.ts ====='),
@@ -1415,6 +1424,15 @@ void main() {
     final createProjectOperation =
         (paths['/dev/api/projects'] as Map)['post'] as Map;
     expect((createProjectOperation['responses'] as Map), contains('201'));
+    final createProjectSchema =
+        (((createProjectOperation['requestBody'] as Map)['content']
+                    as Map)['application/json']
+                as Map)['schema']
+            as Map;
+    expect(
+      (createProjectSchema['properties'] as Map)['webRuntimeMultithreading'],
+      {'type': 'boolean'},
+    );
     final startRuntimeOperation =
         (paths['/dev/api/projects/{projectId}/run'] as Map)['post'] as Map;
     expect((startRuntimeOperation['responses'] as Map), contains('202'));
@@ -1706,6 +1724,9 @@ void main() {
     expect(utf8.decode(manifest.bytes), contains(project.id));
     expect(utf8.decode(manifest.bytes), contains('A polished party game.'));
     expect(utf8.decode(manifest.bytes), contains('motion'));
+    expect((jsonDecode(utf8.decode(manifest.bytes)) as Map)['config'], {
+      'webRuntime': {'multithreading': false},
+    });
     final capabilities = await catalog.readFile(
       project.id,
       'capabilities.json',
@@ -1765,6 +1786,9 @@ void main() {
       updatedManifestJson,
       containsPair('appSdkVersion', SdkFeatureRegistry.appSdkVersion),
     );
+    expect(updatedManifestJson['config'], {
+      'webRuntime': {'multithreading': false},
+    });
     final manifestDiff = await catalog.diffFile(project.id, 'main.json');
     expect(manifestDiff.changed, isTrue);
     expect(manifestDiff.original, contains('"name": "Created Game"'));
@@ -1948,7 +1972,11 @@ void main() {
     sourceManifest
       ..['permissions'] = ['keyboard']
       ..['icon'] = 'app/legacy.png'
-      ..['redundant'] = true;
+      ..['redundant'] = true
+      ..['config'] = {
+        'webRuntime': {'multithreading': true},
+        'futureRuntime': {'preserved': true},
+      };
     await sourceManifestFile.writeAsString(jsonEncode(sourceManifest));
     await catalog.writeFile(
       source.id,
@@ -2005,6 +2033,10 @@ void main() {
     expect(manifest, isNot(contains('permissions')));
     expect(manifest, isNot(contains('icon')));
     expect(manifest, isNot(contains('redundant')));
+    expect(manifest['config'], {
+      'webRuntime': {'multithreading': true},
+      'futureRuntime': {'preserved': true},
+    });
     expect(manifest['author'], 'Current Nickname');
     expect(
       manifest['lastModifiedAt'],
@@ -2693,6 +2725,7 @@ void main() {
   });
 
   test('开发资源会话只接受当前 CLI 对端并在撤销时停止临时运行', () async {
+    const gameId = 'Com.Example.Dev_2';
     final port = await _availablePort();
     final launched = <DeveloperProjectLaunchRequest>[];
     var stopped = 0;
@@ -2702,7 +2735,7 @@ void main() {
       onLaunch: (request) async => launched.add(request),
       clock: () => now,
     );
-    runController.registerStopHandler('demo', () async => stopped += 1);
+    runController.registerStopHandler(gameId, () async => stopped += 1);
     final gateway = await startDeveloperWebGateway(
       port: port,
       token: 'development-session-token',
@@ -2719,12 +2752,12 @@ void main() {
     final credential = List<String>.filled(40, 'c').join();
     final expiresAt = now.add(const Duration(minutes: 30));
     final stagedResponse = await http.post(
-      base.resolve('/dev/api/projects/demo/development/package'),
+      base.resolve('/dev/api/projects/$gameId/development/package'),
       headers: const {
         HttpHeaders.authorizationHeader: 'Bearer development-session-token',
         HttpHeaders.contentTypeHeader: 'application/zip',
       },
-      body: _developmentPackage('demo'),
+      body: _developmentPackage(gameId),
     );
     expect(
       stagedResponse.statusCode,
@@ -2734,7 +2767,7 @@ void main() {
     final packageId = jsonDecode(stagedResponse.body)['packageId'] as String;
 
     final foreign = await http.post(
-      base.resolve('/dev/api/projects/demo/development'),
+      base.resolve('/dev/api/projects/$gameId/development'),
       headers: headers,
       body: jsonEncode({
         'resourceBaseUrl': 'http://192.0.2.10:4173/',
@@ -2747,7 +2780,7 @@ void main() {
     expect(launched, isEmpty);
 
     final invalidExpiry = await http.post(
-      base.resolve('/dev/api/projects/demo/development'),
+      base.resolve('/dev/api/projects/$gameId/development'),
       headers: headers,
       body: jsonEncode({
         'resourceBaseUrl': 'http://127.0.0.1:4173/',
@@ -2760,7 +2793,7 @@ void main() {
     expect(launched, isEmpty);
 
     final started = await http.post(
-      base.resolve('/dev/api/projects/demo/development'),
+      base.resolve('/dev/api/projects/$gameId/development'),
       headers: headers,
       body: jsonEncode({
         'resourceBaseUrl': 'http://127.0.0.1:4173/',
@@ -2772,40 +2805,40 @@ void main() {
     expect(started.statusCode, HttpStatus.accepted, reason: started.body);
     final startedRunId = jsonDecode(started.body)['runId'] as String;
     expect(launched, hasLength(1));
-    expect(launched.single.projectId, 'demo');
+    expect(launched.single.projectId, gameId);
     expect(
       launched.single.resourceSession?.resourceBaseUri,
       Uri.parse('http://127.0.0.1:4173/'),
     );
     final status = await http.get(
-      base.resolve('/dev/api/projects/demo/development'),
+      base.resolve('/dev/api/projects/$gameId/development'),
       headers: headers,
     );
     expect(status.statusCode, HttpStatus.ok);
     expect(jsonDecode(status.body)['active'], isTrue);
     expect(status.body, isNot(contains(credential)));
     runController.registerRestartHandler(
-      'demo',
+      gameId,
       () async => restarted += 1,
       expectedRunId: startedRunId,
     );
     final restart = await http.post(
-      base.resolve('/dev/api/projects/demo/run/restart'),
+      base.resolve('/dev/api/projects/$gameId/run/restart'),
       headers: headers,
     );
     expect(restart.statusCode, HttpStatus.accepted, reason: restart.body);
     expect(jsonDecode(restart.body)['runId'], startedRunId);
     expect(restarted, 1);
     expect(launched, hasLength(1));
-    expect(runController.resourceSession('demo'), isNotNull);
+    expect(runController.resourceSession(gameId), isNotNull);
 
     final revoked = await http.delete(
-      base.resolve('/dev/api/projects/demo/development'),
+      base.resolve('/dev/api/projects/$gameId/development'),
       headers: headers,
     );
     expect(revoked.statusCode, HttpStatus.ok, reason: revoked.body);
     expect(stopped, 1);
-    expect(runController.resourceSession('demo'), isNull);
+    expect(runController.resourceSession(gameId), isNull);
   });
 
   test('源码运行校验并显式启动已保存的受管项目', () async {

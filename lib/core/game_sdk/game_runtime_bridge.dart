@@ -3,11 +3,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:playmesh_database/playmesh_database.dart';
 
 import 'game_sdk_bridge.dart';
 import 'sdk_feature_registry.dart';
 import '../session/go_core_session_client.dart';
 import '../storage/game_storage_service.dart';
+import '../storage/game_database_service.dart';
 
 class GameRuntimeBridge implements GameSdkBridge {
   GameRuntimeBridge(
@@ -17,6 +19,7 @@ class GameRuntimeBridge implements GameSdkBridge {
     this.tags = const <String>[],
     this.requiredCapabilities = const <String>[],
     this.onNicknameUpdate,
+    this.databaseService,
   }) {
     _sessionSubscription = connection.messages.listen(
       (message) => unawaited(_handleTransportMessage(message)),
@@ -33,6 +36,8 @@ class GameRuntimeBridge implements GameSdkBridge {
   final List<String> requiredCapabilities;
   final Future<Map<String, Object?>> Function(String nickname)?
   onNicknameUpdate;
+  GameDatabaseService? databaseService;
+  Future<GameDatabaseService>? _databaseOperation;
   final StreamController<String> _outbound = StreamController.broadcast();
   final Map<String, Completer<void>> _lifecycleOperations = {};
   int _lifecycleSequence = 0;
@@ -79,6 +84,7 @@ class GameRuntimeBridge implements GameSdkBridge {
             return true;
           },
           updateNickname: onNicknameUpdate ?? _rejectNicknameUpdate,
+          ensureDatabase: _ensureDatabase,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -218,6 +224,24 @@ class GameRuntimeBridge implements GameSdkBridge {
     } on TimeoutException {
       _lifecycleOperations.remove(requestId);
     }
+    if (event == 'exit') {
+      // exit 只结束当前 WebView 文档；restart 会继续复用这个 bridge。
+      try {
+        await databaseService?.database.rollbackAllTransactions();
+      } on Object catch (error) {
+        debugPrint('重置游戏数据库事务失败: $error');
+      }
+    }
+  }
+
+  Future<PlaymeshDatabase> _ensureDatabase() async {
+    final current = databaseService;
+    if (current != null) return current.database;
+    final created = await (_databaseOperation ??= GameDatabaseService.create(
+      gameId: connection.snapshot.gameId,
+    ));
+    databaseService = created;
+    return created.database;
   }
 
   void _send(Map<String, Object?> message) {
@@ -240,6 +264,7 @@ class GameRuntimeBridge implements GameSdkBridge {
     }
     _lifecycleOperations.clear();
     if (connection.isAuthority) await storage.clearSystemAvatars();
+    await databaseService?.database.close();
     await storage.close();
     await _sessionSubscription.cancel();
     await connection.close();

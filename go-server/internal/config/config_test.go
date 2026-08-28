@@ -258,3 +258,52 @@ func TestSaveOmitsEnvironmentCaptchaSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestSavePersistsTURNDeploymentFieldsWithoutLegacyTCPRelayTimeouts(t *testing.T) {
+	cfg := Default()
+	cfg.ConfigPath = filepath.Join(t.TempDir(), "server.json")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(cfg.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	for _, required := range []string{
+		"turnUdpListen",
+		"turnTcpListen",
+		"turnPublicIp",
+		"turnPublicPort",
+		"turnRealm",
+		"turnMinPort",
+		"turnMaxPort",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("saved server.json is missing TURN field %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"pendingConnectionTimeoutSeconds",
+		"idleTimeoutSeconds",
+		cfg.Relay.TURNSharedSecret,
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("saved server.json contains retired or secret value %q", forbidden)
+		}
+	}
+}
+
+func TestEnvironmentTemplateDeclaresTURNSharedSecret(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	if !strings.Contains(source, "PLAYMESH_TURN_SHARED_SECRET=replace-me") {
+		t.Fatal(".env.example 未声明必填的 TURN 共享密钥")
+	}
+	if !strings.Contains(source, "至少 32 字节") {
+		t.Fatal(".env.example 未说明 TURN 共享密钥长度要求")
+	}
+}

@@ -30,6 +30,7 @@ type Server struct {
 	Engine        *gin.Engine
 	AdminEngine   *gin.Engine
 	manager       *relay.Manager
+	turn          *relay.TURNService
 	store         *store.Store
 	config        config.Config
 	externalHTTP  *http.Server
@@ -432,6 +433,13 @@ func (s *Server) Run(address string) error {
 	if address == "" {
 		address = s.config.ExternalListen
 	}
+	if s.config.SupportsGameRelay {
+		turnService, err := relay.StartTURN(s.config.Relay)
+		if err != nil {
+			return err
+		}
+		s.turn = turnService
+	}
 	s.externalHTTP = &http.Server{
 		Addr: address,
 		Handler: http.MaxBytesHandler(
@@ -486,6 +494,9 @@ func (s *Server) shutdownHTTP() error {
 		if err := s.adminHTTP.Shutdown(ctx); result == nil {
 			result = err
 		}
+	}
+	if err := s.turn.Close(); result == nil {
+		result = err
 	}
 	return result
 }

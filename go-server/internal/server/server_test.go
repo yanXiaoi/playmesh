@@ -1,20 +1,19 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"go-server/internal/config"
 	"go-server/internal/store"
@@ -81,13 +80,13 @@ func TestCatalogInfoUsesGlobalTokenMiddleware(t *testing.T) {
 		t.Fatalf("用户上传声明 = %#v", declaration["userUpload"])
 	}
 	relay, ok := declaration["relay"].(map[string]any)
-	if !ok || relay["transport"] != "playmesh-tcp-upgrade" {
+	if !ok || relay["transport"] != "playmesh-webrtc-datachannel" {
 		t.Fatalf("中转声明 = %#v", declaration["relay"])
 	}
 	if relay["publicBaseUrl"] != "https://relay.example.com" {
 		t.Fatalf("公共中转地址 = %#v", relay["publicBaseUrl"])
 	}
-	if relay["protocolVersion"] != "3.0.0" {
+	if relay["protocolVersion"] != "4.0.0" {
 		t.Fatalf("中转协议版本 = %#v", relay["protocolVersion"])
 	}
 	if relay["maxConnectionsPerTunnel"] != float64(cfg.Relay.MaxConnectionsPerTunnel) {
@@ -188,6 +187,7 @@ func TestCatalogDownloadRequiresVersion(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodGet, "/apps/download?id=com.example.game", nil,
 	)
+	setRelayProtocolHeaders(request.Header)
 	request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
 	app.Engine.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest ||
@@ -314,7 +314,7 @@ func TestCaptchaChallengeAndVerificationEndpointsAreRateLimited(t *testing.T) {
 	)
 }
 
-func TestRelayPairsOpaqueBidirectionalStreams(t *testing.T) {
+func TestRelayRoutesOpaqueWebRTCSignalsForMultiplePeers(t *testing.T) {
 	cfg := testConfig(t)
 	app, err := New(cfg, DiscardLogger())
 	if err != nil {
@@ -325,18 +325,46 @@ func TestRelayPairsOpaqueBidirectionalStreams(t *testing.T) {
 	defer httpServer.Close()
 
 	credentials := createTunnel(t, httpServer.URL)
-	host := openUpgrade(t, httpServer.URL, "/relay/v1/host?tunnelId="+credentials.TunnelID, map[string]string{
+	host := openSignalWebSocket(t, httpServer.URL, "/relay/v1/host?tunnelId="+credentials.TunnelID, map[string]string{
 		"Authorization":         "Bearer test-source-secret-at-least-32-bytes",
 		"X-Playmesh-Host-Lease": credentials.HostLease,
 	})
-	defer host.Close()
-	client := openUpgrade(t, httpServer.URL, "/relay/v1/client?tunnelId="+credentials.TunnelID, map[string]string{
+	defer host.CloseNow()
+	first := openSignalWebSocket(t, httpServer.URL, "/relay/v1/client?tunnelId="+credentials.TunnelID, map[string]string{
 		"X-Playmesh-Join-Capability": credentials.JoinCapability,
 	})
-	defer client.Close()
+	defer first.CloseNow()
+	second := openSignalWebSocket(t, httpServer.URL, "/relay/v1/client?tunnelId="+credentials.TunnelID, map[string]string{
+		"X-Playmesh-Join-Capability": credentials.JoinCapability,
+	})
+	defer second.CloseNow()
 
-	assertTunnelCopy(t, client, host, []byte{0, 1, 2, 3, 255})
-	assertTunnelCopy(t, host, client, []byte("authority-response"))
+	firstConnected := readSignalFrame(t, first, "connected")
+	secondConnected := readSignalFrame(t, second, "connected")
+	if firstConnected.PeerID == "" || secondConnected.PeerID == "" ||
+		firstConnected.PeerID == secondConnected.PeerID {
+		t.Fatalf("peer ids = %q, %q", firstConnected.PeerID, secondConnected.PeerID)
+	}
+	readSignalFrame(t, host, "peer.joined")
+	readSignalFrame(t, host, "peer.joined")
+
+	writeSignalFrame(t, first, map[string]any{
+		"type": "description", "payload": map[string]any{"type": "offer", "sdp": "opaque-one"},
+	})
+	firstOffer := readSignalFrame(t, host, "description")
+	if firstOffer.PeerID != firstConnected.PeerID ||
+		!bytes.Contains(firstOffer.Payload, []byte(`"opaque-one"`)) {
+		t.Fatalf("first offer = %#v payload=%s", firstOffer, firstOffer.Payload)
+	}
+	writeSignalFrame(t, host, map[string]any{
+		"type": "candidate", "peerId": secondConnected.PeerID,
+		"payload": map[string]any{"candidate": "opaque-two"},
+	})
+	secondCandidate := readSignalFrame(t, second, "candidate")
+	if secondCandidate.PeerID != secondConnected.PeerID ||
+		!bytes.Contains(secondCandidate.Payload, []byte(`"opaque-two"`)) {
+		t.Fatalf("second candidate = %#v payload=%s", secondCandidate, secondCandidate.Payload)
+	}
 }
 
 func TestRelayClientWhitelistStillRequiresCapability(t *testing.T) {
@@ -352,6 +380,7 @@ func TestRelayClientWhitelistStillRequiresCapability(t *testing.T) {
 		"/relay/v1/client?tunnelId=missing",
 		nil,
 	)
+	setRelayProtocolHeaders(request.Header)
 	app.Engine.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("状态 = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -383,15 +412,20 @@ func TestRelayRoutesAreAbsentWhenDeclarationDisablesRelay(t *testing.T) {
 }
 
 type relayCredentials struct {
-	TunnelID       string `json:"tunnelId"`
-	HostLease      string `json:"hostLease"`
-	JoinCapability string `json:"joinCapability"`
+	Type            string `json:"type"`
+	ProtocolVersion string `json:"protocolVersion"`
+	Timestamp       int64  `json:"timestamp"`
+	RequestID       string `json:"requestId"`
+	TunnelID        string `json:"tunnelId"`
+	HostLease       string `json:"hostLease"`
+	JoinCapability  string `json:"joinCapability"`
 }
 
 func createTunnel(t *testing.T, baseURL string) relayCredentials {
 	t.Helper()
 	request, _ := http.NewRequest(http.MethodPost, baseURL+"/relay/v1/host", bytes.NewReader(nil))
 	request.Header.Set("Authorization", "Bearer test-source-secret-at-least-32-bytes")
+	setRelayProtocolHeaders(request.Header)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -410,10 +444,15 @@ func createTunnel(t *testing.T, baseURL string) relayCredentials {
 		t.Fatal(err)
 	}
 	allowed := map[string]bool{
-		"tunnelId":       true,
-		"hostLease":      true,
-		"joinCapability": true,
-		"expiresAt":      true,
+		"type":            true,
+		"protocolVersion": true,
+		"timestamp":       true,
+		"requestId":       true,
+		"tunnelId":        true,
+		"hostLease":       true,
+		"joinCapability":  true,
+		"expiresAt":       true,
+		"iceServers":      true,
 	}
 	for name := range fields {
 		if !allowed[name] {
@@ -427,73 +466,83 @@ func createTunnel(t *testing.T, baseURL string) relayCredentials {
 	return credentials
 }
 
-func openUpgrade(
+func openSignalWebSocket(
 	t *testing.T,
 	baseURL string,
 	path string,
 	headers map[string]string,
-) net.Conn {
+) *websocket.Conn {
 	t.Helper()
-	endpoint, err := url.Parse(baseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := net.DialTimeout("tcp", endpoint.Host, 3*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	var request strings.Builder
-	fmt.Fprintf(&request, "GET %s HTTP/1.1\r\n", path)
-	fmt.Fprintf(&request, "Host: %s\r\n", endpoint.Host)
-	request.WriteString("Connection: Upgrade\r\n")
-	request.WriteString("Upgrade: playmesh-tunnel\r\n")
+	header := make(http.Header, len(headers))
 	for name, value := range headers {
-		fmt.Fprintf(&request, "%s: %s\r\n", name, value)
+		header.Set(name, value)
 	}
-	request.WriteString("\r\n")
-	if _, err := io.WriteString(conn, request.String()); err != nil {
-		_ = conn.Close()
-		t.Fatal(err)
-	}
-	reader := bufio.NewReader(conn)
-	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	setRelayProtocolHeaders(header)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	connection, response, err := websocket.Dial(
+		ctx,
+		strings.Replace(baseURL, "http", "ws", 1)+path,
+		&websocket.DialOptions{HTTPHeader: header},
+	)
 	if err != nil {
-		_ = conn.Close()
-		t.Fatal(err)
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		t.Fatalf("WebSocket 状态 = %d, error = %v", status, err)
 	}
-	if response.StatusCode != http.StatusSwitchingProtocols {
-		body, _ := io.ReadAll(response.Body)
-		_ = conn.Close()
-		t.Fatalf("Upgrade 状态 = %d, body = %s", response.StatusCode, body)
-	}
-	_ = conn.SetDeadline(time.Time{})
-	return &bufferedConn{Conn: conn, reader: reader}
+	return connection
 }
 
-func assertTunnelCopy(t *testing.T, source, destination net.Conn, value []byte) {
+type relaySignalFrame struct {
+	Type            string          `json:"type"`
+	ProtocolVersion string          `json:"protocolVersion"`
+	Timestamp       int64           `json:"timestamp"`
+	RequestID       string          `json:"requestId"`
+	PeerID          string          `json:"peerId"`
+	Payload         json.RawMessage `json:"payload"`
+}
+
+func writeSignalFrame(t *testing.T, connection *websocket.Conn, value map[string]any) {
 	t.Helper()
-	_ = source.SetWriteDeadline(time.Now().Add(3 * time.Second))
-	if _, err := source.Write(value); err != nil {
+	value["protocolVersion"] = config.RelayProtocolVersion
+	value["timestamp"] = time.Now().UnixMilli()
+	value["requestId"] = "relay-signal-test"
+	data, err := json.Marshal(value)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_ = destination.SetReadDeadline(time.Now().Add(3 * time.Second))
-	received := make([]byte, len(value))
-	if _, err := io.ReadFull(destination, received); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := connection.Write(ctx, websocket.MessageText, data); err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(received, value) {
-		t.Fatalf("收到 %v, 期望 %v", received, value)
 	}
 }
 
-type bufferedConn struct {
-	net.Conn
-	reader *bufio.Reader
+func setRelayProtocolHeaders(header http.Header) {
+	header.Set("X-Playmesh-Relay-Version", config.RelayProtocolVersion)
+	header.Set("X-Playmesh-Request-ID", "relay-http-test")
+	header.Set("X-Playmesh-Timestamp", fmt.Sprintf("%d", time.Now().UnixMilli()))
 }
 
-func (c *bufferedConn) Read(buffer []byte) (int, error) {
-	return c.reader.Read(buffer)
+func readSignalFrame(t *testing.T, connection *websocket.Conn, expected string) relaySignalFrame {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for {
+		_, data, err := connection.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var frame relaySignalFrame
+		if err := json.Unmarshal(data, &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame.Type == expected {
+			return frame
+		}
+	}
 }
 
 func testConfig(t *testing.T) config.Config {
@@ -508,7 +557,5 @@ func testConfig(t *testing.T) config.Config {
 	cfg.Admin.CaptchaImageDirectory = filepath.Join(root, "captcha-images")
 	cfg.Auth.Token = "test-source-secret-at-least-32-bytes"
 	cfg.Relay.PublicBaseURL = "https://relay.example.com"
-	cfg.Relay.PendingConnectionTimeoutSeconds = 1
-	cfg.Relay.IdleTimeoutSeconds = 5
 	return cfg
 }

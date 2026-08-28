@@ -165,12 +165,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
         if (message is String) {
           if (message.contains('"command":"app.')) {
             final generation = _sdkMessages.generation;
-            unawaited(
-              widget.appBridge?.handleJavaScriptMessage(
-                message,
-                (reply) => _sendAppMessage(reply, generation),
-              ),
-            );
+            unawaited(_handleAppBridgeMessage(message, generation));
           } else {
             unawaited(widget.bridge?.handleJavaScriptMessage(message));
           }
@@ -324,6 +319,30 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
     await _sdkMessages.addApp(
       appSdkReceiveScript(message),
       generation: generation,
+    );
+  }
+
+  Future<void> _handleAppBridgeMessage(
+    String message,
+    int generation,
+  ) async {
+    final bridge = widget.appBridge;
+    if (bridge == null) return;
+    // WebView2 是原生子窗口，可信 Enter/Space 可能不会进入 Flutter 的
+    // HardwareKeyboard。Bridge 校验前把浏览器瞬时激活转换为宿主票据。
+    try {
+      final active = await _controller.executeScript(
+        'Boolean(globalThis.navigator?.userActivation?.isActive)',
+      );
+      if (active == true || active.toString().toLowerCase() == 'true') {
+        bridge.recordUserActivation();
+      }
+    } on Object catch (error) {
+      debugPrint('读取 Windows 游戏 WebView 用户操作状态失败: $error');
+    }
+    await bridge.handleJavaScriptMessage(
+      message,
+      (reply) => _sendAppMessage(reply, generation),
     );
   }
 

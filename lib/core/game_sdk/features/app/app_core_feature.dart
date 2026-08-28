@@ -12,7 +12,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
 (function (global) {
   "use strict";
 
-  const PLAYMESH_APP_SDK_VERSION = "3.3.0";
+  const PLAYMESH_APP_SDK_VERSION = "3.5.0";
   const PLAYMESH_APP_INTERNAL_KEY =
     Symbol.for("playmesh.app.internal.v1");
 

@@ -65,6 +65,12 @@ const mocks = {
         state.plan.reason === 'explicit_single_scan_enabled'
           ? 'enabled'
           : 'disabled',
+      config: {
+        minPlayers: 3,
+        maxPlayers: 8,
+        tags: ['party'],
+        webRuntimeMultithreading: true,
+      },
       plan: state.plan,
     };
   },
@@ -210,6 +216,7 @@ assert.deepEqual(state.pipelineCalls, [
 assert.equal(state.manifestInput.gameId, gameId);
 assert.equal(state.manifestInput.mode, 'multiplayer');
 assert.equal(state.manifestInput.authorityEntry, 'static/js/service/index.js');
+assert.equal(state.manifestInput.webRuntimeMultithreading, true);
 assert.equal('runtimeInjection' in state.packageArgs, false);
 assert.match(
   state.packageArgs.fpsProbeSource,

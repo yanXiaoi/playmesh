@@ -31,6 +31,7 @@ class GameShareCoordinatorState {
     required this.publication,
     required this.snapshot,
     required this.relayStatus,
+    this.presence,
     this.channelFailureCode,
     this.publicationFailureCode,
     this.relayFailureCode,
@@ -41,6 +42,7 @@ class GameShareCoordinatorState {
   final LanPublicationState publication;
   final GameShareLinkSnapshot snapshot;
   final RelayConnectionStatus relayStatus;
+  final LanGamePresence? presence;
   final String? channelFailureCode;
   final String? publicationFailureCode;
   final String? relayFailureCode;
@@ -50,6 +52,8 @@ class GameShareCoordinatorState {
     LanPublicationState? publication,
     GameShareLinkSnapshot? snapshot,
     RelayConnectionStatus? relayStatus,
+    LanGamePresence? presence,
+    bool clearPresence = false,
     String? channelFailureCode,
     bool clearChannelFailure = false,
     String? publicationFailureCode,
@@ -62,6 +66,7 @@ class GameShareCoordinatorState {
     publication: publication ?? this.publication,
     snapshot: snapshot ?? this.snapshot,
     relayStatus: relayStatus ?? this.relayStatus,
+    presence: clearPresence ? null : presence ?? this.presence,
     channelFailureCode: clearChannelFailure
         ? null
         : channelFailureCode ?? this.channelFailureCode,
@@ -83,6 +88,7 @@ class GameShareAccess {
     required this.presenceChanges,
     required this.release,
     this.coreEndpoint,
+    this.sessionId,
     this.joinCode,
   });
 
@@ -92,6 +98,7 @@ class GameShareAccess {
   final LanGamePresence Function() currentPresence;
   final Stream<LanGamePresence> presenceChanges;
   final Uri? coreEndpoint;
+  final String? sessionId;
   final String? joinCode;
   final Future<void> Function() release;
   bool _released = false;
@@ -133,9 +140,9 @@ class MultiplayerGameShareAccessProvider implements GameShareAccessProvider {
       currentPresence: () => _multiplayerPresence(bridge, _currentHostNickname),
       presenceChanges: bridge.connection.messages
           .where((message) => message['session'] is Map)
-          .map((_) => _multiplayerPresence(bridge, _currentHostNickname))
-          .distinct(),
+          .map((_) => _multiplayerPresence(bridge, _currentHostNickname)),
       coreEndpoint: coreEndpoint,
+      sessionId: bridge.connection.snapshot.id,
       joinCode: bridge.connection.snapshot.joinCode,
       release: bridge.connection.closeShare,
     );
@@ -237,6 +244,7 @@ class GameRelayHostRequest {
 abstract interface class GameRelayHostFactory {
   Future<RelayHostSession> start({
     required GameRelayHostRequest request,
+    required String sessionId,
     required Uri authorityWebBaseUri,
     required Uri authorityCoreBaseUri,
     required Uri authorityEntryUri,
@@ -249,10 +257,13 @@ class DefaultGameRelayHostFactory implements GameRelayHostFactory {
   @override
   Future<RelayHostSession> start({
     required GameRelayHostRequest request,
+    required String sessionId,
     required Uri authorityWebBaseUri,
     required Uri authorityCoreBaseUri,
     required Uri authorityEntryUri,
   }) => startRelayHostSession(
+    coreBaseUri: authorityCoreBaseUri,
+    sessionId: sessionId,
     serverBaseUri: request.serverBaseUri,
     sourceToken: request.sourceToken,
     hostPath: request.hostPath,
@@ -397,6 +408,7 @@ class GameShareCoordinator {
         _state.copyWith(
           channel: ShareChannelState.active,
           snapshot: snapshot,
+          presence: presence,
           clearChannelFailure: true,
         ),
       );
@@ -460,8 +472,12 @@ class GameShareCoordinator {
       // 会话的无效瞬时投影不能覆盖最后一个已验证的公开状态。
       return;
     }
-    if (presence == _presence) return;
+    final presenceChanged = presence != _presence;
     _presence = presence;
+    // 分享面板直接读取当前 Session 的成员明细。即使在线人数没变，昵称、
+    // 在线状态或连接方式也可能变化，因此每个 Session 快照都要驱动房间页重建。
+    _update(_state.copyWith(presence: presence));
+    if (!presenceChanged) return;
     final advertisement = _advertisement;
     if (advertisement != null) {
       _advertisement = advertisement.withPresence(presence);
@@ -666,7 +682,8 @@ class GameShareCoordinator {
     final gateway = _gateway;
     final access = _access;
     final coreEndpoint = access?.coreEndpoint;
-    if (gateway == null || coreEndpoint == null) {
+    final sessionId = access?.sessionId;
+    if (gateway == null || coreEndpoint == null || sessionId == null) {
       throw const GameShareException('share_unavailable', '当前分享不能连接 Relay');
     }
     _update(
@@ -682,6 +699,7 @@ class GameShareCoordinator {
     try {
       session = await _relayFactory.start(
         request: request,
+        sessionId: sessionId,
         authorityWebBaseUri: Uri(
           scheme: 'http',
           host: '127.0.0.1',
@@ -742,7 +760,7 @@ class GameShareCoordinator {
           relayFailureCode: 'relay_unavailable',
         ),
       );
-      throw const GameShareException('share_unavailable', 'Relay 连接失败');
+      rethrow;
     } finally {
       if (!committed) {
         _qrEncoder.retain([..._lanUrls, ?_wanUrl]);

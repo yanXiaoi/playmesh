@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_fullscreen/flutter_fullscreen.dart';
 import 'package:flutter/services.dart';
 import 'package:playmesh_share_ui/playmesh_share_ui.dart';
+import 'package:playmesh_database/playmesh_database.dart';
 import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:window_manager/window_manager.dart';
@@ -209,6 +210,12 @@ final class RuntimeLaunch {
           '${Platform.pathSeparator}$safeGameId.json',
         ),
       );
+      final database = PlaymeshDatabase(
+        filePath:
+            '${root.path}${Platform.pathSeparator}data'
+            '${Platform.pathSeparator}db'
+            '${Platform.pathSeparator}_game.db',
+      );
       nicknameCoordinator = RuntimeNicknameCoordinator(
         session: session,
         readNickname: () => identity.nickname,
@@ -218,6 +225,7 @@ final class RuntimeLaunch {
         game: package.manifest,
         session: session,
         storage: storage,
+        database: database,
         onNicknameUpdate: nicknameCoordinator.update,
       );
       server = RuntimeAssetServer(
@@ -297,6 +305,7 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
     game: widget.launch.package.manifest,
     session: widget.launch.bridge.session,
     server: widget.launch.server,
+    coreControlBaseUri: widget.launch.goCore.baseUri,
     qrAvailable: widget.launch.modules.contains('service.lan.qr'),
     scanQr: _scanQr,
     beforeRemoteNavigation: _prepareRemoteNavigation,
@@ -386,16 +395,21 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
     final useChinese = Platform.localeName.toLowerCase().startsWith('zh');
     final session = widget.launch.bridge.session;
     final relay = _lanHost.bundledRelayPresentation;
+    var visibleLinks = const <RuntimeLanShareLink>[];
+    var roomLoading = true;
+    String? roomError;
     var presentation = buildRuntimeSharePanelPresentation(
       title: runtimeSharePanelTitle(useChinese: useChinese),
-      links: const <RuntimeLanShareLink>[],
+      links: visibleLinks,
+      useChinese: useChinese,
       session: session,
       bundledRelayName: relay == null
           ? null
           : relay.name ??
                 runtimeBundledRelayFallbackName(useChinese: useChinese),
       bundledRelayLatencyMilliseconds: relay?.latencyMilliseconds,
-      lanLoading: true,
+      lanLoading: roomLoading,
+      lanError: roomError,
     );
     final strings = runtimeSharePanelStrings(useChinese: useChinese);
     final actionMode = Platform.isWindows
@@ -404,6 +418,32 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
     String? selectedLanLinkId;
     BuildContext? shareDialogContext;
     StateSetter? updateShareDialog;
+    StreamSubscription<Map<String, Object?>>? roomSubscription;
+    var shareDialogClosed = false;
+    void refreshRoomPresentation() {
+      if (shareDialogContext?.mounted != true) return;
+      final next = buildRuntimeSharePanelPresentation(
+        title: runtimeSharePanelTitle(useChinese: useChinese),
+        links: visibleLinks,
+        useChinese: useChinese,
+        session: session,
+        bundledRelayName: relay == null
+            ? null
+            : relay.name ??
+                  runtimeBundledRelayFallbackName(useChinese: useChinese),
+        bundledRelayLatencyMilliseconds: relay?.latencyMilliseconds,
+        lanLoading: roomLoading,
+        lanError: roomError,
+      );
+      updateShareDialog?.call(() {
+        presentation = next;
+        if (selectedLanLinkId == null ||
+            presentation.linkForId(selectedLanLinkId!) == null) {
+          selectedLanLinkId = presentation.model.selectedLanLinkId;
+        }
+      });
+    }
+
     late final Future<void> dialogOperation;
     try {
       dialogOperation = showDialog<void>(
@@ -471,12 +511,19 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
       rethrow;
     }
     unawaited(
-      dialogOperation.whenComplete(() {
+      dialogOperation.whenComplete(() async {
+        shareDialogClosed = true;
+        await roomSubscription?.cancel();
+        roomSubscription = null;
         _sharePanelVisible = false;
         if (mounted) widget.launch.bridge.restoreGameContentFocus();
       }),
     );
     await WidgetsBinding.instance.endOfFrame;
+    if (shareDialogClosed || shareDialogContext?.mounted != true) return;
+    roomSubscription = session?.messages
+        .where((message) => message['session'] is Map)
+        .listen((_) => refreshRoomPresentation());
     try {
       await _lanHost.setPublished();
       final links = await _lanHost.getShareLinks();
@@ -488,33 +535,22 @@ final class _RuntimeGamePageState extends State<RuntimeGamePage>
         }
       }
       if (!mounted) return;
-      final nextPresentation = buildRuntimeSharePanelPresentation(
-        title: runtimeSharePanelTitle(useChinese: useChinese),
-        links: links,
-        session: session,
-        bundledRelayName: relay == null
-            ? null
-            : relay.name ??
-                  runtimeBundledRelayFallbackName(useChinese: useChinese),
-        bundledRelayLatencyMilliseconds: relay?.latencyMilliseconds,
+      visibleLinks = links;
+      roomLoading = false;
+      roomError = null;
+      refreshRoomPresentation();
+    } on Object catch (error, stackTrace) {
+      debugPrint('[Runtime][Relay][error] operation=share.panel error=$error');
+      debugPrintStack(
+        label: '[Runtime][Relay][stack] operation=share.panel',
+        stackTrace: stackTrace,
       );
       if (shareDialogContext?.mounted == true) {
-        updateShareDialog?.call(() {
-          presentation = nextPresentation;
-          selectedLanLinkId = presentation.model.selectedLanLinkId;
-        });
-      }
-    } on Object {
-      if (shareDialogContext?.mounted == true) {
-        updateShareDialog?.call(() {
-          presentation = buildRuntimeSharePanelPresentation(
-            title: runtimeSharePanelTitle(useChinese: useChinese),
-            links: const <RuntimeLanShareLink>[],
-            session: session,
-            lanError: runtimeShareLoadFailedMessage(useChinese: useChinese),
-          );
-          selectedLanLinkId = null;
-        });
+        visibleLinks = const <RuntimeLanShareLink>[];
+        roomLoading = false;
+        roomError = runtimeShareLoadFailedMessage(useChinese: useChinese);
+        selectedLanLinkId = null;
+        refreshRoomPresentation();
       }
       rethrow;
     }

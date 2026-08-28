@@ -34,6 +34,7 @@ class LocalGameWebView extends StatefulWidget {
     required this.gameId,
     this.gameSdkVersion,
     this.appSdkVersion,
+    this.config,
     this.bridge,
     this.localUserId = 'u_local',
     this.localNickname = playmeshDefaultLocalNickname,
@@ -52,6 +53,7 @@ class LocalGameWebView extends StatefulWidget {
   final String gameId;
   final String? gameSdkVersion;
   final String? appSdkVersion;
+  final Object? config;
   final GameSdkBridge? bridge;
   final String localUserId;
   final String localNickname;
@@ -173,6 +175,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
         entryPath: widget.entryPath,
         gameSdkVersion: widget.gameSdkVersion,
         appSdkVersion: widget.appSdkVersion,
+        config: widget.config,
         storage: storage,
       );
       if (!mounted || generation != _initializationGeneration) {
@@ -210,12 +213,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
               'PlaymeshAppBridge',
               onMessageReceived: (message) {
                 final generation = _messageQueue.generation;
-                unawaited(
-                  _appBridge.handleJavaScriptMessage(
-                    message.message,
-                    (reply) => _sendAppMessage(reply, generation),
-                  ),
-                );
+                unawaited(_handleAppBridgeMessage(message.message, generation));
               },
             )
             ..addJavaScriptChannel(
@@ -305,6 +303,25 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
     await _messageQueue.addAndWait(
       appSdkReceiveScript(message),
       generation: generation,
+    );
+  }
+
+  Future<void> _handleAppBridgeMessage(String message, int generation) async {
+    // WebView 内的可信键盘 click 不一定经过 Flutter 的键盘树。Bridge
+    // 校验前读取浏览器瞬时激活，并把它转换为宿主的一次性短期票据。
+    try {
+      final active = await _evaluateJavaScript(
+        'Boolean(globalThis.navigator?.userActivation?.isActive)',
+      );
+      if (active == true || active.toString().toLowerCase() == 'true') {
+        _appBridge.recordUserActivation();
+      }
+    } on Object catch (error) {
+      debugPrint('读取游戏 WebView 用户操作状态失败: $error');
+    }
+    await _appBridge.handleJavaScriptMessage(
+      message,
+      (reply) => _sendAppMessage(reply, generation),
     );
   }
 

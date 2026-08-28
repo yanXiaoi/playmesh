@@ -23,6 +23,8 @@ GDevelop 工程、GDevelop 运行时或 Playmesh GDevelop 扩展的设计与验�
 - [当前源码接线索引](integration-wiring.md)：仅用于定位当前模块与官方交接点，不产生规则。
 - [本地工程历史](history-development.md)：`gdevelop.history` 的身份、资源、修订、配额、
   恢复和错误合同。
+- [Playmesh 项目配置](project-config-development.md)：sidecar 协议、现有设置面板、
+  Web Runtime 多线程到预览/发布清单的投影及跨源隔离边界。
 - [功能修改与可重放开发](feature-development-guide.md)：同一锁定内核上的 ownership、
   薄入口、source policy、摘要冻结、clean replay、完整流水线和交付检查。
 - [本地 AI 开发流](local-ai-development-flow.md)：Chat/Agent 双模式、提示词、工具、审批、

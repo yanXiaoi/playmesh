@@ -110,3 +110,19 @@ func TestAdminUnpublishRequiresReasonAndNotifiesOwner(t *testing.T) {
 		t.Fatalf("删除通知 = %#v, err=%v", notifications, err)
 	}
 }
+
+func TestEditableRelayPreservesEnvironmentOnlyTURNSecret(t *testing.T) {
+	current := config.Default().Relay
+	current.TURNSharedSecret = "environment-turn-secret-at-least-32-bytes"
+	edited := current
+	edited.TURNPublicIP = "203.0.113.8"
+	edited.TURNSharedSecret = ""
+
+	merged := relayFromEditable(current, edited)
+	if merged.TURNPublicIP != edited.TURNPublicIP {
+		t.Fatalf("TURN public IP = %q", merged.TURNPublicIP)
+	}
+	if merged.TURNSharedSecret != current.TURNSharedSecret {
+		t.Fatal("admin relay edit discarded the environment-only TURN secret")
+	}
+}

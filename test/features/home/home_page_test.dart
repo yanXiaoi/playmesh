@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:playmesh/core/game_web/game_join_coordinator.dart';
 import 'package:playmesh/features/game/game_page.dart';
+import 'package:playmesh/features/game/game_invitation_scan_flow.dart';
 import 'package:playmesh/features/game/game_invitation_scanner_page.dart';
+import 'package:playmesh/features/game/game_join_error_presentation.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
 import 'package:playmesh/features/developer/game_creation_page.dart';
 import 'package:playmesh/features/games/game_library_page.dart';
@@ -271,6 +274,88 @@ void main() {
 
       expect(observer.lastPushedName, GameInvitationScannerPage.routeName);
       expect(observer.lastPushedName, isNot(JoinGamePage.routeName));
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
+  });
+
+  testWidgets('首页扫码入口调用统一扫码预检方法', (tester) async {
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    var calls = 0;
+    try {
+      await tester.pumpWidget(
+        localizedTestApp(
+          home: HomePage(
+            user: _user,
+            scanAndPrepareInvitation:
+                (
+                  _, {
+                  required GameJoinPreparationService coordinator,
+                  required GameJoinContext joinContext,
+                  ValueChanged<String>? onScanned,
+                }) async {
+                  calls += 1;
+                  return null;
+                },
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(HomePage.scanJoinKey));
+      await tester.pump();
+
+      expect(calls, 1);
+      expect(
+        const HomePage(user: _user).scanAndPrepareInvitation,
+        same(scanAndPrepareGameInvitation),
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
+  });
+
+  testWidgets('首页扫码失败展示脱敏后的完整底层异常', (tester) async {
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await tester.pumpWidget(
+        localizedTestApp(
+          home: HomePage(
+            user: _user,
+            scanAndPrepareInvitation:
+                (
+                  _, {
+                  required GameJoinPreparationService coordinator,
+                  required GameJoinContext joinContext,
+                  ValueChanged<String>? onScanned,
+                }) async {
+                  throw GameJoinException(
+                    GameJoinErrorCode.invitationUnavailable,
+                    cause: UnsupportedError(
+                      '当前加入入口没有可用的 Go Core '
+                      'http://relay.internal/j/room#inviteToken=home-secret',
+                    ),
+                    causeStackTrace: StackTrace.fromString('home root stack'),
+                  );
+                },
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(HomePage.scanJoinKey));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(gameJoinErrorDialogKey), findsOneWidget);
+      final details = tester.widget<SelectableText>(
+        find.byKey(gameJoinErrorDetailsKey),
+      );
+      expect(details.data, contains('code=invitation_unavailable'));
+      expect(details.data, contains('UnsupportedError'));
+      expect(details.data, contains('当前加入入口没有可用的 Go Core'));
+      expect(details.data, contains('home root stack'));
+      expect(details.data, contains('[REDACTED URL]'));
+      expect(details.data, isNot(contains('home-secret')));
     } finally {
       debugDefaultTargetPlatformOverride = previousPlatform;
     }

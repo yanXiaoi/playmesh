@@ -33,9 +33,9 @@ const expectedLibGdFiles = Object.freeze({
     size: 3391975,
   }),
 });
-const expectedFunctionCount = 406;
-const expectedPublicFunctionCount = 366;
-const expectedAsyncFunctionCount = 140;
+const expectedFunctionCount = 427;
+const expectedPublicFunctionCount = 385;
+const expectedAsyncFunctionCount = 157;
 
 // These are runtime/editor identifiers, not translatable labels. Keep this
 // baseline independent from Playmesh.json so changing the extension body
@@ -162,6 +162,20 @@ const expectedCommands = Object.freeze([
   'playmesh.main.sync.requestSnapshot',
   'playmesh.main.sync.getSnapshot',
   'playmesh.main.storage.getBucket',
+  'playmesh.main.db.open',
+  'playmesh.main.db.select',
+  'playmesh.main.db.update',
+  'playmesh.main.db.delete',
+  'playmesh.main.db.insert',
+  'playmesh.main.db.getDDL',
+  'playmesh.main.db.beginTransaction',
+  'PlaymeshDatabaseTransaction.select',
+  'PlaymeshDatabaseTransaction.update',
+  'PlaymeshDatabaseTransaction.delete',
+  'PlaymeshDatabaseTransaction.insert',
+  'PlaymeshDatabaseTransaction.getDDL',
+  'PlaymeshDatabaseTransaction.commit',
+  'PlaymeshDatabaseTransaction.rollback',
   'PlaymeshBinaryChannel.send',
   'PlaymeshBinaryChannel.sendLatest',
   'PlaymeshBinaryChannel.close',
@@ -196,6 +210,7 @@ const expectedCommands = Object.freeze([
   'playmesh.app.capabilities.getDeclared',
   'playmesh.app.capabilities.create',
   'playmesh.app.media.open',
+  'playmesh.app.webrtc.getSignalingEndpoint',
   'playmesh.app.device.getPlatform',
   'playmesh.app.device.setFullscreen',
   'playmesh.app.ui.disableSystemMenuTriggers',
@@ -238,6 +253,7 @@ const expectedCommands = Object.freeze([
   'playmesh.app.device.onInput',
   'playmesh.app.ui.onGameMenuOpen',
   'playmesh.app.ui.onGameMenuClose',
+  'playmesh.app.ui.onSystemMenuRequest',
   'playmesh.app.ui.onBack',
   'PlaymeshCapabilityHandle.on',
   'PlaymeshCapabilityHandle.addEventListener',
@@ -529,6 +545,7 @@ const expectedGroupTree = {
     '玩家',
     '会话',
     '存储',
+    '数据库',
     '状态同步',
     '高级 JSON',
   ],
@@ -540,6 +557,7 @@ const expectedGroupTree = {
     '身份',
     '局域网',
     '媒体会话',
+    'WebRTC 信令',
     '性能',
     '运行环境',
     '存储',
@@ -562,7 +580,7 @@ assert.equal(
     (count, leaves) => count + leaves.length,
     0
   ),
-  37
+  39
 );
 const actualGroupTree = new Map();
 for (const eventsFunction of publicFunctions) {
@@ -631,7 +649,8 @@ const isMainSdkPath = value =>
   value.startsWith('playmesh.main.') ||
   value.startsWith('PlaymeshBinaryChannel.') ||
   value.startsWith('PlaymeshSyncAuthorityController.') ||
-  value.startsWith('PlaymeshStorageBucket.');
+  value.startsWith('PlaymeshStorageBucket.') ||
+  value.startsWith('PlaymeshDatabaseTransaction.');
 const isAppSdkPath = value =>
   value.startsWith('playmesh.app.') ||
   value.startsWith('PlaymeshCapabilityHandle.') ||
@@ -685,14 +704,14 @@ const declaredCommands = [
   ...readSurfaceArray('subscribe'),
   ...readSurfaceArray('handler'),
 ];
-assert.equal(expectedCommands.length, 100);
+assert.equal(expectedCommands.length, 116);
 assert.deepEqual(
   declaredCommands,
   expectedCommands,
-  'the 100 stable SDK command paths or their declared order changed'
+  'the 116 SDK command paths or their declared order changed'
 );
-assert.equal(new Set(expectedCommands).size, 100);
-assert.equal(selectedCommands.length, 100, 'command selector entries changed');
+assert.equal(new Set(expectedCommands).size, 116);
+assert.equal(selectedCommands.length, 116, 'command selector entries changed');
 assert.deepEqual(
   [...new Set(selectedCommands)].sort(),
   [...expectedCommands].sort(),
@@ -726,10 +745,10 @@ assert.deepEqual(
   'libGD property selectors must expose the exact readable surface'
 );
 const allSdkSelectors = [...selectedCommands, ...selectedProperties];
-assert.equal(allSdkSelectors.length, 117);
-assert.equal(new Set(allSdkSelectors).size, 117, 'SDK selector paths must be unique');
-assert.equal(allSdkSelectors.filter(isMainSdkPath).length, 51);
-assert.equal(allSdkSelectors.filter(isAppSdkPath).length, 66);
+assert.equal(allSdkSelectors.length, 133);
+assert.equal(new Set(allSdkSelectors).size, 133, 'SDK selector paths must be unique');
+assert.equal(allSdkSelectors.filter(isMainSdkPath).length, 65);
+assert.equal(allSdkSelectors.filter(isAppSdkPath).length, 68);
 
 serializedExtensions.delete();
 project.delete();
@@ -737,5 +756,5 @@ project.delete();
 process.stdout.write(
   'Playmesh extension passed locked GDevelop 5.6.276 libGD/editor semantics ' +
     `(${extension.eventsFunctions.length} functions, ${asyncFunctionCount} async, ` +
-    '117 stable SDK selectors).\n'
+    '133 SDK selectors).\n'
 );

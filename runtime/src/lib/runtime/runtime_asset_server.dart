@@ -566,7 +566,7 @@ final class RuntimeAssetServer {
       } on FormatException catch (error) {
         await _jsonError(
           request.response,
-          error.message.toString().contains('256 MiB')
+          error.message.toString().contains('512 MiB')
               ? HttpStatus.requestEntityTooLarge
               : HttpStatus.badRequest,
           'runtime_upload_invalid',

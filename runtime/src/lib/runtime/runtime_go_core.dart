@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import '../core/network/lan_ipv4_interface_resolver_io.dart';
+
 final class RuntimeGoCore {
   RuntimeGoCore({this.address = '0.0.0.0:0'});
 
@@ -27,15 +29,19 @@ final class RuntimeGoCore {
 
   Future<void> start() async {
     if (_started) return;
+    final localTurnAddresses = await _resolveLocalTurnAddresses();
     if (Platform.isAndroid) {
       _nativeStartAttempted = true;
       final bound = await _channel
-          .invokeMethod<String>('start', {'address': address})
+          .invokeMethod<String>('start', {
+            'address': address,
+            'localTurnAddresses': localTurnAddresses.join(','),
+          })
           .timeout(_startTimeout);
       if (bound == null) throw StateError('Android Go Core 未返回监听地址');
       address = _validateAddress(bound);
     } else if (Platform.isWindows) {
-      address = await _startWindows();
+      address = await _startWindows(localTurnAddresses);
     } else {
       throw UnsupportedError('Runtime 不支持 ${Platform.operatingSystem}');
     }
@@ -46,7 +52,7 @@ final class RuntimeGoCore {
     );
   }
 
-  Future<String> _startWindows() async {
+  Future<String> _startWindows(List<String> localTurnAddresses) async {
     final executable = File(
       '${File(Platform.resolvedExecutable).parent.path}'
       '${Platform.pathSeparator}playmesh-core.exe',
@@ -54,12 +60,11 @@ final class RuntimeGoCore {
     if (!await executable.exists()) {
       throw StateError('Runtime 缺少 ${executable.path}');
     }
-    final process = await Process.start(executable.path, [
-      '-addr',
-      address,
-      '-parent-pid',
-      '$pid',
-    ]);
+    final arguments = <String>['-addr', address, '-parent-pid', '$pid'];
+    if (localTurnAddresses.isNotEmpty) {
+      arguments.addAll(['-local-turn-addresses', localTurnAddresses.join(',')]);
+    }
+    final process = await Process.start(executable.path, arguments);
     _process = process;
     final started = Completer<String>();
     process.stdout
@@ -122,6 +127,21 @@ final class RuntimeGoCore {
     }
     _process?.kill();
     _process = null;
+  }
+}
+
+Future<List<String>> _resolveLocalTurnAddresses() async {
+  try {
+    final entries = await resolveBindableLanIpv4InterfaceAddresses(
+      includeLinkLocal: false,
+    );
+    return entries
+        .map((entry) => entry.address.address)
+        .toSet()
+        .toList(growable: false);
+  } on Object catch (error) {
+    debugPrint('无法解析 Runtime Go Core 局域网 TURN 地址: $error');
+    return const [];
   }
 }
 

@@ -41,6 +41,9 @@ class RemoteGamePage extends StatefulWidget {
     required this.entryUri,
     required this.userId,
     required this.nickname,
+    this.coreControlBaseUri,
+    this.preparedRelayClientSession,
+    this.resolvedEntryPath,
     this.nativeBackHandler,
     this.prepareRuntime = true,
     this.gameId,
@@ -55,6 +58,9 @@ class RemoteGamePage extends StatefulWidget {
   final Uri entryUri;
   final String userId;
   final String nickname;
+  final Uri? coreControlBaseUri;
+  final RelayClientSession? preparedRelayClientSession;
+  final String? resolvedEntryPath;
   final String? gameId;
   final String? gameName;
   final String? sourceInstanceId;
@@ -74,6 +80,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   AppWebViewBridge? _appBridge;
   LocalTunnelGateway? _webGateway;
   LocalTunnelGateway? _coreGateway;
+  RelayClientSession? _relayClientSession;
   Uri? _localEntryUri;
   Object? _error;
   final int _windowsReloadKey = 0;
@@ -98,6 +105,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
   @override
   void initState() {
     super.initState();
+    _relayClientSession = widget.preparedRelayClientSession;
     _currentNickname = widget.nickname;
     final gameId = widget.gameId;
     if (gameId != null) {
@@ -117,6 +125,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         replaceGame: _replaceFromAppSdk,
         publish: _rejectLanAuthorityOperation,
         readShareLinks: _rejectLanShareLinks,
+        coreBaseUri: widget.coreControlBaseUri,
       );
     }
     developerEventHub.beginRuntime();
@@ -150,22 +159,36 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     try {
       final entryUri = widget.entryUri;
       final usesRelay = _isRelayInvitation(entryUri);
+      final resolvedEntryPath = widget.resolvedEntryPath;
       if (entryUri.host.isEmpty ||
           (usesRelay
               ? !{'http', 'https'}.contains(entryUri.scheme)
               : entryUri.scheme != 'http')) {
         throw const FormatException('App 游戏入口地址无效');
       }
+      if (resolvedEntryPath != null &&
+          !_isControlledPreparedEntryPath(resolvedEntryPath)) {
+        throw const FormatException('App 游戏受控入口地址无效');
+      }
       if (usesRelay) {
-        webGateway = await startRelayClientGateway(
-          invitationUri: entryUri,
-          target: RelayTarget.web,
-        );
-        coreGateway = await startRelayClientGateway(
-          invitationUri: entryUri,
-          target: RelayTarget.core,
-        );
+        var relaySession = _relayClientSession;
+        if (relaySession == null) {
+          final coreControlBaseUri = widget.coreControlBaseUri;
+          if (coreControlBaseUri == null) {
+            throw UnsupportedError('当前加入入口没有可用的 Go Core');
+          }
+          relaySession = await startRelayClientSession(
+            coreBaseUri: coreControlBaseUri,
+            invitationUri: entryUri,
+          );
+        }
+        _relayClientSession = relaySession;
+        webGateway = relaySession.webGateway;
+        coreGateway = relaySession.coreGateway;
       } else {
+        if (_relayClientSession != null) {
+          throw StateError('LAN 邀请不能携带 Relay 会话');
+        }
         final invitationFragment = _invitationFragment(entryUri);
         final shareToken =
             invitationFragment[playmeshGameInvitationTokenParameter];
@@ -190,12 +213,18 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         );
       }
       if (!mounted) {
+        await _relayClientSession?.close();
+        _relayClientSession = null;
         await coreGateway.close();
         await webGateway.close();
         return;
       }
       _webGateway = webGateway;
       _coreGateway = coreGateway;
+      // 邀请预检使用 Dart HTTP 客户端，只负责验证邀请和解析受控入口。
+      // 它收到的 HttpOnly Cookie 不会进入 WebView 的 Cookie 仓库，因此 WebView
+      // 必须从同一个本机 tunnel 的邀请入口再完成一次换票，不能直接打开
+      // resolvedEntryPath。Relay 仍复用预检已经建立的会话，不会重复建链。
       _localEntryUri = usesRelay
           ? (webGateway as RelayClientGateway).localEntryUri
           : webGateway.localBaseUri.replace(
@@ -228,6 +257,8 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         setState(() {});
       }
     } on Object catch (error) {
+      await _relayClientSession?.close();
+      _relayClientSession = null;
       await coreGateway?.close();
       await webGateway?.close();
       if (mounted) setState(() => _error = error);
@@ -413,6 +444,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
     HardwareKeyboard.instance.removeHandler(_recordHardwareUserActivation);
     unawaited(_closeAppLanResources());
     unawaited(_appBridge?.close());
+    unawaited(_relayClientSession?.close());
     unawaited(_coreGateway?.close());
     unawaited(_webGateway?.close());
     unawaited(
@@ -451,6 +483,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       launch: launch,
       userId: widget.userId,
       nickname: _currentNickname,
+      coreControlBaseUri: widget.coreControlBaseUri,
       discoveryService: _ownsLanGameDiscoveryService
           ? null
           : _lanGameDiscoveryService,
@@ -642,6 +675,18 @@ bool _isRelayInvitation(Uri value) {
   } on FormatException {
     return false;
   }
+}
+
+bool _isControlledPreparedEntryPath(String value) {
+  final uri = Uri.tryParse(value);
+  return uri != null &&
+      value.trim() == value &&
+      uri.scheme.isEmpty &&
+      uri.authority.isEmpty &&
+      uri.path.startsWith('/') &&
+      uri.path.length > 1 &&
+      !value.contains('?') &&
+      !value.contains('#');
 }
 
 Map<String, String> _invitationFragment(Uri value) {

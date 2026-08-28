@@ -118,6 +118,7 @@ const config = (overrides = {}) => {
     minPlayers: gameType === 'online' ? 2 : 1,
     maxPlayers: gameType === 'online' ? 5 : 1,
     tags: [],
+    webRuntimeMultithreading: false,
     updatedAt: '2026-08-05T01:02:03.000Z',
     ...overrides,
   };
@@ -153,6 +154,9 @@ for (const invalid of [
   envelope('ready', { config: { ...config(), unexpected: true } }),
   envelope('ready', { config: config({ revision: 0 }) }),
   envelope('ready', { config: config({ gameType: 'multiplayer' }) }),
+  envelope('ready', {
+    config: config({ webRuntimeMultithreading: 'true' }),
+  }),
   envelope('ready', { config: config({ updatedAt: 'not-a-time' }) }),
   envelope('ready', { config: config({ updatedAt: '2026-02-31T01:02:03Z' }) }),
 ]) {
@@ -167,6 +171,7 @@ assert.deepEqual(
     minPlayers: 3,
     maxPlayers: 9,
     tags: ['合作', '动作'],
+    webRuntimeMultithreading: true,
     expectedRevision: 7,
   }),
   {
@@ -175,6 +180,7 @@ assert.deepEqual(
     minPlayers: 3,
     maxPlayers: 9,
     tags: ['合作', '动作'],
+    webRuntimeMultithreading: true,
     expectedRevision: 7,
   }
 );
@@ -185,6 +191,7 @@ assert.throws(
       minPlayers: 2,
       maxPlayers: 5,
       tags: [],
+      webRuntimeMultithreading: false,
       expectedRevision: -1,
     }),
   error => error.code === 'invalid_expected_revision'
@@ -244,6 +251,7 @@ const updated = await client.put({
   minPlayers: 3,
   maxPlayers: 9,
   tags: ['合作', '动作'],
+  webRuntimeMultithreading: true,
   expectedRevision: 1,
 });
 assert.equal(updated.config.revision, 2);
@@ -254,6 +262,7 @@ assert.deepEqual(JSON.parse(requests.at(-1).options.body), {
   minPlayers: 3,
   maxPlayers: 9,
   tags: ['合作', '动作'],
+  webRuntimeMultithreading: true,
   expectedRevision: 1,
 });
 assert.deepEqual(requests.at(-1).options.headers, {
@@ -304,6 +313,7 @@ await assert.rejects(
     minPlayers: 1,
     maxPlayers: 1,
     tags: [],
+    webRuntimeMultithreading: false,
     expectedRevision: 2,
   }),
   error =>
@@ -329,6 +339,7 @@ await assert.rejects(
     minPlayers: 2,
     maxPlayers: 5,
     tags: [],
+    webRuntimeMultithreading: false,
     expectedRevision: 3,
   }),
   error =>
@@ -460,8 +471,39 @@ const flushTasks = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(saved.kind, 'saved');
   assert.equal(puts[0].expectedRevision, 0);
   assert.equal(puts[0].gameType, 'single');
+  assert.equal(puts[0].webRuntimeMultithreading, false);
   assert.equal(controller.getState().status, 'ready');
   assert.equal(controller.getState().isExplicitlySaved, true);
+}
+
+// Web Runtime 多线程属于现有 Playmesh 设置；切换后随同一次 Apply 保存。
+{
+  const puts = [];
+  const fakeClient = {
+    async read() {
+      return { requestId: 'req-runtime', status: 'ready', config: config() };
+    },
+    async put(input) {
+      puts.push(input);
+      return {
+        requestId: 'req-runtime-saved',
+        status: 'ready',
+        config: config({
+          revision: 2,
+          webRuntimeMultithreading: input.webRuntimeMultithreading,
+        }),
+      };
+    },
+  };
+  const controller = new controllerModule.PlaymeshProjectConfigController({
+    client: fakeClient,
+  });
+  await controller.load(gameId);
+  controller.selectWebRuntimeMultithreading(true);
+  assert.equal(controller.getState().requiresExplicitSave, true);
+  await controller.saveAfterOfficialApply({ officialApplySucceeded: true });
+  assert.equal(puts[0].webRuntimeMultithreading, true);
+  assert.equal(controller.getState().draftWebRuntimeMultithreading, true);
 }
 
 // invalid/unavailable 只禁用 PlayMesh 字段，且绝不能发出 PUT。
@@ -899,6 +941,11 @@ assert.match(sectionSource, /requiresExplicitSave/);
 assert.match(sectionSource, /playmeshProjectConfigMessages\.missingNotSaved/);
 assert.match(sectionSource, /playmeshProjectConfigMessages\.conflict/);
 assert.match(sectionSource, /playmeshProjectConfigMessages\.retry/);
+assert.match(
+  sectionSource,
+  /playmeshProjectConfigMessages\.webRuntimeMultithreading/
+);
+assert.match(sectionSource, /selectWebRuntimeMultithreading/);
 assert.match(sectionSource, /errorRequestId/);
 assert.match(sectionSource, /usePlaymeshLocalization/);
 

@@ -703,7 +703,7 @@ func (h *Handler) UpdateRuntimeConfig(c *gin.Context) {
 	next.Storage = body.Storage
 	body.Scanner.Enabled = next.Scanner.Enabled
 	next.Scanner = body.Scanner
-	next.Relay = body.Relay
+	next.Relay = relayFromEditable(next.Relay, body.Relay)
 	if strings.TrimSpace(body.WebUI.DefaultLocale) == "" {
 		body.WebUI = next.WebUI
 	}
@@ -745,6 +745,11 @@ func (h *Handler) UpdateRuntimeConfig(c *gin.Context) {
 		"restartRequired": true,
 		"message":         "server.json 已原子更新；publicBaseUrl、内容规则与 ClamAV 设置已热更新，其他运行配置在安全重启后生效",
 	})
+}
+
+func relayFromEditable(current config.Relay, edited config.Relay) config.Relay {
+	edited.TURNSharedSecret = current.TURNSharedSecret
+	return edited
 }
 
 func editableFromConfig(cfg config.Config) editableConfig {

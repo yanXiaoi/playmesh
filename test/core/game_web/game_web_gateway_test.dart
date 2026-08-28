@@ -91,6 +91,9 @@ void main() {
     expect(opened.exchangePayload['gameName'], '测试游戏');
     expect(opened.entryUri.path, '/controller/index.html');
     expect(opened.entryUri.hasQuery, isFalse);
+    final entryWithoutBrowserCookie = await http.get(opened.entryUri);
+    expect(entryWithoutBrowserCookie.statusCode, HttpStatus.forbidden);
+    expect(entryWithoutBrowserCookie.body, '分享链接已失效');
     expect(controller.statusCode, HttpStatus.ok);
     expect(controller.body, contains('window.__PLAYMESH_BROWSER__'));
     expect(
@@ -195,7 +198,7 @@ void main() {
     );
     expect(
       compatibleAppSdk.body,
-      contains('PLAYMESH_APP_SDK_VERSION = "3.3.0"'),
+      contains('PLAYMESH_APP_SDK_VERSION = "3.5.0"'),
     );
 
     final rejectedRemoteLog = await http.post(

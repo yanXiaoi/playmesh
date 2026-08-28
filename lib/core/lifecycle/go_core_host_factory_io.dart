@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../network/lan_ipv4_interface_resolver_io.dart';
 import 'go_core_host_contract.dart';
 
 GoCoreHost createBundledGoCoreHost({required String address}) {
@@ -35,8 +36,10 @@ class _MobileGoCoreHost implements GoCoreHost {
     }
 
     try {
+      final localTurnAddresses = await _resolveLocalTurnAddresses();
       final boundAddress = await _channel.invokeMethod<String>('start', {
         'address': _address,
+        'localTurnAddresses': localTurnAddresses.join(','),
       });
       if (boundAddress == null || boundAddress.isEmpty) {
         throw const FormatException('原生层未返回监听地址');
@@ -118,12 +121,19 @@ class _WindowsGoCoreHost implements GoCoreHost {
     }
 
     try {
-      final process = await Process.start(coreExecutable.path, [
-        '-addr',
-        _address,
-        '-parent-pid',
-        '$pid',
-      ], mode: ProcessStartMode.normal);
+      final localTurnAddresses = await _resolveLocalTurnAddresses();
+      final arguments = <String>['-addr', _address, '-parent-pid', '$pid'];
+      if (localTurnAddresses.isNotEmpty) {
+        arguments.addAll([
+          '-local-turn-addresses',
+          localTurnAddresses.join(','),
+        ]);
+      }
+      final process = await Process.start(
+        coreExecutable.path,
+        arguments,
+        mode: ProcessStartMode.normal,
+      );
       if (_closed) {
         process.kill();
         throw const GoCoreHostException(
@@ -231,6 +241,21 @@ class _UnsupportedIoGoCoreHost implements GoCoreHost {
 
   @override
   Future<void> stop() async {}
+}
+
+Future<List<String>> _resolveLocalTurnAddresses() async {
+  try {
+    final entries = await resolveBindableLanIpv4InterfaceAddresses(
+      includeLinkLocal: false,
+    );
+    return entries
+        .map((entry) => entry.address.address)
+        .toSet()
+        .toList(growable: false);
+  } on Object catch (error) {
+    debugPrint('无法解析 Go Core 局域网 TURN 地址: $error');
+    return const [];
+  }
 }
 
 String? _readStartedAddress(String line) {

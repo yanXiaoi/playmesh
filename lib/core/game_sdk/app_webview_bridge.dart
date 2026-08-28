@@ -13,6 +13,7 @@ import '../capabilities/capability_runtime.dart';
 import '../capabilities/default_capability_plugins.dart';
 import '../capabilities/vibration/vibration_capability_plugin.dart';
 import '../capabilities/web_permission/capability_web_permission.dart';
+import '../diagnostics/playmesh_error_diagnostic.dart';
 import '../platform/app_device_service.dart';
 import '../profile/user_profile_store.dart';
 import '../storage/app_local_bucket_store.dart';
@@ -720,7 +721,9 @@ String _encodeAppBridgeMessage(Map<String, Object?> message) {
 }
 
 String _publicAppBridgeError(Object error) {
-  if (error is SdkCommandException) return error.message;
+  if (error is SdkCommandException) {
+    return formatPlaymeshDiagnosticError(error);
+  }
   if (error is CapabilityOperationException) return error.message;
   final message = error.toString();
   if (utf8.encode(message).length > 1024 ||

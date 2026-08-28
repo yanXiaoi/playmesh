@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 abstract interface class RuntimeSessionConnection {
   Uri get coreBase;
+  String get sessionId;
   Map<String, Object?> get snapshot;
   Map<String, Object?> get currentPlayer;
   Uri get binaryWebSocketUri;
@@ -23,6 +24,10 @@ abstract interface class RuntimeSessionConnection {
   Future<Map<String, Object?>> finish();
   Future<Map<String, Object?>> updateNickname(String nickname);
   Future<Map<String, Object?>> refreshSnapshot();
+  Future<Map<String, Object?>> createWebRTCSignalingEndpoint(
+    String identifier, {
+    String? requestId,
+  });
   void confirmAvatarWritten({required String playerId, required String sha256});
   void rejectAvatarWrite({required String playerId, required String sha256});
   Future<void> close();
@@ -120,6 +125,7 @@ final class RuntimeSession implements RuntimeSessionConnection {
       StreamController.broadcast();
   late final StreamSubscription<Object?> _subscription;
   int _sequence = 0;
+  int _webRTCRequestSequence = 0;
   String? _shareToken;
   bool _closed = false;
 
@@ -143,6 +149,7 @@ final class RuntimeSession implements RuntimeSessionConnection {
   @override
   bool get isAuthority => currentPlayer['id'] == snapshot['authorityClientId'];
 
+  @override
   String get sessionId => _string(snapshot, 'id');
 
   String get joinCode => _string(snapshot, 'joinCode');
@@ -244,6 +251,44 @@ final class RuntimeSession implements RuntimeSessionConnection {
     }
     snapshot = updatedSnapshot;
     return snapshot;
+  }
+
+  @override
+  Future<Map<String, Object?>> createWebRTCSignalingEndpoint(
+    String identifier, {
+    String? requestId,
+  }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final correlationId = requestId?.trim().isNotEmpty == true
+        ? requestId!.trim()
+        : 'webrtc-$timestamp-${++_webRTCRequestSequence}';
+    final response = await _client
+        .post(
+          coreBase.resolve(
+            'v1/sessions/${Uri.encodeComponent(sessionId)}/webrtc/signaling-endpoints',
+          ),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'type': 'playmesh.webrtc-signaling-endpoint.request',
+            'version': 1,
+            'timestamp': timestamp,
+            'requestId': correlationId,
+            'identifier': identifier,
+          }),
+        )
+        .timeout(requestTimeout);
+    final payload = _responseObject(response);
+    final path = _string(payload, 'webSocketPath');
+    final endpoint = coreBase.resolve(path);
+    return {
+      ...payload,
+      'url': endpoint
+          .replace(scheme: endpoint.scheme == 'https' ? 'wss' : 'ws')
+          .toString(),
+    };
   }
 
   Future<String> openShare() async {

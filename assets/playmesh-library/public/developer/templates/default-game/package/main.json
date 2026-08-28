@@ -5,8 +5,8 @@
   "lastModifiedAt": 0,
   "remarks": "Playmesh multiplayer game",
   "version": "0.1.0",
-  "sdkVersion": "4.1.0",
-  "appSdkVersion": "3.3.0",
+  "sdkVersion": "4.3.0",
+  "appSdkVersion": "3.5.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
   "modes": [
@@ -25,6 +25,11 @@
   },
   "authority": {
     "entry": "static/js/service/index.js"
+  },
+  "config": {
+    "webRuntime": {
+      "multithreading": false
+    }
   },
   "tags": [
     "multiplayer"

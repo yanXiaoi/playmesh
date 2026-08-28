@@ -80,6 +80,10 @@ WebIDE 的拆分、重组、名称生成、引用深度和 JSON 格式必须直�
 `gameId` 等于 GDevelop `properties.packageName` 和发布包 `main.json.id`。项目列表先枚举
 App 托管项目根，再只读 direct current evidence。合法项目但 current 损坏时，项目仍出现在
 列表中，`currentEvidence` 为 `null` 并返回稳定诊断；历史损坏不影响 current evidence。
+新建、导入为新项目或复制为新项目时，`gameId/packageName` 使用平台统一的
+Android applicationId 合同：至少两个点分段，每段以 ASCII 字母开头，其余只能是
+ASCII 字母、数字或下划线，总长最多 64 个字符。打开、预览和更新已有项目时仍使用
+该项目持久化的原 gameId，不追溯改名。
 
 项目 rekey 必须同时重写：
 

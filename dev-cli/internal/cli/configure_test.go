@@ -42,8 +42,12 @@ func TestConfigureJSONUsesAdapterManifestAndFullyReplacesModeFields(
 		current.Manifest.DisplayMode != "single_screen_multiplayer" {
 		t.Fatalf("configure --out did not collect current settings: %#v", current)
 	}
+	if current.Manifest.WebRuntimeMultithreading {
+		t.Fatalf("configure --out read an unexpected web runtime setting: %#v", current)
+	}
 
 	current.Manifest.DisplayMode = "multi_screen"
+	current.Manifest.WebRuntimeMultithreading = true
 	current.Manifest.ControllerEntry = ""
 	current.Manifest.ControllerOrientation = ""
 	current.Capabilities.ControllerRequired = nil
@@ -79,6 +83,13 @@ func TestConfigureJSONUsesAdapterManifestAndFullyReplacesModeFields(
 			"multi-screen overwrite retained controller orientation: %#v",
 			manifest,
 		)
+	}
+	configValue := manifest["config"].(map[string]any)
+	webRuntime := configValue["webRuntime"].(map[string]any)
+	if webRuntime["multithreading"] != true ||
+		webRuntime["future"] != "kept" ||
+		configValue["future"].(map[string]any)["kept"] != float64(42) {
+		t.Fatalf("configure did not preserve opaque config fields: %#v", configValue)
 	}
 	capabilities := readTestJSONObject(
 		t,
@@ -223,6 +234,44 @@ func TestConfigureOutStateUsesStableEmptyArrays(t *testing.T) {
 	}
 }
 
+func TestConfigureNormalizesOpaqueConfigToCurrentBoolean(t *testing.T) {
+	root := setupConfigureCocosProject(t)
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	value, err := project.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, manifest, manifestPath, err := readConfigureRequest(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest["config"] = "opaque-legacy-value"
+	current.Manifest.WebRuntimeMultithreading = false
+	if err := applyConfigureRequest(
+		value,
+		manifestPath,
+		manifest,
+		current,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := readTestJSONObject(t, manifestPath)
+	config := saved["config"].(map[string]any)
+	webRuntime := config["webRuntime"].(map[string]any)
+	if webRuntime["multithreading"] != false {
+		t.Fatalf("configure did not write the current boolean: %#v", config)
+	}
+}
+
 func setupConfigureCocosProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -258,7 +307,11 @@ func setupConfigureCocosProject(t *testing.T) string {
 		    "controller":"controller/index.html"
 		  },
 		  "authority":{"entry":"static/js/service/index.js"},
-		  "tags":["cocos"]
+		  "tags":["cocos"],
+		  "config":{
+		    "future":{"kept":42},
+		    "webRuntime":{"future":"kept","multithreading":false}
+		  }
 		}`,
 	)
 	writeTestFile(

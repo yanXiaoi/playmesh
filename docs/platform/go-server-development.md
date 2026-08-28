@@ -4,13 +4,14 @@
 服务端实现，承担三类能力：
 
 - 账号与游戏包源：邮箱账号、上传密钥、所有权、审核、发布、检索和下载。
-- 公共联机中转：为不同网络中的 App 配对临时连接并复制加密字节。
+- 公共 WebRTC 基础设施：为不同网络中的 App 签发短期会话、转发 SDP/trickle ICE，
+  并提供 Pion STUN/TURN UDP/TCP。
 - 用户/管理员 Web：只负责同一业务服务的可访问 UI，不改变 API 契约。
 
 它不是 App 内置的 Go Core，不运行 HTML 游戏，不执行 Authority 规则，也不负责
 计分、房间规则或游戏状态。
 
-当前 Catalog API 为 `3.0.0`，Relay 协议为 `3.0.0`，SQLite schema 为 v6。v6 在游戏记录中持久化规范化
+当前 Catalog API 为 `3.0.0`，Relay 协议为 `4.0.0`，SQLite schema 为 v6。v6 在游戏记录中持久化规范化
 ZIP 的 `package_size_bytes`，避免列表请求重复读取包文件。完整部署说明见
 `go-server/README.md`，本轮实现说明见
 [Playmesh 3.0.0 本地功能实现说明](../implementation/playmesh-3.0.0-local-implementation.md)。
@@ -26,7 +27,7 @@ Go Server
   ├─ 用户与发布治理
   │    注册 / 验证 / Session / 上传密钥 / 所有权 / 审核 / 上下架 / 删除
   └─ Relay
-       临时隧道 / Host Lease / Join Capability / 字节复制
+       临时信令房间 / Host Lease / Join Capability / TURN REST 凭据 / Pion TURN
 ```
 
 三个层次不得混合：
@@ -34,7 +35,8 @@ Go Server
 - HTTP 中间件只处理通用请求上下文，不解释游戏包和隧道业务。
 - Catalog 与游戏包服务只处理可发布包，不读取游戏运行数据，不参与联机会话。
 - 用户身份与所有权只使用稳定账号 ID；邮箱、展示名称和包内 author 不能代替账号 ID。
-- Relay 只处理隧道鉴权、配对、限制、超时和字节复制，不解析加密后的游戏内容。
+- Relay 只处理房间鉴权、配对、限制、超时和不透明 SDP/ICE 转发；TURN 转发 DTLS/SRTP/
+  SCTP 数据包，不解析游戏业务、HTTP、WebSocket 或媒体内容。
 
 Go Server 与 App 自带的本机游戏库可以实现同一 Catalog 读取契约，但两者不是同一
 进程，也不共享存储路径。Go Core 只负责当前 App 的本地会话与消息路由。
@@ -70,6 +72,15 @@ GET    /relay/v1/host
 DELETE /relay/v1/host
 GET    /relay/v1/client
 ```
+
+以上 GET 是 WebSocket 信令握手。Go Server 不再接受 TCP Upgrade 数据流。服务启动时若
+`supportsGameRelay=true`，还必须成功启动 Pion TURN UDP/TCP；任一监听失败都应使启动
+失败，不能在声明 Relay 可用时静默缺少 TURN。
+
+TURN 部署必须设置公网 IPv4、公共端口、UDP/TCP 监听、UDP 中继端口范围和 realm，
+`PLAYMESH_TURN_SHARED_SECRET` 至少 32 字节。公网防火墙/NAT 必须同时开放 3478 TCP/UDP
+及配置的 UDP 中继端口段。TURN 用户名和密码按 Relay 房间 TTL 动态生成，不能写入
+Catalog 配置、日志或持久化数据库。
 
 App 外部端口提供：
 
@@ -238,16 +249,23 @@ Relay 的核心不变量：
 
 - 客户端不能提交任意目标 Host、端口或 URL。
 - `tunnelId`、Host Lease 和 Join Capability 只用于临时隧道定位与鉴权。
-- 端点内容密钥只存在于两端 App，不能进入 Go Server 请求、状态或日志。
-- 配对完成后只执行有背压的双向复制，不缓存完整响应，不解释 HTTP 或 WebSocket。
-- 主机退出、TTL 到期或显式删除时，回收隧道和全部关联连接。
+- 邀请 fragment 内的 Authority 分享凭据和 DataChannel 首帧证明密钥只存在于两端 App，
+  不能进入 Go Server 请求、状态或日志。
+- Go Server 只转发有大小、速率和路由约束的 SDP/trickle ICE JSON，并通过 TURN 转发
+  WebRTC 数据包；不得恢复 raw TCP 字节复制，也不得解释 HTTP、WebSocket 或媒体业务。
+- 每个加入用户只占一个独立 PeerConnection 名额；该用户的 web/core TCP 连接如何映射为
+  独立 DataChannel 由两端 Go Core 负责，不进入 Go Server 信令状态。
+- 已附着主机的隧道租约由当前信令 WebSocket 存活状态决定；心跳确认主机断开或宿主显式
+  删除时，立即回收隧道和全部关联连接，使旧二维码与旧链接同时失效。
+- `relay.tunnelTTLSeconds` 兼容保留原字段名，只限制主机创建后首次附着等待时间以及每个
+  新 peer 的 ICE/TURN 临时凭据寿命；它不得再作为在线主机邀请的硬过期时间。
 - 全局隧道数、单 IP 连接数、单隧道连接数、待配对时间和空闲时间都必须有上限。
 - Relay 在 Source Token、Lease 或 Capability 校验前也必须有允许正常连接池突发的
   IP 窗口限流，避免公开正式 Token 被用于高频鉴权消耗。
 
-Relay 无法检查端到端加密内容是否属于游戏流量。Source Token、临时 Capability 和
-官方 App 流程构成当前产品边界；如果需要对客户端进行密码学证明，应单独设计设备
-证明或客户端证书，不能通过让中转持有内容密钥实现。
+Relay 无法检查 DTLS/SCTP 或 TURN 承载的加密内容是否属于游戏流量。Source Token、临时
+Capability 和官方 App 流程构成当前产品边界；如果需要对客户端进行密码学证明，应单独
+设计设备证明或客户端证书，不能通过让中转解释业务内容实现。
 
 ## 配置约定
 
@@ -339,7 +357,7 @@ Relay Manager。
 - 所有权抢占、相同/较低版本和并发上传返回冲突且无文件/事务残留。
 - deleting 状态可在启动和后台恢复，最后一版完成删除后释放所有权。
 - 所有写操作的鉴权、大小限制、限流和审计已启用。
-- 隧道凭证按角色隔离，端点密钥从未到达服务端。
+- 隧道凭证按角色隔离，Authority 分享凭据和 DataChannel 首帧证明密钥从未到达服务端。
 - 连接、临时文件和失败上传可以在超时或关闭时回收。
 - `server.json` 示例不含生产秘密，公网地址与 TLS 终止配置一致。
 - 版本日志分别记录已验证内容和仍需完成的公网、压力与故障恢复验证。

@@ -15,7 +15,8 @@ Go Server 不是 Go Core，不运行游戏规则，也无法解密公共中转�
 1. 安装 Go 1.26.5 或更高的已修复版本；`go.mod` 已固定安全工具链。
 2. 按 [ClamAV 官方安装文档](https://docs.clamav.net/manual/Installing.html)
    安装并更新病毒库。Windows、Linux 与 macOS 均可使用官方发行包。
-3. 复制 `.env.example` 为 `.env`，替换管理员密码、App Token 与上传密钥 Pepper。
+3. 复制 `.env.example` 为 `.env`，替换管理员密码、App Token、上传密钥 Pepper
+   与 TURN 共享密钥。
 4. 启动：
 
 ```powershell
@@ -49,6 +50,11 @@ SQLite 路径、游戏包限制、验证码、ClamAV、鉴权白名单和 Relay 
 提示重启生效。游戏源名称、作者、主页与 Relay 声明使用独立表单和 SQLite 存储，
 可以即时反映到 `/apps/info`。
 
+`relay.tunnelTTLSeconds` 是为兼容现有配置保留的字段名。它限制主机创建后等待首次信令附着
+以及每个加入 peer 的短期 ICE/TURN 凭据寿命，不限制已经附着并保持心跳的主机分享时长。
+主机信令断开、主动停止分享或服务关闭时，服务端立即撤销 tunnel，原二维码和复制链接同时
+失效；持续在线期间每次加入都会重新签发短期 ICE/TURN 凭据。
+
 Web 语言由 `server.json.webUI` 配置，界面固定使用浅色主题。可用语言只来自仓库统一清单
 `assets/playmesh-localization/manifest.json`；发布前运行
 `node tool/generate_localization.mjs` 更新 Go 嵌入副本。服务启动会拒绝未知 locale、
@@ -66,9 +72,13 @@ Web 语言由 `server.json.webUI` 配置，界面固定使用浅色主题。可�
 PLAYMESH_PUBLISHED_TOKEN  正式游戏 Token
 PLAYMESH_REVIEW_TOKEN     Relay/管理兼容凭据，不进入 Catalog 展示
 PLAYMESH_UPLOAD_KEY_PEPPER 用户上传密钥 HMAC Pepper
+PLAYMESH_TURN_SHARED_SECRET TURN REST 临时凭据 HMAC 密钥
 ```
 
 两个 Token 必须非空且互不相同，不能使用示例占位值或复用其他凭据。
+`PLAYMESH_TURN_SHARED_SECRET` 只在服务端保存，至少 32 字节，并且必须与上述 Token、
+Pepper 和管理员密码使用独立的密码学随机值。它用于为 Relay 房间签发短期
+TURN 用户名/密码，不会下发给游戏代码，也不得写入 `server.json`。
 
 外部端口使用统一 Gin 中间件解析 Bearer Token：
 

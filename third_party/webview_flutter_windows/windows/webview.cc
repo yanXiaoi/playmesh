@@ -776,6 +776,19 @@ void Webview::SetCursorPos(double x, double y) {
       virtual_keys_.state(), 0, point);
 }
 
+void Webview::SetCursorLeave() {
+  if (!IsValid()) {
+    return;
+  }
+
+  // Composition hosting requires an explicit LEAVE in addition to MOVE.
+  // Without it WebView2 keeps treating the last page position as hovered and
+  // may not raise CursorChanged when the mouse re-enters from Flutter UI.
+  composition_controller_->SendMouseInput(
+      COREWEBVIEW2_MOUSE_EVENT_KIND::COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
+      virtual_keys_.state(), 0, last_cursor_pos_);
+}
+
 void Webview::SetPointerUpdate(int32_t pointer,
                                WebviewPointerEventKind eventKind, double x,
                                double y, double size, double pressure) {

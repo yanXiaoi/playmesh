@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../models/game_id.dart';
 import 'foundation/gdevelop_project_mutation_lock.dart';
 import 'foundation/local_version_store.dart';
 import 'foundation/pending_project_commit_store.dart';
@@ -458,7 +459,7 @@ class GDevelopProjectAllocationPayload {
     return GDevelopProjectAllocationPayload(
       gameId: gameId,
       origin: GDevelopProjectAllocationOrigin.parse(json['origin']! as String),
-      name: _name(json['name'], gameId: gameId),
+      name: _name(json['name']),
       clientId: _optionalToken(json['clientId'], 'clientId'),
       workspaceTarget: target,
       stagingPath: json['stagingPath']! as String,
@@ -613,7 +614,7 @@ class GDevelopProjectAllocationCoordinator {
         'GDevelop allocation workspaceTarget gameId 无效',
       );
     }
-    final normalizedName = _name(name ?? normalized, gameId: normalized);
+    final normalizedName = _name(name ?? normalized);
     final normalizedClientId = _optionalToken(clientId, 'clientId');
     final requestValue = {
       'gameId': normalized,
@@ -662,6 +663,9 @@ class GDevelopProjectAllocationCoordinator {
             'kind': PlaymeshProjectKind.gdevelop.wireName,
             'gameId': normalized,
             'name': normalizedName,
+            if (isValidPlaymeshNewProjectGameId(normalized))
+              'identityPolicy':
+                  ProjectProvisioningService.androidApplicationIdIdentityPolicy,
             'fileIdentifiers': [workspaceTarget.fileIdentifier],
             'createdAt': now.toIso8601String(),
             'updatedAt': now.toIso8601String(),
@@ -2031,12 +2035,9 @@ String _projectUuid(Object? value) {
   return value;
 }
 
-String _name(Object? value, {required String gameId}) {
+String _name(Object? value) {
   if (value is! String) throw const FormatException('GDevelop name 无效');
-  return ProjectProvisioningService.validateIdentity(
-    gameId: gameId,
-    name: value,
-  ).name;
+  return ProjectProvisioningService.validateProjectName(value);
 }
 
 String? _optionalToken(Object? value, String field) {

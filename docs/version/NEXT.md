@@ -2,33 +2,103 @@
 
 ## 状态
 
-- 状态：App `4.5.0+33` 已于 2026-08-24 完成正式构建；当前存在未发布变更。
-- 当前发行基线：App `4.5.0+33`、Runtime `1.0.2+7`、Go Core `0.5.0`、Core 协议 `1.3.0`、
-  Game SDK `4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、
-  Relay 协议 `3.0.0`、Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。
-- 最新正式发布日志：`docs/version/4.5.0.md`；本文件保留 4.5.0、4.4.0、4.3.1、4.3.0、4.2.1、4.2.0、4.1.0 与 4.0.0
-  发布归档。
-- Game SDK `4.1.0` 为 `game.submitAction` 与 `authority.onService` 兼容新增
-  隔离 namespace 路由，旧调用仍使用原线格式和稳定默认路由；GDevelop 官方 Multiplayer
-  行为在 Playmesh 内改用命名空间 Authority 服务与 Binary relay，不存在 Playmesh SDK 时
-  保留官方运行层。Go Core 与 Core 协议版本不变。
-- JSON Bucket 存储传输执行破坏性替换：保留既有异步
-  `getData/setData/removeData/clearData/upload` 的签名与 Promise 语义，只新增精确的
-  `getDataSync/setDataSync`；异步与同步 JSON 统一改走同源 HTTP GET/PUT/DELETE、
-  SHA-256、requestId 幂等和 revision/CAS，binary upload 继续独立使用 POST 与
-  `data/data`。SDK、App host、GameRuntimeBridge 与 Go Core 主 Session 链中的旧 WS 存储
-  请求/响应、pending/settle、双读、双写和 fallback 全部删除。正式项目清单使用升级完成的
-  Game SDK `4.1.0`；其公共异步 API 签名与 Promise 语义保持兼容。
+- 状态：App `5.1.0+37`、Runtime `2.1.0+11` 已完成当前源码与受影响自动化验证；Runtime
+  Android x86_64、Android ARM64 与 Windows x64 固定底包已从当前源码重建并同步更新
+  `resources/runtime/update.json`。主 App 与 Go Server 本轮未打包；Runtime 尚未发布，也未
+  完成 Android、Windows、长时在线和公网 TURN 跨设备手工验收。最新正式发行仍为
+  `4.5.0+33`。
+- 当前工作树：Runtime `2.1.0+11`、Go Core `0.7.0`、Core 协议 `1.5.0`、Game SDK
+  `4.3.0`、App Bridge SDK `3.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
+  GDevelop Playmesh 扩展 `2.1.0`、Developer API / OpenAPI `5.0.0`、Developer CLI
+  `2.0.0`。
+- 当前详细日志：`docs/version/5.0.1.md`；最新正式发布日志：`docs/version/4.5.0.md`。
+  本文件后续内容保留既有版本归档。
 
 ## 未发布变更
 
-- 加入游戏弹窗在发现当前游戏的局域网房间时，只在房间列表区域显示简短扫描动效并阻止
-  列表交互；扫码和邀请链接输入保持可用。分享/邀请从统一菜单发起时只让分享按钮显示
-  加载态，主 App 与 Runtime 宿主分享层都先完成首帧绘制，再在局域网区域建立分享通道，
-  避免等待反馈表现为整个界面卡顿。
-- Runtime 保持语义版本 `1.0.2`，构建号提升为 `8`，从同一份 Game SDK `4.1.0`、
-  App Bridge SDK `3.3.0` 源码重建 Android x86_64、Android arm64-v8a 与 Windows x64
-  固定底包；SDK 版本常量不升级。
+- Runtime 的游戏包清单与 Game/App 宿主握手不再要求 SDK 请求版本精确命中历史发行枚举；
+  改为接受兼容基线至随包最高 Bundle 的严格语义版本闭区间。当前接受 Game SDK
+  `4.1.0`～`4.3.0`、App SDK `3.2.0`～`3.5.0`，包括区间内未单独枚举的 PATCH/MINOR；
+  基线前、格式错误及高于随包 Bundle 的新版本继续拒绝。
+- Runtime App 宿主补齐与主 App 一致的 `_playmeshAppStorageSync.endpoint`、同步逻辑 Bucket
+  读写和生命周期关闭。该修复已进入本轮 `v2.1.0-build11` 三端固定底包。
+- Game SDK `4.3.0` 兼容新增 `rpc.requestStream(path, source, options?)` 与
+  `rpc.onStreamRequest(path, handler, options?)`。Binary WS 仅承载鉴权控制和小型结果，实际
+  File/Blob/ArrayBuffer/Uint8Array/ReadableStream 字节通过 Core 一次性 HTTP 数据面、32 KiB
+  有界 pipe 和背压流向固定 Authority，以 EOF 结束，不使用结束字节、不缓存完整文件。
+  Authority 可把收到的 ReadableStream 直接交给 `storage.upload(source, {name, type})`；单流
+  上限 512 MiB，每玩家最多 4 个、每局最多 16 个，默认超时 5 分钟。发送与接收 options 均
+  支持 `(transferredBytes, totalBytes)` 进度监听；未知总量为 `null`，回调失败不影响传输。
+
+### Runtime 固定底包 `v2.1.0-build11`
+
+| 制品 | 架构 | 大小 | SHA-256 |
+| --- | --- | ---: | --- |
+| `playmesh-runtime-x86.apk` | Android x86_64 | 59,077,291 B | `d31449132b822c51906e8752bb796548693c4ef975b16b6ed4096d32aa05914f` |
+| `playmesh-runtime-arm.apk` | Android ARM64 | 51,688,128 B | `58b687fe53079b50184a1b99a86b49834c272a56454f292c583ef8b4708a8f02` |
+| `playmesh-runtime-win.zip` | Windows x64 | 20,558,952 B | `d7427c0fca5a609aa1290b4da111aed2c24ba162057cc030ef0418c21644fe38` |
+
+正式构建脚本完成 Android ABI、签名、16 KiB 对齐、SDK 哈希、Windows 包结构和安装后解密
+校验。首次 Windows 并行编译因 MSVC `C1060` 堆空间不足失败；构建入口固定为默认 2 路 Ninja
+并发后，按同一次构建 `-Resume` 复用并重新校验 Android 产物，Windows 构建及三包统一门禁
+通过。构建成功不替代真机或真实窗口手工验收。
+
+- `main.json` 新增不校验内容的可选 `config` 扩展值；公共读取器在对象或字段缺失时返回
+  `null`。只有 `config.webRuntime.multithreading` 为精确布尔值 `true` 时，App 本地游戏
+  WebView 的公共回环资源网关才对入口、SDK、普通资源、Bucket 和错误响应统一设置
+  COOP/COEP 跨源隔离头。旧项目缺失配置时保持兼容，新模板默认显式为 `false`；源码工作区
+  可在新建和项目设置中修改，Developer CLI 可在 `init` 和 `configure` 中修改，GDevelop
+  可在现有 Playmesh 设置面板中修改。游戏仍须按 `crossOriginIsolated`、
+  `SharedArrayBuffer` 和 `Worker` 做特性检测并保留单线程路径。
+- 修复 Windows 非全屏游戏无法稳定应用网页 `cursor: none`：组合模式 WebView 现在在鼠标
+  进入纹理时发送当前位置 `MOVE`，离开时显式发送 WebView2 `LEAVE`，新文档加载时先恢复
+  普通箭头，再只接受当前页面实时 `CursorChanged`。实现不缓存或跨游戏复用光标状态。
+  代码级回归测试已通过；Windows Runtime 固定包已随当前源码重建并更新
+  `resources/runtime/update.json` 的真实哈希，但真实窗口手工验收仍未执行。
+- GDevelop、源码工作区、Developer CLI `init` 和首次持久包上传现在共用
+  Android applicationId 项目 ID 合同；CLI `run`/`dev` 的路由校验同时接受合法的
+  大写字母和下划线。新建限制不追溯套用到已有项目的预览、更新或 CLI `get`。
+- 首页扫码和“加入对局”页扫码现在只经过同一条二维码采集与邀请预检方法；首页在实际加入时
+  动态读取当前 Go Core 端口，不再遗漏 Relay 4 所需的 Core 地址。加入错误保留稳定 code、
+  原始类型、完整 cause 链和可用堆栈，并在 App、App Bridge 与 Runtime 出口统一脱敏邀请
+  URL、内部 URL 和凭据后展示，不再把 Core/Relay 故障误报成无效链接。
+- 手工输入链接与扫码继续收口到同一个邀请准备方法，LAN `/playmesh/join` 与 Relay `/j/`
+  都保留原有严格校验；手工点击或扫码结果返回后的第一帧立即显示不可操作、不可返回的全页
+  “正在加入”遮罩。Relay 成功准备后的会话与受控入口校验结果直接移交给 App/Runtime 游戏
+  页，不再关闭后重建；但 Dart 预检取得的 HttpOnly Cookie 不能跨到 WebView，因此 LAN 与
+  Relay 的 WebView 都从同一本机 tunnel 的原邀请入口建立自己的 Cookie，再跳转到已校验的
+  受控入口。App 与 Runtime SDK 链接/扫码加入同样复用这条后端链路，且不增加 Authority
+  鉴权。
+- 修复公共分享连接持续在线约 6 小时后，原二维码与原链接同时失效：Relay tunnel 现在由
+  当前主机信令连接持有，在线期间不再按固定 TTL 删除；每次加入重新签发短期 ICE/TURN
+  凭据。主机断开、停止分享或心跳确认失联时立即撤销 tunnel，旧二维码与旧链接同时失效。
+- 修复加入端实际已进入 Core Session、主机“房间”页却仍显示旧离线成员：主 App 与 Runtime
+  现在都跟随每个 Session 成员快照实时重建已打开的房间列表；即使在线人数不变，昵称、在线
+  状态和 `lan/direct/relay` 方式变化也不会被 presence 去重漏掉。
+- Relay Host 初始化 peer 失败会通过单向 `peer.error` 保留原始原因；加入端 ICE 失败诊断增加
+  连接状态、候选类型和脱敏 ICE URL。服务启动不判断 TURN 公网/私网地址性质，部署地址错误
+  仍由实际连通性失败暴露。
+- Game SDK `4.2.0` 为 Authority 兼容新增 `playmesh.main.db`。每个游戏使用固定
+  `data/db/_game.db`，支持参数化表/索引 DDL、数据增删改查、原生 DDL 获取、独立连接事务
+  和自动提交/回滚快捷事务；数组绑定 `?`/`?NNN`，对象绑定 `:name`/`@name`/`$name`。
+  宿主启用 WAL 与外键检查，不增加事务数量等公共层配额，并在 WebView/Runtime 生命周期
+  关闭时回滚未完成事务。Runtime 与 GDevelop 事务句柄已同步。
+- 旧公共 TCP Relay 已整体删除。加入端与房主每用户建立一个 Pion PeerConnection，web/core
+  的每条 TCP 流分别使用可靠、有序 DataChannel；直连失败时使用 Pion TURN，而不是 TCP
+  fallback。Go Server 只负责鉴权、TTL、限流、信令和 TURN。
+- 创建、加入、链接、扫码与分享界面入口保持不变；Core 根据 LAN 或 selected candidate pair
+  生成 `lan/direct/relay`，主 App 与 Runtime 的房间用户列表显示“局域网/直连/中转”。
+- App Bridge SDK `3.4.0` 兼容新增
+  `playmesh.app.webrtc.getSignalingEndpoint(identifier)`，让 HTML 自行使用原生 WebRTC；
+  平台只签发单次、30 秒、会话绑定的信令端点并按 Authority 星形拓扑转发不透明 JSON。
+- 主 App 与 Runtime 复用既有可绑定 LAN IPv4 遍历结果传给 Go Core；Core 为通用 HTML
+  WebRTC 端点提供 Authority 局域网 Pion STUN/TURN，并按会话、玩家和标识符隔离短期
+  凭据。存在公共会话时，本地与 Go Server 公网 ICE 合并返回。
+  链路方式仅供 Main/Runtime 宿主分享面板使用，不扩展公开 Game SDK 玩家对象。
+- App SDK `3.5.0` 新增 `ui.onSystemMenuRequest()`，统一覆盖 Android 系统返回、Windows exe 返回键与普通浏览器
+  悬浮菜单按钮；入口事件到达后先取得 `EXIT / NEXT / STOP` 决策，再退出、继续该入口原有
+  菜单流程或停止。原 `ui.onBack()` 标记废弃并保留为相同行为的兼容别名。
+- 本次完成源码、文档和自动测试；按要求未重建主 App、Runtime 三端固定底包或 Go Server 包。
 
 ## 4.5.0 发布归档
 
@@ -38,8 +108,9 @@
 - SDK 居中菜单合并进入/退出全屏按钮，并在分享/邀请后加入当前游戏专用的局域网加入层；
   该入口复用分享/邀请的主机可见性条件，严格限定 Authority 的 Playmesh WebView，加入端
   WebView 与普通浏览器都不会显示或触发；弹窗只保留房间列表、扫码和邀请链接输入。
-  App Bridge SDK 兼容新增 `ui.onBack()`：仅在
-  游戏显式配置 `fallbackUi:false` 后处理 Android 返回与 Esc，`false` 阻止退出。
+  App Bridge SDK 的 `ui.onBack()` 改为每次受控的 Android 返回与 Esc 都先执行；回调只返回
+  `EXIT`、`NEXT` 或 `STOP`。`NEXT` 继续当前 SDK 面板流程，但仍遵守 `fallbackUi` 是否关闭，
+  不会无条件重新显示面板；`STOP` 不执行任何后续流程。旧 boolean 草案未正式生效，已直接删除。
 - 修复 Windows WebView2/移动端的内部 `transport.status` 未转发：主连接正常断开和异常
   现在与浏览器一致通过 `playmesh.main.lifecycle.onChange()` 产生 `closed/error`。
 - Runtime 宿主同步加入当前游戏的 LAN 加入入口、全屏初始状态和自定义返回接线；底包保持

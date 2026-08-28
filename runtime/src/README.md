@@ -7,7 +7,7 @@
 
 - Runtime 不导入主 App 的 Dart 库，也不在构建时同步主 App 源码。
 - 已从主 App 复制并独立维护协议级公共实现，包括 Game/App SDK 能力、LAN 发现、邀请、
-  本地隧道和公共中转。复制后的代码属于 Runtime，后续可以独立演进。
+  WebRTC 本地隧道和公共信令/TURN。复制后的代码属于 Runtime，后续可以独立演进。
 - `assets/playmesh-library/public/sdk/v1/` 是主 App SDK 的逐字节快照，不允许加入
   Runtime 私有补丁；Runtime 差异只能位于宿主 Bridge 和 Runtime 自有模块。
 - Android 和 Windows 均从仓库父工程的 `go-core` 源码构建，不保存第二份 Go Core。
@@ -26,14 +26,17 @@ runtime-config.json + game.pmp
               |
 Game/App Bridge + Go Core
               |
-LAN 发现、链接/扫码加入、可选公共中转
+LAN 发现、链接/扫码加入、WebRTC 直连或 TURN
 ```
 
 游戏文件使用最新的根目录布局。`entries.game: "index.html"` 对应包内
 `index.html` 和运行时 `/index.html`；不存在旧的 `/app` URL 前缀。
 `playmesh/` 与 `bucket/` 是 Runtime 保留的根命名空间。
 
-Runtime 覆盖当前 Game SDK 4.1.0 与 App SDK 3.2.0–3.3.0 的全部宿主命令。
+Runtime 覆盖当前 Game SDK 4.3.0（兼容请求 4.1.0–4.3.0）与 App SDK 3.5.0
+（兼容请求 3.2.0–3.5.0）的全部宿主命令。这里的范围按严格语义版本比较且包含端点：
+基线以上的旧 PATCH/MINOR 即使不在历史发行枚举中也会统一使用当前兼容 Bundle；高于当前
+Bundle、低于兼容基线或格式错误的版本仍会拒绝。
 独立底包没有 Playmesh 用户头像资料，因此 `app.identity.syncAvatar` 在没有头像时按原
 协议执行为空操作。
 
@@ -42,8 +45,9 @@ FileDescription、ProductName、FileVersion 与 ProductVersion。展示元数据
 身份：Runtime 固定在 `%APPDATA%/top.zfjmm/Playmesh Runtime/games/<gameId SHA-256>/`
 保存该游戏的身份和数据。同名但 gameId 不同的游戏不会重合，游戏改名也不会改变目录。
 
-与主 App 对齐的运行接线包含：能力确认、WebView 输入接管、Android 返回键菜单与游戏自定义
-返回、文件选择、横竖屏/全屏、页面暂停恢复、Binary Channel、JSON 与二进制 Bucket、私有
+与主 App 对齐的运行接线包含：能力确认、WebView 输入接管、Android 返回键和 Windows exe
+返回键菜单与游戏自定义返回、文件选择、横竖屏/全屏、页面暂停恢复、Binary Channel、JSON 与二进制 Bucket、
+App Bucket 异步读写及 GDevelop 同步逻辑 Bucket 的随机回环 capability 网关、私有
 多人头像提交，以及当前游戏范围内的 LAN 分享/加入；菜单加入入口与分享/邀请一样只对
 Authority 主机显示。上述实现均位于 Runtime 自有模块，
 不依赖主 App Dart 源码。Runtime 分享面板保留全部非回环 LAN 链接并允许切换二维码；启动与
@@ -173,20 +177,27 @@ Runtime。AES-GCM 只能在攻击者尚未取得私钥或运行时控制权时�
 需要独立的载荷签名与可信公钥。Windows 代码签名可保护外层发行来源，但不能阻止游戏运行
 后被本机提取。
 
-## 固定包的可选中转
+## 固定包的可选公网 WebRTC
 
 可在游戏包内的 `playmesh-runtime.json` 中预置一个 go-server HTTP/HTTPS publicURL，并
 通过 `autoApproveCapabilities` 布尔值控制导出程序是否由 SDK 内部直接完成 Playmesh
 能力确认。该值只经私有 bootstrap 字段传递，消费后从公开环境删除。
-Runtime 发布游戏时先保留 LAN 分享，再尽力连接配置的公共中转；中转失败不会破坏
-局域网分享。
+Runtime 发布游戏时保留相同的创建、加入、链接和扫码入口。公网加入由该 Go Server 完成
+鉴权和 WebRTC 信令，Pion TURN 在无法直连时提供 relay candidate；旧 TCP Relay 不再存在，
+也没有连接失败后的 TCP 回退。失败会关闭本次加入流程，用户从原入口重新进入。
+
+Runtime 启动 Go Core 时还会复用 Runtime 自有的可绑定 LAN IPv4 解析器，把地址传入 Core。
+Core 在这些地址上为 `playmesh.app.webrtc.getSignalingEndpoint(identifier)` 惰性提供局域网
+Pion STUN/TURN，并按会话、玩家和标识符签发隔离凭据；存在公共会话时，端点会继续追加
+Go Server ICE。该服务不替代 Windows 进程防火墙放行，也不能绕过 AP 客户端隔离。
 
 该文件与游戏代码处于同一个包载荷中，后续导出只替换这一份配置；启用
 `aes-gcm-v1` 后会与游戏代码一起加密，不在明文 `runtime-config.json` 中出现。
 
 publicURL 的 `token` 会随游戏包加密，能避免直接解压读取，但 Runtime 仍必须具备解密
-能力，因此它不能成为长期高权限秘密。生产环境应使用无秘密的受限公共 relay，或由
-服务端签发短时、限额、可撤销的发布凭据。
+能力，因此它不能成为长期高权限秘密。生产环境应使用受限的发布凭据，并为 Pion TURN
+配置独立共享密钥、可公网到达的 IPv4、3478 TCP/UDP 和受控 UDP relay 端口范围；TURN
+凭据由 Go Server 临时签发，不写入游戏包。
 
 ## 构建
 
@@ -197,7 +208,9 @@ cd runtime/src
 
 统一脚本串行构建并验证 Android x86_64、Android arm64-v8a 与 Windows x64。Windows
 固定使用文档记录的 HostX64 MSVC + Ninja 备用链，不经过本机可能卡死的 MSBuild
-生成器。版本唯一来源是本目录 `pubspec.yaml` 的 `MAJOR.MINOR.PATCH+BUILD`，产物位于：
+生成器；Ninja 默认限制为 2 路并发，避免 WebView2 大型 WinRT 头文件并行编译触发 MSVC
+`C1060` 堆空间不足。版本唯一来源是本目录 `pubspec.yaml` 的
+`MAJOR.MINOR.PATCH+BUILD`，产物位于：
 
 ```text
 ../resource/vMAJOR.MINOR.PATCH-buildBUILD/

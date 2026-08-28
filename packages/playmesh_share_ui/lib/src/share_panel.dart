@@ -425,6 +425,9 @@ class PlaymeshSharePanelState extends State<PlaymeshSharePanel> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    subtitle: participant.connectionLabel == null
+                        ? null
+                        : Text(participant.connectionLabel!),
                     trailing: Text(
                       participant.connected
                           ? widget.strings.playerOnline

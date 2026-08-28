@@ -17,7 +17,7 @@ final class RuntimeStorage {
   int _lastUploadTimestamp = 0;
   int _temporarySequence = 0;
 
-  static const maxUploadBytes = 256 * 1024 * 1024;
+  static const maxUploadBytes = 512 * 1024 * 1024;
   static const maxAvatarBytes = 512 * 1024;
   static const systemAvatarBucket = '_sys-user-avatars';
   static final _bucketPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');
@@ -98,7 +98,7 @@ final class RuntimeStorage {
   }) async {
     _validatePublicBucket(bucket);
     if (contentLength != null && contentLength > maxUploadBytes) {
-      throw const FormatException('上传文件不能超过 256 MiB');
+      throw const FormatException('上传文件不能超过 512 MiB');
     }
     final extension = _safeExtension(originalName);
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -126,7 +126,7 @@ final class RuntimeStorage {
         await for (final chunk in data) {
           written += chunk.length;
           if (written > maxUploadBytes) {
-            throw const FormatException('上传文件不能超过 256 MiB');
+            throw const FormatException('上传文件不能超过 512 MiB');
           }
           sink.add(chunk);
         }

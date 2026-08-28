@@ -152,6 +152,8 @@ type PlaymeshMessageRegistry = $ReadOnly<{|
   projectConfigMaxPlayers: string,
   projectConfigTags: string,
   projectConfigTagsHint: string,
+  projectConfigWebRuntimeMultithreading: string,
+  projectConfigWebRuntimeMultithreadingHelp: string,
   projectConfigLoading: string,
   projectConfigSaving: string,
   projectConfigMissingNotSaved: string,
@@ -499,6 +501,10 @@ export const playmeshMessages: PlaymeshMessageRegistry = Object.freeze({
   projectConfigMaxPlayers: "workspace.gdevelop_project_config.max_players",
   projectConfigTags: "workspace.gdevelop_project_config.tags",
   projectConfigTagsHint: "workspace.gdevelop_project_config.tags_hint",
+  projectConfigWebRuntimeMultithreading:
+    "workspace.gdevelop_project_config.web_runtime_multithreading",
+  projectConfigWebRuntimeMultithreadingHelp:
+    "workspace.gdevelop_project_config.web_runtime_multithreading_help",
   projectConfigLoading: "workspace.gdevelop_project_config.loading",
   projectConfigSaving: "workspace.gdevelop_project_config.saving",
   projectConfigMissingNotSaved:

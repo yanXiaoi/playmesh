@@ -35,8 +35,22 @@ const executePaths = [
   'playmesh.main.sync.requestSnapshot',
   'playmesh.main.sync.getSnapshot',
   'playmesh.main.storage.getBucket',
+  'playmesh.main.db.open',
+  'playmesh.main.db.select',
+  'playmesh.main.db.update',
+  'playmesh.main.db.delete',
+  'playmesh.main.db.insert',
+  'playmesh.main.db.getDDL',
+  'playmesh.main.db.beginTransaction',
 
   // Objects returned by the Game SDK.
+  'PlaymeshDatabaseTransaction.select',
+  'PlaymeshDatabaseTransaction.update',
+  'PlaymeshDatabaseTransaction.delete',
+  'PlaymeshDatabaseTransaction.insert',
+  'PlaymeshDatabaseTransaction.getDDL',
+  'PlaymeshDatabaseTransaction.commit',
+  'PlaymeshDatabaseTransaction.rollback',
   'PlaymeshBinaryChannel.send',
   'PlaymeshBinaryChannel.sendLatest',
   'PlaymeshBinaryChannel.close',
@@ -73,6 +87,7 @@ const executePaths = [
   'playmesh.app.capabilities.getDeclared',
   'playmesh.app.capabilities.create',
   'playmesh.app.media.open',
+  'playmesh.app.webrtc.getSignalingEndpoint',
   'playmesh.app.device.getPlatform',
   'playmesh.app.device.setFullscreen',
   'playmesh.app.ui.disableSystemMenuTriggers',
@@ -123,6 +138,7 @@ const subscribePaths = [
   'playmesh.app.device.onInput',
   'playmesh.app.ui.onGameMenuOpen',
   'playmesh.app.ui.onGameMenuClose',
+  'playmesh.app.ui.onSystemMenuRequest',
   'playmesh.app.ui.onBack',
   'PlaymeshCapabilityHandle.on',
   'PlaymeshCapabilityHandle.addEventListener',
@@ -268,7 +284,9 @@ const expectedInternalFunctionNames = [
 const expectedAddedInternalFunctionNames = [
   'CallMainRpc',
   'RegisterMainRpcHandler',
+  'CallMainDatabase',
   'CallAppStorage',
+  'CallAppWebRTC',
   'GetCurrentGameInfo',
   'GetIsAuthority',
   'GetCurrentSession',
@@ -286,6 +304,20 @@ const expectedAddedInternalFunctionNames = [
   'RequestSyncSnapshot',
   'GetLatestSyncSnapshot',
   'GetStorageBucket',
+  'OpenGameDatabase',
+  'SelectGameDatabase',
+  'UpdateGameDatabase',
+  'DeleteGameDatabaseRows',
+  'InsertGameDatabaseRow',
+  'GetGameDatabaseDdl',
+  'BeginGameDatabaseTransaction',
+  'SelectGameDatabaseTransaction',
+  'UpdateGameDatabaseTransaction',
+  'DeleteGameDatabaseTransactionRows',
+  'InsertGameDatabaseTransactionRow',
+  'GetGameDatabaseTransactionDdl',
+  'CommitGameDatabaseTransaction',
+  'RollbackGameDatabaseTransaction',
   'BroadcastBinary',
   'BroadcastLatestBinary',
   'CloseBinaryChannel',
@@ -320,6 +352,7 @@ const expectedAddedInternalFunctionNames = [
   'GetDeclaredCapabilities',
   'CreateDynamicCapability',
   'OpenAppMediaSession',
+  'GetWebRTCSignalingEndpoint',
   'GetDevicePlatform',
   'SetDeviceFullscreen',
   'DisableSystemMenuTriggers',
@@ -410,6 +443,9 @@ const expectedAddedInternalFunctionNames = [
   'SubscribeGameMenuClose',
   'HasSubscribeGameMenuCloseEvent',
   'PopSubscribeGameMenuCloseEvent',
+  'SubscribeSystemMenuRequest',
+  'HasSubscribeSystemMenuRequestEvent',
+  'PopSubscribeSystemMenuRequestEvent',
   'SubscribeAppBack',
   'HasSubscribeAppBackEvent',
   'PopSubscribeAppBackEvent',
@@ -519,6 +555,7 @@ const expectedAddedInternalFunctionNames = [
   'KeepAuthoritySyncState',
   'SetNextAuthoritySyncState',
   'CompleteLifecycleExitCleanup',
+  'CompleteSystemMenuRequest',
   'CompleteAppBackRequest',
   'IsCameraCapabilityDeclared',
   'IsCameraCapabilityAvailable',
@@ -583,26 +620,27 @@ const isMainCallablePath = sdkPath =>
   sdkPath.startsWith('playmesh.main.') ||
   sdkPath.startsWith('PlaymeshBinaryChannel.') ||
   sdkPath.startsWith('PlaymeshSyncAuthorityController.') ||
-  sdkPath.startsWith('PlaymeshStorageBucket.');
+  sdkPath.startsWith('PlaymeshStorageBucket.') ||
+  sdkPath.startsWith('PlaymeshDatabaseTransaction.');
 const mainCallablePaths = expectedCallablePaths.filter(isMainCallablePath);
 const appCallablePaths = expectedCallablePaths.filter(
   sdkPath => !isMainCallablePath(sdkPath)
 );
 
-assert.equal(executePaths.length, 76, 'the execute baseline must stay at 76');
+assert.equal(executePaths.length, 91, 'the execute baseline must stay at 91');
 assert.equal(
   subscribePaths.length,
-  21,
-  'the subscription baseline must stay at 21'
+  22,
+  'the subscription baseline must stay at 22'
 );
 assert.equal(handlerPaths.length, 3, 'the handler baseline must stay at 3');
 assert.equal(
   new Set(expectedCallablePaths).size,
-  100,
-  'the public SDK callable baseline must contain 100 unique paths'
+  116,
+  'the public SDK callable baseline must contain 116 unique paths'
 );
-assert.equal(mainCallablePaths.length, 46);
-assert.equal(appCallablePaths.length, 54);
+assert.equal(mainCallablePaths.length, 60);
+assert.equal(appCallablePaths.length, 56);
 
 const extensionSource = await readFile(extensionPath, 'utf8');
 const extension = JSON.parse(extensionSource);
@@ -860,11 +898,11 @@ const executeMappings = collectMappedPaths(surface.execute);
 const subscribeMappings = collectMappedPaths(surface.subscribe);
 const handlerMappings = collectMappedPaths(surface.handler);
 
-assert.equal(executeMappings.size, 76, 'execute must map exactly 76 SDK calls');
+assert.equal(executeMappings.size, 91, 'execute must map exactly 91 SDK calls');
 assert.equal(
   subscribeMappings.size,
-  21,
-  'subscribe must map exactly 21 SDK subscriptions'
+  22,
+  'subscribe must map exactly 22 SDK subscriptions'
 );
 assert.equal(handlerMappings.size, 3, 'handler must map exactly 3 SDK handlers');
 
@@ -905,8 +943,8 @@ for (const readyPath of [
 assert.equal(
   expectedCallablePaths.filter(path => allDeclaredCallableMappings.has(path))
     .length,
-  100,
-  'all 100 public callable members must have a declared command mapping'
+  116,
+  'all 116 public callable members must have a declared command mapping'
 );
 
 const featureNames = new Set(
@@ -986,6 +1024,33 @@ for (const [pattern, label] of forbiddenRuntimePatterns) {
 // comments in the private initialization source.
 const publicFunctions = extension.eventsFunctions.filter(
   eventsFunction => !eventsFunction.private
+);
+const completeAppBackRequest = publicFunctions.find(
+  eventsFunction => eventsFunction.name === 'CompleteAppBackRequest'
+);
+const completeSystemMenuRequest = publicFunctions.find(
+  eventsFunction => eventsFunction.name === 'CompleteSystemMenuRequest'
+);
+assert.deepEqual(
+  completeSystemMenuRequest.parameters.map(parameter => ({
+    name: parameter.name,
+    type: parameter.type,
+  })),
+  [
+    { name: 'RequestId', type: 'string' },
+    { name: 'Decision', type: 'string' },
+  ],
+  'system menu requests must use the EXIT/NEXT/STOP decision contract'
+);
+assert.match(
+  completeSystemMenuRequest.events[0].inlineCode,
+  /JSON\.stringify\(String\([\s\S]*Decision[\s\S]*\)\.toUpperCase\(\)\)/,
+  'GDevelop must respond with a JSON string decision'
+);
+assert.match(
+  `${completeAppBackRequest.fullName} ${completeAppBackRequest.description}`,
+  /已废弃/,
+  'the legacy App back response must be visibly deprecated'
 );
 assert.equal(
   publicFunctions.some(eventsFunction =>
@@ -1077,6 +1142,7 @@ const expectedGroupPaths = new Set([
   `${mainGroupRoot}${groupDelimiter}状态同步`,
   `${mainGroupRoot}${groupDelimiter}生命周期`,
   `${mainGroupRoot}${groupDelimiter}存储`,
+  `${mainGroupRoot}${groupDelimiter}数据库`,
   `${mainGroupRoot}${groupDelimiter}高级 JSON`,
   `${appGroupRoot}${groupDelimiter}可用性`,
   `${appGroupRoot}${groupDelimiter}身份`,
@@ -1086,6 +1152,7 @@ const expectedGroupPaths = new Set([
   `${appGroupRoot}${groupDelimiter}能力注册表`,
   `${appGroupRoot}${groupDelimiter}动态能力（高级）`,
   `${appGroupRoot}${groupDelimiter}媒体会话`,
+  `${appGroupRoot}${groupDelimiter}WebRTC 信令`,
   `${appGroupRoot}${groupDelimiter}设备环境`,
   `${appGroupRoot}${groupDelimiter}界面`,
   `${appGroupRoot}${groupDelimiter}局域网`,
@@ -1156,8 +1223,8 @@ for (const root of allowedGroupRoots) {
 assert.equal(publicGroupRoots.size, 6, 'the semantic tree must keep six roots');
 assert.equal(
   publicGroupPaths.size,
-  37,
-  'the semantic tree must keep 37 distinct root-to-leaf groups'
+  39,
+  'the semantic tree must keep 39 distinct root-to-leaf groups'
 );
 assert.deepEqual(
   [...publicGroupPaths].sort(),
@@ -1832,5 +1899,5 @@ assert.equal(runtime.unsubscribe('passive-exit-subscription'), true);
 assert.equal(exitCleanupCalls, 2);
 
 process.stdout.write(
-  'Playmesh GDevelop extension SDK surface contract passed (100 callable members; ready is automatic).\n'
+  'Playmesh GDevelop extension SDK surface contract passed (116 callable members; ready is automatic).\n'
 );

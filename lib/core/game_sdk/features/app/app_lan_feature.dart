@@ -358,12 +358,16 @@ Future<T> _runAppLanOperation<T>(
 }) async {
   try {
     return await operation();
-  } on Object catch (error) {
-    throw _sanitizeAppLanError(error, fallbackCode);
+  } on Object catch (error, stackTrace) {
+    throw _sanitizeAppLanError(error, stackTrace, fallbackCode);
   }
 }
 
-SdkCommandException _sanitizeAppLanError(Object error, String fallbackCode) {
+SdkCommandException _sanitizeAppLanError(
+  Object error,
+  StackTrace stackTrace,
+  String fallbackCode,
+) {
   final reportedCode = switch (error) {
     SdkCommandException() => error.code,
     GameShareException() => error.code,
@@ -372,7 +376,13 @@ SdkCommandException _sanitizeAppLanError(Object error, String fallbackCode) {
   final code = _appLanErrorMessages.containsKey(reportedCode)
       ? reportedCode
       : fallbackCode;
-  return SdkCommandException(code, _appLanErrorMessages[code]!);
+  return SdkCommandException(
+    code,
+    _appLanErrorMessages[code]!,
+    cause: error,
+    causeStackTrace: stackTrace,
+    context: const {'operation': 'app_lan_command'},
+  );
 }
 
 const _appLanErrorMessages = <String, String>{

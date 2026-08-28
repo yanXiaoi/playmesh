@@ -36,6 +36,7 @@ final class RuntimeSharePanelPresentation {
 RuntimeSharePanelPresentation buildRuntimeSharePanelPresentation({
   required String title,
   required Iterable<RuntimeLanShareLink> links,
+  bool useChinese = true,
   RuntimeSessionConnection? session,
   String? bundledRelayName,
   int? bundledRelayLatencyMilliseconds,
@@ -71,7 +72,7 @@ RuntimeSharePanelPresentation buildRuntimeSharePanelPresentation({
       selectedInternetLinkId: internetLinks.isEmpty
           ? null
           : internetLinks.first.id,
-      participants: _participants(session?.snapshot),
+      participants: _participants(session?.snapshot, useChinese: useChinese),
       lanLoading: lanLoading,
       lanError: lanError,
       initialSection: lanLinks.isEmpty && internetLinks.isNotEmpty
@@ -100,7 +101,10 @@ RuntimeSharePanelPresentation buildRuntimeSharePanelPresentation({
   );
 }
 
-List<PlaymeshShareParticipant> _participants(Map<String, Object?>? snapshot) {
+List<PlaymeshShareParticipant> _participants(
+  Map<String, Object?>? snapshot, {
+  required bool useChinese,
+}) {
   final rawPlayers = snapshot?['players'];
   if (rawPlayers is! List) return const <PlaymeshShareParticipant>[];
   final participants = <PlaymeshShareParticipant>[];
@@ -117,6 +121,12 @@ List<PlaymeshShareParticipant> _participants(Map<String, Object?>? snapshot) {
         id: id,
         name: normalizedNickname,
         connected: player['connected'] != false,
+        connectionLabel: switch (player['connectionMode']) {
+          'lan' => useChinese ? '局域网' : 'Local network',
+          'relay' => useChinese ? '中转' : 'Relay',
+          'direct' => useChinese ? '直连' : 'Direct',
+          _ => null,
+        },
       ),
     );
   }

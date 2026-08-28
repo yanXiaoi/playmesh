@@ -76,7 +76,7 @@ func (h *Handler) Info(c *gin.Context) {
 	if response["supportsGameRelay"] == true {
 		response["relay"] = gin.H{
 			"protocolVersion":         config.RelayProtocolVersion,
-			"transport":               "playmesh-tcp-upgrade",
+			"transport":               "playmesh-webrtc-datachannel",
 			"publicBaseUrl":           h.currentPublicBaseURL(),
 			"hostPath":                "/relay/v1/host",
 			"clientPath":              "/relay/v1/client",

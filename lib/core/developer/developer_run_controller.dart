@@ -88,6 +88,7 @@ class DeveloperRuntimeDeclaration {
       controllerOrientation: manifest.controllerOrientation,
       tags: manifest.tags,
       capabilities: capabilities,
+      config: manifest.config,
       entry: LocalGameEntry(
         statusLabel: 'Game SDK ${manifest.sdkVersion} · development preview',
         gameEntryPath: gameEntryOverride ?? manifest.entries.game,
@@ -119,6 +120,7 @@ class DeveloperRuntimeDeclaration {
       controllerOrientation: development.controllerOrientation,
       tags: development.tags,
       capabilities: development.capabilities,
+      config: development.config,
       entry: LocalGameEntry(
         statusLabel: development.entry.statusLabel,
         gameEntryPath: development.entry.gameEntryPath,

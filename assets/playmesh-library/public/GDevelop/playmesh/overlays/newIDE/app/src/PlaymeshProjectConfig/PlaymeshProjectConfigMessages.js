@@ -15,6 +15,8 @@ type PlaymeshProjectConfigMessageRegistry = $ReadOnly<{|
   maxPlayers: PlaymeshMessageKey,
   tags: PlaymeshMessageKey,
   tagsHint: PlaymeshMessageKey,
+  webRuntimeMultithreading: PlaymeshMessageKey,
+  webRuntimeMultithreadingHelp: PlaymeshMessageKey,
   loading: PlaymeshMessageKey,
   saving: PlaymeshMessageKey,
   missingNotSaved: PlaymeshMessageKey,
@@ -41,6 +43,10 @@ export const playmeshProjectConfigMessages /*: PlaymeshProjectConfigMessageRegis
     maxPlayers: playmeshMessages.projectConfigMaxPlayers,
     tags: playmeshMessages.projectConfigTags,
     tagsHint: playmeshMessages.projectConfigTagsHint,
+    webRuntimeMultithreading:
+      playmeshMessages.projectConfigWebRuntimeMultithreading,
+    webRuntimeMultithreadingHelp:
+      playmeshMessages.projectConfigWebRuntimeMultithreadingHelp,
     loading: playmeshMessages.projectConfigLoading,
     saving: playmeshMessages.projectConfigSaving,
     missingNotSaved: playmeshMessages.projectConfigMissingNotSaved,

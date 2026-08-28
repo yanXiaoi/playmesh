@@ -472,19 +472,6 @@ func (Cocos) PrepareRelease(
 	return nil
 }
 
-func (Cocos) PrepareUpload(
-	ctx context.Context,
-	value project.Context,
-) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := validateCocosIntegration(value); err != nil {
-		return err
-	}
-	return configureCocosManifest(value)
-}
-
 func validateCocosProject(root string) error {
 	for _, directory := range []string{"assets", "settings"} {
 		info, err := os.Stat(filepath.Join(root, directory))

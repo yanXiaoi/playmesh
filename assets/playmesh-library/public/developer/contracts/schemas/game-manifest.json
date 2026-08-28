@@ -46,14 +46,18 @@
     "sdkVersion": {
       "type": "string",
       "enum": [
-        "4.1.0"
+        "4.1.0",
+        "4.2.0",
+        "4.3.0"
       ]
     },
     "appSdkVersion": {
       "type": "string",
       "enum": [
         "3.2.0",
-        "3.3.0"
+        "3.3.0",
+        "3.4.0",
+        "3.5.0"
       ]
     },
     "orientation": {
@@ -142,6 +146,9 @@
       "items": {
         "type": "string"
       }
+    },
+    "config": {
+      "description": "Optional opaque game configuration. Its contents are accepted and preserved without schema validation."
     }
   },
   "allOf": [

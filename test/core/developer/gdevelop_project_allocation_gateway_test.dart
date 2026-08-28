@@ -24,7 +24,7 @@ void main() {
   test('HTTP workspace allocation exact wire、chunked PUT 与全链路幂等', () async {
     final fixture = await _AllocationGatewayFixture.create();
     addTearDown(fixture.close);
-    final workspace = await fixture.workspace('com.example.allocation-gateway');
+    final workspace = await fixture.workspace('com.example.allocation_gateway');
 
     final unknown = await fixture.jsonRequest(
       'POST',
@@ -209,7 +209,7 @@ void main() {
     final fixture = await _AllocationGatewayFixture.create();
     addTearDown(fixture.close);
     final workspace = await fixture.workspace(
-      'com.example.allocation-gateway-lost-prepare',
+      'com.example.allocation_gateway_lost_prepare',
     );
 
     final first = await fixture.jsonRequest(
@@ -264,7 +264,7 @@ void main() {
     final fixture = await _AllocationGatewayFixture.create();
     addTearDown(fixture.close);
     final workspace = await fixture.workspace(
-      'com.example.allocation-gateway-strict',
+      'com.example.allocation_gateway_strict',
     );
     final prepared = await fixture.jsonRequest(
       'POST',
@@ -340,7 +340,7 @@ void main() {
     final fixture = await _AllocationGatewayFixture.create();
     addTearDown(fixture.close);
     final workspace = await fixture.workspace(
-      'com.example.allocation-reserved',
+      'com.example.allocation_reserved',
     );
     final prepared = await fixture.jsonRequest(
       'POST',

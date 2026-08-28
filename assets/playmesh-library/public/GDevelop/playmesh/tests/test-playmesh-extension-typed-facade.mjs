@@ -34,6 +34,20 @@ playmesh.main.sync.submitState
 playmesh.main.sync.requestSnapshot
 playmesh.main.sync.getSnapshot
 playmesh.main.storage.getBucket
+playmesh.main.db.open
+playmesh.main.db.select
+playmesh.main.db.update
+playmesh.main.db.delete
+playmesh.main.db.insert
+playmesh.main.db.getDDL
+playmesh.main.db.beginTransaction
+PlaymeshDatabaseTransaction.select
+PlaymeshDatabaseTransaction.update
+PlaymeshDatabaseTransaction.delete
+PlaymeshDatabaseTransaction.insert
+PlaymeshDatabaseTransaction.getDDL
+PlaymeshDatabaseTransaction.commit
+PlaymeshDatabaseTransaction.rollback
 PlaymeshBinaryChannel.send
 PlaymeshBinaryChannel.sendLatest
 PlaymeshBinaryChannel.close
@@ -68,6 +82,7 @@ playmesh.app.capabilities.getAvailable
 playmesh.app.capabilities.getDeclared
 playmesh.app.capabilities.create
 playmesh.app.media.open
+playmesh.app.webrtc.getSignalingEndpoint
 playmesh.app.device.getPlatform
 playmesh.app.device.setFullscreen
 playmesh.app.ui.disableSystemMenuTriggers
@@ -113,6 +128,7 @@ playmesh.app.performance.onLatency
 playmesh.app.device.onInput
 playmesh.app.ui.onGameMenuOpen
 playmesh.app.ui.onGameMenuClose
+playmesh.app.ui.onSystemMenuRequest
 playmesh.app.ui.onBack
 PlaymeshCapabilityHandle.on
 PlaymeshCapabilityHandle.addEventListener
@@ -135,11 +151,11 @@ const expectedCommands = Object.freeze([
   ...expectedSubscribeCommands,
   ...expectedHandlerCommands,
 ]);
-assert.equal(expectedExecuteCommands.length, 76);
-assert.equal(expectedSubscribeCommands.length, 21);
+assert.equal(expectedExecuteCommands.length, 91);
+assert.equal(expectedSubscribeCommands.length, 22);
 assert.equal(expectedHandlerCommands.length, 3);
-assert.equal(expectedCommands.length, 100);
-assert.equal(new Set(expectedCommands).size, 100);
+assert.equal(expectedCommands.length, 116);
+assert.equal(new Set(expectedCommands).size, 116);
 
 const readJson = async filePath => JSON.parse(await readFile(filePath, 'utf8'));
 const [extension, capabilityDescriptors] = await Promise.all([
@@ -188,7 +204,8 @@ const isMainCommand = command =>
   command.startsWith('playmesh.main.') ||
   command.startsWith('PlaymeshBinaryChannel.') ||
   command.startsWith('PlaymeshSyncAuthorityController.') ||
-  command.startsWith('PlaymeshStorageBucket.');
+  command.startsWith('PlaymeshStorageBucket.') ||
+  command.startsWith('PlaymeshDatabaseTransaction.');
 
 const typedFunctionsByCommand = new Map();
 for (const [primitive, commands] of Object.entries(expectedCommandsByPrimitive)) {
@@ -220,7 +237,7 @@ for (const [primitive, commands] of Object.entries(expectedCommandsByPrimitive))
     );
   }
 }
-assert.equal(typedFunctionsByCommand.size, 100);
+assert.equal(typedFunctionsByCommand.size, 116);
 
 for (const command of expectedSubscribeCommands) {
   const subscribeFunction = typedFunctionsByCommand.get(command);
@@ -575,5 +592,5 @@ assert.equal(builtInLeaves.size, capabilityDescriptors.length);
 
 process.stdout.write(
   'Playmesh GDevelop typed facade contract passed ' +
-    '(100 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
+    '(116 fixed SDK wrappers; 5 descriptor-driven capability groups).\n'
 );

@@ -27,7 +27,7 @@ class GameStorageService {
   static const maxStandardJsonBytes = 10 * 1024 * 1024;
   static const maxLogicalBucketNameBytes = 64 * 1024;
   static const maxSynchronousBucketNameBytes = 4 * 1024;
-  static const maxUploadBytes = 256 * 1024 * 1024;
+  static const maxUploadBytes = 516 * 1024 * 1024;
   static const systemAvatarBucket = '_sys-user-avatars';
   static const gdevelopStorageRootKey = r'$playmesh.gdevelop.root.v1';
   static const _mappedBucketFormat = 'playmesh.logical-bucket.v1';
@@ -299,7 +299,7 @@ class GameStorageService {
   }) async {
     _validatePublicBucket(bucket);
     if (contentLength != null && contentLength > maxUploadBytes) {
-      throw const FormatException('上传文件不能超过 256 MiB');
+      throw const FormatException('上传文件不能超过 512 MiB');
     }
     final extension = _safeExtension(originalName);
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -327,7 +327,7 @@ class GameStorageService {
         await for (final chunk in data) {
           written += chunk.length;
           if (written > maxUploadBytes) {
-            throw const FormatException('上传文件不能超过 256 MiB');
+            throw const FormatException('上传文件不能超过 512 MiB');
           }
           sink.add(chunk);
         }

@@ -1,4 +1,5 @@
 // @flow
+import PlaymeshGameManifest from '../PlaymeshShared/GameManifest';
 
 const BASE_URL = '/dev/api/gdevelop/project-allocation-transactions';
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -9,7 +10,6 @@ const MAX_FINALIZE_BYTES = 8 * 1024;
 const MAX_EMPTY_BODY_BYTES = 1024;
 
 const TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const GAME_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const PROJECT_CONFIG_SCHEMA_VERSION = 2;
 const PROJECT_CONFIG_MAXIMUM_PLAYERS = 64;
@@ -98,8 +98,7 @@ const requireToken = (value /*: mixed */) /*: string */ => {
 const requireGameId = (value /*: mixed */) /*: string */ => {
   if (
     typeof value === 'string' &&
-    value.length <= 180 &&
-    GAME_ID_PATTERN.test(value)
+    PlaymeshGameManifest.isValidNewProjectGameId(value)
   ) {
     return value;
   }

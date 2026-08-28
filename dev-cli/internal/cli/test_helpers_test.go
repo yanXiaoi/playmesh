@@ -38,8 +38,8 @@ func TestMain(testSuite *testing.M) {
 const (
 	projectConfigName           = project.ConfigName
 	rootIconName                = packaging.RootIconName
-	requiredGameSDKVersion      = sdk.RequiredGameVersion
-	requiredAppSDKVersion       = sdk.RequiredAppVersion
+	requiredGameSDKVersion      = "4.1.0"
+	requiredAppSDKVersion       = "3.3.0"
 	developmentCredentialHeader = development.CredentialHeader
 	playmeshCLIProjectSchema    = cocosadapter.ProjectSchema
 )
@@ -66,6 +66,8 @@ func saveTarget(config target.Config) error {
 func loadTarget() (target.Config, error) {
 	return targetStore.Load()
 }
+
+var buildUploadPackage = packaging.BuildUpload
 
 func newAPIClient(config target.Config) *target.Client {
 	return newTargetClient(config)

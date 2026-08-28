@@ -288,7 +288,7 @@ void main() {
         runController: controller,
       );
       addTearDown(gateway.close);
-      const gameId = 'com.example.generic-preview';
+      const gameId = 'Com.Example.Generic_2';
       final base = Uri.parse('http://127.0.0.1:$port');
       const headers = {
         'Authorization': 'Bearer gateway-generic-preview-token',

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../core/diagnostics/playmesh_error_diagnostic.dart';
 import 'app_media/app_media_runtime.dart';
 import 'app_media/default_app_media_adapters.dart';
 import 'capabilities/capability_plugin.dart';
@@ -13,6 +14,7 @@ import 'capabilities/capability_runtime.dart';
 import 'capabilities/default_capability_plugins.dart';
 import 'capabilities/web_permission/capability_web_permission.dart';
 import 'runtime_app_local_bucket_store.dart';
+import 'runtime_app_local_bucket_sync_gateway.dart';
 import 'runtime_display_controller.dart';
 import 'runtime_lan_host.dart';
 import 'runtime_module_catalog.dart';
@@ -151,6 +153,7 @@ final class RuntimeAppBridge {
   final Future<void> Function()? onOpenSharePanel;
   final void Function()? onInputTakeover;
   final RuntimeAppLocalBucketStore localBucketStore;
+  Future<RuntimeAppLocalBucketSyncGateway>? _localBucketSyncGateway;
   final bool autoApproveCapabilities;
   final AppMediaRuntime mediaRuntime;
   final CapabilityRegistry capabilityRegistry;
@@ -223,7 +226,7 @@ final class RuntimeAppBridge {
       }
       final sdkVersion =
           rawSdkVersion as String? ?? RuntimeSdkCompatibility.appBundleVersion;
-      if (sdkVersion != RuntimeSdkCompatibility.appBundleVersion) {
+      if (!RuntimeSdkCompatibility.supportsAppRequest(sdkVersion)) {
         throw RuntimeAppSdkException(
           'sdk_unsupported',
           'Runtime 不支持 App SDK $sdkVersion',
@@ -411,23 +414,32 @@ final class RuntimeAppBridge {
     }
   }
 
-  Future<Map<String, Object?>> _environment(String sdkVersion) async => {
-    '_playmeshPlatformUi': platformUiConfiguration,
-    '_playmeshFullscreen': await _readFullscreen(),
-    '_playmeshAutoApproveCapabilities': autoApproveCapabilities,
-    'available': true,
-    'sdkVersion': sdkVersion,
-    'identity': _identityEnvironment(),
-    'runtime': {
-      'locale': Platform.localeName.replaceAll('_', '-'),
-      'coreBase': _coreBase.toString(),
-      'playerSource': _playerSource,
-    },
-    'capabilityRegistry': [
-      for (final plugin in capabilityRegistry.descriptors) plugin.toJson(),
-    ],
-    'device': _deviceEnvironment(),
-  };
+  Future<Map<String, Object?>> _environment(String sdkVersion) async {
+    final syncGateway = await _ensureLocalBucketSyncGateway();
+    return {
+      '_playmeshPlatformUi': platformUiConfiguration,
+      '_playmeshFullscreen': await _readFullscreen(),
+      '_playmeshAppStorageSync': {'endpoint': syncGateway.endpoint.toString()},
+      '_playmeshAutoApproveCapabilities': autoApproveCapabilities,
+      'available': true,
+      'sdkVersion': sdkVersion,
+      'identity': _identityEnvironment(),
+      'runtime': {
+        'locale': Platform.localeName.replaceAll('_', '-'),
+        'coreBase': _coreBase.toString(),
+        'playerSource': _playerSource,
+      },
+      'capabilityRegistry': [
+        for (final plugin in capabilityRegistry.descriptors) plugin.toJson(),
+      ],
+      'device': _deviceEnvironment(),
+    };
+  }
+
+  Future<RuntimeAppLocalBucketSyncGateway> _ensureLocalBucketSyncGateway() =>
+      _localBucketSyncGateway ??= RuntimeAppLocalBucketSyncGateway.start(
+        localBucketStore,
+      );
 
   Map<String, Object?> _identityEnvironment() => {
     'userId': userId,
@@ -825,6 +837,8 @@ final class RuntimeAppBridge {
     await capabilityRegistry.dispose();
     await mediaRuntime.dispose();
     await lanHost?.close();
+    final localBucketSyncGateway = await _localBucketSyncGateway;
+    await localBucketSyncGateway?.close();
     if (_ownsHttpClient) _httpClient.close();
   }
 
@@ -847,20 +861,37 @@ final class RuntimeAppCommandResponse {
   final Future<void> Function()? afterResponse;
 }
 
-final class RuntimeAppSdkException implements Exception {
-  const RuntimeAppSdkException(this.code, this.message, {this.cause});
+final class RuntimeAppSdkException
+    implements Exception, PlaymeshDiagnosticError {
+  const RuntimeAppSdkException(
+    this.code,
+    this.message, {
+    this.cause,
+    this.causeStackTrace,
+    this.context = const {},
+  });
 
+  @override
   final String code;
+  @override
   final String message;
+  @override
   final Object? cause;
 
   @override
-  String toString() => message;
+  final StackTrace? causeStackTrace;
+
+  @override
+  final Map<String, String> context;
+
+  @override
+  String toString() => formatPlaymeshDiagnosticError(this);
 }
 
 String _publicError(Object error) {
-  if (error case RuntimeAppSdkException(:final message)) return message;
-  if (error case RuntimeLanException(:final message)) return message;
+  if (error is RuntimeAppSdkException || error is RuntimeLanException) {
+    return formatPlaymeshDiagnosticError(error);
+  }
   if (error case CapabilityOperationException(:final message)) return message;
   final message = error.toString();
   if (utf8.encode(message).length > 1024 ||

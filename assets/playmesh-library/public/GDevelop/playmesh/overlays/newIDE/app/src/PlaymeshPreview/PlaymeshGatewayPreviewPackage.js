@@ -304,6 +304,8 @@ export const createPlaymeshGatewayPreviewPackage = async (
     gameEntry: 'index.html',
     authorityEntry: isMultiplayer ? GDEVELOP_AUTHORITY_ENTRY : undefined,
     tags: projectConfig ? projectConfig.tags : [],
+    webRuntimeMultithreading:
+      projectConfig?.webRuntimeMultithreading === true,
   });
   const fileMap = createPlaymeshPackageFileMap({
     resourcesDownloadOutput,

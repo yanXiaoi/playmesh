@@ -106,6 +106,7 @@ constexpr auto kMethodExecuteScript = "executeScript";
 constexpr auto kMethodPostWebMessage = "postWebMessage";
 constexpr auto kMethodSetSize = "setSize";
 constexpr auto kMethodSetCursorPos = "setCursorPos";
+constexpr auto kMethodSetCursorLeave = "setCursorLeave";
 constexpr auto kMethodSetPointerUpdate = "setPointerUpdate";
 constexpr auto kMethodSetPointerButton = "setPointerButton";
 constexpr auto kMethodSetScrollDelta = "setScrollDelta";
@@ -431,6 +432,12 @@ void WebviewBridge::HandleMethodCall(
       return result->Success();
     }
     return result->Error(kErrorInvalidArgs);
+  }
+
+  // setCursorLeave
+  if (method_name.compare(kMethodSetCursorLeave) == 0) {
+    webview_->SetCursorLeave();
+    return result->Success();
   }
 
   // setPointerUpdate:

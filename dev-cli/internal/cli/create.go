@@ -32,6 +32,7 @@ type createProjectRequest struct {
 	DisplayMode                    string   `json:"displayMode"`
 	MinPlayers                     int      `json:"minPlayers"`
 	MaxPlayers                     int      `json:"maxPlayers"`
+	WebRuntimeMultithreading       bool     `json:"webRuntimeMultithreading"`
 	ClientID                       string   `json:"clientId"`
 }
 
@@ -133,18 +134,19 @@ func configureRequestFromCreate(
 ) configureRequest {
 	return configureRequest{
 		Manifest: configureManifest{
-			Name:                  request.Name,
-			Version:               request.Version,
-			Remarks:               request.Description,
-			Tags:                  request.Tags,
-			Orientation:           request.Orientation,
-			Mode:                  request.Mode,
-			DisplayMode:           request.DisplayMode,
-			ControllerOrientation: request.ControllerOrientation,
-			ControllerEntry:       request.ControllerEntry,
-			AuthorityEntry:        request.AuthorityEntry,
-			MinPlayers:            request.MinPlayers,
-			MaxPlayers:            request.MaxPlayers,
+			Name:                     request.Name,
+			Version:                  request.Version,
+			Remarks:                  request.Description,
+			Tags:                     request.Tags,
+			Orientation:              request.Orientation,
+			Mode:                     request.Mode,
+			DisplayMode:              request.DisplayMode,
+			ControllerOrientation:    request.ControllerOrientation,
+			ControllerEntry:          request.ControllerEntry,
+			AuthorityEntry:           request.AuthorityEntry,
+			MinPlayers:               request.MinPlayers,
+			MaxPlayers:               request.MaxPlayers,
+			WebRuntimeMultithreading: request.WebRuntimeMultithreading,
 		},
 		Capabilities: configureCapabilities{
 			Required:           request.RequiredCapabilities,
@@ -194,18 +196,19 @@ func promptCreateProjectWithDefaults(
 		reader,
 		configureRequest{
 			Manifest: configureManifest{
-				Name:                  defaults.Name,
-				Version:               defaultString(defaults.Version, "0.1.0"),
-				Remarks:               defaults.Description,
-				Tags:                  splitUnique(defaults.Tags),
-				Orientation:           defaultString(defaults.Orientation, "landscape"),
-				Mode:                  defaultString(defaults.Mode, "multiplayer"),
-				DisplayMode:           defaultString(defaults.DisplayMode, "multi_screen"),
-				ControllerOrientation: defaultString(defaults.ControllerOrientation, "portrait"),
-				ControllerEntry:       defaultString(defaults.ControllerEntry, "controller/index.html"),
-				AuthorityEntry:        defaultString(defaults.AuthorityEntry, "static/js/service/index.js"),
-				MinPlayers:            max(defaults.MinPlayers, 2),
-				MaxPlayers:            max(defaults.MaxPlayers, 5),
+				Name:                     defaults.Name,
+				Version:                  defaultString(defaults.Version, "0.1.0"),
+				Remarks:                  defaults.Description,
+				Tags:                     splitUnique(defaults.Tags),
+				Orientation:              defaultString(defaults.Orientation, "landscape"),
+				Mode:                     defaultString(defaults.Mode, "multiplayer"),
+				DisplayMode:              defaultString(defaults.DisplayMode, "multi_screen"),
+				ControllerOrientation:    defaultString(defaults.ControllerOrientation, "portrait"),
+				ControllerEntry:          defaultString(defaults.ControllerEntry, "controller/index.html"),
+				AuthorityEntry:           defaultString(defaults.AuthorityEntry, "static/js/service/index.js"),
+				MinPlayers:               max(defaults.MinPlayers, 2),
+				MaxPlayers:               max(defaults.MaxPlayers, 5),
+				WebRuntimeMultithreading: false,
 			},
 		},
 		capabilities,
@@ -235,6 +238,7 @@ func promptCreateProjectWithDefaults(
 		DisplayMode:                    configured.Manifest.DisplayMode,
 		MinPlayers:                     configured.Manifest.MinPlayers,
 		MaxPlayers:                     configured.Manifest.MaxPlayers,
+		WebRuntimeMultithreading:       configured.Manifest.WebRuntimeMultithreading,
 		ClientID:                       "cli",
 	}, nil
 }

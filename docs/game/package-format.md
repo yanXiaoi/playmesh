@@ -89,7 +89,7 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
   "lastModifiedAt": 1784851200000,
   "remarks": "示例游戏",
   "version": "1.0.0",
-  "sdkVersion": "4.1.0",
+  "sdkVersion": "4.2.0",
   "appSdkVersion": "3.3.0",
   "orientation": "landscape",
   "controllerOrientation": "portrait",
@@ -101,6 +101,9 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
     "controller": "controller/index.html"
   },
   "authority": { "entry": "static/js/service/index.js" },
+  "config": {
+    "webRuntime": { "multithreading": false }
+  },
   "tags": ["party", "example"]
 }
 ```
@@ -115,8 +118,8 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
 | `lastModifiedAt` | 新发布必有，旧包可缺省 | 最后上传的 Unix 毫秒时间戳，只读；缺省由 App 外壳显示本地化“无”，有值时按设备本地时区显示 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | 当前支持 `4.1.0`；新建、更新与 CLI 运行写入当前 `4.1.0` |
-| `appSdkVersion` | 是 | 支持 `3.2.0` 或 `3.3.0`；新建、更新与 CLI 发布写入当前 `3.3.0` |
+| `sdkVersion` | 是 | 支持 `4.1.0` 或 `4.2.0`；新建、更新与 CLI 运行写入当前 `4.2.0` |
+| `appSdkVersion` | 是 | 支持 `3.2.0`、`3.3.0` 或 `3.4.0`；新建、更新与 CLI 发布写入当前 `3.4.0` |
 | `orientation` | 是 | `landscape` 或 `portrait` |
 | `controllerOrientation` | 单屏多人必填 | 控制器全屏方向；其他显示模式禁止声明 |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
@@ -124,9 +127,27 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
 | `players` | 是 | 整数，满足 `1 <= min <= max` |
 | `entries` | 是 | 页面入口对象；`game` 对所有游戏必填，`controller` 对单屏多人必填；HTML 路径相对物理 `app/`，可追加非空查询串，缺失不回退 |
 | `authority` | 多人必填 | `entry` 相对物理 `app/`，必须指向 JavaScript 文件且不能带查询串 |
+| `config` | 否 | 不透明的可选扩展值；平台接收、保存和转发，但不校验其类型或内部字段 |
 | `tags` | 否 | 字符串数组，平台原样保存和展示 |
 
 补充校验：
+
+- `config` 即使不是对象也不使清单失效；缺少 `config`、中间对象或目标字段时，公共读取器
+  返回 `null`。平台内部不得直接索引 `config`，所有字段读取必须使用
+  `readGameManifestConfigValue`，避免不同入口重复实现缺省和类型判断。
+- 当前已定义的可选路径只有 `config.webRuntime.multithreading`。只有精确的 JSON 布尔值
+  `true` 才为该游戏的 App 本地 WebView 回环网关添加
+  `Cross-Origin-Opener-Policy: same-origin` 和
+  `Cross-Origin-Embedder-Policy: require-corp`；`false`、缺失、`null`、字符串或其他值均保持
+  兼容模式且不添加这两个响应头。默认模板显式写入 `false`。
+- 源码工作区的项目设置、Developer CLI `configure` 和 GDevelop 的 Playmesh 设置保存时，
+  都以当前界面值写回该路径的布尔值；对象形态的 `config`/`webRuntime` 保留其他未知字段，
+  无法合并的旧层级由最新标准对象结构替换。被动解析、复制、导入和导出不会做这种改写。
+- 开启跨源隔离会影响该 WebView 内的入口、SDK、普通资源、Bucket 和错误响应。游戏引用的
+  跨源图片、音频、脚本、字体、Worker/WASM 等资源必须提供允许当前来源的 CORS，或提供适当
+  的 `Cross-Origin-Resource-Policy`；否则 `COEP: require-corp` 可能阻止加载。页面仍必须检测
+  `crossOriginIsolated`、`SharedArrayBuffer` 和 `Worker`，并保留单线程路径；响应头不能保证
+  当前 WebView 引擎一定支持 WASM 线程。
 
 - `entries.game`、`entries.controller` 与 `authority.entry` 都相对物理 `app/`
   解析。HTML 入口先以第一个 `?` 分成文件路径和查询串；App 只用路径查找
@@ -152,7 +173,7 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
   对应物理文件是非空、合法 UTF-8、无 NUL 的网页文本。App 正式导入仍按自身更严格的
   安装与运行边界独立校验。
 - `modes` 必须且只能声明一个模式；值为 `multiplayer` 时必须声明 `authority.entry`。
-- Game SDK 只接受 `4.1.0`。App SDK 请求 `3.2.0` 或 `3.3.0` 时均由版本注册表解析到
+- Game SDK 接受 `4.1.0` 或 `4.2.0`，并由版本注册表解析到当前 `4.2.0` bundle。App SDK 请求 `3.2.0` 或 `3.3.0` 时均由版本注册表解析到
   兼容的 `3.3.0` bundle；更旧或未知值不会获得旧文件、旧命名空间或旁路适配。
 - `modes` 为 `solo` 时，`players.max` 不能大于 1。
 - `displayModes` 必须且只能声明一个显示模式。

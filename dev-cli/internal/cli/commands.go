@@ -18,8 +18,8 @@ import (
 	"syscall"
 	"time"
 
-	adapterapi "github.com/yanXiaoi/playmesh/dev-cli/internal/adapter"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/buildinfo"
+	"github.com/yanXiaoi/playmesh/dev-cli/internal/contract"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/development"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/packaging"
 	"github.com/yanXiaoi/playmesh/dev-cli/internal/project"
@@ -236,14 +236,12 @@ func commandUpdate(ctx context.Context) error {
 }
 
 func prepareTargetProject(
-	ctx context.Context,
+	_ context.Context,
 	projectContext project.Context,
 ) (string, *target.Client, error) {
-	versions, err := sdk.VersionsAt(projectContext.SDKRoot)
-	if err != nil {
-		return "", nil, err
-	}
-	projectID, err := sdk.UpdateManifestVersions(projectContext.PackageRoot, versions)
+	uploadManifest, _, err := packaging.LoadUploadManifest(
+		projectContext.PackageRoot,
+	)
 	if err != nil {
 		return "", nil, err
 	}
@@ -252,26 +250,20 @@ func prepareTargetProject(
 		return "", nil, err
 	}
 	client := newTargetClient(targetConfig)
-	var status statusResponse
-	if err := client.JSON(ctx, "GET", "/dev/api/status", nil, &status); err != nil {
-		return "", nil, err
-	}
-	if status.GameSDKVersion != versions.Game || status.AppSDKVersion != versions.App {
-		return "", nil, fmt.Errorf(
-			"本地 SDK（%s/%s）与目标 App（%s/%s）不一致，请先执行 playmesh-cli update",
-			versions.Game, versions.App, status.GameSDKVersion, status.AppSDKVersion,
-		)
-	}
-	return projectID, client, nil
+	return uploadManifest.ID, client, nil
+}
+
+type importedProject struct {
+	ID      string
+	Version string
 }
 
 func importProjectPackage(
 	ctx context.Context,
 	client *target.Client,
-	projectID string,
 	packageBytes []byte,
 	reportSuccess bool,
-) error {
+) (importedProject, error) {
 	response, err := client.Request(
 		ctx,
 		"POST",
@@ -280,11 +272,11 @@ func importProjectPackage(
 		"application/zip",
 	)
 	if err != nil {
-		return err
+		return importedProject{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return target.DecodeAPIError(response)
+		return importedProject{}, target.DecodeAPIError(response)
 	}
 	var result struct {
 		Project struct {
@@ -294,20 +286,23 @@ func importProjectPackage(
 		Committed bool `json:"committed"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		return err
+		return importedProject{}, err
 	}
-	if !result.Committed || result.Project.ID != projectID {
-		return errors.New("目标 App 未确认项目原子提交")
+	if !result.Committed || result.Project.ID == "" {
+		return importedProject{}, errors.New("目标 App 未确认项目原子提交")
 	}
 	if reportSuccess {
 		fmt.Printf(
 			"已上传并通过包结构校验 %s %s（%d bytes）\n",
-			projectID,
+			result.Project.ID,
 			result.Project.Version,
 			len(packageBytes),
 		)
 	}
-	return nil
+	return importedProject{
+		ID:      result.Project.ID,
+		Version: result.Project.Version,
+	}, nil
 }
 
 type stagedDevelopmentPackage struct {
@@ -410,21 +405,13 @@ func commandDev(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := adapterapi.PrepareUpload(
-		ctx,
-		adapter,
-		projectContext,
-	); err != nil {
-		return err
-	}
-	layout, _, err := packaging.LoadManifestLayout(
+	uploadManifest, _, err := packaging.LoadUploadManifest(
 		projectContext.PackageRoot,
-		false,
 	)
 	if err != nil {
 		return err
 	}
-	developmentEntry := layout.GameEntry
+	developmentEntry := uploadManifest.GameEntry
 	developmentEntryOverride := ""
 	if entryMapping, ok := mapping.(development.GameEntryMapping); ok {
 		developmentEntryOverride = strings.TrimSpace(
@@ -435,7 +422,7 @@ func commandDev(ctx context.Context, args []string) error {
 		}
 		developmentEntry = developmentEntryOverride
 	}
-	basePackage, baseProjectID, err := packaging.BuildDevelopmentBase(
+	basePackage, baseProjectID, err := packaging.BuildDevelopmentUpload(
 		projectContext.PackageRoot,
 		developmentEntryOverride,
 	)
@@ -709,36 +696,31 @@ func stopDevelopmentSource(source development.Source) {
 
 func commandRun(ctx context.Context) error {
 	fmt.Printf("playmesh-cli %s\n", buildinfo.Version)
-	projectContext, err := project.Current()
+	root, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	adapter, err := adapterForProject(projectContext)
+	packageRoot := filepath.Join(
+		root,
+		filepath.FromSlash(contract.PackageRoot),
+	)
+	uploadManifest, _, err := packaging.LoadUploadManifest(packageRoot)
 	if err != nil {
 		return err
 	}
-	if err := adapter.PrepareRelease(ctx, projectContext); err != nil {
-		return err
-	}
-	projectID, client, err := prepareTargetProject(ctx, projectContext)
+	packageBytes, err := packaging.BuildUpload(packageRoot)
 	if err != nil {
 		return err
 	}
-	if err := adapterapi.PrepareUpload(
-		ctx,
-		adapter,
-		projectContext,
-	); err != nil {
-		return err
-	}
-	packageBytes, err := packaging.Build(projectContext.PackageRoot)
+	targetConfig, err := targetStore.Load()
 	if err != nil {
 		return err
 	}
+	client := newTargetClient(targetConfig)
 	run, err := startTemporaryPackagePreview(
 		ctx,
 		client,
-		projectID,
+		uploadManifest.ID,
 		packageBytes,
 	)
 	if err != nil {

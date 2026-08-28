@@ -426,6 +426,10 @@ void main() {
         'icon': 'app/legacy.png',
         'permissions': ['keyboard'],
         'redundant': true,
+        'config': {
+          'webRuntime': {'multithreading': true},
+          'futureRuntime': {'preserved': true},
+        },
       }),
     );
     archive
@@ -447,6 +451,10 @@ void main() {
     expect(installedManifest.containsKey('icon'), isFalse);
     expect(installedManifest.containsKey('permissions'), isFalse);
     expect(installedManifest.containsKey('redundant'), isFalse);
+    expect(installedManifest['config'], {
+      'webRuntime': {'multithreading': true},
+      'futureRuntime': {'preserved': true},
+    });
     installedManifest
       ..['icon'] = 'app/legacy.png'
       ..['permissions'] = ['keyboard']
@@ -478,6 +486,10 @@ void main() {
     expect(exportedManifest.containsKey('icon'), isFalse);
     expect(exportedManifest.containsKey('permissions'), isFalse);
     expect(exportedManifest.containsKey('redundant'), isFalse);
+    expect(exportedManifest['config'], {
+      'webRuntime': {'multithreading': true},
+      'futureRuntime': {'preserved': true},
+    });
   });
 
   test('宽松项目拉取保留损坏能力文件且不要求 app 目录', () async {

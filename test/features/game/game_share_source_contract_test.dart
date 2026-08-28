@@ -33,6 +33,52 @@ void main() {
     }
   });
 
+  test('分享房间成员显示 Core 判定的局域网、直连或中转方式', () {
+    final source = _gamePageSource();
+    final projection = _sourceSection(
+      source,
+      'PlaymeshSharePanelModel _buildSharePanelModel(BuildContext context)',
+      'PlaymeshSharePanelStrings _buildSharePanelStrings(',
+    );
+
+    expect(projection, contains('player.connectionMode'));
+    expect(
+      projection,
+      contains("'direct' => context.tr('game.player_connection_direct')"),
+    );
+    expect(
+      projection,
+      contains("'relay' => context.tr('game.player_connection_relay')"),
+    );
+    expect(projection, contains("context.tr('game.player_connection_lan')"));
+  });
+
+  test('主 App 与 Runtime 已打开的房间面板跟随 Session 成员快照实时刷新', () {
+    final coordinator = File(
+      'lib/core/game_web/game_share_coordinator.dart',
+    ).readAsStringSync();
+    final runtime = File('runtime/src/lib/main.dart').readAsStringSync();
+
+    expect(
+      coordinator,
+      contains(".where((message) => message['session'] is Map)"),
+    );
+    expect(
+      coordinator,
+      isNot(contains('_multiplayerPresence(bridge, _currentHostNickname))\n'
+          '          .distinct()')),
+      reason: '在线人数未变时，昵称或连接方式仍可能变化',
+    );
+    expect(coordinator, contains('_update(_state.copyWith(presence: presence))'));
+    expect(
+      runtime,
+      contains('StreamSubscription<Map<String, Object?>>? roomSubscription'),
+    );
+    expect(runtime, contains("message['session'] is Map"));
+    expect(runtime, contains('.listen((_) => refreshRoomPresentation())'));
+    expect(runtime, contains('await roomSubscription?.cancel()'));
+  });
+
   test('主 App 服务器目录仍保留按需加载、刷新、选择与断开行为', () {
     final source = _gamePageSource();
     final pageBuild = _sourceSection(
@@ -472,6 +518,12 @@ void main() {
     expect(source, contains('_controller.hasNativeFocus'));
     expect(source, contains('_scheduleInitialFocusRetry()'));
     expect(source, contains('WidgetsBinding.instance.scheduleFrame()'));
+    expect(
+      source,
+      contains('navigator?.userActivation?.isActive'),
+      reason: 'WebView2 的可信 Enter/Space 不一定进入 Flutter 键盘树，Bridge 前必须同步浏览器激活',
+    );
+    expect(source, contains('bridge.recordUserActivation()'));
   });
 
   test('Android 游戏 WebView 在 App SDK 接管且页面完成后主动聚焦', () {
@@ -488,6 +540,12 @@ void main() {
     expect(source, contains('_scheduleAndroidWebViewFocusRetry()'));
     expect(source, contains('WidgetsBinding.instance.scheduleFrame()'));
     expect(source, contains('defaultTargetPlatform != TargetPlatform.android'));
+    expect(
+      source,
+      contains('navigator?.userActivation?.isActive'),
+      reason: 'Android WebView 的 SDK 按钮键盘激活必须在 Bridge 校验前转换为宿主票据',
+    );
+    expect(source, contains('_appBridge.recordUserActivation()'));
   });
 
   test('App SDK input takeover keeps both platform WebViews mounted', () {

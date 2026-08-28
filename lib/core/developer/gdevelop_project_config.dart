@@ -28,6 +28,7 @@ class GDevelopProjectConfig {
     required this.minPlayers,
     required this.maxPlayers,
     required this.tags,
+    this.webRuntimeMultithreading = false,
     required this.updatedAt,
   });
 
@@ -45,6 +46,7 @@ class GDevelopProjectConfig {
   final int minPlayers;
   final int maxPlayers;
   final List<String> tags;
+  final bool webRuntimeMultithreading;
   final DateTime updatedAt;
 
   Map<String, Object?> toJson() => {
@@ -55,6 +57,7 @@ class GDevelopProjectConfig {
     'minPlayers': minPlayers,
     'maxPlayers': maxPlayers,
     'tags': tags,
+    'webRuntimeMultithreading': webRuntimeMultithreading,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
   };
 
@@ -69,13 +72,27 @@ class GDevelopProjectConfig {
       'gameType',
       'updatedAt',
     };
-    const fields = {...legacyFields, 'minPlayers', 'maxPlayers', 'tags'};
+    const previousFields = {
+      ...legacyFields,
+      'minPlayers',
+      'maxPlayers',
+      'tags',
+    };
+    const fields = {...previousFields, 'webRuntimeMultithreading'};
     final rawSchemaVersion = json['schemaVersion'];
     final isLegacy = rawSchemaVersion == legacySchemaVersion;
-    final expectedFields = isLegacy ? legacyFields : fields;
-    if ((rawSchemaVersion != schemaVersion && !isLegacy) ||
-        json.length != expectedFields.length ||
-        !json.keys.every(expectedFields.contains)) {
+    final hasLegacyFields =
+        json.length == legacyFields.length &&
+        json.keys.every(legacyFields.contains);
+    final hasPreviousFields =
+        json.length == previousFields.length &&
+        json.keys.every(previousFields.contains);
+    final hasCurrentFields =
+        json.length == fields.length && json.keys.every(fields.contains);
+    if ((isLegacy && !hasLegacyFields) ||
+        (!isLegacy &&
+            (rawSchemaVersion != schemaVersion ||
+                (!hasPreviousFields && !hasCurrentFields)))) {
       throw const FormatException('GDevelop 项目配置 schema 无效');
     }
     final gameId = json['gameId'];
@@ -84,6 +101,7 @@ class GDevelopProjectConfig {
     final minPlayers = json['minPlayers'];
     final maxPlayers = json['maxPlayers'];
     final tags = json['tags'];
+    final webRuntimeMultithreading = json['webRuntimeMultithreading'];
     final updatedAt = json['updatedAt'];
     if (gameId is! String ||
         revision is! int ||
@@ -91,6 +109,10 @@ class GDevelopProjectConfig {
         gameType is! String ||
         updatedAt is! String) {
       throw const FormatException('GDevelop 项目配置格式无效');
+    }
+    if (json.containsKey('webRuntimeMultithreading') &&
+        webRuntimeMultithreading is! bool) {
+      throw const FormatException('GDevelop Web Runtime 多线程配置无效');
     }
     final normalizedGameId = ProjectProvisioningService.validateGameId(gameId);
     final normalizedExpected = ProjectProvisioningService.validateGameId(
@@ -126,6 +148,7 @@ class GDevelopProjectConfig {
       minPlayers: effectiveMinPlayers as int,
       maxPlayers: effectiveMaxPlayers as int,
       tags: normalizedTags,
+      webRuntimeMultithreading: webRuntimeMultithreading == true,
       updatedAt: parsedUpdatedAt.toUtc(),
     );
   }
@@ -276,6 +299,7 @@ abstract interface class GDevelopProjectConfigRepository {
     int? minPlayers,
     int? maxPlayers,
     List<String>? tags,
+    bool webRuntimeMultithreading = false,
     required int expectedRevision,
   });
 
@@ -333,6 +357,7 @@ class GDevelopProjectConfigStore implements GDevelopProjectConfigRepository {
     int? minPlayers,
     int? maxPlayers,
     List<String>? tags,
+    bool webRuntimeMultithreading = false,
     required int expectedRevision,
   }) async {
     final normalized = ProjectProvisioningService.validateGameId(gameId);
@@ -373,6 +398,7 @@ class GDevelopProjectConfigStore implements GDevelopProjectConfigRepository {
         minPlayers: effectiveMinPlayers,
         maxPlayers: effectiveMaxPlayers,
         tags: normalizedTags,
+        webRuntimeMultithreading: webRuntimeMultithreading,
         updatedAt: clock().toUtc(),
       );
       await _writeAtomic(_configFile(root), config);

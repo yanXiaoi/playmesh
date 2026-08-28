@@ -120,12 +120,49 @@ interface PlaymeshRpcRequestOptions {
   timeoutMs?: number;
 }
 
+/** RPC 流请求可发送的字节源。File 继承自 Blob。 */
+type PlaymeshRpcStreamSource = Blob | ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>;
+
+/** RPC 流进度。发送端表示已交给网络栈，接收端表示已被 handler 消费。 */
+type PlaymeshRpcStreamProgressHandler = (
+  transferredBytes: number,
+  totalBytes: number | null,
+) => void;
+
+/** Authority RPC 流请求配置。 */
+interface PlaymeshRpcStreamRequestOptions {
+  /** 整个上传与 Authority 处理的超时毫秒数，必须是 1000～1800000 的整数，默认 300000。 */
+  timeoutMs?: number;
+  /** 流的逻辑文件名；File 默认使用自身名称，其他来源默认 `stream.bin`。 */
+  name?: string;
+  /** 流的媒体类型；Blob 默认使用自身 type，其他来源默认 `application/octet-stream`。 */
+  type?: string;
+  /** 监听 source 已交给浏览器网络栈的字节数；回调抛错不会中断传输。 */
+  onProgress?: PlaymeshRpcStreamProgressHandler;
+}
+
+/** Authority RPC 流监听配置。 */
+interface PlaymeshRpcStreamHandlerOptions {
+  /** 监听 handler 已消费的字节数；回调抛错不会中断传输。 */
+  onProgress?: PlaymeshRpcStreamProgressHandler;
+}
+
 /** Authority RPC handler 收到的可信上下文。 */
 interface PlaymeshRpcContext extends PlaymeshAuthorityContext {
   /** Core 生成的请求 ID，可用于 Authority 业务日志。 */
   requestId: string;
   /** 已通过 SDK 校验的精确监听路径。 */
   path: string;
+}
+
+/** Authority 流请求 handler 收到的可信上下文。 */
+interface PlaymeshRpcStreamContext extends PlaymeshRpcContext {
+  /** SDK 规范化后的逻辑文件名。 */
+  name: string;
+  /** SDK 规范化后的媒体类型。 */
+  type: string;
+  /** 已知的源字节数；ReadableStream 未知长度时为 `null`。 */
+  size: number | null;
 }
 
 /** Binary Channel 的转发方式。`authority` 先由 Authority 审核，`relay` 直接转发。 */
@@ -387,6 +424,11 @@ interface PlaymeshStorageBucket {
   clearData(): Promise<void>;
   /** 上传二进制文件；平台以毫秒时间戳重命名并保留安全后缀，返回同源 `/bucket/...` 地址。 */
   upload(file: File): Promise<string>;
+  /**
+   * 流式上传字节源。ReadableStream 必须通过 options.name 提供文件名；实现只保留固定
+   * 大小缓冲并传播背压，不会把完整文件装入内存。
+   */
+  upload(source: PlaymeshRpcStreamSource, options: { name: string; type?: string }): Promise<string>;
 }
 
 interface PlaymeshAppUiOptions {
@@ -395,6 +437,11 @@ interface PlaymeshAppUiOptions {
   /** 普通浏览器是否显示可拖动的悬浮菜单按钮；默认 `true`。 */
   floatingButton?: boolean;
 }
+
+/** Android 系统返回、桌面返回键或浏览器悬浮菜单触发后的后续流程决策。 */
+type PlaymeshSystemMenuDecision = "EXIT" | "NEXT" | "STOP";
+/** @deprecated 使用 `PlaymeshSystemMenuDecision`。 */
+type PlaymeshAppBackDecision = PlaymeshSystemMenuDecision;
 
 interface PlaymeshAppUiApi {
   /** 浏览器专用初始化：启用兜底游戏菜单但不创建悬浮球；App WebView 中返回 `false`。 @playmesh-completion playmesh.app.ui.initializeBrowser */
@@ -408,10 +455,22 @@ interface PlaymeshAppUiApi {
   /** 订阅 SDK 游戏菜单成功关闭事件；只在打开到关闭的真实状态变化后触发。 @playmesh-completion playmesh.app.ui.onGameMenuClose */
   onGameMenuClose(callback: () => void): PlaymeshUnsubscribe;
   /**
-   * 订阅 Android 系统返回和 Esc；仅在 `configure({ fallbackUi: false })` 显式关闭 SDK 兜底面板后生效。
-   * 回调返回 `false` 阻止退出，返回 `true` 继续退出。未订阅时直接继续退出。 @playmesh-completion playmesh.app.ui.onBack
+   * 订阅 Android 系统返回、桌面返回键和浏览器悬浮菜单入口；入口事件到达后、产生默认效果前执行回调。
+   * `EXIT` 直接退出，`NEXT` 继续该入口的默认流程（仍遵守 `fallbackUi`），`STOP` 终止后续流程。
+   * 多个回调会全部执行；`STOP` 优先于 `EXIT`，`EXIT` 优先于 `NEXT`。 @playmesh-completion playmesh.app.ui.onSystemMenuRequest
    */
-  onBack(callback: () => boolean | Promise<boolean>): PlaymeshUnsubscribe;
+  onSystemMenuRequest(
+    callback: () => PlaymeshSystemMenuDecision |
+      Promise<PlaymeshSystemMenuDecision>,
+  ): PlaymeshUnsubscribe;
+  /**
+   * @deprecated 使用 `onSystemMenuRequest()`；此兼容别名具有完全相同的触发与决策语义。
+   * @playmesh-completion playmesh.app.ui.onBack
+   */
+  onBack(
+    callback: () => PlaymeshAppBackDecision |
+      Promise<PlaymeshAppBackDecision>,
+  ): PlaymeshUnsubscribe;
   /** 重新加载当前游戏文档。 @playmesh-completion playmesh.app.ui.restartGame */
   restartGame(): void;
   /** 打开“分享/邀请”；仅当前 Authority 可在有效用户操作中调用。 @playmesh-completion playmesh.app.ui.openSharePanel */
@@ -557,12 +616,24 @@ interface PlaymeshMainApi {
      */
     request(path: string, data?: any, options?: PlaymeshRpcRequestOptions): Promise<any>;
     /**
+     * 向 Authority 发起字节流请求。File、Blob 和内存字节会由 SDK 自动建立请求体；
+     * ReadableStream 会原样转交给浏览器流式发送。结束由流 EOF 表示。
+     * @playmesh-completion playmesh.main.rpc.requestStream
+     */
+    requestStream(path: string, source: PlaymeshRpcStreamSource, options?: PlaymeshRpcStreamRequestOptions): Promise<any>;
+    /**
      * 监听一个精确 RPC path。只有 Authority Client 可以调用；handler 可以同步返回
      * 可传输值，也可以返回 Promise。
      * @returns 取消监听函数。
      * @playmesh-completion playmesh.main.rpc.onRequest
      */
     onRequest(path: string, handler: (data: any, context: PlaymeshRpcContext) => any | Promise<any>): PlaymeshUnsubscribe;
+    /**
+     * 监听一个精确 RPC 流 path。只有 Authority Client 可以调用；流只能消费一次。
+     * @returns 取消监听函数。
+     * @playmesh-completion playmesh.main.rpc.onStreamRequest
+     */
+    onStreamRequest(path: string, handler: (source: ReadableStream<Uint8Array>, context: PlaymeshRpcStreamContext) => any | Promise<any>, options?: PlaymeshRpcStreamHandlerOptions): PlaymeshUnsubscribe;
   };
   /** 多人会话内的透明二进制分发。SDK 按需维护一条受平台管控的 Binary WebSocket。 */
   readonly binary: {
@@ -628,7 +699,7 @@ interface Window { playmesh: PlaymeshApi; }
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "4.1.0";
+  const PLAYMESH_SDK_VERSION = "4.3.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -683,6 +754,7 @@ interface Window { playmesh: PlaymeshApi; }
   const BINARY_OP_CLOSED = 0x84;
   const BINARY_OP_RPC_INCOMING = 0x85;
   const BINARY_OP_RPC_RESULT = 0x86;
+  const BINARY_OP_RPC_STREAM_INCOMING = 0x87;
   const BINARY_MODE_AUTHORITY = 1;
   const BINARY_MODE_RELAY = 2;
   const BINARY_FLAG_LATEST = 1;

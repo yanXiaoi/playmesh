@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:playmesh_database/playmesh_database.dart';
+import 'package:flutter/foundation.dart';
+
 import 'runtime_nickname_coordinator.dart';
 import 'runtime_package.dart';
 import 'runtime_sdk_compatibility.dart';
@@ -18,13 +21,29 @@ final class RuntimeGameBridge {
     'player.setNickname',
     'performance.ping',
     'performance.pong',
+    'webrtc.getSignalingEndpoint',
     'lifecycle.complete',
+    'db.open',
+    'db.select',
+    'db.update',
+    'db.delete',
+    'db.insert',
+    'db.ddl',
+    'db.transaction.begin',
+    'db.transaction.select',
+    'db.transaction.update',
+    'db.transaction.delete',
+    'db.transaction.insert',
+    'db.transaction.ddl',
+    'db.transaction.commit',
+    'db.transaction.rollback',
   };
 
   RuntimeGameBridge({
     required this.game,
     required this.session,
     this.storage,
+    this.database,
     this.onNicknameUpdate,
   }) {
     _sessionSubscription = session?.messages.listen(
@@ -44,6 +63,7 @@ final class RuntimeGameBridge {
   final RuntimeGameManifest game;
   final RuntimeSessionConnection? session;
   final RuntimeStorage? storage;
+  final PlaymeshDatabase? database;
   final Future<RuntimeNicknameUpdate> Function(String nickname)?
   onNicknameUpdate;
   final StreamController<String> _outbound = StreamController.broadcast();
@@ -75,7 +95,7 @@ final class RuntimeGameBridge {
       requestId = rawRequestId as String?;
       final sdkVersion = command['sdkVersion'];
       if (sdkVersion is! String ||
-          sdkVersion != RuntimeSdkCompatibility.gameBundleVersion) {
+          !RuntimeSdkCompatibility.supportsGameRequest(sdkVersion)) {
         throw FormatException('Runtime 不支持 Game SDK $sdkVersion');
       }
       final name = command['command'];
@@ -169,6 +189,37 @@ final class RuntimeGameBridge {
             targets: [target],
           );
           _result(requestId);
+        case 'webrtc.getSignalingEndpoint':
+          _requireExactPayload(payload, const {'identifier'});
+          final identifier = payload['identifier'];
+          if (identifier is! String ||
+              !RegExp(
+                r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+              ).hasMatch(identifier)) {
+            throw const FormatException('identifier 必须是 1～128 位安全通道标识');
+          }
+          _result(
+            requestId,
+            await _requireSession().createWebRTCSignalingEndpoint(
+              identifier,
+              requestId: requestId,
+            ),
+          );
+        case 'db.open':
+        case 'db.select':
+        case 'db.update':
+        case 'db.delete':
+        case 'db.insert':
+        case 'db.ddl':
+        case 'db.transaction.begin':
+        case 'db.transaction.select':
+        case 'db.transaction.update':
+        case 'db.transaction.delete':
+        case 'db.transaction.insert':
+        case 'db.transaction.ddl':
+        case 'db.transaction.commit':
+        case 'db.transaction.rollback':
+          _result(requestId, await _executeDatabaseCommand(name, payload));
         case 'lifecycle.complete':
           final lifecycleRequestId = payload['lifecycleRequestId'];
           if (lifecycleRequestId is! String || lifecycleRequestId.isEmpty) {
@@ -187,9 +238,109 @@ final class RuntimeGameBridge {
         'type': 'command.error',
         'requestId': requestId,
         'error': error.toString(),
-        'code': 'runtime_command_failed',
+        'code': error is PlaymeshDatabaseException
+            ? error.code
+            : 'runtime_command_failed',
       });
     }
+  }
+
+  static const _databaseStatementCommands = {
+    'db.select': PlaymeshDatabaseOperation.select,
+    'db.update': PlaymeshDatabaseOperation.update,
+    'db.delete': PlaymeshDatabaseOperation.delete,
+    'db.insert': PlaymeshDatabaseOperation.insert,
+    'db.transaction.select': PlaymeshDatabaseOperation.select,
+    'db.transaction.update': PlaymeshDatabaseOperation.update,
+    'db.transaction.delete': PlaymeshDatabaseOperation.delete,
+    'db.transaction.insert': PlaymeshDatabaseOperation.insert,
+  };
+
+  Future<Object?> _executeDatabaseCommand(
+    String name,
+    Map<String, Object?> payload,
+  ) async {
+    final current = session;
+    if (current != null && !current.isAuthority) {
+      throw const PlaymeshDatabaseException(
+        'not_authority',
+        '只有 Authority Client 可以访问 main.db',
+      );
+    }
+    final target = database;
+    if (target == null) {
+      throw const PlaymeshDatabaseException(
+        'db_unavailable',
+        '当前 Runtime 没有提供数据库能力',
+      );
+    }
+    if (name == 'db.open') {
+      _requireExactPayload(payload, const {});
+      await target.open();
+      return const {'file': '_game.db'};
+    }
+    if (name == 'db.transaction.begin') {
+      _requireExactPayload(payload, const {});
+      return {'transactionId': await target.beginTransaction()};
+    }
+    if (name == 'db.transaction.commit' || name == 'db.transaction.rollback') {
+      _requireExactPayload(payload, const {'transactionId'});
+      final transactionId = _requiredBridgeString(payload, 'transactionId');
+      if (name == 'db.transaction.commit') {
+        await target.commitTransaction(transactionId);
+      } else {
+        await target.rollbackTransaction(transactionId);
+      }
+      return null;
+    }
+    if (name == 'db.ddl' || name == 'db.transaction.ddl') {
+      final transactionCommand = name == 'db.transaction.ddl';
+      final allowedKeys = transactionCommand
+          ? const {'transactionId', 'name'}
+          : const {'name'};
+      if (!payload.keys.every(allowedKeys.contains) ||
+          (transactionCommand && !payload.containsKey('transactionId'))) {
+        throw const FormatException('DDL 请求参数无效');
+      }
+      final rawName = payload['name'];
+      if (rawName != null && (rawName is! String || rawName.isEmpty)) {
+        throw const FormatException('DDL 名称必须是非空字符串');
+      }
+      final ddlName = rawName as String?;
+      return transactionCommand
+          ? target.getTransactionDdl(
+              _requiredBridgeString(payload, 'transactionId'),
+              ddlName,
+            )
+          : target.getDdl(ddlName);
+    }
+    final operation = _databaseStatementCommands[name];
+    if (operation == null) throw UnsupportedError('未知数据库命令: $name');
+    final transactionCommand = name.startsWith('db.transaction.');
+    _requireExactPayload(
+      payload,
+      transactionCommand
+          ? const {'transactionId', 'sql', 'args'}
+          : const {'sql', 'args'},
+    );
+    final sql = _requiredBridgeString(payload, 'sql');
+    final rawArguments = payload['args'];
+    if (rawArguments is! List &&
+        (rawArguments is! Map ||
+            !rawArguments.keys.every((key) => key is String))) {
+      throw const FormatException('SQL args 必须是数组或命名参数对象');
+    }
+    final arguments = rawArguments is List
+        ? List<Object?>.from(rawArguments)
+        : Map<String, Object?>.from(rawArguments as Map);
+    return transactionCommand
+        ? target.executeTransaction(
+            _requiredBridgeString(payload, 'transactionId'),
+            operation,
+            sql,
+            arguments,
+          )
+        : target.execute(operation, sql, arguments);
   }
 
   Future<void> _handleTransportMessage(Map<String, Object?> message) async {
@@ -254,6 +405,14 @@ final class RuntimeGameBridge {
     } on TimeoutException {
       _lifecycleOperations.remove(requestId);
     }
+    if (event == 'exit') {
+      // exit 只结束当前 WebView 文档；restart 会继续复用这个 bridge。
+      try {
+        await database?.rollbackAllTransactions();
+      } on Object catch (error) {
+        debugPrint('重置游戏数据库事务失败: $error');
+      }
+    }
   }
 
   void restoreGameContentFocus() {
@@ -269,6 +428,7 @@ final class RuntimeGameBridge {
     await _sessionSubscription?.cancel();
     _sessionSubscription = null;
     if (session?.isAuthority == true) await storage?.clearSystemAvatars();
+    await database?.close();
     await session?.close();
     await _outbound.close();
   }
@@ -282,6 +442,7 @@ final class RuntimeGameBridge {
     _lifecycleOperations.clear();
     await _sessionSubscription?.cancel();
     _sessionSubscription = null;
+    await database?.close();
     await session?.close();
   }
 }

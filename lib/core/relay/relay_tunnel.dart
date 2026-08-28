@@ -6,6 +6,8 @@ import 'relay_tunnel_stub.dart'
 export 'relay_tunnel_contract.dart';
 
 Future<RelayHostSession> startRelayHostSession({
+  required Uri coreBaseUri,
+  required String sessionId,
   required Uri serverBaseUri,
   required String sourceToken,
   required String hostPath,
@@ -16,6 +18,8 @@ Future<RelayHostSession> startRelayHostSession({
   required int maxConnectionsPerTunnel,
 }) {
   return implementation.startRelayHostSession(
+    coreBaseUri: coreBaseUri,
+    sessionId: sessionId,
     serverBaseUri: serverBaseUri,
     sourceToken: sourceToken,
     hostPath: hostPath,
@@ -27,12 +31,12 @@ Future<RelayHostSession> startRelayHostSession({
   );
 }
 
-Future<RelayClientGateway> startRelayClientGateway({
+Future<RelayClientSession> startRelayClientSession({
+  required Uri coreBaseUri,
   required Uri invitationUri,
-  required RelayTarget target,
 }) {
-  return implementation.startRelayClientGateway(
+  return implementation.startRelayClientSession(
+    coreBaseUri: coreBaseUri,
     invitationUri: invitationUri,
-    target: target,
   );
 }

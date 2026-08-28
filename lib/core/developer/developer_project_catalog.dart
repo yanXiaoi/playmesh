@@ -79,6 +79,7 @@ class DeveloperProjectDraft {
     this.tags = const [],
     this.requiredCapabilities = const [],
     this.controllerRequiredCapabilities = const [],
+    this.webRuntimeMultithreading = false,
     this.requireAndroidApplicationId = false,
   });
 
@@ -96,6 +97,7 @@ class DeveloperProjectDraft {
   final List<String> tags;
   final List<String> requiredCapabilities;
   final List<String> controllerRequiredCapabilities;
+  final bool webRuntimeMultithreading;
 
   /// Set only by the source workspace's create-project endpoint. Keeping the
   /// default legacy policy prevents copy/import/visual-development paths from
@@ -310,6 +312,12 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       '${root.path}${Platform.pathSeparator}${package.manifest.id}',
     );
     final existed = await target.exists();
+    if (!existed) {
+      ProjectProvisioningService.validateNewProjectIdentity(
+        gameId: package.manifest.id,
+        name: package.manifest.name,
+      );
+    }
     final before = existed ? await _visibleFilePaths(target) : const <String>{};
     if (existed) {
       await _localHistory.recordMutation(
@@ -413,9 +421,11 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
               ..['modes'] = [draft.mode]
               ..['displayModes'] = [draft.displayMode]
               ..['tags'] = draft.tags.map((tag) => tag.trim()).toSet().toList()
-              ..['players'] = {
-                'min': draft.minPlayers,
-                'max': draft.maxPlayers,
+              ..['players'] = {'min': draft.minPlayers, 'max': draft.maxPlayers}
+              ..['config'] = {
+                'webRuntime': {
+                  'multithreading': draft.webRuntimeMultithreading,
+                },
               };
         if (draft.controllerOrientation case final controllerOrientation?) {
           manifestJson['controllerOrientation'] =
@@ -1249,6 +1259,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       controllerOrientation: manifest.controllerOrientation,
       tags: manifest.tags,
       capabilities: await _readCustomCapabilities(directory),
+      config: manifest.config,
       entry: LocalGameEntry(
         gameEntryPath: manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,
@@ -1432,7 +1443,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
     bool requireAndroidApplicationId = false,
   }) {
     final identity = requireAndroidApplicationId
-        ? ProjectProvisioningService.validateNewSourceIdentity(
+        ? ProjectProvisioningService.validateNewProjectIdentity(
             gameId: id,
             name: name,
           )

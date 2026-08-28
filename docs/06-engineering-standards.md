@@ -50,11 +50,19 @@ Game Package
   执行器。执行器不得另设 ID，也不参与路由和声明判断，只实现自身平台授权。本地页、
   加入页、Windows WebView 与 Android Activity 不得按 camera、microphone、MIDI 或
   能力 code 建立第二套映射或 switch；普通浏览器不进入 App 原生权限执行链。
-- 当前终端产生的音视频统一通过 `playmesh.app.media` 按需消费。公共媒体运行时只做
-  适配器注册、选择、不透明源签发、会话映射和生命周期管理；`sourceOptions` 表达协议
-  无关源需求，独立 `adapterOptions` 完全由具体适配器解析。公共请求、能力插件和
-  Bridge 不得包含 WebRTC/SDP/ICE 条件分支；新增协议只注册新的 Dart 与网页适配器。
-  同终端 WebView 媒体不得为接入方便暴露 HTTP 地址、端口或内置信令服务器。
+- 由原生能力插件在当前终端产生、再交给同一 WebView 消费的媒体统一通过
+  `playmesh.app.media` 按需转交。公共媒体运行时只做适配器注册、选择、不透明源签发、
+  会话映射和生命周期管理；`sourceOptions` 表达协议无关源需求，独立 `adapterOptions`
+  完全由具体适配器解析。公共媒体请求和能力插件不得包含 WebRTC/SDP/ICE 条件分支，
+  同终端媒体不得为接入方便暴露 HTTP 地址或任意端口。
+- 网页使用 `getUserMedia()` 等浏览器标准 API 自行采集、并跨终端传输媒体或自定义
+  DataChannel 时，统一从 `playmesh.app.webrtc.getSignalingEndpoint(identifier)` 取得
+  当前会话绑定、短期且单次使用的信令端点与 ICE 配置。平台只鉴权、限流和按 Authority
+  星形拓扑转发 JSON 信令；HTML 自行管理 PeerConnection、权限、SDP/ICE、轨道、码率、
+  ICE restart 和关闭。Authority 局域网 STUN/TURN 的监听地址必须复用 Flutter/Runtime
+  已有的 `resolveBindableLanIpv4InterfaceAddresses`，禁止 Go Core 重复遍历网卡；端点必须先
+  返回可用的本地 ICE，再追加 Go Server 公共 ICE，并按会话、可信玩家和标识符隔离凭据。
+  该入口不得签发 `AppMediaSource`，也不得接管平台 web/core 隧道。
 - 游戏分享运行时采用严格的最小公开面：外层物理 `app/` 下的普通资源直接位于运行时 `/`，另只允许 `/bucket/**`、`/playmesh/**`，以及 SDK 在浏览器沙箱内确实无法替代的受控底层连接能力（例如当前游戏受控的 WebSocket Upgrade）。`app` 是普通用户路径首段，物理 `app/app/**` 映射为 `/app/**`，且不会把 `/app/**` 别名到外层 `app/**`；只有 `playmesh`、`bucket` 是平台保留首段。该清单是完整公开边界而非接口示例。新增平台功能时必须遵循“SDK 优先”原则，优先修改 Game SDK 或 App Bridge SDK；平台 HTTP/WS 入口只能增加在 `/playmesh/**`，必须固定绑定当前游戏和会话、在建连前鉴权、禁止任意目标地址，并同步补齐协议文档与回归测试。
 - SDK 分为公共游戏运行时 `playmesh-main.js` 与当前终端运行时
   `playmesh-app.js`。前者只公开 `playmesh.main.*`，在所有平台提供一致的游戏声明、
@@ -74,16 +82,26 @@ Game Package
   禁止经 Session 或游戏网关跨设备转发。
 - 游戏可以自带引擎或工具库，但必须放在自己的游戏包内并通过包校验流程管理；不得因为使用第三方引擎而绕过 SDK 的身份、存储和联机边界。
 - SDK 不额外设计启动回调，页面脚本执行就是启动；必须提供 `onPause`、`onResume` 和由 App 主动触发的 `onExit` 生命周期接口。
+- 浏览器顶层 `transport.closed/error` 和 WebView 内部 `transport.status` 必须统一投影为
+  `playmesh.main.lifecycle.onChange()` 的 `closed/error`。平台 WebRTC 隧道失效时必须关闭
+  对应 DataChannel 和本机 socket 以触发该投影，但不得自动切换路线、导航或新建连接。
 - `onExit` 只作为退出前的最佳努力通知，必须幂等、有超时，不能作为唯一的数据持久化时机；重要数据应在状态变化后及时保存。
 - 游戏库采用“目录扫描优先”原则：游戏包导入后由 App 自动扫描、校验和建立索引，不增加开发者注册步骤；索引失效时可以从目录重新构建。
 - 游戏自定义数据必须通过 `playmesh.main.storage.getBucket(bucket)` 持久化。JSON 值存放在 `packages/{gameId}/data/json/{bucket}.json`；`upload(file)` 写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`。不能写入游戏包目录或直接操作文件系统。
 - 平台只按 `gameId + bucket` 选择上述目录，不得自动增加 `{userId}` 层。游戏需要区分用户时，由开发者在 Bucket、key 或 JSON 内容中自行设计。
 - 异步方法和 `upload(file)` 的 Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；SDK 在调用前校验，Flutter 存储层在落盘前再次校验。同步方法仅为锁定运行时适配器额外接受 1 至 4096 UTF-8 字节的原始逻辑名，并映射到带原名校验的安全物理 envelope；不能借此放宽同一 Bucket 的异步方法。私有 key `$playmesh.gdevelop.root.v1` 只允许同步 GDevelop 适配路径。
-- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。完整 Bucket JSON root 上限为 10 MiB。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 256 MiB。
+- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。完整 Bucket JSON root 上限为 10 MiB。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 512 MiB。
 - 异步 JSON API 与 `getDataSync/setDataSync` 必须统一走同一个绑定当前游戏/会话的同源 HTTP Bucket 网关：GET 读取、PUT 写入、DELETE 删除或清空，并共同使用 SHA-256、requestId 幂等和 revision/CAS。同步方法只允许锁定运行时 seam 使用主线程同步 XHR；不预热、不设 timer、不提供手动 flush，失败立即抛错。旧 Session WebSocket 存储请求/响应、pending/settle 接收器、双读、双写和 fallback 必须从 SDK、App host、GameRuntimeBridge 与 Go Core 主链彻底删除，并以全仓来源门禁防止回归。
 - 持久化数据的唯一落盘端是开始游戏的 Authority 主机；所有 JSON HTTP 请求最终调用该项目共享的主机内存协调器和延迟落盘服务。该网关是 SDK 内部传输而非游戏可构造的公开业务 API，不能恢复 `/api/storage` 或允许任意 gameId。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。`upload(file)` 继续独立使用 HTTP POST 与 `data/data`，不能进入 JSON envelope 或 `data/json`。
 - `packages/{gameId}/app/` 是 WebView 静态映射根。运行时只把 `data/data` 中的文件映射为不可枚举的 `/bucket/{bucket}/{timestamp-file}`；`data/json` 始终私有，任何资源服务、路径拼接和预览接口都必须拒绝访问或穿越到该目录。
 - 当前游戏的物理 `app/` 直接映射为 `/`；SDK、平台头像等公共资源统一放在 `playmesh-library/public/` 并通过 `/playmesh/...` 暴露。物理 `app/` 不得包含大小写变体的一级 `playmesh/` 或 `bucket/`；游戏不得以编码、反斜杠、空段、`.`、`..` 或符号链接越出 `app/`，也不得读取其他游戏包。
+- `main.json.config` 是可选且不透明的扩展值。解析、未编辑的规范化保存、复制、导入、导出、
+  CLI 打包和运行摘要都必须原样保留它，不得验证其类型、投影其内部对象或删除未知子字段。
+  生产代码读取任意 `config` 内部字段必须统一调用各运行时的公共配置读取器；缺少 `config`、
+  任一级对象或字段时返回 `null`，禁止各模块自行做 `Map` 索引或重复缺省逻辑。设置界面或
+  CLI 明确编辑某个已知字段时，以当前输入值写回标准类型；可合并对象中的其他未知字段必须
+  保留，非对象的旧层级由最新标准对象结构替换。当前 Web Runtime 多线程开关只有精确布尔值
+  `true` 生效；模板和所有新建入口默认显式写入 `false`。
 - 游戏详情页清除缓存/数据和删除游戏必须调用统一的数据清理流程；数据清理必须有用户确认、日志和明确的不可恢复提示。
 - 原始压缩包只存在于导入和分享的临时生命周期内，安装库不长期保存压缩包；分享包由已安装目录临时生成。
 - 工作区新建项目和用户导入项目统一进入 `packages/{gameId}/`，使用同一套扫描、校验、索引、运行和删除流程。
@@ -229,10 +247,13 @@ WebView -> GameAssetGateway -> DevelopmentGameWebResourceProvider
   URL、token 或 PNG 写入日志、分析、磁盘、崩溃详情、异常消息或跨会话缓存。
 - `playmesh.app.ui.disableSystemMenuTriggers()` 必须严格无参数、仅在 App UI ready 后
   单向且幂等地禁用当前文档的 Escape/Menu/Back 自动菜单触发；不得影响显式菜单/信息/日志
-  覆盖层 API，配置刷新不得重新绑定，文档刷新恢复默认。旧 boolean setter 不得恢复。
-- `playmesh.app.ui.onBack()` 只允许在游戏显式配置 `fallbackUi: false` 后生效；`false`
-  阻止退出，`true`、无监听器、异常或超时继续退出。资格判断只读取统一兜底 UI 配置，
-  不得按 WebView/移动端/浏览器或 SDK 内部弹窗类型建立分支。
+  覆盖层 API 或 `onBack()` 回调，配置刷新不得重新绑定，文档刷新恢复默认。旧 boolean setter 不得恢复。
+- `playmesh.app.ui.onBack()` 在 Android 系统返回和 Esc 的每次受控触发中都要先于
+  SDK 覆盖层关闭或菜单显示执行所有回调。回调只能返回 `EXIT`、`NEXT` 或
+  `STOP`：`EXIT` 直接退出，`NEXT` 继续原默认流程，`STOP` 终止后续流程。
+  `NEXT` 必须在决策完成后重新检查 `fallbackUi`、系统菜单触发器和当前覆盖层；
+  `fallbackUi: false` 时绝不得显示面板。多回调优先级为 `STOP > EXIT > NEXT`；
+  异常、超时或非法返回值按 `NEXT` 处理。
 - 统一菜单的“加入游戏”入口必须与分享/邀请共用 Authority 主机可见性，且额外要求存在
   App 原生 Bridge；加入端 WebView 和普通浏览器都不得显示或触发该入口。
 - Go Core 主 Session WebSocket 不设置每连接每秒消息条数上限；帧大小、认证、权限和
@@ -304,8 +325,9 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。WebView 必须按当前页面角色在方向应用完成后创建，进入全屏时把对应方向传到原生宿主，退出游戏后恢复系统方向。
 - `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描。缺失 `author` 在模型中保持空动态值，App 固定外壳用统一 `app.json` 显示本地化“未知发布者”；非空发布者始终逐字显示。缺失时间由 App 外壳显示本地化“无”，有值时按设备本地时区换算。
 - `sdkVersion/appSdkVersion` 均为必填字段，用于声明游戏包要求的 SDK 版本；统一 Dart
-  注册表当前精确接受 Game SDK `4.1.0`，并接受 App Bridge SDK `3.2.0`、`3.3.0`，
-  Game 请求使用 `4.1.0` bundle，两个 App 请求版本均使用兼容的 `3.3.0` bundle。
+  注册表当前只接受 Game SDK `4.1.0`，并接受 App Bridge SDK
+  `3.2.0`、`3.3.0`、`3.4.0`。Game 请求使用 `4.1.0` bundle，App 请求使用
+  兼容的 `3.4.0` bundle。
   当前兼容基线外、未知值和格式错误值直接拒绝。
 - SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本。版本升级必须同步更新发行定义、Manifest、
   Schema、模板、生成产物、测试和文档；已经完成的 Game SDK 4.0 命名空间切换不追溯兼容
@@ -348,7 +370,10 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - `PATCH`：不改变公开契约的兼容性修复、性能修复或实现修正。
 - `MINOR`：保持当前主版本兼容的新增能力、公开 API 或可选字段。
 - `MAJOR`：删除或重命名公开能力，改变既有字段、状态、数据格式或调用语义等不兼容变更。
-- Game SDK 与 App Bridge SDK 是上述 `MAJOR` 规则的例外：永久兼容基线集合包含 Game SDK `4.1.0` 以及 App Bridge SDK `3.2.0`、`3.3.0`。后续禁止破坏性更新，也不得以提升 `MAJOR` 版本规避兼容责任；只能用 `PATCH` 做兼容修复或用 `MINOR` 增量增加新函数，并继续接受升级前全部已支持的明确请求版本。
+- Game SDK 与 App Bridge SDK 是上述 `MAJOR` 规则的例外：永久兼容基线集合包含 Game SDK `4.1.0` 以及 App Bridge SDK `3.2.0`、`3.3.0`；当前 Game 兼容集合追加 `4.2.0`、`4.3.0`，App 兼容集合追加 `3.4.0`、`3.5.0`。后续禁止破坏性更新，也不得以提升 `MAJOR` 版本规避兼容责任；只能用 `PATCH` 做兼容修复或用 `MINOR` 增量增加新函数，并继续接受升级前全部已支持的明确请求版本。
+- 主 App SDK 发行注册表精确枚举已发布请求版本；独立 Runtime 则接受兼容基线到随包最高
+  Bundle 的严格语义版本闭区间，避免拒绝历史枚举中缺失但不高于自身能力的旧兼容 SDK。
+  Runtime 仍必须拒绝基线前、格式错误和高于随包 Bundle 的版本，不能猜测执行未来 SDK。
 - Flutter App 每次形成新的可分发构建时，除语义版本外还必须递增 `+build`；只修改说明文字且不形成新构建时不递增 App 版本。
 - 纯文档勘误、阶段归档或未改变执行约束的提示词整理，不单独推动运行时版本；一旦提示词、Schema、Manifest 或 OpenAPI 反映了新的运行时契约，必须与对应组件在同一变更中升级。
 
@@ -356,18 +381,20 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `4.3.0+30` | `pubspec.yaml` |
-| Go Core | `0.5.0` | `go-core/main.go`、`go-core/mobile/core.go` |
-| Core 协议 | `1.3.0` | Flutter/Go health、会话与玩家协议定义 |
-| Game SDK | `4.1.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
-| App Bridge SDK | `3.3.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
+| Playmesh App | `5.1.0+37` | `pubspec.yaml` |
+| Playmesh Runtime | `2.1.0+11` | `runtime/src/pubspec.yaml` |
+| Go Core | `0.7.0` | `go-core/main.go`、`go-core/mobile/core.go` |
+| Core 协议 | `1.5.0` | Flutter/Go health、会话、玩家、WebRTC 与 RPC 流控制协议定义 |
+| Game SDK | `4.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
+| App Bridge SDK | `3.5.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
 | Developer API / OpenAPI | `5.0.0` | Developer Gateway、安装包导出与临时开发资源会话契约 |
 | Developer CLI | `2.0.0` | `dev-cli/`、adapter.Adapter、CLI User-Agent 与桌面平台构建规则 |
 | Catalog API | `3.0.0` | `/apps/info`、根相对入口、包校验、版本化下载、图标与上传声明 |
-| Relay 协议 | `3.0.0` | 根相对邀请入口、App 端点加密邀请与 Go Server 中转协议 |
+| Relay 协议 | `4.0.0` | WebRTC 信令、Pion TURN/STUN 与 DataChannel 隧道协议 |
+| GDevelop Playmesh 扩展 | `2.1.0` | GDevelop 扩展生成脚本与生成的 `Playmesh.json` |
 
 该矩阵描述当前代码与生成契约；发布状态和历史版本见
-`docs/version/README.md`、`docs/version/4.3.0.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+`docs/version/README.md`、`docs/version/5.0.1.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `dev/run` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段并与目标 App 精确核对，禁止手工声明不一致版本。CLI 2.0 只接受根 `playmesh-cli.json`；发布内容隔离在 `playmesh/package/`，SDK/类型隔离在 `playmesh/sdk/`，上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根 `icon.png` 和必需物理 `app/`。`outputDirectory` 和入口都相对于外层 `packageRoot/app/`；首段 `app` 合法，例如入口 `app/index.html` 对应物理 `packageRoot/app/app/index.html` 和运行时 `/app/index.html`。项目平台差异只能通过唯一 `adapter.Registry` 中的 `Adapter` 实现，公共命令不得按 Cocos/语言复制分支或维护第二份适配器实例表。
@@ -394,18 +421,27 @@ WebSocket 子协议；不得使用环境代理或转发 `/playmesh/**`、`/bucke
 
 所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖必需 `main.json`、可选 `capabilities.json`、可选 `icon.png` 与必需 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 
-Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`；命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时先对 `main.json` 做严格版本校验：永久兼容基线集合包含 Game SDK `4.1.0` 以及 App Bridge SDK `3.2.0`、`3.3.0`，再由注册表解析到对应兼容 bundle；未在 `supportedRequestedVersions` 列出的中间值仍须拒绝。SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。后续 SDK 升级时兼容请求集合只可追加、不得缩小，公开命名空间、函数、参数接受范围、返回结构、事件、错误 code 与调用语义不得破坏；增量增加新函数使用 `MINOR` 版本。
+Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`；命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时先对 `main.json` 做严格版本校验：永久兼容基线集合包含 Game SDK `4.1.0` 以及 App Bridge SDK `3.2.0`、`3.3.0`，当前 App 集合再追加 `3.4.0`，然后由注册表解析到对应兼容 bundle；未在 `supportedRequestedVersions` 列出的中间值仍须拒绝。SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。后续 SDK 升级时兼容请求集合只可追加、不得缩小，公开命名空间、函数、参数接受范围、返回结构、事件、错误 code 与调用语义不得破坏；增量增加新函数使用 `MINOR` 版本。
 
 开发运行时、游戏资源网关、分享网关、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `node tool/generate_sdk.mjs`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、明确兼容请求版本集合、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架和开发下载暴露当前版本；机器契约与校验器必须同时保留仍受支持的清单请求版本，不依赖历史静态文件、字段双写、命名空间 shim 或网关旁路。
 
 ## 错误和日志
 
-错误必须分为用户可理解的提示和开发可定位的诊断信息：
+界面、CLI 和开发者工具必须完整显示底层错误信息，便于直接定位问题；不得把错误拆分成
+面向用户的简化提示和需要另行查找的诊断信息，也不得用本地化文案、概括性描述或“请重试”
+替换、截断或隐藏原始错误。错误展示至少包含稳定的机器错误 code、原始错误消息、错误类型、
+完整 cause 链和可用的请求、会话等上下文标识；底层提供堆栈时，开发与诊断界面必须同时
+完整显示堆栈。本地化说明只能作为附加内容，不能替代底层错误。
 
 ```text
-用户提示：联机码已过期，请重新获取
-诊断信息：code=session_expired sessionId=... requestId=...
+SessionExpiredError: code=session_expired message="join code expired"
+sessionId=... requestId=...
+caused by: ...
+stack: ...
 ```
+
+完整显示不取消敏感信息保护：Token、凭据、内部 URL 等必须按下述规则删除或脱敏，并明确
+标记为已脱敏；除这些敏感字段外，不得删除业务原因或错误链。
 
 推荐日志字段：
 
@@ -431,7 +467,7 @@ Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 
 测试从小到大覆盖：
 
 - 单元测试：模型校验、联机码、人数限制、权限检查、协议编解码。
-- Widget 测试：页面状态、导航、错误提示、单机/联机入口切换。
+- Widget 测试：页面状态、导航、底层错误完整展示、单机/联机入口切换。
 - 集成测试：创建会话、浏览器中间层加入、短期凭证、WebSocket 输入链路。
 - 游戏包验收：目录结构、`main.json`、必需入口、当前 SDK 版本和资源路径。
 - 回归测试：每次修改协议、权限、会话状态或 Game SDK API 时执行相关测试。
@@ -579,6 +615,11 @@ Go Core 只校验连接、会话、角色、凭证、消息格式、大小、频
 - 权威状态必须带 `revision` 或等价版本号，客户端丢失中间状态后可以请求最新快照。
 - SDK 应记录动作从提交到权威确认的耗时，便于区分本机 JS 处理、App 桥接、Go 转发和局域网传输问题。
 - Binary WS 单帧上限为 4 MiB，单次定向发送最多 1024 个去重目标，单连接允许每秒 2000 帧和 64 MiB 入站流量，出站队列上限为 32 MiB，每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。内部 RPC 每局最多挂起 256 项、每个发送者最多 32 项、总 payload 最多 32 MiB，请求超时为 100～60000 ms；SDK 单值编码上限为 `4 MiB - 64 KiB`。这些是局域网防失控边界，不是建议业务速率。多目标 payload 只能上行一次并由 Core 扇出；广播目标由 Core 按 Channel 当前在线成员展开并排除发送者。可靠帧达到上限时必须返回错误，连续状态应优先使用 `sendLatest` 合并尚未发送的状态帧。
+- 大字节文件不得分片塞入普通 RPC 或 Binary 帧；使用 `rpc.requestStream/onStreamRequest`。
+  Binary WS 只承载流控制与小型结果，字节体通过同会话鉴权的一次性 HTTP 流转发，以 EOF
+  结束。Core 必须使用有界缓冲和背压，不得拼接完整文件或无界排队；单流上限 512 MiB，
+  每玩家最多 4 个、每局最多 16 个，默认超时 5 分钟且只允许 1 秒至 30 分钟。发送/接收
+  进度回调只观察各自 source 拉取量，未知总量为 `null`，回调异常不得改变传输结果。
 
 ## 完成定义
 

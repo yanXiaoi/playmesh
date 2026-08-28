@@ -1,33 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../core/game_web/game_invitation_inspector.dart';
-import '../../core/game_web/game_join_coordinator.dart';
 import '../../core/localization/playmesh_localization.dart';
-import '../../core/network/lan_game_discovery_service.dart';
-import 'game_join_error_localization.dart';
-import 'game_join_router.dart';
 
 class GameInvitationScannerPage extends StatefulWidget {
-  const GameInvitationScannerPage({
-    super.key,
-    this.initialUserId,
-    this.initialNickname,
-    this.joinRouter = const GameJoinRouter(),
-    this.discoveryService,
-    this.onNicknameChanged,
-  }) : assert(
-         (initialUserId == null) == (initialNickname == null),
-         'The direct-join identity must be provided as a complete pair.',
-       );
+  const GameInvitationScannerPage({super.key});
 
   static const routeName = '/scan-game-invitation';
-
-  final String? initialUserId;
-  final String? initialNickname;
-  final GameJoinRouter joinRouter;
-  final LanGameDiscoveryService? discoveryService;
-  final Future<void> Function(String nickname)? onNicknameChanged;
 
   @override
   State<GameInvitationScannerPage> createState() =>
@@ -100,50 +79,7 @@ class _GameInvitationScannerPageState extends State<GameInvitationScannerPage> {
     }
     if (value == null || value.isEmpty) return;
 
-    final userId = widget.initialUserId;
-    if (userId == null) {
-      _handled = true;
-      Navigator.of(context).pop(value);
-      return;
-    }
-
     _handled = true;
-    await _scannerController.stop();
-    if (!mounted) return;
-    final inspector = DefaultGameInvitationInspector();
-    try {
-      final coordinator = GameJoinCoordinator(inspector: inspector);
-      final launch = await coordinator.prepareLink(
-        value,
-        context: const GameJoinContext(),
-      );
-      if (!mounted) return;
-      await widget.joinRouter.replace(
-        context,
-        launch: launch,
-        userId: userId,
-        nickname: widget.initialNickname!,
-        discoveryService: widget.discoveryService,
-        onNicknameChanged: widget.onNicknameChanged,
-      );
-    } on GameJoinException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.tr(gameJoinErrorLocalizationKey(error))),
-        ),
-      );
-      _handled = false;
-      await _scannerController.start();
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.tr('join.invalid_invite'))),
-      );
-      _handled = false;
-      await _scannerController.start();
-    } finally {
-      await inspector.close();
-    }
+    Navigator.of(context).pop(value);
   }
 }

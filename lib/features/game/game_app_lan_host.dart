@@ -27,10 +27,12 @@ class GameAppLanHostAdapter implements AppLanHost {
     required AppLanRemoteGameReplacer replaceGame,
     required Future<void> Function() publish,
     required Future<GameShareLinkSnapshot> Function() readShareLinks,
+    Uri? coreBaseUri,
     Duration discoveryDuration = const Duration(seconds: 2),
     GameInvitationInspector? inspector,
   }) {
-    final resolvedInspector = inspector ?? DefaultGameInvitationInspector();
+    final resolvedInspector =
+        inspector ?? DefaultGameInvitationInspector(coreBaseUri: coreBaseUri);
     return GameAppLanHostAdapter._(
       gameId,
       discoveryService,
@@ -268,10 +270,27 @@ class GameAppLanHostAdapter implements AppLanHost {
     );
     try {
       final launch = await prepare(context);
-      _checkGeneration(generation);
-      return AppLanJoinAction(() => _navigate(launch, generation));
-    } on GameJoinException catch (error) {
-      throw SdkCommandException(error.code, error.message);
+      try {
+        _checkGeneration(generation);
+      } on Object {
+        await launch.close();
+        rethrow;
+      }
+      return AppLanJoinAction(() async {
+        try {
+          await _navigate(launch, generation);
+        } finally {
+          await launch.close();
+        }
+      });
+    } on GameJoinException catch (error, stackTrace) {
+      throw SdkCommandException(
+        error.code,
+        error.message,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'prepare_join'},
+      );
     }
   }
 

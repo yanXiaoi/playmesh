@@ -600,6 +600,7 @@ class _PlaymeshAppState extends State<PlaymeshApp>
             : _retryGameLibraryScan,
         lanGameDiscoveryService: _lanGameDiscoveryService,
         onNicknameChanged: _saveNickname,
+        coreControlBaseUriProvider: () => _runtime?.endpoint,
       ),
       routes: {
         ProfilePage.routeName: (_) =>
@@ -655,6 +656,8 @@ class _PlaymeshAppState extends State<PlaymeshApp>
           initialNickname: _profile.nickname,
           onNicknameChanged: _saveNickname,
           discoveryService: _lanGameDiscoveryService,
+          coreControlBaseUri: _runtime?.endpoint,
+          coreControlBaseUriProvider: () => _runtime?.endpoint,
         ),
       },
       onGenerateRoute: (settings) {

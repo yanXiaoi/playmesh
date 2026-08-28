@@ -43,6 +43,7 @@ type PlaymeshProjectConfigPutOptions = {|
   minPlayers: number,
   maxPlayers: number,
   tags: Array<string>,
+  webRuntimeMultithreading: boolean,
   expectedRevision: number,
   signal?: ?AbortSignal,
 |};
@@ -307,6 +308,7 @@ export class PlaymeshProjectConfigClient {
       minPlayers,
       maxPlayers,
       tags,
+      webRuntimeMultithreading,
       expectedRevision,
       signal,
     } /*: PlaymeshProjectConfigPutOptions */
@@ -316,6 +318,7 @@ export class PlaymeshProjectConfigClient {
       minPlayers,
       maxPlayers,
       tags,
+      webRuntimeMultithreading,
       expectedRevision,
     });
     return this._request({

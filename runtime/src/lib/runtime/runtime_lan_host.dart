@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../core/diagnostics/playmesh_error_diagnostic.dart';
+
 final class RuntimeLanDiscoveredGame {
   const RuntimeLanDiscoveredGame({
     required this.instanceId,
@@ -50,12 +52,29 @@ abstract interface class RuntimeLanHost {
   Future<void> close();
 }
 
-final class RuntimeLanException implements Exception {
-  const RuntimeLanException(this.code, this.message);
+final class RuntimeLanException implements Exception, PlaymeshDiagnosticError {
+  const RuntimeLanException(
+    this.code,
+    this.message, {
+    this.cause,
+    this.causeStackTrace,
+    this.context = const {},
+  });
 
+  @override
   final String code;
+  @override
   final String message;
 
   @override
-  String toString() => message;
+  final Object? cause;
+
+  @override
+  final StackTrace? causeStackTrace;
+
+  @override
+  final Map<String, String> context;
+
+  @override
+  String toString() => formatPlaymeshDiagnosticError(this);
 }

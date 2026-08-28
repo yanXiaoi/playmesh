@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -177,6 +178,199 @@ func TestHandlerRoutesActionsOnlyThroughAuthority(t *testing.T) {
 	guestPong := readType(t, guestConnection, "session.pong")
 	if !bytes.Contains(guestPong.Payload, []byte(`"authorityAvailable":true`)) {
 		t.Fatalf("guest latency payload = %s", guestPong.Payload)
+	}
+}
+
+func TestWebRTCSignalingRoutesMultiplePlayersOnlyThroughAuthority(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "webrtc-room", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 5, "nickname": "房主",
+	})
+	hostMain := dial(t, server.URL, host)
+	defer hostMain.CloseNow()
+	first := postSession(t, server.URL+"/v1/sessions/join", map[string]any{
+		"joinCode": host.Session.JoinCode, "nickname": "玩家一",
+	})
+	firstMain := dial(t, server.URL, first)
+	defer firstMain.CloseNow()
+	second := postSession(t, server.URL+"/v1/sessions/join", map[string]any{
+		"joinCode": host.Session.JoinCode, "nickname": "玩家二",
+	})
+	secondMain := dial(t, server.URL, second)
+	defer secondMain.CloseNow()
+
+	hostSignal := dialWebRTCSignaling(t, server.URL, host, "camera.main")
+	defer hostSignal.CloseNow()
+	firstSignal := dialWebRTCSignaling(t, server.URL, first, "camera.main")
+	defer firstSignal.CloseNow()
+	secondSignal := dialWebRTCSignaling(t, server.URL, second, "camera.main")
+	defer secondSignal.CloseNow()
+
+	writeWebRTCSignal(t, firstSignal, "", map[string]any{"description": "offer-one"})
+	firstOffer := readWebRTCSignalingType(t, hostSignal, "signal")
+	if firstOffer.SenderPlayerID != first.Credential.Player.ID ||
+		!bytes.Contains(firstOffer.Payload, []byte(`"offer-one"`)) {
+		t.Fatalf("first offer = %#v payload=%s", firstOffer, firstOffer.Payload)
+	}
+	writeWebRTCSignal(t, secondSignal, "", map[string]any{"description": "offer-two"})
+	secondOffer := readWebRTCSignalingType(t, hostSignal, "signal")
+	if secondOffer.SenderPlayerID != second.Credential.Player.ID ||
+		!bytes.Contains(secondOffer.Payload, []byte(`"offer-two"`)) {
+		t.Fatalf("second offer = %#v payload=%s", secondOffer, secondOffer.Payload)
+	}
+
+	writeWebRTCSignal(
+		t,
+		hostSignal,
+		first.Credential.Player.ID,
+		map[string]any{"description": "answer-one"},
+	)
+	answer := readWebRTCSignalingType(t, firstSignal, "signal")
+	if answer.SenderPlayerID != host.Credential.Player.ID ||
+		!bytes.Contains(answer.Payload, []byte(`"answer-one"`)) {
+		t.Fatalf("authority answer = %#v payload=%s", answer, answer.Payload)
+	}
+
+	writeWebRTCSignal(
+		t,
+		firstSignal,
+		second.Credential.Player.ID,
+		map[string]any{"description": "forbidden"},
+	)
+	_, _, err := firstSignal.Read(context.Background())
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("controller lateral signal close status = %v, error = %v", websocket.CloseStatus(err), err)
+	}
+}
+
+func TestWebRTCSignalingEndpointRequiresMainSessionAndTicketIsSingleUse(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "webrtc-ticket", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+
+	request := newWebRTCSignalingEndpointRequest(t, server.URL, host, "camera.main")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("endpoint without main websocket status = %d", response.StatusCode)
+	}
+
+	hostMain := dial(t, server.URL, host)
+	defer hostMain.CloseNow()
+	endpoint := createWebRTCSignalingEndpoint(t, server.URL, host, "camera.main")
+	connection := dialWebRTCSignalingEndpoint(t, server.URL, endpoint)
+	defer connection.CloseNow()
+
+	webSocketURL := strings.Replace(server.URL, "http", "ws", 1) + endpoint.WebSocketPath
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	reused, reusedResponse, reusedErr := websocket.Dial(ctx, webSocketURL, nil)
+	if reused != nil {
+		reused.CloseNow()
+	}
+	if reusedErr == nil || reusedResponse == nil || reusedResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("reused ticket response = %#v, error = %v", reusedResponse, reusedErr)
+	}
+}
+
+func TestWebRTCSignalingEndpointReceivesPlayerScopedLocalICEConfiguration(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandler(NewStore(), logger)
+	var providedSessionID string
+	var providedPlayerID string
+	var providedIdentifier string
+	handler.SetWebRTCICEServerProvider(func(sessionID, playerID, identifier string) []WebRTCICEServer {
+		providedSessionID = sessionID
+		providedPlayerID = playerID
+		providedIdentifier = identifier
+		return []WebRTCICEServer{
+			{URLs: []string{"stun:192.168.1.2:3478"}},
+			{
+				URLs:     []string{"turn:192.168.1.2:3478?transport=udp"},
+				Username: "scoped-user", Credential: "scoped-credential",
+			},
+		}
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "webrtc-local-ice", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	hostMain := dial(t, server.URL, host)
+	defer hostMain.CloseNow()
+
+	endpoint := createWebRTCSignalingEndpoint(t, server.URL, host, "camera/main")
+	if providedSessionID != host.Session.ID ||
+		providedPlayerID != host.Credential.Player.ID ||
+		providedIdentifier != "camera/main" {
+		t.Fatalf(
+			"ICE scope = session:%q player:%q identifier:%q",
+			providedSessionID,
+			providedPlayerID,
+			providedIdentifier,
+		)
+	}
+	if len(endpoint.ICEServers) != 2 || endpoint.ICEServers[1].Username != "scoped-user" {
+		t.Fatalf("endpoint ICE servers = %#v", endpoint.ICEServers)
+	}
+}
+
+func TestWebRTCSignalingEndpointLimitsPendingTicketsPerPlayer(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "webrtc-ticket-limit", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	hostMain := dial(t, server.URL, host)
+	defer hostMain.CloseNow()
+
+	for index := 0; index < webRTCSignalingMaxPlayerSlots; index++ {
+		request := newWebRTCSignalingEndpointRequest(
+			t,
+			server.URL,
+			host,
+			fmt.Sprintf("channel.%d", index),
+		)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusCreated {
+			t.Fatalf("endpoint %d status = %d", index, response.StatusCode)
+		}
+	}
+
+	request := newWebRTCSignalingEndpointRequest(t, server.URL, host, "channel.overflow")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("overflow endpoint status = %d", response.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	errorPayload, _ := payload["error"].(map[string]any)
+	if errorPayload["code"] != "signaling_limit" {
+		t.Fatalf("overflow error = %#v", payload)
 	}
 }
 
@@ -474,6 +668,8 @@ func TestJoinAccessUsesServerDerivedIngress(t *testing.T) {
 		origin        string
 		claim         string
 		want          playerAccess
+		wantError     bool
+		derivedMode   string
 	}{
 		{
 			name:          "native app",
@@ -498,15 +694,21 @@ func TestJoinAccessUsesServerDerivedIngress(t *testing.T) {
 			host: "192.0.2.10:39001", claim: "lan_app", want: playerAccessLANHTML,
 		},
 		{
-			name:          "relay source remains non-avatar server identity",
+			name:          "untrusted remote cannot claim relay identity",
 			remoteAddress: "192.0.2.50:51005", localAddress: "192.0.2.10:39001",
-			host: "192.0.2.10:39001", claim: "server", want: playerAccessServer,
+			host: "192.0.2.10:39001", claim: "server", wantError: true,
 		},
 		{
-			name:          "relay loopback bridge is not upgraded to app",
+			name:          "unregistered loopback bridge cannot claim relay identity",
 			remoteAddress: "127.0.0.1:51006", localAddress: "127.0.0.1:39001",
 			host: "127.0.0.1:42001", origin: "http://127.0.0.1:43001",
-			claim: "server", want: playerAccessServer,
+			claim: "server", wantError: true,
+		},
+		{
+			name:          "Pion registry establishes relay identity",
+			remoteAddress: "127.0.0.1:51007", localAddress: "127.0.0.1:39001",
+			host: "127.0.0.1:42001", origin: "http://127.0.0.1:43001",
+			claim: "lan_html", want: playerAccessServer, derivedMode: "relay",
 		},
 	}
 	for _, test := range tests {
@@ -528,7 +730,22 @@ func TestJoinAccessUsesServerDerivedIngress(t *testing.T) {
 					localAddress,
 				),
 			)
-			access, err := joinAccessForRequest(request, test.claim)
+			handler := NewHandler(
+				NewStore(),
+				slog.New(slog.NewTextHandler(io.Discard, nil)),
+			)
+			if test.derivedMode != "" {
+				handler.SetConnectionModeResolver(func(remoteAddress string) (string, bool) {
+					return test.derivedMode, remoteAddress == test.remoteAddress
+				})
+			}
+			access, _, err := handler.joinAccessForRequest(request, test.claim)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -612,6 +829,142 @@ func postSession(t *testing.T, url string, body map[string]any) sessionResponse 
 		t.Fatal(err)
 	}
 	return result
+}
+
+func newWebRTCSignalingEndpointRequest(
+	t *testing.T,
+	baseURL string,
+	session sessionResponse,
+	identifier string,
+) *http.Request {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"type": "playmesh.webrtc-signaling-endpoint.request", "version": 1,
+		"timestamp": time.Now().UnixMilli(), "requestId": "endpoint-test-request",
+		"identifier": identifier,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(
+		http.MethodPost,
+		baseURL+"/v1/sessions/"+session.Session.ID+"/webrtc/signaling-endpoints",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+session.Credential.Token)
+	request.Header.Set("Content-Type", "application/json")
+	return request
+}
+
+func createWebRTCSignalingEndpoint(
+	t *testing.T,
+	baseURL string,
+	session sessionResponse,
+	identifier string,
+) webRTCSignalingEndpointResponse {
+	t.Helper()
+	response, err := http.DefaultClient.Do(
+		newWebRTCSignalingEndpointRequest(t, baseURL, session, identifier),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("create signaling endpoint status = %d body=%s", response.StatusCode, body)
+	}
+	var endpoint webRTCSignalingEndpointResponse
+	if err := json.NewDecoder(response.Body).Decode(&endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if endpoint.Identifier != identifier || endpoint.WebSocketPath == "" ||
+		endpoint.PlayerID != session.Credential.Player.ID {
+		t.Fatalf("signaling endpoint = %#v", endpoint)
+	}
+	return endpoint
+}
+
+func dialWebRTCSignaling(
+	t *testing.T,
+	baseURL string,
+	session sessionResponse,
+	identifier string,
+) *websocket.Conn {
+	t.Helper()
+	return dialWebRTCSignalingEndpoint(
+		t,
+		baseURL,
+		createWebRTCSignalingEndpoint(t, baseURL, session, identifier),
+	)
+}
+
+func dialWebRTCSignalingEndpoint(
+	t *testing.T,
+	baseURL string,
+	endpoint webRTCSignalingEndpointResponse,
+) *websocket.Conn {
+	t.Helper()
+	webSocketURL := strings.Replace(baseURL, "http", "ws", 1) + endpoint.WebSocketPath
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	connection, response, err := websocket.Dial(ctx, webSocketURL, nil)
+	if err != nil {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		t.Fatalf("dial signaling status=%d: %v", status, err)
+	}
+	return connection
+}
+
+func writeWebRTCSignal(
+	t *testing.T,
+	connection *websocket.Conn,
+	targetPlayerID string,
+	payload map[string]any,
+) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{
+		"type": "signal", "version": 1, "timestamp": time.Now().UnixMilli(),
+		"requestId": "signal-test-request", "targetPlayerId": targetPlayerID,
+		"payload": payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := connection.Write(ctx, websocket.MessageText, data); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readWebRTCSignalingType(
+	t *testing.T,
+	connection *websocket.Conn,
+	expected string,
+) webRTCSignalingServerFrame {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for {
+		_, data, err := connection.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var frame webRTCSignalingServerFrame
+		if err := json.Unmarshal(data, &frame); err != nil {
+			t.Fatal(err)
+		}
+		if frame.Type == expected {
+			return frame
+		}
+	}
 }
 
 func writeWS(t *testing.T, connection *websocket.Conn, value any) {

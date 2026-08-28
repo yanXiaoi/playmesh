@@ -27,33 +27,19 @@ void main() {
       provisioning: provisioning,
     );
 
-    await expectLater(
-      catalog.createProject(_sourceDraft(id: 'Com.Example.Invalid')),
-      throwsA(
-        isA<FormatException>().having(
-          (error) => error.message,
-          'message',
-          '项目 ID 必须是小写反向域名格式',
-        ),
-      ),
+    final source = await catalog.createProject(
+      _sourceDraft(id: 'Com.Example.Source_2'),
     );
-    expect(
-      () => gdevelop.ensureProjectRoot(
-        gameId: 'Com.Example.Invalid',
-        name: 'Invalid',
-        origin: GDevelopProjectEnsureOrigin.create,
-      ),
-      throwsA(
-        isA<FormatException>().having(
-          (error) => error.message,
-          'message',
-          '项目 ID 必须是小写反向域名格式',
-        ),
-      ),
+    expect(source.id, 'Com.Example.Source_2');
+    final visual = await gdevelop.ensureProjectRoot(
+      gameId: 'Com.Example.Visual_2',
+      name: 'Visual',
+      origin: GDevelopProjectEnsureOrigin.create,
     );
+    expect(visual.gameId, 'Com.Example.Visual_2');
     await expectLater(
       catalog.createProject(
-        _sourceDraft(id: 'com.example.invalid-name', name: '   '),
+        _sourceDraft(id: 'com.example.invalid_name', name: '   '),
       ),
       throwsA(
         isA<FormatException>().having(
@@ -65,7 +51,7 @@ void main() {
     );
     expect(
       () => gdevelop.ensureProjectRoot(
-        gameId: 'com.example.invalid-name',
+        gameId: 'com.example.invalid_name',
         name: '   ',
         origin: GDevelopProjectEnsureOrigin.create,
       ),
@@ -101,10 +87,10 @@ void main() {
       provisioning: provisioning,
     );
 
-    await catalog.createProject(_sourceDraft(id: 'com.example.source-first'));
+    await catalog.createProject(_sourceDraft(id: 'com.example.source_first'));
     await expectLater(
       gdevelop.ensureProjectRoot(
-        gameId: 'com.example.source-first',
+        gameId: 'com.example.source_first',
         name: 'Visual Project',
         origin: GDevelopProjectEnsureOrigin.create,
       ),
@@ -113,7 +99,7 @@ void main() {
             .having(
               (error) => error.gameId,
               'gameId',
-              'com.example.source-first',
+              'com.example.source_first',
             )
             .having(
               (error) => error.existingKind,
@@ -124,18 +110,18 @@ void main() {
     );
 
     await gdevelop.ensureProjectRoot(
-      gameId: 'com.example.visual-first',
+      gameId: 'com.example.visual_first',
       name: 'Visual First',
       origin: GDevelopProjectEnsureOrigin.create,
     );
     await expectLater(
-      catalog.createProject(_sourceDraft(id: 'com.example.visual-first')),
+      catalog.createProject(_sourceDraft(id: 'com.example.visual_first')),
       throwsA(
         isA<ProjectProvisioningConflict>()
             .having(
               (error) => error.gameId,
               'gameId',
-              'com.example.visual-first',
+              'com.example.visual_first',
             )
             .having(
               (error) => error.existingKind,
@@ -159,7 +145,7 @@ void main() {
     );
 
     final project = await catalog.createProject(
-      _sourceDraft(id: 'com.example.provisioned-source'),
+      _sourceDraft(id: 'com.example.provisioned_source'),
     );
     final projectRoot = Directory(project.rootFilePath);
     final manifest = File(
@@ -174,7 +160,7 @@ void main() {
     expect(await manifest.exists(), isTrue);
     expect(await app.exists(), isTrue);
     final decoded = jsonDecode(await metadata.readAsString()) as Map;
-    expect(decoded['gameId'], 'com.example.provisioned-source');
+    expect(decoded['gameId'], 'com.example.provisioned_source');
     expect(decoded['kind'], 'source');
     expect(
       await root
@@ -221,13 +207,13 @@ void main() {
     }
 
     final created = await resolver.ensureProjectRoot(
-      gameId: 'com.example.same-visual',
+      gameId: 'com.example.same_visual',
       name: 'Same Visual',
       fileIdentifier: 'original-file',
       origin: GDevelopProjectEnsureOrigin.create,
     );
     final savedAs = await resolver.ensureProjectRoot(
-      gameId: 'com.example.same-visual',
+      gameId: 'com.example.same_visual',
       name: 'Same Visual',
       fileIdentifier: 'saved-as-file',
       origin: GDevelopProjectEnsureOrigin.saveAs,
@@ -412,4 +398,5 @@ DeveloperProjectDraft _sourceDraft({
   displayMode: 'multi_screen',
   minPlayers: 1,
   maxPlayers: 1,
+  requireAndroidApplicationId: true,
 );

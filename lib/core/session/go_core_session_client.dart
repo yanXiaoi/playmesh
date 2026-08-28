@@ -27,6 +27,7 @@ class GoCoreSessionClient {
   final bool _ownsHttpClient;
   final SessionChannelFactory _channelFactory;
   final SessionLogSink _logSink;
+  int _webRTCRequestSequence = 0;
 
   Future<GameSessionConnection> create({
     required String gameId,
@@ -216,6 +217,49 @@ class GoCoreSessionClient {
         _decodeResponse(response),
       );
     }
+  }
+
+  Future<Map<String, Object?>> createWebRTCSignalingEndpoint({
+    required String sessionId,
+    required String token,
+    required String identifier,
+    String? requestId,
+  }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final correlationId = requestId?.trim().isNotEmpty == true
+        ? requestId!.trim()
+        : 'webrtc-$timestamp-${++_webRTCRequestSequence}';
+    final response = await _httpClient.post(
+      baseUri.resolve(
+        'v1/sessions/${Uri.encodeComponent(sessionId)}/webrtc/signaling-endpoints',
+      ),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'type': 'playmesh.webrtc-signaling-endpoint.request',
+        'version': 1,
+        'timestamp': timestamp,
+        'requestId': correlationId,
+        'identifier': identifier,
+      }),
+    );
+    final payload = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw GameSessionException.fromPayload(response.statusCode, payload);
+    }
+    final webSocketPath = payload['webSocketPath'];
+    if (webSocketPath is! String || webSocketPath.isEmpty) {
+      throw const FormatException('Go Core 返回了无效的 WebRTC 信令地址');
+    }
+    final httpEndpoint = baseUri.resolve(webSocketPath);
+    return {
+      ...payload,
+      'url': httpEndpoint
+          .replace(scheme: httpEndpoint.scheme == 'https' ? 'wss' : 'ws')
+          .toString(),
+    };
   }
 
   Future<GameSessionSnapshot> uploadAvatar({
@@ -459,6 +503,18 @@ class GameSessionConnection {
 
   Future<void> closeShare() {
     return _client.closeShare(snapshot.id, bootstrap.credential.token);
+  }
+
+  Future<Map<String, Object?>> createWebRTCSignalingEndpoint(
+    String identifier, {
+    String? requestId,
+  }) {
+    return _client.createWebRTCSignalingEndpoint(
+      sessionId: snapshot.id,
+      token: bootstrap.credential.token,
+      identifier: identifier,
+      requestId: requestId,
+    );
   }
 
   Future<void> syncAvatar(Uint8List pngBytes, String sha256) async {

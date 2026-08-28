@@ -13,6 +13,21 @@ void main() {
       'session.reset',
       'session.finish',
       'player.setNickname',
+      'webrtc.getSignalingEndpoint',
+      'db.open',
+      'db.select',
+      'db.update',
+      'db.delete',
+      'db.insert',
+      'db.ddl',
+      'db.transaction.begin',
+      'db.transaction.select',
+      'db.transaction.update',
+      'db.transaction.delete',
+      'db.transaction.insert',
+      'db.transaction.ddl',
+      'db.transaction.commit',
+      'db.transaction.rollback',
       'performance.ping',
       'performance.pong',
       'lifecycle.complete',
@@ -45,15 +60,15 @@ void main() {
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;
-    expect(fragments, hasLength(18));
-    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(18));
+    expect(fragments, hasLength(21));
+    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(21));
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.game),
-      hasLength(9),
+      hasLength(11),
     );
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.app),
-      hasLength(9),
+      hasLength(10),
     );
     expect(
       fragments.every((fragment) => fragment.typeScript.trim().isNotEmpty),
@@ -63,7 +78,7 @@ void main() {
       fragments
           .where((fragment) => fragment.declaration.trim().isNotEmpty)
           .map((fragment) => fragment.id),
-      containsAll(['app.ui', 'app.lan']),
+      containsAll(['game.database', 'app.ui', 'app.webrtc', 'app.lan']),
     );
 
     final gameTypeScript =
@@ -81,17 +96,23 @@ void main() {
             SdkFeatureRegistry.appSdkVersion,
           ),
     );
-    expect(SdkFeatureRegistry.gameSdkVersion, '4.1.0');
-    expect(SdkFeatureRegistry.appSdkVersion, '3.3.0');
+    expect(SdkFeatureRegistry.gameSdkVersion, '4.3.0');
+    expect(SdkFeatureRegistry.appSdkVersion, '3.5.0');
     expect(SdkFeatureRegistry.gameSdkCompatibilityBaselineVersions, ['4.1.0']);
     expect(SdkFeatureRegistry.appSdkCompatibilityBaselineVersions, [
       '3.2.0',
       '3.3.0',
     ]);
-    expect(SdkFeatureRegistry.gameSdkSupportedRequestVersions, ['4.1.0']);
+    expect(SdkFeatureRegistry.gameSdkSupportedRequestVersions, [
+      '4.1.0',
+      '4.2.0',
+      '4.3.0',
+    ]);
     expect(SdkFeatureRegistry.appSdkSupportedRequestVersions, [
       '3.2.0',
       '3.3.0',
+      '3.4.0',
+      '3.5.0',
     ]);
     expect(
       SdkFeatureRegistry.gameSdkReleases
@@ -103,7 +124,7 @@ void main() {
             ),
           )
           .toList(),
-      [('4.1.0', '4.1.0', '4.1.0')],
+      [('4.1.0', '4.3.0', '4.3.0')],
     );
     expect(
       SdkFeatureRegistry.appSdkReleases
@@ -115,11 +136,15 @@ void main() {
             ),
           )
           .toList(),
-      [('3.2.0', '3.3.0', '3.3.0')],
+      [('3.2.0', '3.5.0', '3.5.0')],
     );
-    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.2.0'), '3.3.0');
-    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.3.0'), '3.3.0');
-    expect(SdkFeatureRegistry.resolveGameSdkVersion('4.1.0'), '4.1.0');
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.2.0'), '3.5.0');
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.3.0'), '3.5.0');
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.4.0'), '3.5.0');
+    expect(SdkFeatureRegistry.resolveAppSdkVersion('3.5.0'), '3.5.0');
+    expect(SdkFeatureRegistry.resolveGameSdkVersion('4.1.0'), '4.3.0');
+    expect(SdkFeatureRegistry.resolveGameSdkVersion('4.2.0'), '4.3.0');
+    expect(SdkFeatureRegistry.resolveGameSdkVersion('4.3.0'), '4.3.0');
     expect(
       () => SdkFeatureRegistry.resolveAppSdkVersion('3.2.1'),
       throwsUnsupportedError,
@@ -129,8 +154,12 @@ void main() {
       throwsUnsupportedError,
     );
     expect(
+      () => SdkFeatureRegistry.resolveGameSdkVersion('4.4.0'),
+      throwsUnsupportedError,
+    );
+    expect(
       SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.2.0'),
-      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.3.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-app.js', version: '3.5.0'),
     );
     expect(
       SdkFeatureRegistry.gameSdkReleases.single.commandNames,
@@ -175,12 +204,15 @@ void main() {
         contains('readonly main: PlaymeshMainApi'),
         contains('readonly app: PlaymeshAppApi'),
         contains('avatar: string | null'),
+        isNot(contains('connectionMode: "lan" | "direct" | "relay"')),
         contains('openSharePanel(): Promise<void>'),
         contains('disableSystemMenuTriggers(): void'),
-        contains(
-          'onBack(callback: () => boolean | Promise<boolean>): '
-          'PlaymeshUnsubscribe',
-        ),
+        contains('type PlaymeshSystemMenuDecision = "EXIT" | "NEXT" | "STOP"'),
+        contains('type PlaymeshAppBackDecision = PlaymeshSystemMenuDecision'),
+        contains('onSystemMenuRequest('),
+        contains('@deprecated 使用 `onSystemMenuRequest()`'),
+        contains('Promise<PlaymeshAppBackDecision>'),
+        isNot(contains('boolean | Promise<boolean>')),
         contains('type PlaymeshAppLanShareLinkType = "lan" | "wan"'),
         contains('interface PlaymeshAppLanApi'),
         contains('readonly lan: PlaymeshAppLanApi'),
@@ -191,6 +223,7 @@ void main() {
         contains('showGameSidebar(): Promise<boolean>'),
         contains('exitGame(): Promise<void>'),
         contains('readonly media: PlaymeshAppMediaApi'),
+        contains('getSignalingEndpoint(identifier: string)'),
         contains('Promise<PlaymeshAppMediaSession>'),
         isNot(contains('hideGameSidebar')),
         isNot(contains('onMenuRequest')),
@@ -211,7 +244,7 @@ void main() {
 
   test('版本选择拒绝未注册版本且当前版仍从统一 Dart 源组装', () {
     expect(
-      SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
+      SdkFeatureRegistry.sdkFile('playmesh-main.js'),
       SdkFeatureRegistry.sdkFile('playmesh-main.js', version: '4.1.0'),
     );
     expect(

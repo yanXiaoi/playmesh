@@ -8,6 +8,7 @@ class GameSessionPlayer {
     required this.role,
     this.avatar,
     this.source = 'lan_html',
+    this.connectionMode = 'lan',
   });
 
   factory GameSessionPlayer.fromJson(Map<String, Object?> json) {
@@ -18,6 +19,7 @@ class GameSessionPlayer {
       role: json['role']! as String,
       avatar: json['avatar'] as String?,
       source: json['source'] as String? ?? 'lan_html',
+      connectionMode: json['connectionMode'] as String? ?? 'lan',
     );
   }
 
@@ -27,6 +29,7 @@ class GameSessionPlayer {
   final String role;
   final String? avatar;
   final String source;
+  final String connectionMode;
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -35,6 +38,7 @@ class GameSessionPlayer {
     'role': role,
     'avatar': avatar,
     'source': source,
+    'connectionMode': connectionMode,
   };
 }
 

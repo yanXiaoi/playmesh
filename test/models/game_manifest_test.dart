@@ -55,16 +55,66 @@ void main() {
   });
 
   test('未知字段静默忽略且已知字段投影写回', () {
+    final config = {
+      'webRuntime': {'multithreading': true},
+      'futureRuntime': {
+        'untouched': <Object?>[1, 'two'],
+      },
+    };
     final json = validManifest()
       ..['permissions'] = ['keyboard']
       ..['icon'] = 'app/legacy.png'
-      ..['redundant'] = {'nested': true};
+      ..['redundant'] = {'nested': true}
+      ..['config'] = config;
 
     final encoded = GameManifest.fromJson(json).toJson();
 
     expect(encoded, isNot(contains('permissions')));
     expect(encoded, isNot(contains('icon')));
     expect(encoded, isNot(contains('redundant')));
+    expect(encoded['config'], config);
+    expect(projectGameManifestJson(json)['config'], config);
+  });
+
+  test('config 可选且内容不校验', () {
+    for (final config in <Object?>[
+      null,
+      true,
+      42,
+      'opaque',
+      <Object?>['future', 1],
+      {
+        'webRuntime': {'multithreading': 'future-value'},
+      },
+    ]) {
+      final manifest = GameManifest.fromJson(
+        validManifest()..['config'] = config,
+      );
+      expect(manifest.config, config);
+      expect(manifest.toJson()['config'], config);
+    }
+    expect(GameManifest.fromJson(validManifest()).config, isNull);
+  });
+
+  test('公共 config 字段读取器在路径缺失时返回 null', () {
+    final config = {
+      'webRuntime': {'multithreading': true, 'nullable': null},
+    };
+
+    expect(
+      readGameManifestConfigValue(
+        config,
+        gameWebRuntimeMultithreadingConfigPath,
+      ),
+      isTrue,
+    );
+    expect(
+      readGameManifestConfigValue(config, const ['webRuntime', 'missing']),
+      isNull,
+    );
+    expect(readGameManifestConfigValue(null, const ['webRuntime']), isNull);
+    expect(readGameManifestConfigValue('opaque', const ['webRuntime']), isNull);
+    expect(readGameManifestConfigValue(config, const []), isNull);
   });
 
   test('单屏多人必须声明控制器方向', () {

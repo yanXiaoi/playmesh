@@ -11,6 +11,8 @@ import 'package:playmesh/core/network/lan_game_discovery_platform.dart';
 import 'package:playmesh/core/network/lan_game_discovery_service.dart';
 import 'package:playmesh/core/network/lan_game_presence.dart';
 import 'package:playmesh/features/game/game_invitation_scanner_page.dart';
+import 'package:playmesh/features/game/game_invitation_scan_flow.dart';
+import 'package:playmesh/features/game/game_join_error_presentation.dart';
 import 'package:playmesh/features/game/game_join_router.dart';
 import 'package:playmesh/features/game/join_game_page.dart';
 
@@ -161,6 +163,227 @@ void main() {
     expect(find.byType(TextFormField), findsOneWidget);
     expect(find.text('对局邀请链接'), findsOneWidget);
     expect(find.text('加入对局'), findsOneWidget);
+  });
+
+  testWidgets('加入页扫码入口调用与首页相同的统一扫码预检方法', (tester) async {
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final platform = _FakeDiscoveryPlatform();
+    final service = LanGameDiscoveryService(platform: platform);
+    addTearDown(service.dispose);
+    var calls = 0;
+    try {
+      await _pumpJoinPage(
+        tester,
+        service: service,
+        scanAndPrepareInvitation:
+            (
+              _, {
+              required GameJoinPreparationService coordinator,
+              required GameJoinContext joinContext,
+              ValueChanged<String>? onScanned,
+            }) async {
+              calls += 1;
+              return null;
+            },
+      );
+
+      final scanButton = find.byKey(JoinGamePage.scanButtonKey).last;
+      await tester.scrollUntilVisible(
+        scanButton,
+        120,
+        scrollable: find.byType(Scrollable).last,
+      );
+      final onScanPressed = tester.widget<FilledButton>(scanButton).onPressed;
+      expect(onScanPressed, isNotNull);
+      onScanPressed!();
+      await _pumpUntil(
+        tester,
+        () => calls == 1,
+        reason: '扫码前释放发现租约后应调用统一扫码预检方法',
+      );
+
+      expect(calls, 1);
+      expect(
+        JoinGamePage(discoveryService: service).scanAndPrepareInvitation,
+        same(scanAndPrepareGameInvitation),
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
+  });
+
+  testWidgets('手工输入的局域网邀请调用与扫码相同的统一邀请准备方法', (tester) async {
+    final platform = _FakeDiscoveryPlatform();
+    final service = LanGameDiscoveryService(platform: platform);
+    addTearDown(service.dispose);
+    final router = _RecordingGameJoinRouter();
+    final coordinator = _FakeJoinPreparationService();
+    final rawValues = <String>[];
+    final lanInvitation =
+        'http://$_host:$_port/playmesh/join#inviteToken=lan-input-token';
+
+    await _pumpJoinPage(
+      tester,
+      service: service,
+      coordinator: coordinator,
+      router: router,
+      prepareInvitation:
+          (
+            raw, {
+            required GameJoinPreparationService coordinator,
+            required GameJoinContext joinContext,
+          }) async {
+            rawValues.add(raw);
+            return _remoteLaunch();
+          },
+    );
+    await tester.enterText(find.byType(TextFormField), '  $lanInvitation  ');
+    final joinButton = find.byKey(JoinGamePage.submitButtonKey).last;
+    await tester.scrollUntilVisible(
+      joinButton,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    tester.widget<FilledButton>(joinButton).onPressed!();
+    await _pumpUntil(
+      tester,
+      () => router.pushes.length == 1,
+      reason: '手工输入应经过统一邀请准备方法后导航',
+    );
+
+    expect(rawValues, [lanInvitation]);
+    expect(coordinator.linkValues, isEmpty);
+    expect(
+      JoinGamePage(discoveryService: service).prepareInvitation,
+      same(prepareGameInvitation),
+    );
+  });
+
+  testWidgets('链接准备和导航期间立即显示不可操作的加入中遮罩', (tester) async {
+    final platform = _FakeDiscoveryPlatform();
+    final service = LanGameDiscoveryService(platform: platform);
+    addTearDown(service.dispose);
+    final prepareCompleter = Completer<RemoteGameLaunch>();
+    final navigationCompleter = Completer<void>();
+    final router = _RecordingGameJoinRouter(
+      pushResult: navigationCompleter.future,
+    );
+
+    await _pumpJoinPage(
+      tester,
+      service: service,
+      router: router,
+      prepareInvitation:
+          (
+            _, {
+            required GameJoinPreparationService coordinator,
+            required GameJoinContext joinContext,
+          }) => prepareCompleter.future,
+    );
+    await tester.enterText(
+      find.byType(TextFormField),
+      'http://$_host:$_port/playmesh/join#inviteToken=overlay-token',
+    );
+    final joinButton = find.byKey(JoinGamePage.submitButtonKey).last;
+    await tester.scrollUntilVisible(
+      joinButton,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    tester.widget<FilledButton>(joinButton).onPressed!();
+    await _pumpUntil(
+      tester,
+      () => find.byKey(JoinGamePage.joiningOverlayKey).evaluate().isNotEmpty,
+      reason: '等待邀请预检时必须立即显示加入遮罩',
+    );
+
+    expect(find.text('正在加入…'), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byKey(JoinGamePage.joiningOverlayKey),
+        matching: find.byType(ModalBarrier),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<FilledButton>(joinButton).onPressed,
+      isNull,
+      reason: '遮罩显示期间页面操作必须禁用',
+    );
+
+    prepareCompleter.complete(_remoteLaunch());
+    await _pumpUntil(
+      tester,
+      () => router.pushes.length == 1,
+      reason: '预检完成后应进入导航阶段',
+    );
+    expect(
+      find.byKey(JoinGamePage.joiningOverlayKey),
+      findsOneWidget,
+      reason: '导航尚未完成时遮罩不能提前消失',
+    );
+
+    navigationCompleter.complete();
+    await tester.pump();
+    expect(find.byKey(JoinGamePage.joiningOverlayKey), findsNothing);
+  });
+
+  testWidgets('手工加入原样展示脱敏后的底层错误类型、code、cause 和堆栈', (tester) async {
+    final platform = _FakeDiscoveryPlatform();
+    final service = LanGameDiscoveryService(platform: platform);
+    addTearDown(service.dispose);
+    final root = UnsupportedError(
+      '当前加入入口没有可用的 Go Core '
+      'http://relay.internal/j/room#inviteToken=private-token',
+    );
+    final inspection = GameInvitationInspectionException(
+      GameInvitationInspectionFailure.unavailable,
+      cause: root,
+      causeStackTrace: StackTrace.fromString('root join stack'),
+    );
+    final coordinator = _FakeJoinPreparationService(
+      onPrepareLink: (_) async => throw GameJoinException(
+        GameJoinErrorCode.invitationUnavailable,
+        cause: inspection,
+        causeStackTrace: StackTrace.fromString('inspection stack'),
+      ),
+    );
+
+    await _pumpJoinPage(tester, service: service, coordinator: coordinator);
+    await tester.enterText(
+      find.byType(TextFormField),
+      'http://$_host:$_port/playmesh/join#inviteToken=input-token',
+    );
+    final joinButton = find.byKey(JoinGamePage.submitButtonKey).last;
+    await tester.scrollUntilVisible(
+      joinButton,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    final onJoinPressed = tester.widget<FilledButton>(joinButton).onPressed;
+    expect(onJoinPressed, isNotNull);
+    onJoinPressed!();
+    await _pumpUntil(
+      tester,
+      () => coordinator.linkValues.isNotEmpty,
+      reason: '手工链接应进入统一准备服务',
+    );
+    await tester.pump();
+
+    expect(find.text('邀请入口或本机 Go Core 当前不可用。'), findsOneWidget);
+    final details = tester.widget<SelectableText>(
+      find.byKey(gameJoinErrorDetailsKey),
+    );
+    expect(details.data, contains('GameJoinException'));
+    expect(details.data, contains('code=invitation_unavailable'));
+    expect(details.data, contains('GameInvitationInspectionException'));
+    expect(details.data, contains('UnsupportedError'));
+    expect(details.data, contains('当前加入入口没有可用的 Go Core'));
+    expect(details.data, contains('root join stack'));
+    expect(details.data, contains('[REDACTED URL]'));
+    expect(details.data, isNot(contains('private-token')));
+    expect(details.data, isNot(contains('relay.internal')));
   });
 
   testWidgets('附近列表显示多人游戏、主机、IP、完整 gameId 与人数', (tester) async {
@@ -451,6 +674,9 @@ Future<void> _pumpJoinPage(
   String userId = 'u_local_test',
   String nickname = '本地玩家',
   Future<void> Function(String nickname)? onNicknameChanged,
+  GameInvitationScanAndPrepare scanAndPrepareInvitation =
+      scanAndPrepareGameInvitation,
+  GameInvitationPrepare prepareInvitation = prepareGameInvitation,
 }) async {
   await tester.pumpWidget(
     localizedTestApp(
@@ -461,6 +687,8 @@ Future<void> _pumpJoinPage(
         joinCoordinator: coordinator ?? _FakeJoinPreparationService(),
         joinRouter: router,
         onNicknameChanged: onNicknameChanged,
+        scanAndPrepareInvitation: scanAndPrepareInvitation,
+        prepareInvitation: prepareInvitation,
       ),
       navigatorObservers: [?observer],
     ),
@@ -630,11 +858,13 @@ class _SuccessfulInvitationInspector implements GameInvitationInspector {
 }
 
 typedef _PrepareDiscovered = RemoteGameLaunch Function(String instanceId);
+typedef _PrepareLink = Future<RemoteGameLaunch> Function(String invitationUrl);
 
 class _FakeJoinPreparationService implements GameJoinPreparationService {
-  _FakeJoinPreparationService({this.onPrepareDiscovered});
+  _FakeJoinPreparationService({this.onPrepareDiscovered, this.onPrepareLink});
 
   final _PrepareDiscovered? onPrepareDiscovered;
+  final _PrepareLink? onPrepareLink;
   final List<String> discoveredInstanceIds = [];
   final List<String> linkValues = [];
   final List<RemoteGameLaunch> launches = [];
@@ -657,6 +887,8 @@ class _FakeJoinPreparationService implements GameJoinPreparationService {
     required GameJoinContext context,
   }) async {
     linkValues.add(invitationUrl);
+    final callback = onPrepareLink;
+    if (callback != null) return callback(invitationUrl);
     final launch = _remoteLaunch();
     launches.add(launch);
     return launch;
@@ -693,6 +925,7 @@ class _RecordingGameJoinRouter extends GameJoinRouter {
     required RemoteGameLaunch launch,
     required String userId,
     required String nickname,
+    Uri? coreControlBaseUri,
     LanGameDiscoveryService? discoveryService,
     Future<void> Function(String nickname)? onNicknameChanged,
   }) {
@@ -714,6 +947,7 @@ class _RecordingGameJoinRouter extends GameJoinRouter {
     required RemoteGameLaunch launch,
     required String userId,
     required String nickname,
+    Uri? coreControlBaseUri,
     LanGameDiscoveryService? discoveryService,
     Future<void> Function(String nickname)? onNicknameChanged,
   }) async {

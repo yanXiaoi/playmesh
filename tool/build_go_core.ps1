@@ -567,7 +567,7 @@ function Build-AndroidCore {
         # ownership in clean/isolated builders.
         $env:GOFLAGS = "-buildvcs=false"
         & $gomobile bind -target=android -androidapi=24 -trimpath `
-            '-tags=playmesh_private_crypto' '-ldflags=-s -w' `
+            '-tags=playmesh_private_crypto' '-ldflags=-s -w -checklinkname=0' `
             -o $temporaryOutput ./mobile ./appnative
         if ($LASTEXITCODE -ne 0) {
             throw "Android Go Core AAR build failed"

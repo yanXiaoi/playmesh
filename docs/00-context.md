@@ -12,7 +12,7 @@
 6. `06-engineering-standards.md`：代码复用、调用链、测试、日志和文档规范。
 7. `version/README.md`：第六阶段之后的版本更新日志与 App 简略日志规则。
 8. `catalog-api.md`：本机游戏源、在线多源游戏库、鉴权和下载队列。
-9. `remote-game-relay.md`：局域网、本地回环网关、公共中转和端到端加密边界。
+9. `remote-game-relay.md`：局域网、本地回环网关、Pion WebRTC/TURN 与通用信令边界。
 10. `game/README.md`：游戏开发文档入口，包含游戏包、SDK、默认模板和开发者通道文档。
 
 ## 项目定位
@@ -36,7 +36,8 @@ Playmesh 是一个局域网优先的跨平台派对游戏平台。应用负责�
 - AI 生成的 HTML 游戏不能直接获得原生 JS Bridge 权限，必须经过受限 SDK 和权限系统。
 - 默认自动验证限于静态分析、Flutter/Go/SDK 代码级测试以及与平台编译无关的资源和语法检查。只有用户明确要求平台构建时，才可使用其已配置工具链生成并检查产物；安装、真机行为和生产签名仍需用户或 CI 验证。iOS 发布、体感和云端仍放在后续版本评估。
 - 第三阶段已完成真实会话、WebSocket、Game SDK、统一游戏包扫描和浏览器控制器入口。
-- 远程联机只通过已启用在线游戏源声明的公共中转提供；Go Server 没有端点密钥，只能配对和复制密文字节，不能成为通用反向代理。
+- 远程加入通过已启用在线游戏源声明的 Relay 4.0 提供；Go Server 只转发 SDP/ICE、
+  签发短期 TURN 凭据并运行 Pion TURN，不解析游戏业务，也不能成为通用反向代理。
 
 ## 第一阶段目标
 
@@ -78,13 +79,13 @@ Flutter App
 ## 当前开发建议
 
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
-`1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。当前
-正式版本为 Playmesh `4.3.0+30`、Go Core `0.5.0`、Core 协议 `1.3.0`、Game SDK
-`4.1.0`、App Bridge SDK `3.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
+`1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。
+当前工作版本为 Playmesh `5.1.0+37`、Runtime `2.1.0+11`、Go Core `0.7.0`、Core 协议
+`1.5.0`、Game SDK `4.3.0`、App Bridge SDK `3.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
-唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。当前 Game SDK 只接受
-`4.1.0`；App Bridge SDK 接受明确版本 `3.2.0`、`3.3.0` 的清单请求，并统一解析到兼容的
-`3.3.0` 运行包。更旧或未知版本直接拒绝。所有游戏、
+唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。Game SDK 只接受
+`4.1.0`、`4.2.0`、`4.3.0`；App Bridge SDK 接受 `3.2.0`、`3.3.0`、`3.4.0`、`3.5.0` 的清单请求，并统一
+解析到当前兼容 Bundle。基线外或未知版本直接拒绝。所有游戏、
 分享和 Developer 网关、SDK 下载与 AI 声明只能经过同一注册表；游戏 Authority
 决定玩法开始和结束条件，SDK 只提交受控会话状态请求。当前变化记录在
 `docs/version/NEXT.md`，工程落点记录在
@@ -194,7 +195,11 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 分享通道、公开租约、Relay 和不可变链接/二维码快照由单一
   `GameShareCoordinator` 管理；SDK、分享面板和开发状态只做投影，不重新枚举网卡、
   拼接 URL 或生成二维码。所有手工链接、扫码和附近对局加入复用
-  `GameJoinCoordinator` 的邀请预检与既有 `RemoteGamePage`。
+  `GameJoinCoordinator` 的邀请预检与既有 `RemoteGamePage`。其中首页与“加入对局”页
+  扫码共同调用唯一的扫码准备方法，并与手工链接共同进入同一个邀请准备方法；LAN 与 Relay
+  邀请继续使用各自严格格式并在实际操作时读取当前 Go Core 地址。加入准备和导航期间显示
+  全页遮罩；失败时附加显示脱敏后的原始类型、稳定 code、完整 cause 链和可用堆栈，不用
+  概括文案替换底层原因。
 - App 通过局域网或公共中转加入时都从本地回环入口加载；普通浏览器只能直接使用主机公开的局域网 Authority 地址。
 - 局域网分享链接固定进入 `/playmesh/join#inviteToken=...`。落地页以 POST 交换
   邀请凭据，网关写入短期 HttpOnly Cookie 后重定向到 `main.json` 声明的真实页面；

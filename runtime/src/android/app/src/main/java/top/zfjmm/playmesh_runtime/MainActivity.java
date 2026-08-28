@@ -101,8 +101,10 @@ public final class MainActivity extends FlutterActivity {
                 switch (call.method) {
                     case "start":
                         String address = call.argument("address");
-                        result.success(Mobile.start(
-                                address == null ? "0.0.0.0:0" : address
+                        String localTurnAddresses = call.argument("localTurnAddresses");
+                        result.success(Mobile.startWithLocalTURNAddresses(
+                                address == null ? "0.0.0.0:0" : address,
+                                localTurnAddresses == null ? "" : localTurnAddresses
                         ));
                         break;
                     case "stop":

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint, debugPrintStack;
 import 'package:http/http.dart' as http;
 
 import '../core/game_web/game_invitation.dart';
@@ -25,6 +26,8 @@ typedef RuntimeRemotePreparation =
     Future<void> Function(Uri coreBase, String playerSource);
 typedef RuntimeRelayHostStarter =
     Future<RelayHostSession> Function({
+      required Uri coreBaseUri,
+      required String sessionId,
       required Uri serverBaseUri,
       required String sourceToken,
       required String hostPath,
@@ -45,13 +48,13 @@ final class RuntimeBundledRelayPresentation {
   final int latencyMilliseconds;
 }
 
-/// Runtime-owned LAN host. It reuses the protocol implementation copied from
-/// the main App, but owns its lifecycle and navigation independently.
+/// Runtime 自己持有 LAN/Relay 生命周期，但复用与主 App 相同的协议边界。
 final class RuntimeLanCoordinator implements RuntimeLanHost {
   RuntimeLanCoordinator({
     required this.game,
     required this.session,
     required this.server,
+    required this.coreControlBaseUri,
     required this.qrAvailable,
     required this.scanQr,
     required this.beforeRemoteNavigation,
@@ -63,7 +66,9 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
     this.discoveryDuration = const Duration(seconds: 2),
   }) : _discovery = discoveryService ?? LanGameDiscoveryService(),
        _ownsDiscovery = discoveryService == null,
-       _inspector = inspector ?? DefaultGameInvitationInspector(),
+       _inspector =
+           inspector ??
+           DefaultGameInvitationInspector(coreBaseUri: coreControlBaseUri),
        _ownsInspector = inspector == null,
        _relayHttpClient = relayHttpClient ?? http.Client(),
        _ownsRelayHttpClient = relayHttpClient == null,
@@ -77,6 +82,7 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
   final RuntimeGameManifest game;
   final RuntimeSessionConnection? session;
   final RuntimeAssetServer server;
+  final Uri coreControlBaseUri;
   final bool qrAvailable;
   final RuntimeInvitationScanner scanQr;
   final RuntimeRemotePreparation beforeRemoteNavigation;
@@ -100,6 +106,7 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
   StreamSubscription<Map<String, Object?>>? _sessionSubscription;
   LocalTunnelGateway? _webGateway;
   LocalTunnelGateway? _coreGateway;
+  RelayClientSession? _relayClientSession;
   RelayHostSession? _relayHostSession;
   RuntimeBundledRelayPresentation? _bundledRelayPresentation;
   Future<void>? _relayConnectOperation;
@@ -200,10 +207,27 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
           isCancelled: () => !_isCurrent(generation),
         ),
       );
-      _checkGeneration(generation);
-      return RuntimeLanJoinAction(() => _navigateRemote(launch, generation));
-    } on GameJoinException catch (error) {
-      throw RuntimeLanException(error.code, error.message);
+      try {
+        _checkGeneration(generation);
+      } on Object {
+        await launch.close();
+        rethrow;
+      }
+      return RuntimeLanJoinAction(() async {
+        try {
+          await _navigateRemote(launch, generation);
+        } finally {
+          await launch.close();
+        }
+      });
+    } on GameJoinException catch (error, stackTrace) {
+      throw RuntimeLanException(
+        error.code,
+        error.message,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'prepare_join'},
+      );
     }
   }
 
@@ -212,11 +236,18 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
     if (_navigationStarted) return;
     _navigationStarted = true;
     try {
+      final resolvedEntryPath = launch.resolvedEntryPath;
+      if (resolvedEntryPath != null &&
+          !_isControlledPreparedEntryPath(resolvedEntryPath)) {
+        throw const FormatException('Runtime 游戏受控入口地址无效');
+      }
       await _sessionSubscription?.cancel();
       _sessionSubscription = null;
       await _releaseDiscoveryLease();
       await _registration?.close();
       _registration = null;
+      await _relayClientSession?.close();
+      _relayClientSession = null;
       await _webGateway?.close();
       await _coreGateway?.close();
       _webGateway = null;
@@ -225,18 +256,18 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
       late final Uri remoteCoreBase;
       late final String playerSource;
       if (launch.usesRelay) {
-        final webGateway = await startRelayClientGateway(
-          invitationUri: launch.entryUri,
-          target: RelayTarget.web,
-        );
-        _webGateway = webGateway;
-        final coreGateway = await startRelayClientGateway(
-          invitationUri: launch.entryUri,
-          target: RelayTarget.core,
-        );
-        _coreGateway = coreGateway;
-        target = webGateway.localEntryUri;
-        remoteCoreBase = coreGateway.localBaseUri;
+        final relaySession =
+            launch.takeRelayClientSession() ??
+            await startRelayClientSession(
+              coreBaseUri: coreControlBaseUri,
+              invitationUri: launch.entryUri,
+            );
+        _relayClientSession = relaySession;
+        // 预检的 HttpOnly Cookie 属于 Dart HTTP 客户端，不能交给 Runtime
+        // WebView。复用同一个 Relay 会话，但仍从本机邀请入口进入，让 WebView
+        // 在自己的 Cookie 仓库中完成换票。
+        target = relaySession.webGateway.localEntryUri;
+        remoteCoreBase = relaySession.coreGateway.localBaseUri;
         playerSource = 'server';
       } else {
         final authorityBase = Uri(
@@ -268,6 +299,8 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
       await navigate(target);
     } on Object {
       _navigationStarted = false;
+      await _relayClientSession?.close();
+      _relayClientSession = null;
       await _webGateway?.close();
       await _coreGateway?.close();
       _webGateway = null;
@@ -343,6 +376,8 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
       final declaration = handshake.declaration;
       final token = configured.queryParameters['token'] ?? '';
       final relay = await _relayHostStarter(
+        coreBaseUri: coreControlBaseUri,
+        sessionId: session!.sessionId,
         serverBaseUri: declaration.publicBaseUrl,
         sourceToken: token,
         hostPath: declaration.hostPath,
@@ -366,8 +401,13 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
         latencyMilliseconds: handshake.latencyMilliseconds,
       );
       return;
-    } on Object {
-      // 不记录可能包含 token 的地址。
+    } on Object catch (error, stackTrace) {
+      _logRuntimeRelayException(
+        'host.connect',
+        error,
+        stackTrace,
+        configured: configured,
+      );
     }
     throw const RuntimeLanException('relay_unavailable', '内置中转服务不可用');
   }
@@ -392,7 +432,10 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
       stopwatch.stop();
     }
     if (response.statusCode != 200 || response.bodyBytes.length > 64 * 1024) {
-      throw const FormatException('中转声明不可用');
+      throw FormatException(
+        '中转声明不可用: status=${response.statusCode} '
+        'body=${utf8.decode(response.bodyBytes, allowMalformed: true)}',
+      );
     }
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
     if (decoded is! Map || decoded['supportsGameRelay'] != true) {
@@ -430,11 +473,34 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
             pngBytes: Uint8List.fromList(link.pngBytes),
           ),
       ];
-    } on GameShareException catch (error) {
-      throw RuntimeLanException(error.code, error.message);
-    } on Object {
+    } on GameShareException catch (error, stackTrace) {
+      throw RuntimeLanException(
+        error.code,
+        error.message,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'get_share_links'},
+      );
+    } on Object catch (error, stackTrace) {
+      _logRuntimeRelayException('share.links', error, stackTrace);
       throw const RuntimeLanException('share_unavailable', '当前分享链接不可用');
     }
+  }
+
+  void _logRuntimeRelayException(
+    String operation,
+    Object error,
+    StackTrace stackTrace, {
+    Uri? configured,
+  }) {
+    debugPrint(
+      '[Runtime][Relay][error] operation=$operation '
+      'configured=$configured error=$error',
+    );
+    debugPrintStack(
+      label: '[Runtime][Relay][stack] operation=$operation',
+      stackTrace: stackTrace,
+    );
   }
 
   LanGamePresence _presence() {
@@ -513,6 +579,8 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
     _sessionSubscription = null;
     await _registration?.close();
     _registration = null;
+    await _relayClientSession?.close();
+    _relayClientSession = null;
     await _webGateway?.close();
     await _coreGateway?.close();
     _webGateway = null;
@@ -614,6 +682,18 @@ final class RuntimeLanCoordinator implements RuntimeLanHost {
   }
 }
 
+bool _isControlledPreparedEntryPath(String value) {
+  final uri = Uri.tryParse(value);
+  return uri != null &&
+      value.trim() == value &&
+      uri.scheme.isEmpty &&
+      uri.authority.isEmpty &&
+      uri.path.startsWith('/') &&
+      uri.path.length > 1 &&
+      !value.contains('?') &&
+      !value.contains('#');
+}
+
 String? _safeRelayName(Object? value) {
   if (value is! String || _unsafeRelayNameCharacters.hasMatch(value)) {
     return null;
@@ -655,7 +735,7 @@ final class _RuntimeRelayDeclaration {
     final clientPath = json['clientPath'];
     final maximum = json['maxConnectionsPerTunnel'];
     if (protocol != relayProtocolVersion ||
-        transport != 'playmesh-tcp-upgrade' ||
+        transport != 'playmesh-webrtc-datachannel' ||
         publicBaseUrl == null ||
         !{'http', 'https'}.contains(publicBaseUrl.scheme) ||
         publicBaseUrl.host.isEmpty ||

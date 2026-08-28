@@ -398,8 +398,8 @@ void main() {
   test('项目生命周期按 gameId 绑定根、文件标识和独立历史', () async {
     final fixture = await _GatewayFixture.create();
     addTearDown(fixture.close);
-    const gameId = 'com.playmesh.game.gfixtureone';
-    const copiedGameId = 'com.playmesh.game.gfixturetwo';
+    const gameId = 'Com.Playmesh.Game.GFixture_One';
+    const copiedGameId = 'Com.Playmesh.Game.GFixture_Two';
 
     final created = await fixture
         .jsonRequest('POST', '/dev/api/gdevelop/projects', const {

@@ -729,7 +729,9 @@ void main() {
 
     expect(oversized['type'], 'app.command.error');
     expect(oversized['code'], 'share_links_too_large');
-    expect(oversized['error'], '分享链接负载超过 4 MiB');
+    expect(oversized['error'], contains('SdkCommandException'));
+    expect(oversized['error'], contains('code=share_links_too_large'));
+    expect(oversized['error'], contains('分享链接负载超过 4 MiB'));
     expect(jsonEncode(oversized), isNot(contains('relay.example')));
     expect(jsonEncode(oversized), isNot(contains('data:image/png')));
   });
@@ -755,7 +757,10 @@ void main() {
     );
 
     expect(response['code'], 'discovery_unavailable');
-    expect(response['error'], '局域网发现不可用');
+    expect(response['error'], contains('code=discovery_unavailable'));
+    expect(response['error'], contains('局域网发现不可用'));
+    expect(response['error'], contains('caused by:'));
+    expect(response['error'], contains('[REDACTED URL]'));
     expect(jsonEncode(response), isNot(contains('must-not-leak')));
     expect(jsonEncode(response), isNot(contains('inviteToken')));
   });

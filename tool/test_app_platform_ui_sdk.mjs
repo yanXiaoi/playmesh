@@ -438,7 +438,7 @@ function createPage({
             result: command.command === "app.bootstrap"
               ? {
                   available: true,
-                  sdkVersion: "3.3.0",
+                  sdkVersion: "3.5.0",
                   identity: null,
                   capabilityRegistry: [],
                   device: {
@@ -521,7 +521,7 @@ const browserPage = createPage();
 assert.equal(browserPage.consoleEntries[0].args.length, 1);
 assert.equal(
   browserPage.consoleEntries[0].args[0],
-  'Playmesh App SDK 注入成功 {"version":"3.3.0"}',
+  'Playmesh App SDK 注入成功 {"version":"3.5.0"}',
 );
 assert.equal(browserPage.window.playmesh, undefined);
 assert.equal(browserPage.window.playmeshApp, undefined);
@@ -587,7 +587,7 @@ browserPage.window[appInternalKey].registerRuntimeUi({
       playerName: null,
       playerCount: null,
       gameSdkVersion: "4.1.0",
-      appSdkVersion: "3.3.0",
+      appSdkVersion: "3.5.0",
       platform: "browser",
     };
   },
@@ -628,7 +628,7 @@ assert.equal(
 await browserPage.appSdk.ui.openRuntimeLogs();
 assert.equal(
   browserUi[".logs-output"].textContent.includes(
-    'Playmesh App SDK 注入成功 {"version":"3.3.0"}',
+    'Playmesh App SDK 注入成功 {"version":"3.5.0"}',
   ),
   true,
 );
@@ -966,7 +966,7 @@ systemMenuInternal.registerRuntimeUi({
       playerName: null,
       playerCount: null,
       gameSdkVersion: "4.1.0",
-      appSdkVersion: "3.3.0",
+      appSdkVersion: "3.5.0",
       platform: "browser",
     };
   },
@@ -990,26 +990,81 @@ const freshSystemMenuPage = createPage();
 await freshSystemMenuPage.appSdk.ready;
 await new Promise((resolve) => setTimeout(resolve, 0));
 let fallbackBackCalls = 0;
-const stopFallbackBack = freshSystemMenuPage.appSdk.ui.onBack(() => {
+const fallbackBackOrder = [];
+const stopFallbackBack = freshSystemMenuPage.appSdk.ui.onSystemMenuRequest(() => {
   fallbackBackCalls += 1;
-  return false;
+  fallbackBackOrder.push("callback");
+  assert.equal(
+    freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+    true,
+  );
+  return "STOP";
 });
 assert.equal(
   freshSystemMenuPage.dispatchKey("Escape", 27).defaultPrevented,
   true,
 );
-await Promise.resolve();
-assert.equal(fallbackBackCalls, 0);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(fallbackBackCalls, 1);
+assert.deepEqual(fallbackBackOrder, ["callback"]);
+assert.equal(
+  freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+  true,
+);
 stopFallbackBack();
+
+const nextFallbackBack = freshSystemMenuPage.appSdk.ui.onSystemMenuRequest(() => {
+  fallbackBackOrder.push("next");
+  assert.equal(
+    freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+    true,
+  );
+  return "NEXT";
+});
+freshSystemMenuPage.dispatchKey("Escape", 27);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(fallbackBackOrder, ["callback", "next"]);
+assert.equal(
+  freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+  false,
+);
+nextFallbackBack();
+
+let openPanelStopCalls = 0;
+const stopOpenPanelBack = freshSystemMenuPage.appSdk.ui.onSystemMenuRequest(() => {
+  openPanelStopCalls += 1;
+  assert.equal(
+    freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+    false,
+  );
+  return "STOP";
+});
+freshSystemMenuPage.mounted[0].__root.emit("keydown", { key: "Escape" });
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(openPanelStopCalls, 1);
+assert.equal(
+  freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+  false,
+);
+stopOpenPanelBack();
+
+const nextOpenPanelBack = freshSystemMenuPage.appSdk.ui.onSystemMenuRequest(() => "NEXT");
+freshSystemMenuPage.mounted[0].__root.emit("keydown", { key: "Escape" });
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  freshSystemMenuPage.mounted[0].__elements[".layer"].hidden,
+  true,
+);
+nextOpenPanelBack();
 
 const disabledPage = createPage({ fallbackUi: false });
 await disabledPage.appSdk.ready;
 assert.equal(disabledPage.mounted.length, 0);
 assert.equal(await disabledPage.appSdk.ui.showGameSidebar(), false);
 let blockedBackCalls = 0;
-const stopBlockedBack = disabledPage.appSdk.ui.onBack(() => {
+const stopBlockedBack = disabledPage.appSdk.ui.onSystemMenuRequest(() => {
   blockedBackCalls += 1;
-  return false;
+  return "STOP";
 });
 assert.equal(disabledPage.dispatchKey("Escape", 27).defaultPrevented, true);
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1027,11 +1082,74 @@ assert.equal(disabledPage.window.__exitCount, 1);
 
 const allowedBackPage = createPage({ fallbackUi: false });
 await allowedBackPage.appSdk.ready;
-allowedBackPage.appSdk.ui.onBack(() => true);
+allowedBackPage.appSdk.ui.onSystemMenuRequest(() => "EXIT");
 assert.equal(allowedBackPage.window[appInternalKey].handleNativeBack(), true);
 await new Promise((resolve) => setTimeout(resolve, 0));
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(allowedBackPage.window.__exitCount, 1);
+
+const nextWithoutFallbackPage = createPage({ fallbackUi: false });
+await nextWithoutFallbackPage.appSdk.ready;
+nextWithoutFallbackPage.appSdk.ui.onSystemMenuRequest(() => "NEXT");
+assert.equal(nextWithoutFallbackPage.window[appInternalKey].handleNativeBack(), true);
+await new Promise((resolve) => setTimeout(resolve, 0));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(nextWithoutFallbackPage.mounted.length, 0);
+assert.equal(nextWithoutFallbackPage.window.__exitCount, 1);
+
+const stopWinsPage = createPage();
+await stopWinsPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+const stopWinsCalls = [];
+stopWinsPage.appSdk.ui.onSystemMenuRequest(() => {
+  stopWinsCalls.push("exit");
+  return "EXIT";
+});
+stopWinsPage.appSdk.ui.onSystemMenuRequest(async () => {
+  stopWinsCalls.push("stop");
+  return "STOP";
+});
+stopWinsPage.dispatchKey("Escape", 27);
+await new Promise((resolve) => setTimeout(resolve, 0));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(stopWinsCalls, ["exit", "stop"]);
+assert.equal(stopWinsPage.mounted[0].__elements[".layer"].hidden, true);
+assert.equal(stopWinsPage.window.__exitCount || 0, 0);
+
+const floatingBackPage = createPage();
+await floatingBackPage.appSdk.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+const floatingBackUi = floatingBackPage.mounted[0].__elements;
+const floatingBackOrder = [];
+const stopFloatingBack = floatingBackPage.appSdk.ui.onSystemMenuRequest(() => {
+  floatingBackOrder.push("stop");
+  assert.equal(floatingBackUi[".layer"].hidden, true);
+  return "STOP";
+});
+floatingBackUi[".menu-fab"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(floatingBackOrder, ["stop"]);
+assert.equal(floatingBackUi[".layer"].hidden, true);
+stopFloatingBack();
+
+const nextFloatingBack = floatingBackPage.appSdk.ui.onSystemMenuRequest(() => {
+  floatingBackOrder.push("next");
+  assert.equal(floatingBackUi[".layer"].hidden, true);
+  return "NEXT";
+});
+floatingBackUi[".menu-fab"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(floatingBackOrder, ["stop", "next"]);
+assert.equal(floatingBackUi[".layer"].hidden, false);
+nextFloatingBack();
+floatingBackUi[".continue"].click();
+
+floatingBackPage.appSdk.ui.onBack(() => "EXIT");
+floatingBackUi[".menu-fab"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(floatingBackUi[".layer"].hidden, true);
+assert.equal(floatingBackPage.window.__exitCount, 1);
 
 const browserWithoutFloatingButton = createPage({ showShareAction: true });
 assert.equal(
@@ -1181,7 +1299,10 @@ assert.equal(
 assert.equal(appPage.commands.includes("app.ui.gameSidebar.show"), false);
 assert.equal(appPage.appSdk.hideGameSidebar, undefined);
 assert.equal(appPage.appSdk.onMenuRequest, undefined);
-appPage.mounted[0].__elements[".share"].click();
+appUi[".share"].focus();
+const shareEnter = appPage.mounted[0].__root.emit("keydown", { key: "Enter" });
+assert.equal(shareEnter.defaultPrevented, true);
+assert.equal(shareEnter.immediatePropagationStopped, true);
 assert.equal(appPage.mounted[0].__elements[".layer"].hidden, false);
 await Promise.resolve();
 assert.equal(appPage.commands.includes("app.ui.openSharePanel"), true);
@@ -1191,9 +1312,12 @@ assert.equal(
     appPage.mounted[0].__root.html.indexOf('class="action join"'),
   true,
 );
-appUi[".join"].click();
-await new Promise((resolve) => setTimeout(resolve, 0));
+appUi[".join"].focus();
+const joinEnter = appPage.mounted[0].__root.emit("keydown", { key: "Enter" });
+assert.equal(joinEnter.defaultPrevented, true);
 assert.equal(appUi[".join-layer"].hidden, false);
+assert.equal(appPage.document.activeElement, appUi[".join-scan"]);
+await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(appUi[".join-title"].textContent, "加入游戏");
 assert.equal(appUi[".join-close"].textContent, "×");
 assert.equal(appUi[".join-empty"].textContent, "暂无房间");

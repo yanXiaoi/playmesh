@@ -2,7 +2,7 @@
 (function (global) {
   "use strict";
 
-  const PLAYMESH_SDK_VERSION = "4.1.0";
+  const PLAYMESH_SDK_VERSION = "4.3.0";
 
   let sequence = 0;
   let bootstrap = null;
@@ -57,6 +57,7 @@
   const BINARY_OP_CLOSED = 0x84;
   const BINARY_OP_RPC_INCOMING = 0x85;
   const BINARY_OP_RPC_RESULT = 0x86;
+  const BINARY_OP_RPC_STREAM_INCOMING = 0x87;
   const BINARY_MODE_AUTHORITY = 1;
   const BINARY_MODE_RELAY = 2;
   const BINARY_FLAG_LATEST = 1;
@@ -450,6 +451,7 @@
     }
     binaryPending.clear();
     rejectAllRpcRequests(error, "rpc_transport_closed");
+    rejectAllRpcStreamRequests(error, "rpc_transport_closed");
     if (closeChannels) {
       for (const state of binaryChannels.values()) {
         state.closed = true;
@@ -589,6 +591,9 @@
       break;
     case BINARY_OP_RPC_RESULT:
       receiveRpcResult(data);
+      break;
+    case BINARY_OP_RPC_STREAM_INCOMING:
+      void receiveRpcStreamIncoming(data);
       break;
     default:
       closeBinaryTransport("主机返回了未知的二进制操作");
@@ -938,6 +943,90 @@
     }
   }
 
+
+  let webRTCSignalingRequestSequence = 0;
+
+  function freezeWebRTCSignalingEndpoint(value, coreBase) {
+    if (!value || value.type !== "playmesh.webrtc-signaling-endpoint" ||
+        value.version !== 1 || typeof value.identifier !== "string" ||
+        typeof value.expiresAt !== "string" ||
+        typeof value.playerId !== "string" || typeof value.role !== "string" ||
+        typeof value.timestamp !== "number" || typeof value.requestId !== "string") {
+      throw new Error("Core 返回了无效的 WebRTC 信令端点");
+    }
+    let url = typeof value.url === "string" ? value.url : null;
+    if (!url && typeof value.webSocketPath === "string" && coreBase) {
+      const endpoint = new URL(value.webSocketPath, coreBase);
+      endpoint.protocol = endpoint.protocol === "https:" ? "wss:" : "ws:";
+      url = endpoint.toString();
+    }
+    if (!url || !/^wss?:/.test(url)) {
+      throw new Error("Core 返回了无效的 WebRTC WebSocket 地址");
+    }
+    const iceServers = Array.isArray(value.iceServers)
+      ? value.iceServers.map((server) => Object.freeze({
+          urls: Object.freeze([...(server?.urls || [])].map(String)),
+          ...(server?.username ? { username: String(server.username) } : {}),
+          ...(server?.credential ? { credential: String(server.credential) } : {}),
+        }))
+      : [];
+    return Object.freeze({
+      type: value.type,
+      version: value.version,
+      timestamp: value.timestamp,
+      requestId: value.requestId,
+      identifier: value.identifier,
+      url,
+      expiresAt: value.expiresAt,
+      playerId: value.playerId,
+      role: value.role,
+      iceServers: Object.freeze(iceServers),
+    });
+  }
+
+  async function getWebRTCSignalingEndpoint(identifier) {
+    await main.ready;
+    if (!bootstrap?.session) {
+      throw new Error("单机模式没有多人会话信令通道");
+    }
+    if (global.__PLAYMESH_BROWSER__) {
+      if (!browserCredential || !browserConnectionConfig?.coreBase) {
+        throw new Error("当前浏览器会话凭据不可用");
+      }
+      const coreBase = browserConnectionConfig.coreBase;
+      const timestamp = Date.now();
+      const requestId = `webrtc-${timestamp}-${++webRTCSignalingRequestSequence}`;
+      const endpointUrl = new URL(
+        `v1/sessions/${encodeURIComponent(bootstrap.session.id)}/webrtc/signaling-endpoints`,
+        coreBase,
+      );
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${browserCredential.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "playmesh.webrtc-signaling-endpoint.request",
+          version: 1,
+          timestamp,
+          requestId,
+          identifier,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        const error = new Error(result?.error?.message || "无法取得 WebRTC 信令端点");
+        error.code = result?.error?.code;
+        throw error;
+      }
+      return freezeWebRTCSignalingEndpoint(result, coreBase);
+    }
+    return freezeWebRTCSignalingEndpoint(
+      await post("webrtc.getSignalingEndpoint", { identifier }),
+      null,
+    );
+  }
   let syncSnapshotSequence = 0;
 
   function cloneJson(value, label) {
@@ -1657,6 +1746,11 @@
   const RPC_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024 - 64 * 1024;
   const RPC_MAX_DEPTH = 64;
   const RPC_MAX_ENTRIES = 100000;
+  const RPC_STREAM_DEFAULT_TIMEOUT_MS = 300000;
+  const RPC_STREAM_MIN_TIMEOUT_MS = 1000;
+  const RPC_STREAM_MAX_TIMEOUT_MS = 1800000;
+  const RPC_STREAM_MAX_PENDING = 4;
+  const RPC_STREAM_MAX_BYTES = 512 * 1024 * 1024;
   const RPC_TAG_UNDEFINED = 0;
   const RPC_TAG_NULL = 1;
   const RPC_TAG_FALSE = 2;
@@ -1673,6 +1767,9 @@
   const rpcErrorCodePattern = /^[a-z][a-z0-9_]{0,63}$/;
   const rpcHandlers = new Map();
   const rpcPending = new Map();
+  const rpcStreamHandlers = new Map();
+  const rpcStreamPending = new Set();
+  const rpcStreamReceivers = new Set();
 
   function rpcError(code, message) {
     const error = new Error(message);
@@ -1716,6 +1813,262 @@
       );
     }
     return timeoutMs;
+  }
+
+  function validateRpcStreamOptions(options, allowedKeys, defaults) {
+    if (options === undefined) return { ...defaults };
+    if (!options || typeof options !== "object" || Array.isArray(options)) {
+      throw rpcError("rpc_options_invalid", "RPC 流 options 必须是对象");
+    }
+    for (const key of Object.keys(options)) {
+      if (!allowedKeys.includes(key)) {
+        throw rpcError("rpc_options_invalid", `未知 RPC 流 option: ${key}`);
+      }
+    }
+    return { ...defaults, ...options };
+  }
+
+  function normalizeRpcStreamProgressHandler(callback) {
+    if (callback !== undefined && typeof callback !== "function") {
+      throw rpcError("rpc_progress_invalid", "RPC 流 onProgress 必须是函数");
+    }
+    return callback ?? null;
+  }
+
+  function reportRpcStreamProgress(callback, transferredBytes, totalBytes) {
+    if (!callback) return;
+    try {
+      const result = callback(transferredBytes, totalBytes);
+      if (result && typeof result.then === "function") {
+        void result.catch((error) => {
+          global.console?.warn?.("RPC 流进度回调执行失败", error);
+        });
+      }
+    } catch (error) {
+      global.console?.warn?.("RPC 流进度回调执行失败", error);
+    }
+  }
+
+  function rpcStreamSourceAsReadable(stream) {
+    if (stream.streaming) return stream.body;
+    if (typeof global.Blob === "function" && stream.body instanceof global.Blob) {
+      return stream.body.stream();
+    }
+    const bytes = stream.body instanceof Uint8Array
+      ? stream.body
+      : new Uint8Array(stream.body);
+    return new global.ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+  }
+
+  function trackRpcStreamProgress(source, totalBytes, callback) {
+    if (!callback) return source;
+    const reader = source.getReader();
+    let transferredBytes = 0;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      try {
+        reader.releaseLock();
+      } catch (_) {
+        // 流结束或取消时可能已自动释放。
+      }
+    };
+    reportRpcStreamProgress(callback, 0, totalBytes);
+    return new global.ReadableStream({
+      async pull(controller) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            release();
+            controller.close();
+            return;
+          }
+          if (!(chunk.value instanceof Uint8Array)) {
+            throw rpcError(
+              "rpc_stream_chunk_invalid",
+              "RPC ReadableStream 的每个 chunk 必须是 Uint8Array",
+            );
+          }
+          transferredBytes += chunk.value.byteLength;
+          if (transferredBytes > RPC_STREAM_MAX_BYTES) {
+            throw rpcError("rpc_stream_too_large", "RPC 流不能超过 512 MiB");
+          }
+          controller.enqueue(chunk.value);
+          reportRpcStreamProgress(callback, transferredBytes, totalBytes);
+        } catch (error) {
+          try {
+            await reader.cancel(error);
+          } catch (_) {
+            // 保留最初的读取错误。
+          }
+          release();
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        try {
+          await reader.cancel(reason);
+        } finally {
+          release();
+        }
+      },
+    });
+  }
+
+  function normalizeRpcStreamMetadata(name, type) {
+    const normalizedName = name ?? "stream.bin";
+    const normalizedType = type || "application/octet-stream";
+    const encoder = new TextEncoder();
+    if (
+      typeof normalizedName !== "string" ||
+      !normalizedName.length ||
+      encoder.encode(normalizedName).length > 255 ||
+      /[\u0000\r\n]/.test(normalizedName)
+    ) {
+      throw rpcError(
+        "rpc_stream_name_invalid",
+        "RPC 流名称必须是 1～255 UTF-8 字节且不能包含控制换行",
+      );
+    }
+    if (
+      typeof normalizedType !== "string" ||
+      !normalizedType.length ||
+      encoder.encode(normalizedType).length > 255 ||
+      /[\u0000\r\n]/.test(normalizedType)
+    ) {
+      throw rpcError("rpc_stream_type_invalid", "RPC 流媒体类型无效");
+    }
+    return { name: normalizedName, type: normalizedType };
+  }
+
+  function describeRpcStreamSource(source, metadata = {}) {
+    let body = source;
+    let size = null;
+    let sourceName = null;
+    let sourceType = null;
+    let streaming = false;
+    if (typeof global.File === "function" && source instanceof global.File) {
+      size = source.size;
+      sourceName = source.name;
+      sourceType = source.type;
+    } else if (typeof global.Blob === "function" && source instanceof global.Blob) {
+      size = source.size;
+      sourceType = source.type;
+    } else if (source instanceof global.ArrayBuffer) {
+      size = source.byteLength;
+    } else if (source instanceof Uint8Array) {
+      size = source.byteLength;
+    } else if (
+      typeof global.ReadableStream === "function" &&
+      source instanceof global.ReadableStream
+    ) {
+      streaming = true;
+    } else {
+      throw rpcError(
+        "rpc_stream_source_invalid",
+        "RPC 流 source 必须是 File、Blob、ArrayBuffer、Uint8Array 或 ReadableStream<Uint8Array>",
+      );
+    }
+    if (size !== null && size > RPC_STREAM_MAX_BYTES) {
+      throw rpcError("rpc_stream_too_large", "RPC 流不能超过 512 MiB");
+    }
+    const normalized = normalizeRpcStreamMetadata(
+      metadata.name ?? sourceName,
+      metadata.type ?? sourceType,
+    );
+    return { body, size, streaming, ...normalized };
+  }
+
+  function normalizeRpcStreamSource(source, options) {
+    const normalized = validateRpcStreamOptions(
+      options,
+      ["timeoutMs", "name", "type", "onProgress"],
+      { timeoutMs: RPC_STREAM_DEFAULT_TIMEOUT_MS },
+    );
+    if (
+      !Number.isInteger(normalized.timeoutMs) ||
+      normalized.timeoutMs < RPC_STREAM_MIN_TIMEOUT_MS ||
+      normalized.timeoutMs > RPC_STREAM_MAX_TIMEOUT_MS
+    ) {
+      throw rpcError(
+        "rpc_timeout_invalid",
+        `RPC 流 timeoutMs 必须是 ${RPC_STREAM_MIN_TIMEOUT_MS} 至 ${RPC_STREAM_MAX_TIMEOUT_MS} 的整数`,
+      );
+    }
+    const stream = {
+      ...describeRpcStreamSource(source, normalized),
+      timeoutMs: normalized.timeoutMs,
+      onProgress: normalizeRpcStreamProgressHandler(normalized.onProgress),
+    };
+    return stream;
+  }
+
+  function normalizeStorageUploadSource(source, options) {
+    const fileSource = typeof global.File === "function" && source instanceof global.File;
+    const normalized = validateRpcStreamOptions(options, ["name", "type"], {});
+    if (!fileSource && normalized.name === undefined) {
+      throw rpcError(
+        "storage_upload_name_required",
+        "非 File 字节源必须通过 options.name 提供上传文件名",
+      );
+    }
+    return describeRpcStreamSource(source, normalized);
+  }
+
+  function getRpcStreamTransport() {
+    const session = main.session.getCurrent();
+    if (!session?.id || !binaryTransportConfig?.url) {
+      throw rpcError("rpc_session_required", "RPC 流只能在多人会话中调用");
+    }
+    let binaryUrl;
+    try {
+      binaryUrl = new URL(binaryTransportConfig.url, global.location?.href);
+    } catch (_) {
+      throw rpcError("rpc_stream_transport_invalid", "RPC 流传输地址无效");
+    }
+    const token = binaryUrl.searchParams.get("token");
+    if (!token) {
+      throw rpcError("rpc_stream_transport_invalid", "RPC 流传输缺少会话凭据");
+    }
+    binaryUrl.protocol = binaryUrl.protocol === "wss:" ? "https:" : "http:";
+    binaryUrl.pathname = "/";
+    binaryUrl.search = "";
+    binaryUrl.hash = "";
+    return { baseUrl: binaryUrl, token, session };
+  }
+
+  async function rpcStreamResponseError(response) {
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (_) {
+      // 非 JSON 网关错误使用稳定兜底 code。
+    }
+    const code = payload?.error?.code;
+    const message = payload?.error?.message;
+    return rpcError(
+      typeof code === "string" && rpcErrorCodePattern.test(code)
+        ? code
+        : "rpc_stream_failed",
+      typeof message === "string" && message
+        ? message
+        : `Authority RPC 流请求失败（HTTP ${response.status}）`,
+    );
+  }
+
+  function rejectAllRpcStreamRequests(reason, code = "rpc_transport_closed") {
+    const error = rpcError(code, reason?.message || String(reason || "RPC 流传输已关闭"));
+    for (const pendingRequest of [...rpcStreamPending]) {
+      pendingRequest.error = error;
+      pendingRequest.controller.abort();
+    }
+    for (const controller of [...rpcStreamReceivers]) controller.abort();
   }
 
   function rpcUint32(value) {
@@ -2093,6 +2446,74 @@
     });
   }
 
+  async function requestRpcStream(path, source, options) {
+    const normalizedPath = validateRpcPath(path);
+    const stream = normalizeRpcStreamSource(source, options);
+    await main.ready;
+    if (!main.session.getCurrent()) {
+      throw rpcError("rpc_session_required", "RPC 流只能在多人会话中调用");
+    }
+    if (rpcStreamPending.size >= RPC_STREAM_MAX_PENDING) {
+      throw rpcError("rpc_pending_limit", "当前页面等待中的 RPC 流请求过多");
+    }
+    await ensureBinarySocket();
+    const transport = getRpcStreamTransport();
+    const endpoint = new URL(
+      `v1/sessions/${encodeURIComponent(transport.session.id)}/rpc-stream`,
+      transport.baseUrl,
+    );
+    endpoint.searchParams.set("path", normalizedPath);
+    endpoint.searchParams.set("timeoutMs", String(stream.timeoutMs));
+    endpoint.searchParams.set("name", stream.name);
+    if (stream.size !== null) endpoint.searchParams.set("size", String(stream.size));
+    if (stream.onProgress) {
+      stream.body = trackRpcStreamProgress(
+        rpcStreamSourceAsReadable(stream),
+        stream.size,
+        stream.onProgress,
+      );
+      stream.streaming = true;
+    }
+    const controller = new AbortController();
+    const pendingRequest = { controller, error: null };
+    rpcStreamPending.add(pendingRequest);
+    const timer = global.setTimeout(() => {
+      pendingRequest.error = rpcError(
+        "rpc_timeout",
+        `Authority RPC 流请求超时: ${normalizedPath}`,
+      );
+      controller.abort();
+    }, stream.timeoutMs);
+    try {
+      const request = {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${transport.token}`,
+          "Content-Type": stream.type,
+        },
+        body: stream.body,
+        signal: controller.signal,
+      };
+      if (stream.streaming) request.duplex = "half";
+      const response = await global.fetch(endpoint, request);
+      if (!response.ok) throw await rpcStreamResponseError(response);
+      const encoded = new Uint8Array(await response.arrayBuffer());
+      if (encoded.length > RPC_MAX_PAYLOAD_BYTES) {
+        throw rpcError("rpc_payload_too_large", "Authority RPC 流响应超过 4 MiB 通道上限");
+      }
+      return decodeRpcValue(encoded);
+    } catch (error) {
+      if (pendingRequest.error) throw pendingRequest.error;
+      if (error?.name === "AbortError") {
+        throw rpcError("rpc_stream_cancelled", "Authority RPC 流请求已取消");
+      }
+      throw error;
+    } finally {
+      global.clearTimeout(timer);
+      rpcStreamPending.delete(pendingRequest);
+    }
+  }
+
   function registerRpcRequestHandler(path, handler) {
     if (!main.session.isAuthority()) {
       throw rpcError(
@@ -2121,6 +2542,46 @@
     return function unregister() {
       if (rpcHandlers.get(normalizedPath) === registration) {
         rpcHandlers.delete(normalizedPath);
+      }
+    };
+  }
+
+  function registerRpcStreamRequestHandler(path, handler, options) {
+    if (!main.session.isAuthority()) {
+      throw rpcError(
+        "not_authority",
+        "只有 Authority Client 可以调用 playmesh.main.rpc.onStreamRequest()",
+      );
+    }
+    const normalizedPath = validateRpcPath(path);
+    if (typeof handler !== "function") {
+      throw rpcError("rpc_handler_invalid", "RPC 流 handler 必须是函数");
+    }
+    const normalizedOptions = validateRpcStreamOptions(
+      options,
+      ["onProgress"],
+      {},
+    );
+    const onProgress = normalizeRpcStreamProgressHandler(
+      normalizedOptions.onProgress,
+    );
+    if (rpcStreamHandlers.has(normalizedPath)) {
+      throw rpcError(
+        "rpc_path_registered",
+        `Authority RPC 流 path 已注册: ${normalizedPath}`,
+      );
+    }
+    const registration = { handler, onProgress };
+    rpcStreamHandlers.set(normalizedPath, registration);
+    void ensureBinarySocket().catch((error) => {
+      global.console?.warn?.("Authority RPC 流二进制控制连接暂不可用", {
+        path: normalizedPath,
+        error: error?.message || String(error),
+      });
+    });
+    return function unregister() {
+      if (rpcStreamHandlers.get(normalizedPath) === registration) {
+        rpcStreamHandlers.delete(normalizedPath);
       }
     };
   }
@@ -2182,6 +2643,111 @@
       queueBinaryFrame(encodeRpcResponseFrame(rpcId, encoded, null));
     } catch (error) {
       queueBinaryFrame(encodeRpcResponseFrame(rpcId, null, error));
+    }
+  }
+
+  async function receiveRpcStreamIncoming(data) {
+    if (data.length < 28) {
+      closeBinaryTransport("Authority RPC 流请求帧格式无效");
+      return;
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const rpcId = data.slice(2, 10);
+    const lengths = [
+      view.getUint16(10),
+      view.getUint16(12),
+      view.getUint16(14),
+      view.getUint16(16),
+      view.getUint16(18),
+    ];
+    let offset = 28;
+    const values = [];
+    for (const length of lengths) {
+      if (!length || data.length < offset + length) {
+        closeBinaryTransport("Authority RPC 流请求上下文无效");
+        return;
+      }
+      values.push(new TextDecoder().decode(data.subarray(offset, offset + length)));
+      offset += length;
+    }
+    if (offset !== data.length) {
+      closeBinaryTransport("Authority RPC 流请求帧包含多余数据");
+      return;
+    }
+    const [senderPlayerId, path, consumePath, name, type] = values;
+    let normalizedPath;
+    try {
+      normalizedPath = validateRpcPath(path);
+      normalizeRpcStreamMetadata(name, type);
+    } catch (error) {
+      queueBinaryFrame(encodeRpcResponseFrame(rpcId, null, error));
+      return;
+    }
+    const registration = rpcStreamHandlers.get(normalizedPath);
+    if (!registration) {
+      queueBinaryFrame(encodeRpcResponseFrame(
+        rpcId,
+        null,
+        rpcError("rpc_path_not_found", `Authority 未监听 RPC 流 path: ${normalizedPath}`),
+      ));
+      return;
+    }
+    const highLength = view.getUint32(20);
+    const lowLength = view.getUint32(24);
+    const size = highLength === 0xffffffff && lowLength === 0xffffffff
+      ? null
+      : highLength * 0x100000000 + lowLength;
+    const session = main.session.getCurrent();
+    const context = {
+      requestId: rpcRequestIdFromBytes(rpcId),
+      path: normalizedPath,
+      senderPlayerId,
+      session,
+      members: Array.isArray(session?.players) ? session.players : [],
+      name,
+      type,
+      size,
+    };
+    const controller = new AbortController();
+    rpcStreamReceivers.add(controller);
+    let body = null;
+    try {
+      const transport = getRpcStreamTransport();
+      const expectedPrefix =
+        `/v1/sessions/${encodeURIComponent(transport.session.id)}/rpc-streams/`;
+      if (!consumePath.startsWith(expectedPrefix) || consumePath.length <= expectedPrefix.length) {
+        throw rpcError("rpc_stream_transport_invalid", "Authority RPC 流读取地址无效");
+      }
+      const endpoint = new URL(consumePath, transport.baseUrl);
+      if (endpoint.origin !== transport.baseUrl.origin) {
+        throw rpcError("rpc_stream_transport_invalid", "Authority RPC 流读取来源无效");
+      }
+      const response = await global.fetch(endpoint, {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${transport.token}` },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw await rpcStreamResponseError(response);
+      body = response.body;
+      if (!body) {
+        throw rpcError("rpc_stream_unsupported", "当前浏览器不支持 ReadableStream 响应体");
+      }
+      body = trackRpcStreamProgress(body, size, registration.onProgress);
+      const result = await registration.handler(body, context);
+      const encoded = await encodeRpcValue(result);
+      queueBinaryFrame(encodeRpcResponseFrame(rpcId, encoded, null));
+    } catch (error) {
+      queueBinaryFrame(encodeRpcResponseFrame(rpcId, null, error));
+    } finally {
+      rpcStreamReceivers.delete(controller);
+      if (body && !body.locked) {
+        try {
+          await body.cancel();
+        } catch (_) {
+          // 已关闭的响应流无需再次处理。
+        }
+      }
+      controller.abort();
     }
   }
 
@@ -3198,6 +3764,195 @@
       .replace(/'/g, "&#39;");
   }
 
+
+  function validateDatabaseSql(sql) {
+    if (typeof sql !== "string" || sql.trim().length === 0) {
+      throw new Error("SQL 必须是非空字符串");
+    }
+    return sql;
+  }
+
+  function validateDatabaseArguments(args) {
+    if (args === undefined) return [];
+    const indexed = Array.isArray(args);
+    if (
+      !indexed &&
+      (!args || typeof args !== "object" || Object.getPrototypeOf(args) !== Object.prototype)
+    ) {
+      throw new Error("SQL args 必须是数组或命名参数对象");
+    }
+    for (const value of indexed ? args : Object.values(args)) {
+      if (
+        value !== null &&
+        typeof value !== "boolean" &&
+        typeof value !== "number" &&
+        typeof value !== "string"
+      ) {
+        throw new Error("SQL 参数只能是 null、boolean、number 或 string");
+      }
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new Error("SQL number 参数必须是有限数值");
+      }
+    }
+    return indexed ? args.slice() : { ...args };
+  }
+
+  function requireDatabaseAuthority() {
+    if (!main.session.isAuthority()) {
+      throw new Error("只有 Authority Client 可以访问 main.db");
+    }
+  }
+
+  function databaseStatementCall(command, sql, args, transactionId) {
+    requireDatabaseAuthority();
+    const payload = {
+      sql: validateDatabaseSql(sql),
+      args: validateDatabaseArguments(args),
+    };
+    if (transactionId !== undefined) payload.transactionId = transactionId;
+    switch (command) {
+      case "db.select": return post("db.select", payload);
+      case "db.update": return post("db.update", payload);
+      case "db.delete": return post("db.delete", payload);
+      case "db.insert": return post("db.insert", payload);
+      case "db.transaction.select":
+        return post("db.transaction.select", payload);
+      case "db.transaction.update":
+        return post("db.transaction.update", payload);
+      case "db.transaction.delete":
+        return post("db.transaction.delete", payload);
+      case "db.transaction.insert":
+        return post("db.transaction.insert", payload);
+      default: throw new Error(`未知数据库命令: ${command}`);
+    }
+  }
+
+  function createDatabaseTransaction(transactionId) {
+    let active = true;
+    function requireActive() {
+      if (!active) throw new Error("数据库事务已经结束");
+    }
+    return Object.freeze({
+      select(sql, args) {
+        requireActive();
+        return databaseStatementCall(
+          "db.transaction.select",
+          sql,
+          args,
+          transactionId,
+        );
+      },
+      update(sql, args) {
+        requireActive();
+        return databaseStatementCall(
+          "db.transaction.update",
+          sql,
+          args,
+          transactionId,
+        );
+      },
+      delete(sql, args) {
+        requireActive();
+        return databaseStatementCall(
+          "db.transaction.delete",
+          sql,
+          args,
+          transactionId,
+        );
+      },
+      insert(sql, args) {
+        requireActive();
+        return databaseStatementCall(
+          "db.transaction.insert",
+          sql,
+          args,
+          transactionId,
+        );
+      },
+      getDDL(name) {
+        requireActive();
+        return databaseDdlCall(name, transactionId);
+      },
+      async commit() {
+        requireActive();
+        requireDatabaseAuthority();
+        await post("db.transaction.commit", { transactionId });
+        active = false;
+      },
+      async rollback() {
+        requireActive();
+        requireDatabaseAuthority();
+        await post("db.transaction.rollback", { transactionId });
+        active = false;
+      },
+    });
+  }
+
+  function databaseDdlCall(name, transactionId) {
+    requireDatabaseAuthority();
+    if (
+      name !== undefined &&
+      (typeof name !== "string" || name.trim().length === 0)
+    ) {
+      throw new Error("DDL 名称必须是非空字符串");
+    }
+    const payload = {};
+    if (name !== undefined) payload.name = name;
+    if (transactionId !== undefined) payload.transactionId = transactionId;
+    return transactionId === undefined
+      ? post("db.ddl", payload)
+      : post("db.transaction.ddl", payload);
+  }
+
+  function createDatabaseApi() {
+    return Object.freeze({
+      open() {
+        requireDatabaseAuthority();
+        return post("db.open", {});
+      },
+      select(sql, args) {
+        return databaseStatementCall("db.select", sql, args);
+      },
+      update(sql, args) {
+        return databaseStatementCall("db.update", sql, args);
+      },
+      delete(sql, args) {
+        return databaseStatementCall("db.delete", sql, args);
+      },
+      insert(sql, args) {
+        return databaseStatementCall("db.insert", sql, args);
+      },
+      getDDL(name) {
+        return databaseDdlCall(name);
+      },
+      async beginTransaction() {
+        requireDatabaseAuthority();
+        const result = await post("db.transaction.begin", {});
+        return createDatabaseTransaction(result.transactionId);
+      },
+      async transaction(callback) {
+        requireDatabaseAuthority();
+        if (typeof callback !== "function") {
+          throw new Error("db.transaction() callback 必须是函数");
+        }
+        const result = await post("db.transaction.begin", {});
+        const transaction = createDatabaseTransaction(result.transactionId);
+        try {
+          const result = await callback(transaction);
+          await transaction.commit();
+          return result;
+        } catch (error) {
+          try {
+            await transaction.rollback();
+          } catch (rollbackError) {
+            global.console?.error?.("数据库事务自动回滚失败", rollbackError);
+          }
+          throw error;
+        }
+      },
+    });
+  }
+
   const standardStorageRevisions = new Map();
   const standardStorageBucketOperations = new Map();
   let nicknameUpdateTail = Promise.resolve();
@@ -3281,7 +4036,9 @@
     },
     rpc: {
       request: requestRpc,
+      requestStream: requestRpcStream,
       onRequest: registerRpcRequestHandler,
+      onStreamRequest: registerRpcStreamRequestHandler,
     },
     binary: {
       authorityPlayerId: "authority",
@@ -3374,13 +4131,14 @@
             validateStorageName(bucket, "bucket");
             return storageCall("storage.clear", bucket);
           },
-          upload(file) {
+          upload(file, options) {
             validateStorageName(bucket, "bucket");
-            return storageUpload(bucket, file);
+            return storageUpload(bucket, file, options);
           },
         };
       },
     },
+    db: createDatabaseApi(),
   };
 
   const PLAYMESH_MAIN_INTERNAL_KEY =
@@ -3391,6 +4149,9 @@
     enumerable: false,
     writable: false,
   });
+  appInternalRuntime.registerWebRTCSignalingEndpointProvider?.(
+    getWebRTCSignalingEndpoint,
+  );
   registerAppPlatformUiRuntime();
   if (global.chrome && global.chrome.webview) {
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
@@ -3970,26 +4731,24 @@
     return encoded;
   }
 
-  async function storageUpload(bucket, file) {
+  async function storageUpload(bucket, source, options) {
     await main.ready;
-    if (!file || typeof file.name !== "string" || typeof file.size !== "number") {
-      throw new Error("upload(file) 需要浏览器 File");
-    }
-    if (file.size > 256 * 1024 * 1024) {
-      throw new Error("上传文件不能超过 256 MiB");
-    }
+    const stream = normalizeStorageUploadSource(source, options);
     const config = global.__PLAYMESH_BROWSER__;
     const base = config?.bucketEndpoint || "/bucket";
-    const url = `${base}/${encodeURIComponent(bucket)}?name=${encodeURIComponent(file.name)}`;
+    const url = `${base}/${encodeURIComponent(bucket)}?name=${encodeURIComponent(stream.name)}`;
     const headers = {};
     if (config?.shareToken) {
       headers["X-Playmesh-Share-Token"] = config.shareToken;
     }
-    const response = await global.fetch(url, {
+    if (stream.type) headers["Content-Type"] = stream.type;
+    const request = {
       method: "POST",
       headers,
-      body: file,
-    });
+      body: stream.body,
+    };
+    if (stream.streaming) request.duplex = "half";
+    const response = await global.fetch(url, request);
     let payload = null;
     try {
       payload = await response.json();

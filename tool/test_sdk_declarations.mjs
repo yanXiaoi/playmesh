@@ -25,6 +25,10 @@ const gameStorageLifecycleSource = fs.readFileSync(
   "lib/core/game_sdk/features/game/game_storage_lifecycle_feature.dart",
   "utf8",
 );
+const gameDatabaseSource = fs.readFileSync(
+  "lib/core/game_sdk/features/game/game_database_feature.dart",
+  "utf8",
+);
 const appDeviceSource = fs.readFileSync(
   "lib/core/game_sdk/features/app/app_device_feature.dart",
   "utf8",
@@ -130,11 +134,11 @@ assert(!game.includes("__PLAYMESH"), "Game SDK 声明包含未替换的占位符
 assert(!app.includes("__PLAYMESH"), "App SDK 声明包含未替换的占位符");
 assert.match(
   game,
-  /interface PlaymeshMainApi \{[\s\S]*?readonly version: "4\.1\.0";/,
+  /interface PlaymeshMainApi \{[\s\S]*?readonly version: "4\.3\.0";/,
 );
 assert.match(
   game,
-  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.3\.0";/,
+  /interface PlaymeshAppApi \{[\s\S]*?readonly version: "3\.5\.0";/,
 );
 assert.match(
   game,
@@ -147,6 +151,30 @@ assert.match(
 assert.match(
   game,
   /onService\([\s\S]*?options\?: PlaymeshAuthorityServiceOptions\): PlaymeshUnsubscribe;/,
+);
+assert.match(
+  game,
+  /requestStream\(path: string, source: PlaymeshRpcStreamSource, options\?: PlaymeshRpcStreamRequestOptions\): Promise<any>;/,
+);
+assert.match(
+  game,
+  /onStreamRequest\(path: string, handler: \(source: ReadableStream<Uint8Array>, context: PlaymeshRpcStreamContext\)[\s\S]*?options\?: PlaymeshRpcStreamHandlerOptions\): PlaymeshUnsubscribe;/,
+);
+assert.match(
+  game,
+  /type PlaymeshRpcStreamProgressHandler = \([\s\S]*?transferredBytes: number,[\s\S]*?totalBytes: number \| null,[\s\S]*?\) => void;/,
+);
+assert.match(
+  game,
+  /interface PlaymeshRpcStreamRequestOptions \{[\s\S]*?onProgress\?: PlaymeshRpcStreamProgressHandler;/,
+);
+assert.match(
+  game,
+  /interface PlaymeshRpcStreamHandlerOptions \{[\s\S]*?onProgress\?: PlaymeshRpcStreamProgressHandler;/,
+);
+assert.match(
+  game,
+  /upload\(source: PlaymeshRpcStreamSource, options: \{ name: string; type\?: string \}\): Promise<string>;/,
 );
 assert.match(
   gameAuthoritySource,
@@ -202,6 +230,28 @@ assert.match(game, /capabilities\.create/);
 assert.match(game, /addEventListener\(event: string, callback:/);
 assert.match(game, /removeEventListener\(event: string, callback:/);
 assert.match(game, /interface PlaymeshAppMediaSource/);
+assert.match(game, /interface PlaymeshWebRTCSignalingEndpoint/);
+assert.match(
+  game,
+  /readonly webrtc:[\s\S]*?getSignalingEndpoint\(identifier: string\): Promise<PlaymeshWebRTCSignalingEndpoint>/,
+);
+assert.match(
+  game,
+  /type PlaymeshSystemMenuDecision = "EXIT" \| "NEXT" \| "STOP"/,
+);
+assert.match(
+  game,
+  /onSystemMenuRequest\([\s\S]*?callback: \(\) => PlaymeshSystemMenuDecision \|[\s\S]*?Promise<PlaymeshSystemMenuDecision>/,
+);
+assert.match(
+  game,
+  /@deprecated 使用 `onSystemMenuRequest\(\)`；[\s\S]*?onBack\(/,
+);
+assert.match(
+  game,
+  /onBack\([\s\S]*?callback: \(\) => PlaymeshAppBackDecision \|[\s\S]*?Promise<PlaymeshAppBackDecision>/,
+);
+assert.doesNotMatch(game, /onBack\([\s\S]{0,160}Promise<boolean>/);
 assert.match(
   game,
   /open\([\s\S]*?source: PlaymeshAppMediaSource,[\s\S]*?options\?: PlaymeshAppMediaOpenOptions/,
@@ -264,6 +314,7 @@ for (const removedRootMember of [
   "lifecycle",
   "performance",
   "storage",
+  "db",
   "runtime",
 ]) {
   assert.doesNotMatch(publicRootApi, new RegExp(`readonly ${removedRootMember}:`));
@@ -273,6 +324,7 @@ assert.match(
   game,
   /interface PlaymeshPlayer \{[\s\S]*avatar: string \| null;[\s\S]*role: "authority" \| "authority_player" \| "player";[\s\S]*connected: boolean;/,
 );
+assert.doesNotMatch(game, /interface PlaymeshPlayer \{[\s\S]*connectionMode:/);
 assert.match(
   game,
   /interface PlaymeshPlayerConnectionEvent \{[\s\S]*player: PlaymeshPlayer;[\s\S]*session: PlaymeshSessionSnapshot;[\s\S]*isCurrentPlayer: boolean;/,
@@ -293,8 +345,17 @@ assert.match(game, /openSharePanel\(\): Promise<void>/);
 assert.match(game, /disableSystemMenuTriggers\(\): void/);
 assert.match(
   game,
-  /onBack\(callback: \(\) => boolean \| Promise<boolean>\): PlaymeshUnsubscribe/,
+  /type PlaymeshSystemMenuDecision = "EXIT" \| "NEXT" \| "STOP"/,
 );
+assert.match(
+  game,
+  /onSystemMenuRequest\(\s*callback: \(\) => PlaymeshSystemMenuDecision \|\s*Promise<PlaymeshSystemMenuDecision>,\s*\): PlaymeshUnsubscribe/,
+);
+assert.match(
+  game,
+  /onBack\(\s*callback: \(\) => PlaymeshAppBackDecision \|\s*Promise<PlaymeshAppBackDecision>,\s*\): PlaymeshUnsubscribe/,
+);
+assert.doesNotMatch(game, /onBack\([\s\S]{0,160}Promise<boolean>/);
 assert.match(game, /type PlaymeshAppLanShareLinkType = "lan" \| "wan"/);
 assert.match(game, /interface PlaymeshAppLanShareLink/);
 assert.match(game, /interface PlaymeshLanGame/);
@@ -442,12 +503,22 @@ const openSharePanel = appNamespace.members.find(
 );
 assert.equal(openSharePanel.signature, "ui.openSharePanel(): Promise<void>");
 assert.match(openSharePanel.behavior, /returns no token, URL, QR code/);
+const systemMenuRequest = appNamespace.members.find(
+  (member) => member.name === "ui.onSystemMenuRequest",
+);
+assert.match(systemMenuRequest.signature, /PlaymeshSystemMenuDecision/);
+const deprecatedBack = appNamespace.members.find(
+  (member) => member.name === "ui.onBack",
+);
+assert.equal(deprecatedBack.deprecated, "Use ui.onSystemMenuRequest");
 for (const memberName of [
   "ui.configure",
   "ui.initializeBrowser",
   "ui.showGameSidebar",
   "ui.onGameMenuOpen",
   "ui.onGameMenuClose",
+  "ui.onSystemMenuRequest",
+  "ui.onBack",
   "ui.restartGame",
   "ui.openRuntimeLogs",
   "ui.openGameInfo",
@@ -479,6 +550,23 @@ assert.match(
     .signature,
   /options\?: \{namespace\?: string\}/,
 );
+const rpcNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.main.rpc",
+);
+assert.deepEqual(
+  rpcNamespace.members.map((member) => member.name),
+  ["request", "onRequest", "requestStream", "onStreamRequest"],
+);
+assert.match(
+  rpcNamespace.members.find((member) => member.name === "requestStream")
+    .signature,
+  /onProgress.*totalBytes: number \| null/,
+);
+assert.match(
+  rpcNamespace.members.find((member) => member.name === "onStreamRequest")
+    .behavior,
+  /StorageBucket\.upload/,
+);
 const gameNamespace = sdkManifest.namespaces.find(
   (namespace) => namespace.name === "playmesh.main.game",
 );
@@ -501,7 +589,46 @@ assert.deepEqual(storageBucketMembers, [
   "removeData(key): Promise<null>",
   "clearData(): Promise<null>",
   "upload(file): Promise<string>",
+  "upload(source, {name, type?}): Promise<string>",
 ]);
+const databaseNamespace = sdkManifest.namespaces.find(
+  (namespace) => namespace.name === "playmesh.main.db",
+);
+assert.deepEqual(
+  databaseNamespace.members.map((member) => member.name),
+  [
+    "open",
+    "select",
+    "update",
+    "delete",
+    "insert",
+    "getDDL",
+    "beginTransaction",
+    "transaction",
+  ],
+);
+assert.deepEqual(databaseNamespace.transactionMembers, [
+  "select(sql, args?)",
+  "update(sql, args?)",
+  "delete(sql, args?)",
+  "insert(sql, args?)",
+  "getDDL(name?)",
+  "commit()",
+  "rollback()",
+]);
+assert.match(
+  game,
+  /type PlaymeshDatabaseArguments = readonly PlaymeshDatabaseParameter\[\] \|[\s\S]*Readonly<Record<string, PlaymeshDatabaseParameter>>;/,
+);
+assert.match(
+  game,
+  /interface PlaymeshDatabaseApi \{[\s\S]*?open\(\): Promise<\{ readonly file: "_game\.db" \}>;[\s\S]*?beginTransaction\(\): Promise<PlaymeshDatabaseTransaction>;[\s\S]*?transaction<T>/,
+);
+assert.match(
+  gameDatabaseSource,
+  /Array\.isArray\(args\)[\s\S]*?SQL args 必须是数组或命名参数对象[\s\S]*?db\.transaction\.begin/,
+);
+assert.doesNotMatch(game, /interface PlaymeshDatabaseApi \{[\s\S]*?\bclose\s*\(/);
 const appStorageNamespace = sdkManifest.namespaces.find(
   (namespace) => namespace.name === "playmesh.app.storage",
 );
@@ -554,7 +681,7 @@ assert.equal(
 assert(sdkSchema.$defs.PlaymeshBootstrap.required.includes("gameInfo"));
 assert.equal(
   sdkSchema.$defs.PlaymeshAppBootstrap.properties.sdkVersion.const,
-  "3.3.0",
+  "3.5.0",
 );
 assert.equal(
   sdkSchema.$defs.PlaymeshReadyResult.properties.app.$ref,
@@ -572,31 +699,37 @@ assert.deepEqual(sdkSchema.$defs.Player.properties.avatar.type, [
 ]);
 assert.equal("source" in sdkSchema.$defs.Player.properties, false);
 assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
-assert.equal(defaultGameManifest.sdkVersion, "4.1.0");
-assert.equal(defaultGameManifest.appSdkVersion, "3.3.0");
-assert.deepEqual(gameManifestSchema.properties.sdkVersion.enum, ["4.1.0"]);
+assert.equal("connectionMode" in sdkSchema.$defs.Player.properties, false);
+assert.equal(defaultGameManifest.sdkVersion, "4.3.0");
+assert.equal(defaultGameManifest.appSdkVersion, "3.5.0");
+assert.deepEqual(defaultGameManifest.config, {
+  webRuntime: { multithreading: false },
+});
+assert.deepEqual(gameManifestSchema.properties.sdkVersion.enum, ["4.1.0", "4.2.0", "4.3.0"]);
 assert.equal(
   sdkManifest.projectRules.gameSdkVersion,
-  "main.json sdkVersion is required and must be one of 4.1.0; new projects use 4.1.0",
+  "main.json sdkVersion is required and must be one of 4.1.0, 4.2.0, 4.3.0; new projects use 4.3.0",
 );
 assert.deepEqual(gameManifestSchema.properties.appSdkVersion.enum, [
   "3.2.0",
   "3.3.0",
+  "3.4.0",
+  "3.5.0",
 ]);
 assert.equal(
   sdkManifest.projectRules.appSdkVersion,
-  "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0; new projects use 3.3.0",
+  "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0, 3.4.0, 3.5.0; new projects use 3.5.0",
 );
 assert.deepEqual(sdkManifest.compatibility, {
   game: {
     baselineVersions: ["4.1.0"],
-    bundleVersion: "4.1.0",
-    supportedRequestedVersions: ["4.1.0"],
+    bundleVersion: "4.3.0",
+    supportedRequestedVersions: ["4.1.0", "4.2.0", "4.3.0"],
   },
   app: {
     baselineVersions: ["3.2.0", "3.3.0"],
-    bundleVersion: "3.3.0",
-    supportedRequestedVersions: ["3.2.0", "3.3.0"],
+    bundleVersion: "3.5.0",
+    supportedRequestedVersions: ["3.2.0", "3.3.0", "3.4.0", "3.5.0"],
   },
 });
 assert.match(
@@ -609,24 +742,29 @@ assert.match(
 );
 assert.match(
   runtimeSdkCompatibilitySource,
-  /gameBundleVersion = '4\.1\.0'/,
+  /gameBundleVersion = '4\.3\.0'/,
 );
 assert.match(
   runtimeSdkCompatibilitySource,
-  /appBundleVersion = '3\.3\.0'/,
+  /appBundleVersion = '3\.5\.0'/,
 );
 assert.match(
   runtimeSdkCompatibilitySource,
-  /gameRequestedVersions\s*=\s*\[\s*'4\.1\.0',?\s*\]/,
+  /gameMinimumVersion = '4\.1\.0'/,
 );
 assert.match(
   runtimeSdkCompatibilitySource,
-  /appRequestedVersions\s*=\s*\[\s*'3\.2\.0',\s*'3\.3\.0',?\s*\]/,
+  /appMinimumVersion = '3\.2\.0'/,
+);
+assert.match(
+  runtimeSdkCompatibilitySource,
+  /_isWithinInclusiveRange/,
 );
 assert.equal("permissions" in defaultGameManifest, false);
 assert.equal("icon" in defaultGameManifest, false);
 assert.equal("permissions" in gameManifestSchema.properties, false);
 assert.equal("icon" in gameManifestSchema.properties, false);
+assert.equal("type" in gameManifestSchema.properties.config, false);
 for (const source of developerSources) {
   assert(!source.includes("/game/"), "开发模板或提示词仍包含旧 /game/ 路径");
 }

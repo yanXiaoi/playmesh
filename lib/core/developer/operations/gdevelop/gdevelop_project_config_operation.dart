@@ -31,6 +31,7 @@ class _GDevelopProjectConfigOperation implements _DeveloperHttpOperation {
         'uniqueItems': true,
         'items': {'type': 'string', 'minLength': 1, 'maxLength': 64},
       },
+      'webRuntimeMultithreading': {'type': 'boolean'},
       'expectedRevision': {'type': 'integer', 'minimum': 0},
     },
   };
@@ -85,7 +86,7 @@ class _GDevelopProjectConfigOperation implements _DeveloperHttpOperation {
       request,
       GDevelopProjectConfigStore.maxBytes,
     );
-    if (body.length != 6 ||
+    if ((body.length != 6 && body.length != 7) ||
         !body.keys.every(
           const {
             'schemaVersion',
@@ -93,6 +94,7 @@ class _GDevelopProjectConfigOperation implements _DeveloperHttpOperation {
             'minPlayers',
             'maxPlayers',
             'tags',
+            'webRuntimeMultithreading',
             'expectedRevision',
           }.contains,
         ) ||
@@ -101,6 +103,8 @@ class _GDevelopProjectConfigOperation implements _DeveloperHttpOperation {
         body['minPlayers'] is! int ||
         body['maxPlayers'] is! int ||
         body['tags'] is! List ||
+        (body.containsKey('webRuntimeMultithreading') &&
+            body['webRuntimeMultithreading'] is! bool) ||
         body['expectedRevision'] is! int ||
         (body['expectedRevision']! as int) < 0) {
       throw const FormatException('GDevelop config PUT 请求格式无效');
@@ -113,6 +117,8 @@ class _GDevelopProjectConfigOperation implements _DeveloperHttpOperation {
         minPlayers: body['minPlayers']! as int,
         maxPlayers: body['maxPlayers']! as int,
         tags: GDevelopProjectConfig.normalizeTags(body['tags']! as List),
+        webRuntimeMultithreading:
+            body['webRuntimeMultithreading'] as bool? ?? false,
         expectedRevision: body['expectedRevision']! as int,
       ),
     );

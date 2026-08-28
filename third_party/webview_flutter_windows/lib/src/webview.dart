@@ -458,6 +458,12 @@ class WebviewController extends ValueNotifier<WebviewValue> {
         break;
       case 'loadingStateChanged':
         final value = LoadingState.values[map['value']];
+        if (value == LoadingState.loading) {
+          // A navigation starts a new document. Do not carry the previous
+          // document's CSS cursor across that boundary while waiting for the
+          // new page to report its live cursor through CursorChanged.
+          _cursorStreamController.add(SystemMouseCursors.basic);
+        }
         _loadingStateStreamController.add(value);
         break;
       case 'downloadEvent':
@@ -923,6 +929,14 @@ class WebviewController extends ValueNotifier<WebviewValue> {
     return _channel.invokeMethod('setCursorPos', [position.dx, position.dy]);
   }
 
+  /// Tells the composition-hosted WebView that the mouse left its surface.
+  Future<void> _setCursorLeave() async {
+    if (_isDisposed) {
+      return;
+    }
+    return _channel.invokeMethod('setCursorLeave');
+  }
+
   /// Indicates whether the specified [button] is currently down.
   Future<void> _setPointerButtonState(PointerButton button, bool isDown) async {
     if (_isDisposed) {
@@ -1145,6 +1159,21 @@ class _WebviewState extends State<Webview> {
                   }
                 },
                 child: MouseRegion(
+                  onEnter: (ev) {
+                    if (_pointerKind == PointerDeviceKind.touch) {
+                      return;
+                    }
+                    // A fresh MOVE makes WebView2 resolve the cursor for the
+                    // current document and entry position instead of reusing
+                    // state from before the pointer crossed the Flutter UI.
+                    _controller._setCursorPos(ev.localPosition);
+                  },
+                  onExit: (ev) {
+                    if (_pointerKind != PointerDeviceKind.touch) {
+                      _controller._setCursorLeave();
+                    }
+                    _pointerKind = PointerDeviceKind.unknown;
+                  },
                   cursor: _cursor,
                   child: Texture(
                     textureId: _controller._textureId,

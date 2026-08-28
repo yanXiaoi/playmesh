@@ -135,14 +135,14 @@ Map<String, Object?> _declarationFor(String token) {
     return _relayDeclaration(transport: 'websocket');
   }
   if (token == 'bad-protocol-token') {
-    return _relayDeclaration(protocolVersion: '2.0.0');
+    return _relayDeclaration(protocolVersion: '3.0.0');
   }
   return _relayDeclaration();
 }
 
 Map<String, Object?> _relayDeclaration({
-  String transport = 'playmesh-tcp-upgrade',
-  String protocolVersion = '3.0.0',
+  String transport = 'playmesh-webrtc-datachannel',
+  String protocolVersion = '4.0.0',
 }) => {
   'catalogApiVersion': gameCatalogApiVersion,
   'supportsGameRelay': true,

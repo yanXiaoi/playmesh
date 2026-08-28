@@ -12,6 +12,7 @@ Future<GameAssetGateway> startGameAssetGateway({
   required String entryPath,
   String? gameSdkVersion,
   String? appSdkVersion,
+  Object? config,
   GameStorageService? storage,
 }) {
   return startPlatformGameAssetGateway(
@@ -19,6 +20,7 @@ Future<GameAssetGateway> startGameAssetGateway({
     entryPath: entryPath,
     gameSdkVersion: gameSdkVersion,
     appSdkVersion: appSdkVersion,
+    config: config,
     storage: storage,
   );
 }

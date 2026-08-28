@@ -44,11 +44,16 @@
   "relay": {
     "publicBaseUrl": "http://127.0.0.1:16668",
     "tunnelTTLSeconds": 21600,
-    "pendingConnectionTimeoutSeconds": 15,
-    "idleTimeoutSeconds": 120,
     "maxTunnels": 1000,
     "maxConnectionsPerTunnel": 64,
-    "maxConnectionsPerIP": 32
+    "maxConnectionsPerIP": 32,
+    "turnUdpListen": "0.0.0.0:3478",
+    "turnTcpListen": "0.0.0.0:3478",
+    "turnPublicIp": "127.0.0.1",
+    "turnPublicPort": 3478,
+    "turnRealm": "playmesh",
+    "turnMinPort": 49160,
+    "turnMaxPort": 49260
   },
   "webUI": {
     "defaultLocale": "zh-CN",

@@ -15,6 +15,7 @@ class GDevelopProjectConfigController {
     required int minPlayers,
     required int maxPlayers,
     required List<String> tags,
+    bool webRuntimeMultithreading = false,
     required int expectedRevision,
   }) => repository.put(
     gameId: gameId,
@@ -22,6 +23,7 @@ class GDevelopProjectConfigController {
     minPlayers: minPlayers,
     maxPlayers: maxPlayers,
     tags: tags,
+    webRuntimeMultithreading: webRuntimeMultithreading,
     expectedRevision: expectedRevision,
   );
 
@@ -46,6 +48,7 @@ class GDevelopProjectConfigController {
         minPlayers: 1,
         maxPlayers: 1,
         tags: const [],
+        webRuntimeMultithreading: false,
         expectedRevision: 0,
       );
       return true;

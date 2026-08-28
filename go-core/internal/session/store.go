@@ -33,14 +33,15 @@ const (
 )
 
 type Player struct {
-	ID           string  `json:"id"`
-	Nickname     string  `json:"nickname"`
-	Avatar       *string `json:"avatar"`
-	Role         string  `json:"role"`
-	Source       string  `json:"source"`
-	Connected    bool    `json:"connected"`
-	AvatarDigest string  `json:"-"`
-	access       playerAccess
+	ID             string  `json:"id"`
+	Nickname       string  `json:"nickname"`
+	Avatar         *string `json:"avatar"`
+	Role           string  `json:"role"`
+	Source         string  `json:"source"`
+	ConnectionMode string  `json:"connectionMode"`
+	Connected      bool    `json:"connected"`
+	AvatarDigest   string  `json:"-"`
+	access         playerAccess
 }
 
 type Snapshot struct {
@@ -69,6 +70,7 @@ type CreateInput struct {
 type JoinInput struct {
 	JoinCode, Nickname, ShareToken, PlayerID string
 	Access                                   playerAccess
+	ConnectionMode                           string
 }
 
 type playerAccess uint8
@@ -141,6 +143,7 @@ func (s *Store) Create(input CreateInput) (Snapshot, Credentials, error) {
 		authority.Role = "authority_player"
 	}
 	authority.Source = "lan_app"
+	authority.ConnectionMode = "lan"
 	authority.access = playerAccessLANApp
 	id, err := randomID("s_", 16)
 	if err != nil {
@@ -176,6 +179,14 @@ func (s *Store) Join(input JoinInput) (Snapshot, Credentials, error) {
 		return Snapshot{}, Credentials{}, err
 	}
 	player.Source = input.Access.source()
+	connectionMode := strings.TrimSpace(input.ConnectionMode)
+	if connectionMode == "" {
+		connectionMode = "lan"
+	}
+	if connectionMode != "lan" && connectionMode != "direct" && connectionMode != "relay" {
+		return Snapshot{}, Credentials{}, errors.New("玩家连接方式无效")
+	}
+	player.ConnectionMode = connectionMode
 	player.access = input.Access
 	record.mutex.Lock()
 	defer record.mutex.Unlock()

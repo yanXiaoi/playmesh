@@ -31,6 +31,9 @@ void main() {
     final scanner = File(
       'lib/features/game/game_invitation_scanner_page.dart',
     ).readAsStringSync();
+    final invitationFlow = File(
+      'lib/features/game/game_invitation_scan_flow.dart',
+    ).readAsStringSync();
     final appLanHost = File(
       'lib/features/game/game_app_lan_host.dart',
     ).readAsStringSync();
@@ -38,16 +41,44 @@ void main() {
       'lib/features/game/game_join_router.dart',
     ).readAsStringSync();
 
-    for (final source in [joinPage, scanner, appLanHost]) {
+    for (final source in [joinPage, scanner, invitationFlow, appLanHost]) {
       expect(RegExp(r'RemoteGamePage\s*\(').hasMatch(source), isFalse);
       expect(RegExp(r'\bGamePage\s*\(').hasMatch(source), isFalse);
       expect(RegExp(r'\bGameLaunchArguments\s*\(').hasMatch(source), isFalse);
     }
     expect(RegExp(r'RemoteGamePage\s*\(').allMatches(router), hasLength(1));
     expect(router, contains('entryUri: launch.entryUri'));
-    expect(joinPage, contains('_joinCoordinator.prepareLink'));
+    expect(router, contains('launch.takeRelayClientSession()'));
+    expect(router, contains('resolvedEntryPath: launch.resolvedEntryPath'));
+    expect(joinPage, contains('widget.prepareInvitation'));
+    expect(invitationFlow, contains('coordinator.prepareLink'));
+    expect(invitationFlow, contains('runGameInvitationScanPreparation('));
+    expect(invitationFlow, contains('prepareGameInvitation('));
     expect(joinPage, contains('_joinCoordinator.prepareDiscovered'));
     expect(appLanHost, contains('GameJoinCoordinator('));
+  });
+
+  test('主 App 与 Runtime SDK 的扫码/链接加入共用后端且不执行 Authority 鉴权', () {
+    final appLanHost = File(
+      'lib/features/game/game_app_lan_host.dart',
+    ).readAsStringSync();
+    final runtimeLanHost = File(
+      'runtime/src/lib/runtime/runtime_lan_coordinator.dart',
+    ).readAsStringSync();
+
+    for (final source in [appLanHost, runtimeLanHost]) {
+      expect(source, contains('return prepareInvitationJoin(raw);'));
+      expect(source, contains('_joinCoordinator.prepareLink'));
+      final joinStart = source.indexOf('prepareInvitationJoin(');
+      final authorityStart = source.indexOf('setPublished()', joinStart);
+      expect(joinStart, greaterThanOrEqualTo(0));
+      expect(authorityStart, greaterThan(joinStart));
+      expect(
+        source.substring(joinStart, authorityStart),
+        isNot(contains('_requireAuthority')),
+      );
+    }
+    expect(appLanHost, contains('void _requireAuthority()'));
   });
 
   test('加入端远程 Game runtime 与本机 App Bridge 边界固定', () {
@@ -62,7 +93,9 @@ void main() {
     ).readAsStringSync();
 
     expect(remote, contains('startLocalTunnelGateway('));
-    expect(remote, contains('startRelayClientGateway('));
+    expect(remote, contains('startRelayClientSession('));
+    expect(remote, contains('widget.preparedRelayClientSession'));
+    expect(remote, contains('webGateway.localBaseUri.replace'));
     expect(remote, contains('controller.loadRequest(_launchUri)'));
     expect(remote, contains('AppWebViewBridge('));
     expect(remote, contains("'PlaymeshAppBridge'"));
@@ -87,6 +120,50 @@ void main() {
     expect(localTunnel, isNot(contains('playmesh-app.js')));
     expect(remote, isNot(contains('playmeshAppSdkUrl')));
     expect(remote, isNot(contains('local_app_sdk_server')));
+  });
+
+  test('主 App 与 Runtime 都由 WebView 邀请入口建立浏览器 Cookie', () {
+    final remote = File(
+      'lib/features/game/remote_game_page.dart',
+    ).readAsStringSync();
+    final runtime = File(
+      'runtime/src/lib/runtime/runtime_lan_coordinator.dart',
+    ).readAsStringSync();
+
+    expect(
+      remote,
+      contains('(webGateway as RelayClientGateway).localEntryUri'),
+    );
+    expect(remote, contains('path: entryUri.path'));
+    expect(remote, contains('fragment: entryUri.fragment'));
+    expect(
+      remote,
+      isNot(
+        contains('webGateway.localBaseUri.replace(path: resolvedEntryPath)'),
+      ),
+    );
+
+    expect(
+      runtime,
+      contains('target = relaySession.webGateway.localEntryUri;'),
+    );
+    expect(runtime, contains('path: launch.entryUri.path'));
+    expect(runtime, contains('fragment: launch.entryUri.fragment'));
+    expect(
+      runtime,
+      isNot(
+        contains(
+          'relaySession.webGateway.localBaseUri.replace(\n'
+          '                path: resolvedEntryPath',
+        ),
+      ),
+    );
+    expect(
+      runtime,
+      isNot(
+        contains('webGateway.localBaseUri.replace(path: resolvedEntryPath)'),
+      ),
+    );
   });
 
   test('本地 Flutter 与 Windows WebView 共用同一 document reset 边界', () {

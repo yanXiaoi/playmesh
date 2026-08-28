@@ -106,7 +106,7 @@ const isUnassignedGDevelopGameId = () => false;`
   )
   .replace(
     "import PlaymeshGameManifest from '../../PlaymeshShared/GameManifest';",
-    `const PlaymeshGameManifest = { isAndroidPackageName: () => true };`
+    `const PlaymeshGameManifest = { isValidNewProjectGameId: () => true };`
   )
   .replace(
     "import { sha256Blob } from '../../PlaymeshCrypto/PlaymeshSha256';",

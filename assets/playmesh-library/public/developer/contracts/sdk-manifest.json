@@ -1,6 +1,6 @@
 {
-  "version": "4.1.0",
-  "channelVersion": "3.3.0",
+  "version": "4.3.0",
+  "channelVersion": "3.5.0",
   "script": "/playmesh/sdk/v1/playmesh-main.js",
   "appBridgeScript": "/playmesh/sdk/v1/playmesh-app.js",
   "global": "playmesh",
@@ -163,7 +163,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "4.1.0"
+          "value": "4.3.0"
         },
         {
           "name": "ready",
@@ -179,7 +179,7 @@
           "name": "version",
           "kind": "property",
           "type": "string",
-          "value": "3.3.0"
+          "value": "3.5.0"
         },
         {
           "name": "ready",
@@ -231,9 +231,15 @@
           "behavior": "Subscribes to successful open-to-closed SDK game menu transitions and returns an idempotent unsubscribe function"
         },
         {
+          "name": "ui.onSystemMenuRequest",
+          "signature": "ui.onSystemMenuRequest(callback: () => PlaymeshSystemMenuDecision | Promise<PlaymeshSystemMenuDecision>): PlaymeshUnsubscribe",
+          "behavior": "Runs after an Android system-back, desktop back-key, or ordinary-browser floating-menu trigger arrives and before its default effect; EXIT exits, NEXT continues that trigger's default flow, and STOP suppresses all later handling"
+        },
+        {
           "name": "ui.onBack",
-          "signature": "ui.onBack(callback: () => boolean | Promise<boolean>): PlaymeshUnsubscribe",
-          "behavior": "Handles Android system back and Escape only after fallbackUi is explicitly configured false; false blocks exit and true continues exit"
+          "signature": "ui.onBack(callback: () => PlaymeshAppBackDecision | Promise<PlaymeshAppBackDecision>): PlaymeshUnsubscribe",
+          "behavior": "Deprecated compatibility alias of ui.onSystemMenuRequest with the exact same trigger and decision semantics",
+          "deprecated": "Use ui.onSystemMenuRequest"
         },
         {
           "name": "ui.restartGame",
@@ -469,6 +475,39 @@
       ]
     },
     {
+      "name": "playmesh.main.rpc",
+      "members": [
+        {
+          "name": "request",
+          "signature": "request(path: string, data?: any, options?: {timeoutMs?: number}): Promise<any>",
+          "availability": "Any multiplayer client",
+          "behavior": "Uses authenticated internal Binary WebSocket frames for small request and result values; never grants direct Main Bucket access",
+          "limits": "Encoded request and result values are each limited to 4 MiB - 64 KiB; timeoutMs is 100 to 60000 and defaults to 10000"
+        },
+        {
+          "name": "onRequest",
+          "signature": "onRequest(path: string, handler: (data: any, context: PlaymeshRpcContext) => any | Promise<any>): PlaymeshUnsubscribe",
+          "availability": "Authority Client only",
+          "rule": "Use context.senderPlayerId as the trusted sender identity; duplicate exact paths are rejected"
+        },
+        {
+          "name": "requestStream",
+          "signature": "requestStream(path: string, source: File | Blob | ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>, options?: {timeoutMs?: number, name?: string, type?: string, onProgress?: (transferredBytes: number, totalBytes: number | null) => void}): Promise<any>",
+          "availability": "Any multiplayer client",
+          "behavior": "The SDK sends bytes through an authenticated private HTTP body while Binary WebSocket carries only control and the small result. EOF ends the stream; no sentinel byte is reserved",
+          "progress": "Sender progress counts source bytes pulled by Fetch, not peer acknowledgement or persistence. Unknown ReadableStream length reports totalBytes=null; callback failures do not interrupt transfer"
+        },
+        {
+          "name": "onStreamRequest",
+          "signature": "onStreamRequest(path: string, handler: (source: ReadableStream<Uint8Array>, context: PlaymeshRpcStreamContext) => any | Promise<any>, options?: {onProgress?: (transferredBytes: number, totalBytes: number | null) => void}): PlaymeshUnsubscribe",
+          "availability": "Authority Client only",
+          "behavior": "Consumes a one-shot authenticated stream with bounded buffering and backpressure. The source can be passed directly to StorageBucket.upload(source, {name, type})",
+          "progress": "Receiver progress counts bytes pulled by the handler, not persistence. Callback failures do not interrupt transfer",
+          "limits": "512 MiB per stream; 4 pending streams per player and 16 per session; timeoutMs is 1000 to 1800000 and defaults to 300000; handler result keeps the ordinary RPC value limit"
+        }
+      ]
+    },
+    {
       "name": "playmesh.main.binary",
       "members": [
         {
@@ -563,14 +602,67 @@
             "setDataSync(key, value): void",
             "removeData(key): Promise<null>",
             "clearData(): Promise<null>",
-            "upload(file): Promise<string>"
+            "upload(file): Promise<string>",
+            "upload(source, {name, type?}): Promise<string>"
           ],
           "uploadStorage": "packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{safe-extension}",
           "uploadUrl": "/bucket/{bucket}/{timestamp-ms}.{safe-extension}",
+          "uploadLimit": "512 MiB per file; ReadableStream is consumed with backpressure and is not fully buffered",
           "jsonStorage": "packages/{gameId}/data/json/{bucket}.json or data/json/logical/sha256-{digest}.json envelope; never mapped to the web",
           "syncTransport": "Optional blocking same-origin GET/PUT over the authenticated Bucket gateway; it reuses transport/auth only and never writes data/data or returns a file URL"
         }
       ]
+    },
+    {
+      "name": "playmesh.main.db",
+      "availability": "Authority Client only",
+      "storage": "packages/{gameId}/data/db/_game.db",
+      "members": [
+        {
+          "name": "open",
+          "signature": "open(): Promise<{file: '_game.db'}>"
+        },
+        {
+          "name": "select",
+          "signature": "select(sql: string, args?: DatabaseArguments): Promise<Row[]>"
+        },
+        {
+          "name": "update",
+          "signature": "update(sql: string, args?: DatabaseArguments): Promise<{changes: number}>"
+        },
+        {
+          "name": "delete",
+          "signature": "delete(sql: string, args?: DatabaseArguments): Promise<{changes: number}>"
+        },
+        {
+          "name": "insert",
+          "signature": "insert(sql: string, args?: DatabaseArguments): Promise<{changes: number, lastInsertRowId: string}>"
+        },
+        {
+          "name": "getDDL",
+          "signature": "getDDL(name?: string): Promise<DatabaseDdl[]>"
+        },
+        {
+          "name": "beginTransaction",
+          "signature": "beginTransaction(): Promise<DatabaseTransaction>"
+        },
+        {
+          "name": "transaction",
+          "signature": "transaction<T>(callback: (transaction: DatabaseTransaction) => T | Promise<T>): Promise<T>"
+        }
+      ],
+      "arguments": "arrays bind ? and ?NNN by index; objects bind :name, @name or $name by name; a bare object key name aliases :name; values are never interpolated into SQL",
+      "allowedSql": "SELECT, VALUES, WITH, INSERT, REPLACE, UPDATE, DELETE, CREATE/DROP/ALTER TABLE, CREATE/DROP INDEX and CREATE UNIQUE INDEX",
+      "transactionMembers": [
+        "select(sql, args?)",
+        "update(sql, args?)",
+        "delete(sql, args?)",
+        "insert(sql, args?)",
+        "getDDL(name?)",
+        "commit()",
+        "rollback()"
+      ],
+      "concurrency": "WAL with a background autocommit connection pool; every explicit transaction owns an independent connection; SQLite still serializes writers"
     },
     {
       "name": "playmesh.app.performance",
@@ -630,13 +722,14 @@
   ],
   "projectRules": {
     "managedManifest": "main.json is edited through the visual manifest endpoint; id is immutable and raw file writes remain blocked",
+    "gameConfig": "main.json config is an optional opaque extension value: accept and preserve it without validating its contents; read nested fields only through the shared config accessor, where a missing object or field returns null. New templates write config.webRuntime.multithreading=false, and only the exact boolean true enables COOP/COEP for the App local-game WebView.",
     "capabilityRegistry": "/dev/api/capabilities is the single metadata source for capability code, Chinese name, description, and App/HTML adapter status; generated AI prompts include this registry and the current declaration",
     "capabilityConsent": "When capabilities.json.required is non-empty, the main SDK prompts on every App/browser game load. Rejection exits; unsupported capabilities are labeled but never block entry after consent; results are not persisted",
     "publicRoot": "app/",
     "sdkImport": "/playmesh/sdk/v1/playmesh-main.js",
     "appUrlRoot": "/",
-    "gameSdkVersion": "main.json sdkVersion is required and must be one of 4.1.0; new projects use 4.1.0",
-    "appSdkVersion": "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0; new projects use 3.3.0",
+    "gameSdkVersion": "main.json sdkVersion is required and must be one of 4.1.0, 4.2.0, 4.3.0; new projects use 4.3.0",
+    "appSdkVersion": "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0, 3.4.0, 3.5.0; new projects use 3.5.0",
     "gameEntry": "main.json entries.game is required; it is relative to physical app/ and must explicitly identify an HTML file",
     "controllerEntry": "main.json entries.controller is required for single_screen_multiplayer; it is relative to physical app/ and must explicitly identify an HTML file",
     "authorityEntry": "main.json authority.entry is required for multiplayer games; it is relative to physical app/ and must explicitly identify a JavaScript file",
@@ -647,9 +740,11 @@
       "baselineVersions": [
         "4.1.0"
       ],
-      "bundleVersion": "4.1.0",
+      "bundleVersion": "4.3.0",
       "supportedRequestedVersions": [
-        "4.1.0"
+        "4.1.0",
+        "4.2.0",
+        "4.3.0"
       ]
     },
     "app": {
@@ -657,10 +752,12 @@
         "3.2.0",
         "3.3.0"
       ],
-      "bundleVersion": "3.3.0",
+      "bundleVersion": "3.5.0",
       "supportedRequestedVersions": [
         "3.2.0",
-        "3.3.0"
+        "3.3.0",
+        "3.4.0",
+        "3.5.0"
       ]
     }
   }

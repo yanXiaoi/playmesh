@@ -185,7 +185,7 @@ func TestUpdateWithoutProjectConfigOnlyRefreshesNativeSDK(t *testing.T) {
 	}
 }
 
-func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testing.T) {
+func TestImportProjectPackagePassesVersionsThroughToGateway(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, projectConfigName), `{
 	  "schemaVersion": 1,
@@ -204,10 +204,9 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 	writeTestFile(t, filepath.Join(packageRoot, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(packageRoot, "app", "index.html"), "<!doctype html>")
 	writeTestBytes(t, filepath.Join(packageRoot, rootIconName), validRootIcon(t))
-	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.1.0";`)
-	writeTestFile(t, filepath.Join(root, "playmesh", "sdk", "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.3.0";`)
 
 	var uploaded []byte
+	var statusRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") != "Bearer test-token" {
 			http.Error(response, "unauthorized", http.StatusUnauthorized)
@@ -215,9 +214,8 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 		}
 		switch request.URL.Path {
 		case "/dev/api/status":
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"enabled": true, "gameSdkVersion": "4.1.0", "appSdkVersion": "3.3.0",
-			})
+			statusRequests.Add(1)
+			http.Error(response, "upload must not inspect gateway SDK versions", http.StatusConflict)
 		case "/dev/api/packages/import":
 			uploaded, _ = io.ReadAll(request.Body)
 			_ = json.NewEncoder(response).Encode(map[string]any{
@@ -254,20 +252,21 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	packageBytes, err := buildPackage(project.PackageRoot)
+	packageBytes, err := buildUploadPackage(project.PackageRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := importProjectPackage(
+	imported, err := importProjectPackage(
 		context.Background(),
 		client,
-		projectID,
 		packageBytes,
 		true,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if projectID != "com.example.push" || len(uploaded) == 0 {
+	if imported.ID != projectID ||
+		projectID != "com.example.push" || len(uploaded) == 0 {
 		t.Fatalf("unexpected push result: id=%s bytes=%d", projectID, len(uploaded))
 	}
 	reader, err := zip.NewReader(bytes.NewReader(uploaded), int64(len(uploaded)))
@@ -275,8 +274,20 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 		t.Fatal(err)
 	}
 	paths := map[string]bool{}
+	var uploadedManifest []byte
 	for _, entry := range reader.File {
 		paths[entry.Name] = true
+		if entry.Name == "main.json" {
+			input, openErr := entry.Open()
+			if openErr != nil {
+				t.Fatal(openErr)
+			}
+			uploadedManifest, err = io.ReadAll(input)
+			_ = input.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if !paths["main.json"] || !paths["capabilities.json"] ||
 		!paths[rootIconName] || !paths["app/index.html"] {
@@ -287,13 +298,18 @@ func TestImportProjectPackageNormalizesVersionsAndUploadsPublishedFiles(t *testi
 			t.Fatalf("local SDK leaked into upload: %s", path)
 		}
 	}
-	var manifest map[string]any
-	data, err := os.ReadFile(filepath.Join(packageRoot, "main.json"))
-	if err != nil || json.Unmarshal(data, &manifest) != nil {
-		t.Fatalf("read normalized manifest: %v", err)
+	if statusRequests.Load() != 0 {
+		t.Fatalf("upload queried gateway SDK status %d times", statusRequests.Load())
 	}
-	if manifest["sdkVersion"] != "4.1.0" || manifest["appSdkVersion"] != "3.3.0" {
-		t.Fatalf("manifest SDK versions were not normalized: %#v", manifest)
+	var manifest map[string]any
+	if err := json.Unmarshal(uploadedManifest, &manifest); err != nil {
+		t.Fatalf("read uploaded manifest: %v", err)
+	}
+	if manifest["sdkVersion"] != "9.9.9" {
+		t.Fatalf("manifest SDK version was changed before upload: %#v", manifest)
+	}
+	if _, exists := manifest["appSdkVersion"]; exists {
+		t.Fatalf("missing App SDK version was synthesized before upload: %#v", manifest)
 	}
 }
 
@@ -334,11 +350,12 @@ func TestRunUploadsConfiguredPackageAndStartsWithoutLogs(t *testing.T) {
 	  "creator":{"version":"3.8.8"}
 	}`)
 	packageRoot := filepath.Join(root, "playmesh", "package")
-	sdkRoot := filepath.Join(root, "playmesh", "sdk")
 	writeTestFile(t, filepath.Join(packageRoot, "main.json"), `{
-	  "id":"com.example.cocos",
+	  "id":"Com.Example.LegacyCocos",
 	  "name":"Cocos",
 	  "version":"1.0.0",
+	  "sdkVersion":"99.0.0",
+	  "appSdkVersion":"gateway-current",
 	  "orientation":"landscape",
 	  "modes":["solo"],
 	  "displayModes":["multi_screen"],
@@ -347,32 +364,38 @@ func TestRunUploadsConfiguredPackageAndStartsWithoutLogs(t *testing.T) {
 	}`)
 	writeTestFile(t, filepath.Join(packageRoot, "capabilities.json"), `{"required":[]}`)
 	writeTestFile(t, filepath.Join(packageRoot, "app", "index.html"), "<!doctype html>")
-	writeTestFile(t, filepath.Join(sdkRoot, "playmesh-main.js"), `const PLAYMESH_SDK_VERSION = "4.1.0";`)
-	writeTestFile(t, filepath.Join(sdkRoot, "playmesh-app.js"), `const PLAYMESH_APP_SDK_VERSION = "3.3.0";`)
 
-	var formalImports atomic.Int32
+	var imports atomic.Int32
 	var previews atomic.Int32
+	var runStarts atomic.Int32
 	var logRequests atomic.Int32
+	var statusRequests atomic.Int32
 	var uploaded []byte
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/dev/api/status":
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"enabled": true, "gameSdkVersion": "4.1.0", "appSdkVersion": "3.3.0",
-			})
+			statusRequests.Add(1)
+			http.Error(response, "run must not inspect gateway SDK versions", http.StatusConflict)
 		case "/dev/api/packages/import":
-			formalImports.Add(1)
-			http.Error(response, "formal import forbidden", http.StatusConflict)
-		case "/dev/api/projects/com.example.cocos/preview":
+			imports.Add(1)
+			http.Error(response, "formal import must not be used", http.StatusConflict)
+		case "/dev/api/projects/Com.Example.LegacyCocos/preview":
 			previews.Add(1)
 			uploaded, _ = io.ReadAll(request.Body)
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"gameId": "com.example.cocos",
+				"gameId": "Com.Example.LegacyCocos",
 				"run": runStatus{
-					ProjectID: "com.example.cocos",
+					ProjectID: "Com.Example.LegacyCocos",
 					RunID:     "run-cocos",
 					Phase:     "running",
 				},
+			})
+		case "/dev/api/projects/Com.Example.LegacyCocos/run":
+			runStarts.Add(1)
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"projectId": "Com.Example.LegacyCocos",
+				"runId":     "run-cocos",
+				"phase":     "running",
 			})
 		case "/dev/api/logs", "/dev/api/events":
 			logRequests.Add(1)
@@ -399,17 +422,29 @@ func TestRunUploadsConfiguredPackageAndStartsWithoutLogs(t *testing.T) {
 	if err := commandRun(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if formalImports.Load() != 0 || previews.Load() != 1 {
+	if imports.Load() != 0 || previews.Load() != 1 || runStarts.Load() != 0 {
 		t.Fatalf(
-			"run must use one temporary preview and no formal import: previews=%d imports=%d",
+			"run must use one temporary preview without formal import: previews=%d imports=%d starts=%d",
 			previews.Load(),
-			formalImports.Load(),
+			imports.Load(),
+			runStarts.Load(),
 		)
 	}
 	if logRequests.Load() != 0 {
 		t.Fatalf("run must not attach logs: %d requests", logRequests.Load())
 	}
-	assertPackageOrientation(t, uploaded, "portrait")
+	if statusRequests.Load() != 0 {
+		t.Fatalf("run queried gateway SDK status %d times", statusRequests.Load())
+	}
+	assertPackageOrientation(t, uploaded, "landscape")
+	uploadedManifest := readArchivedManifest(t, uploaded)
+	if uploadedManifest["id"] != "Com.Example.LegacyCocos" {
+		t.Fatalf("run changed the mixed-case application ID: %#v", uploadedManifest)
+	}
+	if uploadedManifest["sdkVersion"] != "99.0.0" ||
+		uploadedManifest["appSdkVersion"] != "gateway-current" {
+		t.Fatalf("run changed SDK versions before upload: %#v", uploadedManifest)
+	}
 	localData, err := os.ReadFile(filepath.Join(packageRoot, "main.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -418,9 +453,9 @@ func TestRunUploadsConfiguredPackageAndStartsWithoutLogs(t *testing.T) {
 	if err := json.Unmarshal(localData, &localManifest); err != nil {
 		t.Fatal(err)
 	}
-	if localManifest["orientation"] != "portrait" {
+	if localManifest["orientation"] != "landscape" {
 		t.Fatalf(
-			"Cocos upload hook did not update local main.json: %#v",
+			"run changed local package contents before upload: %#v",
 			localManifest,
 		)
 	}
@@ -471,40 +506,108 @@ func assertPackageOrientation(
 	t.Fatal("uploaded package is missing main.json")
 }
 
-func TestRunStopsBeforeUploadWhenAdapterReleaseIsMissing(t *testing.T) {
-	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, projectConfigName), `{
-	  "schemaVersion": 1,
-	  "packageRoot": "playmesh/package",
-	  "sdkRoot": "playmesh/sdk",
-	  "integration": {
-	    "type": "cocos",
-	    "projectRoot": ".",
-	    "platform": "web-mobile",
-	    "outputDirectory": ".",
-	    "entry": "index.html",
-	    "autoRunAfterBuild": true
-	  }
-	}`)
-	for _, directory := range []string{"assets", "settings"} {
-		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
+func readArchivedManifest(t *testing.T, archive []byte) map[string]any {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range reader.File {
+		if entry.Name != "main.json" {
+			continue
+		}
+		input, err := entry.Open()
+		if err != nil {
 			t.Fatal(err)
 		}
+		data, err := io.ReadAll(input)
+		_ = input.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var manifest map[string]any
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		return manifest
 	}
-	writeTestFile(t, filepath.Join(root, "package.json"), `{
-	  "name":"Missing Build",
-	  "creator":{"version":"3.8.8"}
-	}`)
+	t.Fatal("uploaded package is missing main.json")
+	return nil
+}
+
+func readArchiveFiles(t *testing.T, archive []byte) map[string][]byte {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := make(map[string][]byte, len(reader.File))
+	for _, entry := range reader.File {
+		input, err := entry.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, readErr := io.ReadAll(input)
+		closeErr := input.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		files[entry.Name] = data
+	}
+	return files
+}
+
+func TestRunDoesNotRequireProjectConfigAdapterOrValidatePackageContent(t *testing.T) {
+	root := t.TempDir()
 	writeTestFile(
 		t,
 		filepath.Join(root, "playmesh", "package", "main.json"),
-		`{"id":"com.example.missing","entries":{"game":"index.html"}}`,
+		`{"id":"Legacy.MixedCase.ID","sdkVersion":"future-sdk","unknown":{"kept":true}}`,
 	)
 	writeTestFile(
 		t,
 		filepath.Join(root, "playmesh", "package", "capabilities.json"),
-		`{"required":[]}`,
+		`this is also deliberately not valid JSON`,
 	)
+	writeTestBytes(
+		t,
+		filepath.Join(root, "playmesh", "package", rootIconName),
+		[]byte("not a png"),
+	)
+
+	var uploaded []byte
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		switch request.URL.Path {
+		case "/dev/api/packages/import":
+			http.Error(response, "formal import must not be used", http.StatusConflict)
+		case "/dev/api/projects/Legacy.MixedCase.ID/preview":
+			uploaded, _ = io.ReadAll(request.Body)
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"gameId": "Legacy.MixedCase.ID",
+				"run": runStatus{
+					ProjectID: "Legacy.MixedCase.ID",
+					RunID:     "run-unvalidated",
+					Phase:     "running",
+				},
+			})
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("APPDATA", t.TempDir())
+	if err := saveTarget(targetConfig{
+		BaseURL: server.URL,
+		Token:   "test-token",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	previous, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -514,9 +617,16 @@ func TestRunStopsBeforeUploadWhenAdapterReleaseIsMissing(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(previous) })
 
-	if err := commandRun(context.Background()); err == nil ||
-		!strings.Contains(err.Error(), "正式构建结果缺少入口") {
-		t.Fatalf("run must stop before target access, got %v", err)
+	if err := commandRun(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	files := readArchiveFiles(t, uploaded)
+	if string(files["main.json"]) !=
+		`{"id":"Legacy.MixedCase.ID","sdkVersion":"future-sdk","unknown":{"kept":true}}` ||
+		string(files["capabilities.json"]) !=
+			"this is also deliberately not valid JSON" ||
+		string(files[rootIconName]) != "not a png" {
+		t.Fatalf("run did not upload fixed resources byte-for-byte: %#v", files)
 	}
 }
 
@@ -535,11 +645,12 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 	  }
 	}`)
 	packageRoot := filepath.Join(root, "playmesh", "package")
-	sdkRoot := filepath.Join(root, "playmesh", "sdk")
 	writeTestFile(t, filepath.Join(packageRoot, "main.json"), `{
-	  "id":"com.example.dev",
+	  "id":"Com.Example.Dev_2",
 	  "name":"Development",
 	  "version":"1.0.0",
+	  "sdkVersion":"future-game",
+	  "appSdkVersion":"future-app",
 	  "orientation":"landscape",
 	  "modes":["multiplayer"],
 	  "displayModes":["single_screen_multiplayer"],
@@ -570,21 +681,11 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 		filepath.Join(root, "src", "index.html"),
 		"<title>live development</title>",
 	)
-	writeTestFile(
-		t,
-		filepath.Join(sdkRoot, "playmesh-main.js"),
-		`const PLAYMESH_SDK_VERSION = "4.1.0";`,
-	)
-	writeTestFile(
-		t,
-		filepath.Join(sdkRoot, "playmesh-app.js"),
-		`const PLAYMESH_APP_SDK_VERSION = "3.3.0";`,
-	)
-
 	var imported []byte
 	var imports atomic.Int32
 	var developmentStarts atomic.Int32
 	var developmentStops atomic.Int32
+	var statusRequests atomic.Int32
 	attachmentReady := make(chan struct{}, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(
 		response http.ResponseWriter,
@@ -592,23 +693,20 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 	) {
 		switch {
 		case request.URL.Path == "/dev/api/status":
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"enabled":        true,
-				"gameSdkVersion": "4.1.0",
-				"appSdkVersion":  "3.3.0",
-			})
+			statusRequests.Add(1)
+			http.Error(response, "dev must not inspect gateway SDK versions", http.StatusConflict)
 		case request.URL.Path ==
-			"/dev/api/projects/com.example.dev/development/package":
+			"/dev/api/projects/Com.Example.Dev_2/development/package":
 			imports.Add(1)
 			imported, _ = io.ReadAll(request.Body)
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"packageId": "package-0123456789abcdef0123456789abcdef",
-				"gameId":    "com.example.dev",
+				"gameId":    "Com.Example.Dev_2",
 				"expiresAt": time.Now().Add(15 * time.Minute).UnixMilli(),
 			})
 		case request.Method == "POST" &&
 			request.URL.Path ==
-				"/dev/api/projects/com.example.dev/development":
+				"/dev/api/projects/Com.Example.Dev_2/development":
 			developmentStarts.Add(1)
 			var payload developmentSessionRequest
 			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
@@ -673,13 +771,13 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 				return
 			}
 			_ = json.NewEncoder(response).Encode(runStatus{
-				ProjectID: "com.example.dev",
+				ProjectID: "Com.Example.Dev_2",
 				RunID:     "run-dev",
 				Phase:     "running",
 			})
 		case request.Method == "DELETE" &&
 			request.URL.Path ==
-				"/dev/api/projects/com.example.dev/development":
+				"/dev/api/projects/Com.Example.Dev_2/development":
 			developmentStops.Add(1)
 			response.WriteHeader(http.StatusNoContent)
 		case request.URL.Path == "/dev/api/logs":
@@ -737,9 +835,11 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 	}
 	runDevelopment()
 	writeTestFile(t, filepath.Join(packageRoot, "main.json"), `{
-	  "id":"com.example.dev",
+	  "id":"Com.Example.Dev_2",
 	  "name":"Updated Development",
 	  "version":"2.0.0",
+	  "sdkVersion":"future-game",
+	  "appSdkVersion":"future-app",
 	  "orientation":"portrait",
 	  "modes":["multiplayer"],
 	  "displayModes":["single_screen_multiplayer"],
@@ -771,6 +871,9 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 			"every dev session must stage current base metadata: stages=%d",
 			imports.Load(),
 		)
+	}
+	if statusRequests.Load() != 0 {
+		t.Fatalf("dev queried gateway SDK status %d times", statusRequests.Load())
 	}
 	reader, err := zip.NewReader(bytes.NewReader(imported), int64(len(imported)))
 	if err != nil {
@@ -810,7 +913,9 @@ func TestDevUsesCredentialedProxyAndTemporaryBasePackage(t *testing.T) {
 	}
 	if importedManifest["name"] != "Updated Development" ||
 		importedManifest["version"] != "2.0.0" ||
-		importedManifest["orientation"] != "portrait" {
+		importedManifest["orientation"] != "portrait" ||
+		importedManifest["sdkVersion"] != "future-game" ||
+		importedManifest["appSdkVersion"] != "future-app" {
 		t.Fatalf(
 			"second dev did not upload current main.json: %#v",
 			importedManifest,
@@ -902,7 +1007,7 @@ func TestAttachEventsReplaysLogsAndStopsWhenRunDisappears(t *testing.T) {
 			if count < 3 {
 				_ = json.NewEncoder(response).Encode(map[string]any{
 					"run": map[string]any{
-						"projectId": "com.example.dev",
+						"projectId": "Com.Example.Dev_2",
 						"runId":     "run-1",
 						"phase":     "running",
 					},
@@ -916,7 +1021,7 @@ func TestAttachEventsReplaysLogsAndStopsWhenRunDisappears(t *testing.T) {
 				"logs": []map[string]any{{
 					"type":      "runtime.log",
 					"eventId":   "event-1",
-					"projectId": "com.example.dev",
+					"projectId": "Com.Example.Dev_2",
 					"runId":     "run-1",
 					"source":    "app-webview",
 					"level":     "log",
@@ -935,7 +1040,7 @@ func TestAttachEventsReplaysLogsAndStopsWhenRunDisappears(t *testing.T) {
 	if err := attachEvents(
 		ctx,
 		client,
-		"com.example.dev",
+		"Com.Example.Dev_2",
 		"run-1",
 		logAttachmentKeepsRun,
 	); err != nil {
@@ -966,7 +1071,7 @@ func TestAttachEventsReplaysLogsBeforeAlreadyStoppedRunExits(t *testing.T) {
 				"logs": []map[string]any{{
 					"type":      "runtime.log",
 					"eventId":   "event-1",
-					"projectId": "com.example.dev",
+					"projectId": "Com.Example.Dev_2",
 					"runId":     "run-1",
 					"source":    "app-webview",
 					"level":     "log",
@@ -987,7 +1092,7 @@ func TestAttachEventsReplaysLogsBeforeAlreadyStoppedRunExits(t *testing.T) {
 	if err := attachEvents(
 		ctx,
 		client,
-		"com.example.dev",
+		"Com.Example.Dev_2",
 		"run-1",
 		logAttachmentKeepsRun,
 	); err != nil {
@@ -1018,7 +1123,7 @@ func TestAttachEventsDevelopmentStopsWhenAppRunEnds(t *testing.T) {
 			case 1:
 				_ = json.NewEncoder(response).Encode(map[string]any{
 					"run": map[string]any{
-						"projectId": "com.example.dev",
+						"projectId": "Com.Example.Dev_2",
 						"runId":     "run-1",
 						"phase":     "running",
 					},
@@ -1052,7 +1157,7 @@ func TestAttachEventsDevelopmentStopsWhenAppRunEnds(t *testing.T) {
 	if err := attachEvents(
 		ctx,
 		client,
-		"com.example.dev",
+		"Com.Example.Dev_2",
 		"run-1",
 		logAttachmentStopsDevelopment,
 	); err != nil {

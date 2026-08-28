@@ -1,7 +1,10 @@
 import 'dart:convert';
 
+import 'package:playmesh_database/playmesh_database.dart';
+
 import '../capabilities/capability_runtime.dart';
 import '../app_media/app_media_runtime.dart';
+import '../diagnostics/playmesh_error_diagnostic.dart';
 import '../game_web/game_share_link_snapshot.dart';
 import '../session/go_core_session_client.dart';
 import '../storage/app_local_bucket_store.dart';
@@ -15,7 +18,9 @@ part 'features/app/app_media_webrtc_feature.dart';
 part 'features/app/app_performance_feature.dart';
 part 'features/app/app_storage_feature.dart';
 part 'features/app/app_ui_feature.dart';
+part 'features/app/app_webrtc_feature.dart';
 part 'features/game/game_binary_feature.dart';
+part 'features/game/game_database_feature.dart';
 part 'features/game/game_authority_feature.dart';
 part 'features/game/game_core_feature.dart';
 part 'features/game/game_performance_feature.dart';
@@ -24,6 +29,7 @@ part 'features/game/game_runtime_feature.dart';
 part 'features/game/game_session_feature.dart';
 part 'features/game/game_storage_lifecycle_feature.dart';
 part 'features/game/game_sync_feature.dart';
+part 'features/game/game_webrtc_feature.dart';
 
 enum SdkSourceTarget { game, app }
 
@@ -148,14 +154,31 @@ class SdkCommandDeferred extends SdkCommandExecution {
   const SdkCommandDeferred();
 }
 
-class SdkCommandException implements Exception {
-  const SdkCommandException(this.code, this.message);
+class SdkCommandException implements Exception, PlaymeshDiagnosticError {
+  const SdkCommandException(
+    this.code,
+    this.message, {
+    this.cause,
+    this.causeStackTrace,
+    this.context = const {},
+  });
 
+  @override
   final String code;
+  @override
   final String message;
 
   @override
-  String toString() => message;
+  final Object? cause;
+
+  @override
+  final StackTrace? causeStackTrace;
+
+  @override
+  final Map<String, String> context;
+
+  @override
+  String toString() => formatPlaymeshDiagnosticError(this);
 }
 
 /// App 命令的公开结果，以及必须在 Bridge 成功回包后才执行的宿主动作。
@@ -199,6 +222,7 @@ class GameSdkCommandContext {
     this.connection,
     this.standalonePlayer,
     this.updateNickname,
+    this.ensureDatabase,
   });
 
   final GameSessionConnection? connection;
@@ -206,8 +230,10 @@ class GameSdkCommandContext {
   final Map<String, Object?> gameInfo;
   final bool Function(String requestId) completeLifecycle;
   final Future<Map<String, Object?>> Function(String nickname)? updateNickname;
+  final Future<PlaymeshDatabase> Function()? ensureDatabase;
 
   bool get isStandalone => connection == null;
+  bool get isAuthority => connection?.isAuthority ?? true;
 }
 
 class AppSdkCommandContext {
@@ -268,14 +294,25 @@ final class SdkFeatureRegistry {
   ];
 
   /// 已公开并永久保留的 Game SDK 请求版本。新版本只能追加到末尾。
-  static const List<String> gameSdkSupportedRequestVersions = ['4.1.0'];
+  static const List<String> gameSdkSupportedRequestVersions = [
+    '4.1.0',
+    '4.2.0',
+    '4.3.0',
+  ];
 
   /// 已公开并永久保留的 App SDK 请求版本。新版本只能追加到末尾。
-  static const List<String> appSdkSupportedRequestVersions = ['3.2.0', '3.3.0'];
+  static const List<String> appSdkSupportedRequestVersions = [
+    '3.2.0',
+    '3.3.0',
+    '3.4.0',
+    '3.5.0',
+  ];
 
   static final List<_GameSdkCommandFeature> _gameCommandFeatures = [
     _GameCoreFeature(),
     _GameSessionFeature(),
+    _GameWebRTCFeature(),
+    _GameDatabaseFeature(),
     _GameStorageLifecycleFeature(),
     _GamePerformanceTransportFeature(),
   ];
@@ -310,11 +347,13 @@ final class SdkFeatureRegistry {
     gameCoreSdkSource,
     gameBinarySdkSource,
     gameSessionSdkSource,
+    gameWebRTCSdkSource,
     gameSyncSdkSource,
     gameAuthoritySdkSource,
     gameRpcSdkSource,
     gamePerformanceSdkSource,
     gameRuntimeSdkSource,
+    gameDatabaseSdkSource,
     gameStorageLifecycleSdkSource,
     appCoreSdkSource,
     appStorageSdkSource,
@@ -323,6 +362,7 @@ final class SdkFeatureRegistry {
     appMediaWebRtcSdkSource,
     appPerformanceSdkSource,
     appUiSdkSource,
+    appWebRTCSdkSource,
     appLanSdkSource,
     appDeviceSdkSource,
   ];
@@ -349,8 +389,7 @@ final class SdkFeatureRegistry {
     ),
     SdkRelease._(
       target: SdkSourceTarget.app,
-      // App SDK 3.3.0 only adds APIs to 3.2.0, so both explicit request
-      // versions safely share the current runtime bundle.
+      // App SDK 只做兼容新增，全部已发布请求版本共享当前 Bundle。
       supportedRequestedVersions: appSdkSupportedRequestVersions,
       minimumRequestedVersion: appSdkSupportedRequestVersions.first,
       maximumRequestedVersion: appSdkSupportedRequestVersions.last,

@@ -5,6 +5,7 @@ import 'package:playmesh/core/game_web/game_join_coordinator.dart';
 import 'package:playmesh/core/game_web/game_web_gateway_contract.dart';
 import 'package:playmesh/core/network/lan_endpoint.dart';
 import 'package:playmesh/core/network/lan_game_join_candidate_source.dart';
+import 'package:playmesh/core/relay/relay_tunnel.dart';
 
 void main() {
   test('直接链接统一解析、预检并生成 RemoteGameLaunch', () async {
@@ -26,6 +27,55 @@ void main() {
     expect(launch.toString(), isNot(contains('opaque-token')));
   });
 
+  test('Relay 成功预检把已建立会话和受控入口单次移交给 RemoteGameLaunch', () async {
+    final session = _FakeRelayClientSession();
+    final coordinator = GameJoinCoordinator(
+      inspector: _FakeInspector(
+        (invitation) async => InspectedGameInvitation(
+          invitation: invitation,
+          gameId: 'com.example.game',
+          gameName: '示例游戏',
+          resolvedEntryPath: '/controller/index.html',
+          relayClientSession: session,
+        ),
+      ),
+    );
+
+    final launch = await coordinator.prepareLink(
+      'https://relay.example/j/room_123#inviteToken=relay-token',
+      context: const GameJoinContext(expectedGameId: 'com.example.game'),
+    );
+
+    expect(launch.resolvedEntryPath, '/controller/index.html');
+    expect(launch.takeRelayClientSession(), same(session));
+    expect(launch.takeRelayClientSession(), isNull);
+    await session.close();
+  });
+
+  test('Relay 预检后发现 gameId 不匹配时立即关闭未移交会话', () async {
+    final session = _FakeRelayClientSession();
+    final coordinator = GameJoinCoordinator(
+      inspector: _FakeInspector(
+        (invitation) async => InspectedGameInvitation(
+          invitation: invitation,
+          gameId: 'com.example.other',
+          gameName: '其他游戏',
+          resolvedEntryPath: '/controller/index.html',
+          relayClientSession: session,
+        ),
+      ),
+    );
+
+    await expectLater(
+      coordinator.prepareLink(
+        'https://relay.example/j/room_123#inviteToken=relay-token',
+        context: const GameJoinContext(expectedGameId: 'com.example.game'),
+      ),
+      _joinFailure(GameJoinErrorCode.gameMismatch),
+    );
+    expect(session.closeCount, 1);
+  });
+
   test('非法直接链接稳定映射为 invalid_invitation 且不预检', () async {
     final inspector = _FakeInspector(
       (invitation) async => _inspected(invitation),
@@ -40,6 +90,36 @@ void main() {
       _joinFailure(GameJoinErrorCode.invalidInvitation),
     );
     expect(inspector.calls, isEmpty);
+  });
+
+  test('直接链接预检失败保留稳定错误码、原始异常和完整 cause 链', () async {
+    final rootStack = StackTrace.fromString('root inspection stack');
+    final root = UnsupportedError('当前加入入口没有可用的 Go Core');
+    final inspectionError = GameInvitationInspectionException(
+      GameInvitationInspectionFailure.unavailable,
+      cause: root,
+      causeStackTrace: rootStack,
+      context: const {'operation': 'relay_inspection'},
+    );
+    final coordinator = GameJoinCoordinator(
+      inspector: _FakeInspector((_) async => throw inspectionError),
+    );
+
+    try {
+      await coordinator.prepareLink(
+        _lanUrl('192.168.1.9'),
+        context: const GameJoinContext(),
+      );
+      fail('prepareLink should throw');
+    } on GameJoinException catch (error) {
+      expect(error.error, GameJoinErrorCode.invitationUnavailable);
+      expect(error.code, 'invitation_unavailable');
+      expect(error.cause, same(inspectionError));
+      expect(error.toString(), contains('GameInvitationInspectionException'));
+      expect(error.toString(), contains('UnsupportedError'));
+      expect(error.toString(), contains('当前加入入口没有可用的 Go Core'));
+      expect(error.toString(), contains('root inspection stack'));
+    }
   });
 
   test('直接链接在创建 launch 前执行 expectedGameId 精确比较', () async {
@@ -262,6 +342,10 @@ void main() {
   test('稳定错误 wire code 与 SDK 契约一致', () {
     expect(GameJoinErrorCode.values.map((value) => value.wireValue), [
       'invalid_invitation',
+      'invitation_invalid_response',
+      'invitation_unavailable',
+      'invitation_timed_out',
+      'invitation_inspection_closed',
       'game_mismatch',
       'self_invitation',
       'discovery_not_found',
@@ -331,6 +415,51 @@ class _FakeInspector implements GameInvitationInspector {
     calls.add(invitation);
     return _inspect(invitation);
   }
+
+  @override
+  Future<void> close() async {}
+}
+
+class _FakeRelayClientSession implements RelayClientSession {
+  _FakeRelayClientSession()
+    : webGateway = _FakeRelayClientGateway(
+        Uri.parse(
+          'http://127.0.0.1:34567/playmesh/join#inviteToken=authority-token',
+        ),
+      ),
+      coreGateway = _FakeRelayClientGateway(
+        Uri.parse('http://127.0.0.1:34568/'),
+      );
+
+  @override
+  final RelayClientGateway webGateway;
+
+  @override
+  final RelayClientGateway coreGateway;
+
+  int closeCount = 0;
+
+  @override
+  String get connectionMode => 'relay';
+
+  @override
+  Future<void> close() async {
+    closeCount += 1;
+  }
+}
+
+class _FakeRelayClientGateway implements RelayClientGateway {
+  const _FakeRelayClientGateway(this.localEntryUri);
+
+  @override
+  final Uri localEntryUri;
+
+  @override
+  Uri get localBaseUri => Uri(
+    scheme: localEntryUri.scheme,
+    host: localEntryUri.host,
+    port: localEntryUri.hasPort ? localEntryUri.port : null,
+  );
 
   @override
   Future<void> close() async {}

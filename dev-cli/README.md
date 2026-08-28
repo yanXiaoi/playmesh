@@ -113,6 +113,10 @@ Developer API 创建项目。新项目 ID 必须直接满足 Android application
 校验与 `configure` 共用同一套实现，不在 `init` 中维护第二份定义；`get` 获取旧项目
 时不追溯套用这项新建规则。
 
+`run`/`dev` 不会再把路由中的大写字母或下划线当成旧规则错误，会保留
+`main.json.id` 的原始大小写完成临时预览。预览不新建持久项目，所以仍允许
+CLI `get` 恢复的旧 ID。
+
 ## 配置当前项目
 
 ```powershell
@@ -125,6 +129,12 @@ Get-Content settings.json -Raw | playmesh-cli configure --json
 不接受额外的 `json` 参数；`--json` 从标准输入读取一个 JSON 对象并保存。各适配器
 只负责返回本项目 `main.json` 的位置，CLI 公共层统一执行路径边界与符号链接检查、
 字段校验和原子全量覆盖。
+
+`init` 与 `configure` 共用“Web Runtime 多线程”选项；新建默认关闭，后续可随时修改。
+CLI 每次保存都把界面当前值写为 `main.json.config.webRuntime.multithreading` 的布尔值；
+已有 `config`/`webRuntime` 为对象时保留其他未知字段，无法合并的旧值由最新标准对象结构
+替换。只有精确布尔值 `true` 才请求 App 的公共 WebView 资源网关启用 COOP/COEP；
+`config` 的接收、传输和通用清单校验仍不检查其类型或内部字段。
 
 只有单屏多人模式保存 `entries.controller`、`controllerOrientation` 和控制器能力，
 控制器 HTML 地址由用户配置。单人模式以及联机多屏多人模式都会删除这些字段；切换
@@ -201,8 +211,9 @@ playmesh-cli convert
   项目配置。
 - `playmesh-cli update`：更新当前 SDK 与 `main.json` 版本，再按
   `integration.type` 刷新 JavaScript、TypeScript 或 Cocos 集成。
-- `playmesh-cli run`：由适配器正式构建，完整上传、校验、原子安装并启动或重启当前
-  项目；输出 `runId` 后立即返回，不附加日志。
+- `playmesh-cli run`：不调用适配器构建或上传钩子，直接把 `playmesh/package/` 的固定
+  包资源原样上传到项目 preview 入口，由 App 网关校验并启动临时开发预览；不安装、
+  不写入 Catalog。输出 `runId` 后立即返回，不附加日志。
 - `playmesh-cli logs`：确认 App 当前运行的是本地项目，回放缓存并实时跟随日志。
 - `playmesh-cli dev [adapter-args]`：把 `adapter-args` 原样交给当前项目适配器，
   启动或连接开发 Web 根，通过受控局域网代理在真实 App WebView 中运行，并实时输出
@@ -404,25 +415,26 @@ Playmesh 扩展。Creator 3.8 的公开扩展 API 没有稳定且有文档支持
 
 ## 发布边界
 
-只有 `playmesh/package/` 进入上传包，内容固定为必需 `main.json`、可选
-`capabilities.json`、可选安全根 `icon.png` 与必需 `app/`；`playmesh/sdk/` 永不
-上传。目标 App 继续复用正式导入器完成 ZIP 路径、大小、Manifest、能力、图标和入口
-校验。相同 `main.json.id` 表示更新，只替换发布内容；目标中的 `data/`、`cache/`
-保持不变。失败时恢复原发布文件。
+只有 `playmesh/package/` 进入上传包，传输范围固定为 `main.json`、可选
+`capabilities.json`、可选 `icon.png` 与 `app/`；`playmesh/sdk/` 永不上传。CLI 只拒绝
+无法安全读取的符号链接或特殊文件，不解析、规范化或校验包业务内容。目标 App 的网关
+统一完成 ZIP 路径、大小、Manifest、能力、图标、入口和 SDK 兼容性校验。相同
+`main.json.id` 表示更新，只替换发布内容；目标中的 `data/`、`cache/` 保持不变。
+失败时恢复原发布文件。
 
-CLI 在上传前要求 `main.json.entries.game` 显式存在；单屏多人还要求显式
-`entries.controller`，多人要求显式 `authority.entry`。三者必须指向
-`playmesh/package/app/` 中实际文件，不能依赖模板路径回退。`sdkVersion` 与
-`appSdkVersion` 同样必须显式写入；Game SDK 只支持 `4.1.0`，App SDK 支持
-`3.2.0` 与 `3.3.0`；新建、更新以及普通 `dev/run` 会把清单分别写入当前
-`4.1.0`、`3.3.0`。
+CLI 不限制 `sdkVersion` 或 `appSdkVersion`，不比较本地 SDK 与目标 App 版本，也不在
+上传前回写这两个字段。完整上传会保留清单中的版本声明，由目标 App 网关按自身兼容性
+政策校验并选择当前兼容实现。`run` 只读取 `main.json.id` 来构造 preview 上传地址，且
+保留其原始大小写；清单其余结构和字段错误均由网关返回。
+如果包上传会在目标 App 中首次创建持久项目，网关对 `main.json.id` 执行与
+`init` 完全相同的 Android applicationId 校验；更新已存在的旧 ID 项目不追溯套用。
 
-包根 `playmesh/package/icon.png` 是可选项；文件存在且通过 PNG、大小和尺寸校验时
-才随完整包或每次开发基础包上传，缺少图标不会阻止发布。
+包根 `playmesh/package/icon.png` 是可选项；普通文件会原样进入上传包，PNG、大小和尺寸
+校验由目标 App 网关完成，缺少图标不会阻止上传。
 
 物理 `playmesh/package/app/` 在 App 中直接映射为运行时 `/`；`/playmesh/**` 与
 `/bucket/**` 是平台保留命名空间。发布包不得包含一级 `app/playmesh/` 或
-`app/bucket/`（大小写不敏感），入口必须是相对于外层物理 `app/` 的正斜杠路径。
+`app/bucket/`（大小写不敏感），网关要求入口必须是相对于外层物理 `app/` 的正斜杠路径。
 用户首段 `app` 合法，例如清单入口 `app/index.html` 解析到物理
 `playmesh/package/app/app/index.html`，运行时 URL 为 `/app/index.html`；它不是
 外层 `app/` 的兼容别名。编码、反斜杠和越界路径仍不提供兼容。

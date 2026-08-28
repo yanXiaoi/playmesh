@@ -49,6 +49,20 @@ const executeCommands = [
   'playmesh.main.sync.requestSnapshot',
   'playmesh.main.sync.getSnapshot',
   'playmesh.main.storage.getBucket',
+  'playmesh.main.db.open',
+  'playmesh.main.db.select',
+  'playmesh.main.db.update',
+  'playmesh.main.db.delete',
+  'playmesh.main.db.insert',
+  'playmesh.main.db.getDDL',
+  'playmesh.main.db.beginTransaction',
+  'PlaymeshDatabaseTransaction.select',
+  'PlaymeshDatabaseTransaction.update',
+  'PlaymeshDatabaseTransaction.delete',
+  'PlaymeshDatabaseTransaction.insert',
+  'PlaymeshDatabaseTransaction.getDDL',
+  'PlaymeshDatabaseTransaction.commit',
+  'PlaymeshDatabaseTransaction.rollback',
   'PlaymeshBinaryChannel.send',
   'PlaymeshBinaryChannel.sendLatest',
   'PlaymeshBinaryChannel.close',
@@ -83,6 +97,7 @@ const executeCommands = [
   'playmesh.app.capabilities.getDeclared',
   'playmesh.app.capabilities.create',
   'playmesh.app.media.open',
+  'playmesh.app.webrtc.getSignalingEndpoint',
   'playmesh.app.device.getPlatform',
   'playmesh.app.device.setFullscreen',
   'playmesh.app.ui.disableSystemMenuTriggers',
@@ -128,6 +143,7 @@ const subscribeCommands = [
   'playmesh.app.device.onInput',
   'playmesh.app.ui.onGameMenuOpen',
   'playmesh.app.ui.onGameMenuClose',
+  'playmesh.app.ui.onSystemMenuRequest',
   'playmesh.app.ui.onBack',
   'PlaymeshCapabilityHandle.on',
   'PlaymeshCapabilityHandle.addEventListener',
@@ -189,6 +205,7 @@ const returnedInterfaceBodies = new Map([
   ['PlaymeshBinaryChannel', interfaceBody('PlaymeshBinaryChannel')],
   ['PlaymeshSyncAuthorityController', interfaceBody('PlaymeshSyncAuthorityController')],
   ['PlaymeshStorageBucket', interfaceBody('PlaymeshStorageBucket')],
+  ['PlaymeshDatabaseTransaction', interfaceBody('PlaymeshDatabaseTransaction')],
   ['PlaymeshAppStorageBucket', interfaceBody('PlaymeshAppStorageBucket')],
   ['PlaymeshCapabilityHandle', interfaceBody('PlaymeshCapabilityHandle')],
   ['PlaymeshAppMediaSession', interfaceBody('PlaymeshAppMediaSession')],
@@ -206,7 +223,7 @@ for (const command of callableCommands) {
   const interfaceName = command.slice(0, separator);
   const methodName = command.slice(separator + 1);
   const body = returnedInterfaceBodies.get(interfaceName);
-  if (!body || !new RegExp(`\\b${methodName}\\s*(?:<[^;>{}]*>)?\\s*\\(`, 'u').test(body)) {
+  if (!body || !new RegExp(`\\b${methodName}\\s*(?:<[^;]*>)?\\s*\\(`, 'u').test(body)) {
     throw new Error(`SDK declaration has no returned-handle member for: ${command}`);
   }
 }
@@ -869,6 +886,7 @@ const runtimeCode = String.raw`(() => {
       if (command === "playmesh.main.binary.createChannel" || command === "playmesh.main.binary.joinChannel") type = "PlaymeshBinaryChannel";
       else if (command === "playmesh.main.sync.startAuthority") type = "PlaymeshSyncAuthorityController";
       else if (command === "playmesh.main.storage.getBucket") type = "PlaymeshStorageBucket";
+      else if (command === "playmesh.main.db.beginTransaction") type = "PlaymeshDatabaseTransaction";
       else if (command === "playmesh.app.storage.getBucket") type = "PlaymeshAppStorageBucket";
       else if (command === "playmesh.app.capabilities.create") type = "PlaymeshCapabilityHandle";
       else if (command === "playmesh.app.media.open") type = "PlaymeshAppMediaSession";
@@ -1263,14 +1281,17 @@ const runtimeCode = String.raw`(() => {
         const target = command.startsWith("playmesh.") ? resolveDirect(sdk, command) : handleCommand(sdk, command, handleIdInput);
         let callback;
         let requestHandlerId = "";
+        const systemMenuRequest =
+          command === "playmesh.app.ui.onSystemMenuRequest" ||
+          command === "playmesh.app.ui.onBack";
         if (command === "playmesh.main.lifecycle.onExit" ||
-            command === "playmesh.app.ui.onBack") {
+            systemMenuRequest) {
           const configuration = normalized.args[0] && typeof normalized.args[0] === "object" ? normalized.args[0] : {};
           requestHandlerId = configuration.handlerId ? String(configuration.handlerId) : "";
           callback = (event) => {
             try { pushEvent(subscriptionId, command, [event], sdk); }
             catch (error) { recordError(error, { command, handleId: handleIdInput }); }
-            const defaultValue = command === "playmesh.app.ui.onBack" ? true : undefined;
+            const defaultValue = systemMenuRequest ? "NEXT" : undefined;
             return requestHandlerId ? createRequest(requestHandlerId, command, { event }, sdk, defaultValue, configuration.callbackTimeoutMs) : defaultValue;
           };
         } else {
@@ -1650,6 +1671,7 @@ const chineseGroupSegments = new Map([
   ['Sync', '状态同步'],
   ['Lifecycle', '生命周期'],
   ['Storage', '存储'],
+  ['Database', '数据库'],
   ['Availability', '可用性'],
   ['Identity', '身份'],
   ['Runtime', '运行环境'],
@@ -1659,6 +1681,7 @@ const chineseGroupSegments = new Map([
   ['Dynamic capability (advanced)', '动态能力（高级）'],
   ['Advanced JSON', '高级 JSON'],
   ['Media', '媒体会话'],
+  ['WebRTC', 'WebRTC 信令'],
   ['Device', '设备环境'],
   ['Device environment', '设备环境'],
   ['Microphone', '麦克风'],
@@ -1925,6 +1948,7 @@ const commandGroups = [
   { id: 'MainSync', group: 'Main SDK ❯ Sync', matches: command => command.startsWith('playmesh.main.sync.') || command.startsWith('PlaymeshSyncAuthorityController.'), properties: [] },
   { id: 'MainLifecycle', group: 'Main SDK ❯ Lifecycle', matches: command => command.startsWith('playmesh.main.lifecycle.'), properties: [] },
   { id: 'MainStorage', group: 'Main SDK ❯ Storage', matches: command => command.startsWith('playmesh.main.storage.') || command.startsWith('PlaymeshStorageBucket.'), properties: [] },
+  { id: 'MainDatabase', group: 'Main SDK ❯ Database', matches: command => command.startsWith('playmesh.main.db.') || command.startsWith('PlaymeshDatabaseTransaction.'), properties: [] },
   { id: 'AppAvailability', group: 'App SDK ❯ Availability', matches: command => command === 'playmesh.app.isAvailable', properties: ['playmesh.app.version'] },
   { id: 'AppIdentity', group: 'App SDK ❯ Identity', matches: command => command.startsWith('playmesh.app.identity.'), properties: [] },
   { id: 'AppRuntime', group: 'App SDK ❯ Runtime', matches: command => command.startsWith('playmesh.app.runtime.'), properties: [] },
@@ -1932,6 +1956,7 @@ const commandGroups = [
   { id: 'AppPerformance', group: 'App SDK ❯ Performance', matches: command => command.startsWith('playmesh.app.performance.'), properties: [] },
   { id: 'AppCapabilities', group: 'App SDK ❯ Capabilities', matches: command => command.startsWith('playmesh.app.capabilities.') || command.startsWith('PlaymeshCapabilityHandle.'), properties: ['PlaymeshCapabilityHandle.id', 'PlaymeshCapabilityHandle.code', 'PlaymeshCapabilityHandle.apiVersion'] },
   { id: 'AppMedia', group: 'App SDK ❯ Media', matches: command => command.startsWith('playmesh.app.media.') || command.startsWith('PlaymeshAppMediaSession.'), properties: ['PlaymeshAppMediaSession.id', 'PlaymeshAppMediaSession.source', 'PlaymeshAppMediaSession.state', 'PlaymeshAppMediaSession.stream'] },
+  { id: 'AppWebRTC', group: 'App SDK ❯ WebRTC', matches: command => command.startsWith('playmesh.app.webrtc.'), properties: [] },
   { id: 'AppDevice', group: 'App SDK ❯ Device', matches: command => command.startsWith('playmesh.app.device.'), properties: [] },
   { id: 'AppUi', group: 'App SDK ❯ UI', matches: command => command.startsWith('playmesh.app.ui.'), properties: [] },
   { id: 'AppLan', group: 'App SDK ❯ LAN', matches: command => command.startsWith('playmesh.app.lan.') || command.startsWith('PlaymeshLanGame.'), properties: ['PlaymeshLanGame.instanceId', 'PlaymeshLanGame.gameId', 'PlaymeshLanGame.name', 'PlaymeshLanGame.host'] },
@@ -2105,6 +2130,76 @@ const typedExecuteSpecs = [
     description: '获取 Authority 主机上的持久 JSON Bucket。', parameters: [requiredString('Bucket', '存储桶逻辑名称。')], result: '将存储桶 handleId 写入变量。', args: `[${argumentCode('Bucket')}]`,
   },
   {
+    command: 'playmesh.main.db.open', name: 'OpenGameDatabase', group: 'Main SDK ❯ Database', label: '打开游戏数据库',
+    description: '仅 Authority 打开或创建当前游戏固定的 _game.db。', result: '将固定数据库文件描述写入变量。', args: '[]',
+  },
+  {
+    command: 'playmesh.main.db.select', name: 'SelectGameDatabase', group: 'Main SDK ❯ Database', label: '查询游戏数据库',
+    description: '执行表级只读 SQL；参数变量可使用数组绑定 ?/?NNN，或对象绑定命名占位符。',
+    parameters: [requiredString('Sql', '使用标准占位符的 SQLite 查询。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将查询行数组写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`,
+  },
+  {
+    command: 'playmesh.main.db.update', name: 'UpdateGameDatabase', group: 'Main SDK ❯ Database', label: '更新游戏数据库',
+    description: '执行允许的 UPDATE 或表/索引 DDL。',
+    parameters: [requiredString('Sql', '使用标准占位符的 SQLite 写语句。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将受影响行数写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`,
+  },
+  {
+    command: 'playmesh.main.db.delete', name: 'DeleteGameDatabaseRows', group: 'Main SDK ❯ Database', label: '删除游戏数据库数据',
+    description: '执行允许的 DELETE。',
+    parameters: [requiredString('Sql', '使用标准占位符的 SQLite DELETE。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将受影响行数写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`,
+  },
+  {
+    command: 'playmesh.main.db.insert', name: 'InsertGameDatabaseRow', group: 'Main SDK ❯ Database', label: '新增游戏数据库数据',
+    description: '执行允许的 INSERT 或 REPLACE。',
+    parameters: [requiredString('Sql', '使用标准占位符的 SQLite INSERT 或 REPLACE。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将受影响行数和 lastInsertRowId 写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`,
+  },
+  {
+    command: 'playmesh.main.db.getDDL', name: 'GetGameDatabaseDdl', group: 'Main SDK ❯ Database', label: '获取游戏数据库 DDL',
+    description: '返回 SQLite 原生表与索引 DDL；可按表或索引名称筛选。',
+    parameters: [requiredBoolean('UseName', '是否按名称筛选。'), optionalString('Name', '表或索引名称。')],
+    result: '将 DDL 记录数组写入变量。', args: `(${argumentCode('UseName')} ? [${argumentCode('Name')}] : [])`,
+  },
+  {
+    command: 'playmesh.main.db.beginTransaction', name: 'BeginGameDatabaseTransaction', group: 'Main SDK ❯ Database', label: '开始游戏数据库事务',
+    description: '在独立 SQLite 连接上开始事务。', result: '将事务 handleId 写入变量。', args: '[]',
+  },
+  {
+    command: 'PlaymeshDatabaseTransaction.select', name: 'SelectGameDatabaseTransaction', group: 'Main SDK ❯ Database', label: '在事务中查询数据库',
+    description: '在指定事务连接中执行表级只读 SQL。',
+    parameters: [handleIdParameter('数据库事务 handleId。'), requiredString('Sql', '使用标准占位符的 SQLite 查询。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将查询行数组写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`, handle: 'HandleId',
+  },
+  {
+    command: 'PlaymeshDatabaseTransaction.update', name: 'UpdateGameDatabaseTransaction', group: 'Main SDK ❯ Database', label: '在事务中更新数据库',
+    description: '在指定事务连接中执行 UPDATE 或表/索引 DDL。',
+    parameters: [handleIdParameter('数据库事务 handleId。'), requiredString('Sql', '使用标准占位符的 SQLite 写语句。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将受影响行数写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`, handle: 'HandleId',
+  },
+  {
+    command: 'PlaymeshDatabaseTransaction.delete', name: 'DeleteGameDatabaseTransactionRows', group: 'Main SDK ❯ Database', label: '在事务中删除数据库数据',
+    description: '在指定事务连接中执行 DELETE。',
+    parameters: [handleIdParameter('数据库事务 handleId。'), requiredString('Sql', '使用标准占位符的 SQLite DELETE。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将受影响行数写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`, handle: 'HandleId',
+  },
+  {
+    command: 'PlaymeshDatabaseTransaction.insert', name: 'InsertGameDatabaseTransactionRow', group: 'Main SDK ❯ Database', label: '在事务中新增数据库数据',
+    description: '在指定事务连接中执行 INSERT 或 REPLACE。',
+    parameters: [handleIdParameter('数据库事务 handleId。'), requiredString('Sql', '使用标准占位符的 SQLite INSERT 或 REPLACE。'), requiredBoolean('UseArguments', '是否传入 SQL 参数。'), requiredVariable('Arguments', '位置参数数组或命名参数对象。')],
+    result: '将受影响行数和 lastInsertRowId 写入变量。', args: `(${argumentCode('UseArguments')} ? [${argumentCode('Sql')}, ${variableCode('Arguments')}] : [${argumentCode('Sql')}])`, handle: 'HandleId',
+  },
+  {
+    command: 'PlaymeshDatabaseTransaction.getDDL', name: 'GetGameDatabaseTransactionDdl', group: 'Main SDK ❯ Database', label: '在事务中获取数据库 DDL',
+    description: '从指定事务连接返回 SQLite 原生表与索引 DDL。',
+    parameters: [handleIdParameter('数据库事务 handleId。'), requiredBoolean('UseName', '是否按名称筛选。'), optionalString('Name', '表或索引名称。')],
+    result: '将 DDL 记录数组写入变量。', args: `(${argumentCode('UseName')} ? [${argumentCode('Name')}] : [])`, handle: 'HandleId',
+  },
+  { command: 'PlaymeshDatabaseTransaction.commit', name: 'CommitGameDatabaseTransaction', group: 'Main SDK ❯ Database', label: '提交游戏数据库事务', description: '提交指定事务并释放其独立连接。', parameters: [handleIdParameter('数据库事务 handleId。')], args: '[]', handle: 'HandleId', void: true },
+  { command: 'PlaymeshDatabaseTransaction.rollback', name: 'RollbackGameDatabaseTransaction', group: 'Main SDK ❯ Database', label: '回滚游戏数据库事务', description: '回滚指定事务并释放其独立连接。', parameters: [handleIdParameter('数据库事务 handleId。')], args: '[]', handle: 'HandleId', void: true },
+  {
     command: 'PlaymeshBinaryChannel.send', name: 'BroadcastBinary', group: 'Main SDK ❯ Binary', label: '可靠广播编码二进制帧',
     description: '以 UTF-8、Base64 或十六进制编码向通道内其他在线成员可靠广播。',
     parameters: [handleIdParameter('二进制通道 handleId。'), requiredString('Encoding', '输入编码。', ['utf8', 'base64', 'hex']), requiredString('Data', '对应编码的帧数据。')],
@@ -2209,6 +2304,12 @@ typedExecuteSpecs.push(
     parameters: [requiredString('SourceHandleId', 'PlaymeshAppMediaSource handleId。'), requiredBoolean('UseAbortSignal', '是否传入中止信号。'), optionalString('AbortHandleId', 'AbortController handleId。')],
     result: '将媒体会话描述、session handleId 和不透明 stream handleId 写入变量。',
     args: `(() => { const values = [{ $handle: ${argumentCode('SourceHandleId')} }]; if (${argumentCode('UseAbortSignal')}) values.push({ signal: { $abortSignal: ${argumentCode('AbortHandleId')} } }); return values; })()`,
+  },
+  {
+    command: 'playmesh.app.webrtc.getSignalingEndpoint', name: 'GetWebRTCSignalingEndpoint', group: 'App SDK ❯ WebRTC', label: '获取 WebRTC 信令端点',
+    description: '获取当前多人会话中受身份约束、短期且一次性的信令地址和 ICE 配置；WebRTC 用途由游戏自行决定。',
+    parameters: [requiredString('Identifier', '1～128 位业务通道标识，可使用字母、数字、点、下划线、冒号、斜杠和连字符。')],
+    result: '将信令端点描述写入变量。', args: `[${argumentCode('Identifier')}]`,
   },
   {
     command: 'playmesh.app.device.getPlatform', name: 'GetDevicePlatform', group: 'App SDK ❯ Device environment', label: '获取设备宿主平台',
@@ -2343,8 +2444,13 @@ const typedSubscribeSpecs = [
   { command: 'playmesh.app.ui.onGameMenuOpen', name: 'SubscribeGameMenuOpen', group: 'App SDK ❯ UI', label: '订阅游戏菜单打开', description: '只在关闭到打开的真实状态变化后入队。', args: '[]' },
   { command: 'playmesh.app.ui.onGameMenuClose', name: 'SubscribeGameMenuClose', group: 'App SDK ❯ UI', label: '订阅游戏菜单关闭', description: '只在打开到关闭的真实状态变化后入队。', args: '[]' },
   {
-    command: 'playmesh.app.ui.onBack', name: 'SubscribeAppBack', group: 'App SDK ❯ UI', label: '订阅系统返回', description: '仅在显式关闭 SDK 兜底面板后处理 Android 返回与 Esc；处理器返回 false 可阻止退出。',
-    parameters: [requiredBoolean('UseHandler', '是否启用可阻止退出的返回处理器。'), optionalString('HandlerId', '返回请求处理器 ID。'), requiredBoolean('UseCallbackTimeout', '是否显式设置回调等待时间。'), optionalNumber('CallbackTimeoutMs', '返回回调最大等待毫秒数。', 2500)],
+    command: 'playmesh.app.ui.onSystemMenuRequest', name: 'SubscribeSystemMenuRequest', group: 'App SDK ❯ UI', label: '订阅系统菜单请求', description: 'Android 返回、桌面返回键或浏览器悬浮按钮触发后，在默认效果前返回 EXIT、NEXT 或 STOP。',
+    parameters: [requiredBoolean('UseHandler', '是否启用可决定菜单流程的处理器。'), optionalString('HandlerId', '系统菜单请求处理器 ID；回应 JSON 字符串 EXIT、NEXT 或 STOP。'), requiredBoolean('UseCallbackTimeout', '是否显式设置回调等待时间。'), optionalNumber('CallbackTimeoutMs', '系统菜单回调最大等待毫秒数。', 2500)],
+    args: `(() => { if (!${argumentCode('UseHandler')}) return [{}]; const options = { handlerId: ${argumentCode('HandlerId')} }; if (${argumentCode('UseCallbackTimeout')}) options.callbackTimeoutMs = ${argumentCode('CallbackTimeoutMs')}; return [options]; })()`,
+  },
+  {
+    command: 'playmesh.app.ui.onBack', name: 'SubscribeAppBack', group: 'App SDK ❯ UI', label: '订阅返回入口（已废弃）', description: '已废弃兼容入口；请改用“订阅系统菜单请求”。',
+    parameters: [requiredBoolean('UseHandler', '是否启用可决定菜单流程的处理器。'), optionalString('HandlerId', '返回请求处理器 ID；回应 JSON 字符串 EXIT、NEXT 或 STOP。'), requiredBoolean('UseCallbackTimeout', '是否显式设置回调等待时间。'), optionalNumber('CallbackTimeoutMs', '返回回调最大等待毫秒数。', 2500)],
     args: `(() => { if (!${argumentCode('UseHandler')}) return [{}]; const options = { handlerId: ${argumentCode('HandlerId')} }; if (${argumentCode('UseCallbackTimeout')}) options.callbackTimeoutMs = ${argumentCode('CallbackTimeoutMs')}; return [options]; })()`,
   },
   { command: 'PlaymeshCapabilityHandle.on', name: 'SubscribeDynamicCapabilityEvent', group: 'App SDK ❯ Dynamic capability (advanced)', label: '订阅动态能力事件（高级）', description: '按注册表事件名订阅开放 JSON 数据。', parameters: [handleIdParameter('能力实例 handleId。'), requiredString('EventName', '注册表声明的事件名。')], args: `[${argumentCode('EventName')}]`, handle: 'HandleId' },
@@ -2441,7 +2547,7 @@ const typedExecuteFunctions = [...typedExecuteSpecs, ...typedExecuteOverloadSpec
 const typedSubscribeFunctions = typedSubscribeSpecs.flatMap(spec => [makeTypedSubscribeFunction(spec), ...makeTypedEventQueueFunctions(spec)]);
 const typedHandlerFunctions = typedHandlerSpecs.flatMap(spec => [makeTypedHandlerFunction(spec), ...makeTypedRequestQueueFunctions(spec)]);
 
-const mainExecuteCommands = executeCommands.filter(command => command.startsWith('playmesh.main.') || command.startsWith('PlaymeshBinaryChannel.') || command.startsWith('PlaymeshSyncAuthorityController.') || command.startsWith('PlaymeshStorageBucket.'));
+const mainExecuteCommands = executeCommands.filter(command => command.startsWith('playmesh.main.') || command.startsWith('PlaymeshBinaryChannel.') || command.startsWith('PlaymeshSyncAuthorityController.') || command.startsWith('PlaymeshStorageBucket.') || command.startsWith('PlaymeshDatabaseTransaction.'));
 const mainSubscribeCommands = subscribeCommands.filter(command => command.startsWith('playmesh.main.') || command.startsWith('PlaymeshBinaryChannel.'));
 const appExecuteCommands = executeCommands.filter(command => !mainExecuteCommands.includes(command));
 const appSubscribeCommands = subscribeCommands.filter(command => !mainSubscribeCommands.includes(command));
@@ -2588,7 +2694,8 @@ const typedResponseFunctions = [
   eventFunction({ name: 'KeepAuthoritySyncState', fullName: '同步回调保持当前状态', description: '响应 onInput/onTick 请求而不替换当前状态。', group: 'Main SDK ❯ Sync', sentence: '同步回调请求 _PARAM1_ 保持当前状态', parameters: [requiredString('RequestId', '同步回调请求 ID。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, null, "keep");`) }),
   eventFunction({ name: 'SetNextAuthoritySyncState', fullName: '同步回调返回下一状态', description: '以变量中的完整 JSON 状态响应 onInput/onTick。', group: 'Main SDK ❯ Sync', sentence: '同步回调请求 _PARAM1_ 返回状态 _PARAM2_', parameters: [requiredString('RequestId', '同步回调请求 ID。'), requiredVariable('State', '下一完整状态变量。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, ${variableCode('State')}, "next");`) }),
   eventFunction({ name: 'CompleteLifecycleExitCleanup', fullName: '完成退出异步清理请求', description: '完成 onExit 的有限等待清理请求。', group: 'Main SDK ❯ Lifecycle', sentence: '完成退出清理请求 _PARAM1_', parameters: [requiredString('RequestId', '退出清理请求 ID。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, null, "void");`) }),
-  eventFunction({ name: 'CompleteAppBackRequest', fullName: '完成系统返回请求', description: '决定继续退出或留在当前游戏。', group: 'App SDK ❯ UI', sentence: '系统返回请求 _PARAM1_ 继续退出：_PARAM2_', parameters: [requiredString('RequestId', '系统返回请求 ID。'), requiredBoolean('ContinueExit', 'true 继续退出；false 阻止退出。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, ${argumentCode('ContinueExit')}, "result");`) }),
+  eventFunction({ name: 'CompleteSystemMenuRequest', fullName: '决定系统菜单流程', description: '返回 EXIT 退出、NEXT 继续当前入口默认流程，或 STOP 停止后续流程。', group: 'App SDK ❯ UI', sentence: '系统菜单请求 _PARAM1_ 决策 _PARAM2_', parameters: [requiredString('RequestId', '系统菜单请求 ID。'), requiredString('Decision', 'EXIT、NEXT 或 STOP。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, JSON.stringify(String(${argumentCode('Decision')}).toUpperCase()), "result");`) }),
+  eventFunction({ name: 'CompleteAppBackRequest', fullName: '决定系统返回流程（已废弃）', description: '已废弃兼容入口；请改用“决定系统菜单流程”。', group: 'App SDK ❯ UI', sentence: '旧系统返回请求 _PARAM1_ 决策 _PARAM2_', parameters: [requiredString('RequestId', '系统菜单请求 ID。'), requiredString('Decision', 'EXIT、NEXT 或 STOP。')], code: extensionGuard('', `extension.respond(${argumentCode('RequestId')}, JSON.stringify(String(${argumentCode('Decision')}).toUpperCase()), "result");`) }),
 ];
 
 const capabilityByCode = new Map(builtInCapabilityDescriptors.map(descriptor => [descriptor.code, descriptor]));
@@ -2919,7 +3026,7 @@ const extension = {
   name: 'Playmesh',
   previewIconUrl: icon,
   shortDescription: '使用当前游戏页面中已存在的 Playmesh 游戏 SDK 与原生 App SDK。',
-  version: '2.0.0',
+  version: '2.1.0',
   description: '面向当前 Playmesh SDK 上下文的非致命、允许列表式 GDevelop 事件桥。它公开游戏 SDK、原生 App 能力、返回对象句柄、事件、回调请求、JSON 路径、二进制值、文件与媒体；不会加载另一份 SDK，也不会自行建立传输通道。',
   tags: ['playmesh', 'sdk', 'multiplayer', 'native', 'storage', 'media'],
   authorIds: [],

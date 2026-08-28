@@ -124,7 +124,7 @@ const window = {
             messages: { "sidebar.title": "Game menu" },
           },
           available: true,
-          sdkVersion: "3.3.0",
+          sdkVersion: "3.5.0",
           identity: {
             userId: "u-current-app",
             nickname: "本机玩家",
@@ -228,9 +228,17 @@ assert.deepEqual(
     messages: { "sidebar.title": "Game menu" },
   },
 );
-assert.equal(app.version, "3.3.0");
+assert.equal(app.version, "3.5.0");
 assert.equal(app.isAvailable(), true);
 assert.equal(app.runtime.getLocale(), "en-US");
+await assert.rejects(
+  app.webrtc.getSignalingEndpoint("camera/main"),
+  /没有可用的多人会话信令通道/,
+);
+await assert.rejects(
+  app.webrtc.getSignalingEndpoint("bad identifier"),
+  /identifier/,
+);
 assert.equal(app.performance.getFps(), null);
 let reportedFps = null;
 app.performance.onFps((fps) => {
@@ -415,9 +423,9 @@ assert.deepEqual(
   { fallbackUi: false, floatingButton: true },
 );
 let appBackCalls = 0;
-const stopAppBack = app.ui.onBack(() => {
+const stopAppBack = app.ui.onSystemMenuRequest(() => {
   appBackCalls += 1;
-  return false;
+  return "STOP";
 });
 assert.equal(appInternal.handleNativeBack(), true);
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -436,6 +444,7 @@ for (const methodName of [
   "showGameSidebar",
   "onGameMenuOpen",
   "onGameMenuClose",
+  "onSystemMenuRequest",
   "onBack",
   "restartGame",
   "openSharePanel",
@@ -592,7 +601,7 @@ const browserApp = browserWindow[appInternalKey].publicApi;
 const browserBootstrap = await browserApp.ready;
 assert.equal(browserWindow.playmesh, undefined);
 assert.equal(browserBootstrap.available, false);
-assert.equal(browserBootstrap.sdkVersion, "3.3.0");
+assert.equal(browserBootstrap.sdkVersion, "3.5.0");
 assert.equal(browserBootstrap.identity, null);
 await assert.rejects(
   browserApp.lan.discoverGames(),
@@ -620,7 +629,7 @@ pendingReadyWindow[appInternalKey].receive({
   requestId: pendingReadyCommand.requestId,
   result: {
     available: true,
-    sdkVersion: "3.3.0",
+    sdkVersion: "3.5.0",
     identity: null,
     runtime: null,
     capabilityRegistry: [],

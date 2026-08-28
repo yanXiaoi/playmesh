@@ -108,11 +108,12 @@ void main() {
       expect(declaration, contains('disableSystemMenuTriggers(): void'));
       expect(
         declaration,
-        contains(
-          'onBack(callback: () => boolean | Promise<boolean>): '
-          'PlaymeshUnsubscribe',
-        ),
+        contains('type PlaymeshSystemMenuDecision = "EXIT" | "NEXT" | "STOP"'),
       );
+      expect(declaration, contains('onSystemMenuRequest('));
+      expect(declaration, contains('@deprecated 使用 `onSystemMenuRequest()`'));
+      expect(declaration, contains('Promise<PlaymeshAppBackDecision>'));
+      expect(declaration, isNot(contains('boolean | Promise<boolean>')));
       expect(declaration, isNot(contains('setSystemMenuTriggersEnabled')));
       expect(declaration, isNot(contains('platform.ui.configure')));
       expect(declaration, isNot(contains('platformUiMessages')));

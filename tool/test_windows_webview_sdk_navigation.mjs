@@ -196,7 +196,7 @@ class NavigationHost {
         () => runtime[Symbol.for('playmesh.main.internal.v1')].receive({
           type: 'sdk.bootstrap',
           requestId: command.requestId,
-          sdkVersion: '4.1.0',
+          sdkVersion: '4.3.0',
           isAuthority: true,
           gameInfo: {
             id: 'com.playmesh.navigation-test',
@@ -320,7 +320,7 @@ for (const [label, html] of htmlFixtures) {
   await delayTasks();
   const ready = await runtime.page.playmesh.ready;
   assert.equal(ready.app.sdkVersion, '3.3.0');
-  assert.equal(ready.main.sdkVersion, '4.1.0');
+  assert.equal(ready.main.sdkVersion, '4.3.0');
   assert.equal(
     host.commands.filter(item => item.label === label && item.command.command === 'app.bootstrap').length,
     1
@@ -357,7 +357,7 @@ await reloadHost.completeNavigation(oldGeneration);
 await reloadHost.completeNavigation(newGeneration);
 await delayTasks();
 const reloadedReady = await newPage.page.playmesh.ready;
-assert.equal(reloadedReady.main.sdkVersion, '4.1.0');
+assert.equal(reloadedReady.main.sdkVersion, '4.3.0');
 assert.equal(
   reloadHost.commands.filter(item => item.label === 'reload-old' && item.command.command === 'sdk.ready').length,
   0,

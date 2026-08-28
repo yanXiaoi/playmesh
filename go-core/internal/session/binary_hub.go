@@ -241,6 +241,7 @@ type binaryPendingRPC struct {
 	senderID     string
 	payloadBytes int
 	timer        *time.Timer
+	stream       *binaryRPCStream
 }
 
 type binarySession struct {
@@ -253,6 +254,7 @@ type binarySession struct {
 	nextReviewID       uint64
 	pendingRPC         map[uint64]*binaryPendingRPC
 	pendingRPCByClient map[binaryRPCClientKey]uint64
+	pendingRPCByStream map[string]uint64
 	pendingRPCByPlayer map[string]int
 	pendingRPCBytes    int
 	nextRPCID          uint64
@@ -361,6 +363,7 @@ func (b *binaryHub) attach(sessionID, authorityID string, peer *binaryPeer) {
 			latestReview:       make(map[binaryLatestKey]uint64),
 			pendingRPC:         make(map[uint64]*binaryPendingRPC),
 			pendingRPCByClient: make(map[binaryRPCClientKey]uint64),
+			pendingRPCByStream: make(map[string]uint64),
 			pendingRPCByPlayer: make(map[string]int),
 		}
 		b.sessions[sessionID] = session
@@ -524,6 +527,23 @@ func (b *binaryHub) respondRPC(peer *binaryPeer, frame binaryClientFrame) {
 	}
 	pending := session.pendingRPC[frame.rpcID]
 	if pending == nil {
+		return
+	}
+	if pending.stream != nil {
+		result := binaryRPCStreamResult{
+			payload: frame.payload,
+			code:    frame.errorCode,
+			message: frame.errorMessage,
+		}
+		if frame.errorCode != "" &&
+			(!validBinaryRPCErrorCode(frame.errorCode) || len(frame.errorMessage) > 512) {
+			result = binaryRPCStreamResult{
+				code:    "rpc_response_invalid",
+				message: "Authority RPC 错误响应格式无效",
+			}
+		}
+		b.removePendingRPCLocked(session, pending)
+		pending.stream.finish(result)
 		return
 	}
 	b.removePendingRPCLocked(session, pending)
@@ -1097,6 +1117,13 @@ func (b *binaryHub) expireRPC(sessionID string, rpcID uint64) {
 		return
 	}
 	b.removePendingRPCLocked(session, pending)
+	if pending.stream != nil {
+		pending.stream.finish(binaryRPCStreamResult{
+			code:    binaryRPCCodeTimeout,
+			message: "Authority RPC 流请求超时",
+		})
+		return
+	}
 	if requester := session.peers[pending.senderID]; requester != nil {
 		b.sendRPCErrorLocked(
 			requester,
@@ -1112,10 +1139,14 @@ func (b *binaryHub) removePendingRPCLocked(
 	pending *binaryPendingRPC,
 ) {
 	delete(session.pendingRPC, pending.id)
-	delete(
-		session.pendingRPCByClient,
-		binaryRPCClientKey{senderID: pending.senderID, requestID: pending.requestID},
-	)
+	if pending.stream == nil {
+		delete(
+			session.pendingRPCByClient,
+			binaryRPCClientKey{senderID: pending.senderID, requestID: pending.requestID},
+		)
+	} else {
+		delete(session.pendingRPCByStream, pending.stream.token)
+	}
 	remaining := session.pendingRPCByPlayer[pending.senderID] - 1
 	if remaining > 0 {
 		session.pendingRPCByPlayer[pending.senderID] = remaining
@@ -1135,6 +1166,12 @@ func (b *binaryHub) cancelPlayerRPCsLocked(
 	for _, pending := range session.pendingRPC {
 		if pending.senderID == playerID {
 			b.removePendingRPCLocked(session, pending)
+			if pending.stream != nil {
+				pending.stream.finish(binaryRPCStreamResult{
+					code:    "rpc_sender_offline",
+					message: "RPC 流发送端已离线",
+				})
+			}
 		}
 	}
 }
@@ -1146,6 +1183,10 @@ func (b *binaryHub) cancelAllRPCsLocked(
 ) {
 	for _, pending := range session.pendingRPC {
 		b.removePendingRPCLocked(session, pending)
+		if pending.stream != nil {
+			pending.stream.finish(binaryRPCStreamResult{code: code, message: message})
+			continue
+		}
 		if requester := session.peers[pending.senderID]; requester != nil {
 			b.sendRPCErrorLocked(requester, pending.requestID, code, message)
 		}

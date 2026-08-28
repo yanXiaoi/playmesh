@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:playmesh/core/game_web/game_invitation.dart';
 import 'package:playmesh/core/game_web/game_invitation_inspector.dart';
 import 'package:playmesh/core/game_web/game_web_gateway_contract.dart';
-import 'package:playmesh/core/relay/relay_tunnel_contract.dart';
+import 'package:playmesh/core/relay/relay_tunnel.dart';
 
 void main() {
   test('LAN 预检只向去除 fragment 的受控入口 POST token', () async {
@@ -34,32 +34,35 @@ void main() {
     expect(result.invitation, same(invitation));
     expect(result.gameId, 'com.example.game');
     expect(result.gameName, '示例游戏');
+    expect(result.resolvedEntryPath, '/controller/index.html');
 
     await inspector.close();
     expect(client.closeCount, 1);
   });
 
-  test('Relay 预检复用 Web 回环 token 并始终关闭临时网关', () async {
+  test('Relay 预检复用 Web 回环 token 并把成功会话移交给导航', () async {
     final gateway = _FakeRelayGateway(
       Uri.parse(
         'http://127.0.0.1:34567$playmeshGameInvitationPath'
         '#inviteToken=authority-share-token',
       ),
     );
+    final session = _FakeRelaySession(gateway);
     late Uri factoryInvitation;
-    late RelayTarget factoryTarget;
+    late Uri factoryCoreBase;
     late http.AbortableRequest sentRequest;
     final client = _RecordingClient((request) async {
       sentRequest = request as http.AbortableRequest;
       return _jsonResponse(_validResponseBody());
     });
     final inspector = DefaultGameInvitationInspector(
+      coreBaseUri: Uri.parse('http://127.0.0.1:39001/'),
       httpClient: client,
-      relayClientGatewayFactory:
-          ({required invitationUri, required target}) async {
+      relayClientSessionFactory:
+          ({required coreBaseUri, required invitationUri}) async {
             factoryInvitation = invitationUri;
-            factoryTarget = target;
-            return gateway;
+            factoryCoreBase = coreBaseUri;
+            return session;
           },
     );
     final invitation = GameInvitation.parse(
@@ -69,7 +72,7 @@ void main() {
     final result = await inspector.inspect(invitation);
 
     expect(factoryInvitation, invitation.entryUri);
-    expect(factoryTarget, RelayTarget.web);
+    expect(factoryCoreBase, Uri.parse('http://127.0.0.1:39001/'));
     expect(
       sentRequest.url,
       Uri.parse('http://127.0.0.1:34567$playmeshGameInvitationPath'),
@@ -78,7 +81,11 @@ void main() {
       playmeshGameInvitationTokenParameter: 'authority-share-token',
     });
     expect(result.invitation, same(invitation));
-    expect(gateway.closeCount, 1);
+    expect(result.resolvedEntryPath, '/controller/index.html');
+    expect(session.closeCount, 0, reason: '成功预检不能关闭随后导航还要使用的会话');
+    expect(result.takeRelayClientSession(), same(session));
+    expect(result.takeRelayClientSession(), isNull, reason: '连接只能移交一次');
+    await session.close();
     await inspector.close();
   });
 
@@ -89,12 +96,14 @@ void main() {
         '#inviteToken=authority-share-token',
       ),
     );
+    final session = _FakeRelaySession(gateway);
     final inspector = DefaultGameInvitationInspector(
+      coreBaseUri: Uri.parse('http://127.0.0.1:39001/'),
       httpClient: _RecordingClient(
         (_) async => _jsonResponse(_validResponseBody(), statusCode: 403),
       ),
-      relayClientGatewayFactory:
-          ({required invitationUri, required target}) async => gateway,
+      relayClientSessionFactory:
+          ({required coreBaseUri, required invitationUri}) async => session,
     );
 
     await expectLater(
@@ -106,8 +115,62 @@ void main() {
       _inspectionFailure(GameInvitationInspectionFailure.invalidResponse),
     );
 
-    expect(gateway.closeCount, 1);
+    expect(session.closeCount, 1);
     await inspector.close();
+  });
+
+  test('Relay 预检在每次加入时读取当前 Go Core 动态端口', () async {
+    var currentCoreBaseUri = Uri.parse('http://127.0.0.1:0/');
+    late Uri factoryCoreBaseUri;
+    final gateway = _FakeRelayGateway(
+      Uri.parse(
+        'http://127.0.0.1:34567$playmeshGameInvitationPath'
+        '#inviteToken=authority-share-token',
+      ),
+    );
+    final session = _FakeRelaySession(gateway);
+    final inspector = DefaultGameInvitationInspector(
+      coreBaseUriProvider: () => currentCoreBaseUri,
+      httpClient: _RecordingClient(
+        (_) async => _jsonResponse(_validResponseBody()),
+      ),
+      relayClientSessionFactory:
+          ({required coreBaseUri, required invitationUri}) async {
+            factoryCoreBaseUri = coreBaseUri;
+            return session;
+          },
+    );
+    currentCoreBaseUri = Uri.parse('http://127.0.0.1:39002/');
+
+    final inspected = await inspector.inspect(
+      GameInvitation.parse(
+        'https://relay.example/j/tunnel_123#inviteToken=opaque-relay-token',
+      ),
+    );
+
+    expect(factoryCoreBaseUri, currentCoreBaseUri);
+    await inspected.close();
+    await inspector.close();
+  });
+
+  test('Relay 缺少 Go Core 时保留原始 UnsupportedError', () async {
+    final inspector = DefaultGameInvitationInspector();
+
+    try {
+      await inspector.inspect(
+        GameInvitation.parse(
+          'https://relay.example/j/tunnel_123#inviteToken=opaque-relay-token',
+        ),
+      );
+      fail('inspect should throw');
+    } on GameInvitationInspectionException catch (error) {
+      expect(error.failure, GameInvitationInspectionFailure.unavailable);
+      expect(error.cause, isA<UnsupportedError>());
+      expect(error.toString(), contains('UnsupportedError'));
+      expect(error.toString(), contains('当前加入入口没有可用的 Go Core'));
+    } finally {
+      await inspector.close();
+    }
   });
 
   test('3xx 响应不跟随重定向并按无效响应拒绝', () async {
@@ -280,6 +343,26 @@ class _FakeRelayGateway implements RelayClientGateway {
     host: localEntryUri.host,
     port: localEntryUri.hasPort ? localEntryUri.port : null,
   );
+
+  @override
+  Future<void> close() async {
+    closeCount += 1;
+  }
+}
+
+class _FakeRelaySession implements RelayClientSession {
+  _FakeRelaySession(this.webGateway) : coreGateway = webGateway;
+
+  @override
+  final RelayClientGateway webGateway;
+
+  @override
+  final RelayClientGateway coreGateway;
+
+  int closeCount = 0;
+
+  @override
+  String get connectionMode => 'relay';
 
   @override
   Future<void> close() async {

@@ -19,12 +19,13 @@ const (
 	binaryOpRPCRequest  byte = 0x06
 	binaryOpRPCResponse byte = 0x07
 
-	binaryOpResponse    byte = 0x81
-	binaryOpDelivery    byte = 0x82
-	binaryOpReview      byte = 0x83
-	binaryOpClosed      byte = 0x84
-	binaryOpRPCIncoming byte = 0x85
-	binaryOpRPCResult   byte = 0x86
+	binaryOpResponse          byte = 0x81
+	binaryOpDelivery          byte = 0x82
+	binaryOpReview            byte = 0x83
+	binaryOpClosed            byte = 0x84
+	binaryOpRPCIncoming       byte = 0x85
+	binaryOpRPCResult         byte = 0x86
+	binaryOpRPCStreamIncoming byte = 0x87
 
 	binaryModeAuthority byte = 1
 	binaryModeRelay     byte = 2
@@ -235,6 +236,42 @@ func encodeBinaryRPCIncoming(
 	copy(data[14:14+len(senderID)], senderID)
 	copy(data[14+len(senderID):14+len(senderID)+len(path)], path)
 	copy(data[14+len(senderID)+len(path):], payload)
+	if len(data) > maxBinaryFrameBytes {
+		return nil, errBinaryInvalidRPCRequest
+	}
+	return data, nil
+}
+
+func encodeBinaryRPCStreamIncoming(
+	rpcID uint64,
+	senderID string,
+	path string,
+	consumePath string,
+	name string,
+	contentType string,
+	contentLength uint64,
+) ([]byte, error) {
+	if len(senderID) == 0 || len(senderID) > 0xffff ||
+		len(path) == 0 || len(path) > 0xffff ||
+		len(consumePath) == 0 || len(consumePath) > 0xffff ||
+		len(name) == 0 || len(name) > 0xffff ||
+		len(contentType) == 0 || len(contentType) > 0xffff {
+		return nil, errBinaryInvalidRPCRequest
+	}
+	data := make([]byte, 28+len(senderID)+len(path)+len(consumePath)+len(name)+len(contentType))
+	data[0], data[1] = binaryProtocolVersion, binaryOpRPCStreamIncoming
+	binary.BigEndian.PutUint64(data[2:10], rpcID)
+	binary.BigEndian.PutUint16(data[10:12], uint16(len(senderID)))
+	binary.BigEndian.PutUint16(data[12:14], uint16(len(path)))
+	binary.BigEndian.PutUint16(data[14:16], uint16(len(consumePath)))
+	binary.BigEndian.PutUint16(data[16:18], uint16(len(name)))
+	binary.BigEndian.PutUint16(data[18:20], uint16(len(contentType)))
+	binary.BigEndian.PutUint64(data[20:28], contentLength)
+	offset := 28
+	for _, value := range []string{senderID, path, consumePath, name, contentType} {
+		copy(data[offset:offset+len(value)], value)
+		offset += len(value)
+	}
 	if len(data) > maxBinaryFrameBytes {
 		return nil, errBinaryInvalidRPCRequest
 	}

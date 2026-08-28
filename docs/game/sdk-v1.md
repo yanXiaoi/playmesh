@@ -1,25 +1,27 @@
 # Game SDK / App SDK API
 
-本文记录 Game SDK `4.1.0` 与 App SDK `3.3.0` 的最新公开 API。静态资源 URL 中的
+本文记录 Game SDK `4.3.0` 与 App SDK `3.5.0` 的最新公开 API。静态资源 URL 中的
 `/v1/` 是稳定分发路径，不代表当前语义版本。`lib/core/game_sdk/features/` 下注册的
 Dart feature 是唯一手写源；同一文件同时维护对应 TypeScript/声明片段和宿主执行器。
-App 运行时和各网关从统一注册表组装 JS、`.d.ts` 与宿主执行器。当前清单只接受
-Game SDK `4.1.0`；App SDK 接受 `3.2.0` 或 `3.3.0`，并统一解析到向后兼容的
-`3.3.0` bundle。范围外版本直接拒绝，也不提供旧根命名空间 shim。Game SDK 4 的游戏域全部位于
+App 运行时和各网关从统一注册表组装 JS、`.d.ts` 与宿主执行器。当前清单接受
+Game SDK `4.1.0`、`4.2.0` 或 `4.3.0`；App SDK 接受 `3.2.0`、
+`3.3.0`、`3.4.0` 或 `3.5.0`，并统一解析到向后兼容的 `3.5.0` bundle。范围外版本直接拒绝，
+也不提供旧根命名空间 shim。Game SDK 4 的游戏域全部位于
 `playmesh.main.*`，App SDK 3.2 的终端域全部位于 `playmesh.app.*`；根
 `playmesh.ready` 是唯一例外。旧 `playmesh.<游戏域>` 访问和旧 `playmesh.js` 文件
 均不兼容、不保留。其他版本拒绝运行，不会静默切换。执行器内部的
 `supportedVersions` 只校验当前实际 bundle，不能扩大清单允许版本。Game `4.1.0` 与
-App `3.2.0`、`3.3.0` 构成永久兼容基线集合。后续升级只允许兼容修复
+App `3.2.0`、`3.3.0` 构成永久兼容基线集合；当前集合追加 Game `4.2.0`、`4.3.0` 与 App
+`3.4.0`、`3.5.0`。
+后续升级只允许兼容修复
 或增量增加函数，必须
 继续接受升级前已支持的请求版本，不得破坏既有调用契约。正式构建再生成
 最新版 `sdk-src/*.ts` 和 `/playmesh/sdk/v1/*` 静态产物，内置工作区、AI 项目提示词
 和 CLI/IDEA 均使用最新注册表内容。
 
-Playmesh App `4.2.0+28` 起提供的 `playmesh.app.lan`、统一平台菜单以及本次新增的
-`playmesh.app.ui.onBack()` 都属于 App Bridge SDK `3.3.0` 的兼容扩展，Game SDK
-`4.1.0` 与 App Bridge SDK 版本均保持不变。自动化契约已验证；五个原生平台的跨设备
-发布、发现、权限、网络切换和真实加入仍待实机验收。
+当前工作树的 `playmesh.app.webrtc.getSignalingEndpoint()` 属于 App Bridge SDK
+`3.4.0` 的兼容新增。链路方式只供宿主分享面板使用，不进入公开 `PlaymeshPlayer`。
+自动化契约已验证；Android、Windows 与公网 TURN 的跨设备实机验收仍待完成。
 
 开发者 Gateway 同时提供 AI 可直接读取的正式契约：
 
@@ -83,20 +85,26 @@ App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持
 
 ## 运行环境与传输抽象
 
-不同加入方式的底层传输由平台透明处理。游戏代码始终使用同一套 Game SDK，不得探测底层链路、读取或保存分享参数，也不得按加入方式分叉会话协议。App 加入页运行在稳定的本机来源下；普通浏览器只通过主机提供的局域网入口加入。安全上下文并不等于具体能力一定可用，游戏仍须以 `playmesh.app`、能力声明和浏览器特性检测结果为准，并处理用户拒绝或平台不支持。
+平台 Session、资源加载和 Binary WebSocket 的底层传输由平台透明处理。游戏代码始终使用
+同一套 Game SDK，不得自行替换平台会话协议、读取或保存分享参数。唯一公开的底层扩展是
+`playmesh.app.webrtc.getSignalingEndpoint(identifier)`：它允许 HTML 为自己的媒体或
+DataChannel 用途创建额外 PeerConnection，但不得接管或假冒平台的 web/core 隧道。App 加入页运行在
+稳定的本机来源下；安全上下文并不等于具体能力一定可用，游戏仍须以 `playmesh.app`、能力
+声明和浏览器特性检测结果为准，并处理用户拒绝或平台不支持。
 
 Authority 面向游戏只公开外层物理 `app/` 映射到运行时 `/` 的普通资源、
 `/bucket/**`、`/playmesh/**` 和 SDK 无法替代的受控底层连接能力。`app` 是普通
 用户路径首段：物理 `app/app/**` 映射为 `/app/**`，且不会别名到外层 `app/**`；
 只有 `playmesh`、`bucket` 是平台保留首段。身份、昵称、会话和 JSON 存储均通过
-SDK 完成，游戏不得构造内部 HTTP API、WebSocket、token 或连接参数。
+SDK 完成。除 SDK 明确返回的短期 WebRTC 信令 URL 外，游戏不得构造内部 HTTP API、
+WebSocket、token 或连接参数。
 
 浏览器玩家由主 SDK 生成 `p_...` ID，并把 ID 写入浏览器 `localStorage` 的 `playmesh.player-id.v1`；昵称写入 `playmesh.nickname.v1`。同一来源刷新后会复用这两项，但不持久化玩家凭证或游戏 Bucket。App 玩家使用 App 自己的 `u_...` ID 和资料，不读写浏览器 ID。服务端只允许同一玩家 ID 存在一条在线 WebSocket；旧连接在线时新连接被拒绝，旧连接掉线后才允许同 ID 重新加入。
 
 ```js
 await playmesh.ready;
-console.log(playmesh.main.version); // "4.1.0"
-console.log(playmesh.app.version); // "3.3.0"
+console.log(playmesh.main.version); // "4.3.0"
+console.log(playmesh.app.version); // "3.5.0"
 ```
 
 `playmesh.app.ready` 等待当前终端 App SDK 初始化；`playmesh.main.ready` 内部先
@@ -343,8 +351,8 @@ interface Player {
 玩家均为 `null`。游戏不能设置头像。该字段同样出现在 Bootstrap、会话快照、
 玩家连接事件、Authority 上下文和 Sync 上下文的所有 `Player` 中。
 
-公开 `Player` 固定只包含 `id`、`nickname`、`avatar`、`role` 和
-`connected`。Core 用于连接管理的 `source`、`latencyMs` 及其他内部字段会在
+公开 `Player` 固定只包含 `id`、`nickname`、`avatar`、`role` 和 `connected`。
+Core 用于连接管理的 `source`、`latencyMs`、`connectionMode` 及其他内部字段会在
 Game SDK 边界统一过滤，不会进入 Bootstrap、会话快照、玩家连接事件、
 Authority 上下文或 Sync 上下文。游戏如需观察当前页面的联机延迟，应使用
 `playmesh.app.performance`，不能依赖玩家内部连接元数据。
@@ -439,6 +447,41 @@ const off = playmesh.main.sync.observe((snapshot) => render(snapshot.state));
 注入 `playmesh-app.js`；`playmesh.app.isAvailable()` 只表示原生 App SDK 宿主桥是否
 可用，不影响浏览器使用 SDK 游戏菜单。
 
+### `playmesh.app.webrtc`
+
+App Bridge SDK `3.4.0` 提供通用、用途无关的会话信令端点：
+
+```js
+const endpoint = await playmesh.app.webrtc.getSignalingEndpoint("camera-main");
+const pc = new RTCPeerConnection({ iceServers: endpoint.iceServers });
+const signaling = new WebSocket(endpoint.url);
+```
+
+`identifier` 必须是 1～128 位安全标识，并与当前 `sessionId` 和 Core 已认证的
+`playerId` 一起构成隔离键。返回 URL 内含 30 秒过期、只能消费一次的票据；重复连接时
+应重新调用该方法。普通浏览器和 App WebView 都可使用标准 `RTCPeerConnection`，但必须先
+有有效主会话连接，不能把 URL、TURN credential 或信令 payload 持久化或写入日志。同一
+会话中每位玩家最多占用 32 个待消费票据与活动标识符连接，超过时返回
+`signaling_limit`；调用方应关闭不用的信令连接，而不是循环申请端点。
+
+`endpoint.iceServers` 优先包含 Authority Go Core 在可绑定 LAN IPv4 上提供的本地
+STUN/TURN；会话具备公网 Relay 时再追加 Go Server 的公网配置。局域网 TURN 凭据同样按
+会话、玩家和标识符隔离，不能跨用户复用。调用方必须使用完整数组，也必须允许数组因无可
+绑定网卡且无公网 Relay 而为空。局域网 TURN 不能绕过操作系统进程防火墙或 Wi-Fi AP 客户端
+隔离；这些网络策略仍需由部署者处理。数组顺序只规定候选服务器的提供顺序，最终候选对仍
+由浏览器 ICE priority 和连通性检查决定；不能把“本地在前”解释成强制选路。
+
+信令 WebSocket 接收 `type`、`version: 1`、`timestamp`、`requestId`、可选
+`targetPlayerId` 与 JSON `payload`，转发帧额外带 Core 注入的 `senderPlayerId`。平台仅按
+Authority 星形拓扑完成鉴权、限流与不透明转发：加入者默认只能发给 Authority，Authority
+发给加入者时必须指定目标。HTML 自行定义 `payload` 内的 offer/answer/candidate/close，
+并自行管理媒体权限、轨道、DataChannel、码率、ICE restart、摄像头切换和释放。
+
+这个 API 不创建“媒体源”，也不把媒体塞进 Session WebSocket 或平台隧道。
+`playmesh.app.media.open()` 是已有的同终端受控媒体适配入口，两者没有隐式转换或回退关系。
+业务若需要一条长期 WebRTC 会话，应让 Authority 为每个远端 `senderPlayerId` 建立独立的
+PeerConnection；多个加入用户不能共用 SDP 状态或把媒体广播误当成同一个对等端。
+
 ### `playmesh.app.lan`
 
 App Bridge SDK `3.3.0` 兼容新增局域网发现、加入和房主分享 API：
@@ -523,10 +566,11 @@ playmesh.app.ui.disableSystemMenuTriggers();
 
 该同步方法严格不接受参数，只为当前 WebView 文档单向、幂等禁用默认的
 Escape/Menu/Back 自动菜单触发。它不禁用 `showGameSidebar()`、`openSharePanel()`、
-信息/日志覆盖层，也不阻止原生返回关闭已经显示的平台层。SDK 配置刷新不会重新绑定；
+信息/日志覆盖层；未注册 `onSystemMenuRequest()` 时，已经显示的平台层仍按原返回流程关闭。SDK 配置刷新不会重新绑定；
 页面刷新创建新文档后恢复默认监听。ready 前调用同步抛出 `app_not_ready`，任意多余
 参数同步抛出 `invalid_argument` 且不能发生部分解绑；不存在旧的 boolean 启停方法。
-该方法不等于显式关闭兜底面板，也不会令 `onBack()` 生效。
+该方法不等于显式关闭兜底面板，也不会取消 `onSystemMenuRequest()` 回调；回调返回
+`NEXT` 时仍会遵守这个触发器状态。
 
 ### 居中游戏菜单
 
@@ -574,19 +618,25 @@ offClose();
 playmesh.app.ui.configure({ fallbackUi: false });
 ```
 
-此时 SDK 不创建游戏菜单、悬浮球、信息层或日志层。只有在这个配置已显式关闭兜底面板后，
-Android 滑动/按钮返回和 Esc 才会调用 `onBack()`：
+此时 SDK 不创建游戏菜单、悬浮球、信息层或日志层。Android 滑动/按钮返回、桌面 exe
+返回键和普通浏览器悬浮菜单按钮都会在原始入口事件到达后、默认动作发生前调用
+`onSystemMenuRequest()`：
 
 ```js
-const offBack = playmesh.app.ui.onBack(async () => {
-  return await confirmGameExit(); // false 留在游戏；true 继续退出
+const offMenuRequest = playmesh.app.ui.onSystemMenuRequest(async () => {
+  if (await confirmGameExit()) return "EXIT";
+  return "STOP";
 });
 ```
 
-没有注册回调时直接继续退出；多个回调中任意一个严格返回 `false` 都会阻止本次退出，
-返回 `true` 则继续。同步异常、Promise reject 或超过有限等待时间按继续退出处理，避免页面
-永久锁死；重复返回在前一次判断完成前只消费事件，不会绕过 `false`。兜底面板仍启用时不会
-调用游戏回调，而是继续由 SDK 处理菜单和内部覆盖层。
+`EXIT` 直接退出；`NEXT` 在回调完成后继续当前入口原有默认流程；`STOP` 保留当前页面、
+面板和覆盖层状态且不执行后续操作。返回键的 `NEXT` 不会强制显示菜单：SDK 会重新检查
+`fallbackUi`、系统菜单触发器和当前覆盖层；`fallbackUi: false` 时不会创建或显示
+面板，而是继续原退出流程。悬浮按钮的 `NEXT` 则继续显示菜单。没有注册回调时仍保持原默认处理。多个回调全部执行，
+决策优先级为 `STOP > EXIT > NEXT`。同步异常、Promise reject、非法返回值或超过有限
+等待时间按 `NEXT` 处理；前一次判断完成前的重复返回事件只会被消费。
+原 `onBack()` 已废弃，只作为相同行为的兼容别名保留；新代码应使用
+`onSystemMenuRequest()`。
 
 普通浏览器
 若仍想使用 SDK 游戏菜单、但由游戏自己的按钮负责打开，可以调用：
@@ -597,7 +647,8 @@ customMenuButton.onclick = () => playmesh.app.ui.showGameSidebar();
 ```
 
 `initializeBrowser()` 不创建悬浮球 DOM。默认浏览器兜底模式则创建可拖动的悬浮菜单
-按钮；App WebView 永远不创建该按钮。
+按钮；点击后同样先执行 `onSystemMenuRequest()` 决策，再决定展示菜单、退出或停止。App WebView 永远
+不创建该按钮。
 
 App SDK 在 console 日志写入点先把每个参数安全转换为字符串，再拼成最终消息并同时
 交给 SDK 日志层与宿主日志管线。对象和数组使用 JSON 文本，因此 SDK“运行日志”与
@@ -673,6 +724,68 @@ RPC 复用现有会话认证的 Binary WebSocket，但使用 SDK 内部帧，不
 单个 SDK 编码 payload 上限为 `4 MiB - 64 KiB`。客户端超时或断线只会结束等待，不会
 撤销已经进入 Authority JavaScript 的 handler；需要幂等的写操作必须由游戏按业务键实现。
 
+Game SDK `4.3.0` 兼容新增大字节流 RPC。发送方调用
+`requestStream(path, source, options?)`，Authority 使用
+`onStreamRequest(path, handler, options?)` 注册精确 path：
+
+```js
+if (playmesh.main.session.isAuthority()) {
+  const files = playmesh.main.storage.getBucket("received_files");
+  const off = playmesh.main.rpc.onStreamRequest(
+    "/files/store",
+    async (source, context) => {
+      validateRequester(context.senderPlayerId);
+      return files.upload(source, {
+        name: context.name,
+        type: context.type,
+      });
+    },
+    {
+      onProgress(transferredBytes, totalBytes) {
+        updateReceiveProgress(transferredBytes, totalBytes);
+      },
+    },
+  );
+}
+
+const url = await playmesh.main.rpc.requestStream(
+  "/files/store",
+  selectedFile,
+  {
+    timeoutMs: 300000,
+    onProgress(transferredBytes, totalBytes) {
+      updateSendProgress(transferredBytes, totalBytes);
+    },
+  },
+);
+```
+
+`source` 只能是 `File`、`Blob`、`ArrayBuffer`、`Uint8Array` 或
+`ReadableStream<Uint8Array>`，不是“任意 JavaScript 对象”；普通结构化数据继续使用
+`request()`。非 `File` 来源可用 `options.name/type` 提供逻辑文件名和媒体类型，默认分别为
+`stream.bin` 与 `application/octet-stream`。Authority handler 收到一次性的
+`ReadableStream<Uint8Array>`，以及包含可信 `senderPlayerId`、`requestId`、`path`、会话成员、
+`name`、`type` 和 `size` 的上下文。已知源大小会传入 `size`；原始 ReadableStream 未知长度时
+为 `null`。
+
+发送端 `onProgress` 表示 source 字节已被 Fetch 拉取并交给浏览器网络栈，不表示对端确认、
+TCP ACK 或磁盘落盘；接收端 `onProgress` 表示对应字节已由 handler 拉取。回调参数固定为
+`(transferredBytes, totalBytes)`，未知总量时 `totalBytes` 为 `null`。SDK 会忽略并记录进度
+回调自身的同步异常或 Promise 拒绝，不能让仅用于 UI 的监听器中断传输。Authority handler
+返回且 `requestStream()` resolve，只表示业务处理完成；转存到 Bucket 时以 `upload()` Promise
+完成作为宿主已接收文件的确认。
+
+字节流以标准 HTTP body EOF 结束，不定义也不扫描结束字节，因此所有 0～255 字节值都可原样
+出现。Binary WebSocket 只承载鉴权后的开始控制帧和小型 RPC 结果；实际字节走 Core 的一次性、
+同会话 HTTP 流入口。游戏不得读取 token 或自行构造该私有入口。Core 只允许当前在线固定
+Authority 消费一次，并以 32 KiB 有界缓冲和背压在发送方与接收方之间转发；这表示不会缓存
+完整文件或落临时盘，不表示进程在传输时“零内存占用”。
+
+单个流上限为 512 MiB；每个发送页面最多同时等待 4 个流，Core 每个玩家最多 4 个、每局最多
+16 个。`timeoutMs` 必须是 1000～1800000 的整数，默认 300000，覆盖上传、Authority 消费和
+handler 处理。流的 handler 返回值仍使用普通 RPC 编码并受 `4 MiB - 64 KiB` 上限约束；超时、
+断线或取消会关闭两端流，但不能撤销已经完成的外部副作用。
+
 ## Binary Channel
 
 `playmesh.main.binary` 用于不适合 JSON 的高频或二进制数据，例如局域网内的位姿、语音片段、压缩快照和自定义序列化状态。SDK 按需建立独立 Binary WebSocket；同一游戏只维护一条该连接，并在其上复用多个相互隔离的逻辑 Channel。游戏不能直接创建 WebSocket、读取 URL/token 或解析平台帧头。
@@ -736,7 +849,9 @@ playmesh.main.lifecycle.onExit((event) => {});
 
 主会话连接断开会在浏览器、Windows WebView2 和移动端统一转换为 `closed` 或 `error`；
 WebView 内部的 `transport.status` 不属于公开 API。正常关闭产生 `closed`，传输异常产生
-`error`，游戏不得按底层运行环境分别监听连接状态。SDK 仍会在内部执行既有重连策略。
+`error`，游戏不得按底层运行环境分别监听连接状态。SDK 仍会在内部执行既有的同一 Session
+WebSocket 重试；该重试不会对已经关闭的平台 PeerConnection 做 ICE restart，也不会自动
+选择局域网、直连或 TURN 路线。需要换通道时由玩家从现有加入入口重新进入。
 
 `onExit` 处理器可以返回 Promise，宿主会有限等待业务清理。关键进度仍应在状态变化时调用 `setData`，不要只依赖退出回调；最终存储落盘由 App 在 WebView 重启、退出或会话关闭时完成。
 
@@ -746,7 +861,7 @@ WebView 内部的 `transport.status` 不属于公开 API。正常关闭产生 `c
 
 ### `playmesh.main.storage.getBucket(bucket)`
 
-普通异步方法与 `upload(file)` 的 Bucket 名称必须匹配
+普通异步方法与 `upload(...)` 的 Bucket 名称必须匹配
 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`。同步方法为 GDevelop 等必须保持同步事件语义的
 运行时适配器额外接受 1 至 4096 UTF-8 字节的原始逻辑名称；这不会放宽同一对象上的异步
 方法。所有 `_sys-` 前缀均由平台保留，游戏的数据、上传和清空 API 会统一拒绝，不能占用
@@ -769,7 +884,8 @@ await profile.clearData();
 | `setDataSync(key, value)` | `void` | 阻塞写入主机内存状态；失败时同步抛错 |
 | `removeData(key)` | `Promise` | 删除单个 key |
 | `clearData()` | `Promise` | 清空当前 Bucket |
-| `upload(file)` | `Promise<string>` | 上传原始文件并返回 `/bucket/...` 地址 |
+| `upload(file)` | `Promise<string>` | 上传 File 并返回 `/bucket/...` 地址 |
+| `upload(source, {name, type?})` | `Promise<string>` | 流式上传 Blob、ArrayBuffer、Uint8Array 或 ReadableStream；非 File 必须提供逻辑文件名 |
 
 普通 key 必须匹配 `^[A-Za-z0-9._-]+$`，长度为 1 至 128。私有保留 key
 `$playmesh.gdevelop.root.v1` 只允许同步 GDevelop 适配路径使用，普通游戏和全部异步方法不能
@@ -791,16 +907,97 @@ await profile.clearData();
 不完整、摘要/CAS 冲突都会立即抛错，绝不退回 `localStorage`。它会阻塞当前页面，普通游戏
 代码应继续使用异步方法，只允许 GDevelop 这类无法改变同步调用语义的锁定运行时 seam 使用。
 
-JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/json/{bucket}.json`，始终保持私有。`upload(file)` 不经过 JSON/Base64，文件以流写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，单文件上限 256 MiB；平台保留安全的字母数字后缀并用毫秒时间戳替换原文件名。
+JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/json/{bucket}.json`，始终保持私有。`upload(...)` 不经过 JSON/Base64，文件以流写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，单文件上限 512 MiB；平台保留安全的字母数字后缀并用毫秒时间戳替换逻辑文件名。
 
 上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch`
 的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。JSON 网关是
 固定绑定当前游戏和会话的 SDK 内部传输，不是游戏可自行构造的公开业务接口；
-`upload(file)` 仍独立使用原始字节 `POST` 和 `data/data` 目录，绝不与 JSON root 混存。
+`upload(...)` 仍独立使用原始字节 `POST` 和 `data/data` 目录，绝不与 JSON root 混存。
 浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他
 App 玩家访问同一 Authority 主机存储服务。
 
 平台不定义 `{userId}` 存储层。需要按用户区分时，由游戏设计 key 或 JSON 结构。
+
+## SQLite 数据库
+
+### `playmesh.main.db`
+
+Game SDK `4.2.0` 为 Authority 提供当前游戏唯一的 SQLite 数据库。首次 `open()` 时在当前
+游戏数据目录创建 `data/db/_game.db`；非 Authority 调用统一返回 `not_authority`。数据库
+不会暴露公共 `close()`，页面退出、刷新或宿主关闭时由 Bridge 关闭连接并回滚未完成事务。
+
+```js
+const db = playmesh.main.db;
+await db.open();
+
+await db.update(`
+  CREATE TABLE IF NOT EXISTS scores (
+    id INTEGER PRIMARY KEY,
+    player_id TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    FOREIGN KEY (player_id) REFERENCES players(id)
+  )
+`);
+
+// 数组按位置绑定 ? 或 ?NNN。
+await db.insert(
+  "INSERT INTO scores (player_id, score) VALUES (?, ?)",
+  [playerId, score],
+);
+
+// 对象按名称绑定；裸键 id 默认对应 :id。
+const rows = await db.select(
+  "SELECT * FROM scores WHERE player_id = :id",
+  { id: playerId },
+);
+```
+
+位置参数支持 SQLite 的 `?` 和 `?NNN`。命名参数支持 `:name`、`@name`、`$name`；对象裸键
+`name` 是 `:name` 的简写，使用 `@name` 或 `$name` 时传完整同名键。参数始终经 SQLite
+预编译语句绑定，不能把值拼入 SQL。参数数量、约束、语法、锁和 I/O 错误由 SQLite 报告，
+宿主保留原生错误消息。
+
+公开 SQL 是表级白名单：查询支持 `SELECT`、`VALUES`、`WITH`；数据写入支持
+`INSERT`、`REPLACE`、`UPDATE`、`DELETE`；结构操作支持 `CREATE/DROP/ALTER TABLE` 和
+`CREATE/DROP INDEX`（含 `CREATE UNIQUE INDEX`）。事务只能通过 SDK 对象控制。`PRAGMA`、
+`ATTACH`、`VACUUM`、`ANALYZE`、`REINDEX`、视图、触发器、虚拟表、原始事务控制语句和
+一条调用中的多条 SQL 均不开放。主键、外键和索引由 SQLite 原生 DDL 处理；SDK 不模拟
+SQLite 不支持的 `ALTER TABLE ADD/DROP CONSTRAINT`，复杂变更由游戏在事务中执行原生重建表迁移。
+
+| 方法 | 返回 | 说明 |
+|---|---|---|
+| `open()` | `Promise<{file:"_game.db"}>` | 幂等打开或创建固定数据库 |
+| `select(sql, args?)` | `Promise<Row[]>` | 执行只读表查询 |
+| `update(sql, args?)` | `Promise<{changes}>` | 执行 UPDATE 或允许的表/索引 DDL |
+| `delete(sql, args?)` | `Promise<{changes}>` | 执行 DELETE |
+| `insert(sql, args?)` | `Promise<{changes,lastInsertRowId}>` | 执行 INSERT 或 REPLACE；行号以字符串返回 |
+| `getDDL(name?)` | `Promise<Ddl[]>` | 读取 `sqlite_schema` 中原生表/索引 DDL |
+| `beginTransaction()` | `Promise<Transaction>` | 在独立连接上开始事务 |
+| `transaction(callback)` | `Promise<T>` | 成功自动提交，抛错自动回滚并重新抛出原错误 |
+
+```js
+await db.transaction(async tx => {
+  await tx.update("UPDATE scores SET score = ? WHERE id = ?", [nextScore, id]);
+  await tx.insert("INSERT INTO audit(message) VALUES (:message)", {
+    message: "score updated",
+  });
+});
+
+const tx = await db.beginTransaction();
+try {
+  await tx.delete("DELETE FROM scores WHERE id = @id", { "@id": id });
+  await tx.commit();
+} catch (error) {
+  await tx.rollback();
+  throw error;
+}
+```
+
+每个显式事务使用独立 SQLite 连接，普通自动提交调用使用后台连接池。数据库启用 WAL 和
+外键检查，允许多个连接并发读取；SQLite 仍只允许一个写事务同时提交，并不具备 MySQL
+InnoDB 的行级并发写。事务没有 SDK 自动超时：不提交会一直保留到显式提交、回滚或页面
+连接关闭；已开始读取的事务会保持快照，写事务会阻塞其他写入并最终由 SQLite 的 busy
+机制报错。调用方应尽快结束事务。
 
 ## 性能
 
@@ -855,7 +1052,7 @@ panel。
 
 - 当前页面角色对应的 `required` 或 `controllerRequired` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；空数组是有效声明，绝不回退到另一角色。不支持项只做标注，不阻止同意后进入。
 - 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 游戏菜单保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
-- `playmesh-app.js` 在捕获阶段监听 `Escape`、浏览器返回键、Android Menu keyCode 和菜单键，第一次按下即可打开或关闭 SDK 游戏菜单；原生层不注入、不转发这些按键。
+- `playmesh-app.js` 在捕获阶段监听 `Escape`、浏览器返回键、Android Menu keyCode 和菜单键。Android/桌面返回入口与普通浏览器悬浮按钮都在入口事件到达后执行 `onSystemMenuRequest()`，只有 `NEXT` 才继续各自符合当前配置的 SDK 默认流程；原生层不注入、不转发这些网页按键。
 - 普通浏览器加载 Authority 主机提供的默认 App SDK；默认菜单至少提供继续、刷新、游戏信息、运行日志和退出游戏，且只有普通浏览器显示可拖动悬浮入口。
 - 普通多人多屏分享加载清单显式声明的 `main.json.entries.game`，浏览器玩家加入
   Session 并建立 WebSocket；只有单屏多人分享才加载同样显式声明的
@@ -865,7 +1062,7 @@ panel。
   和图片仍解析到当前游戏的运行时根路径，不会改变 SDK、会话或存储边界。
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
 - 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。
-- 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线后，同 ID 重连可由游戏恢复准备状态和临时玩家状态。
+- 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线会先触发 `playmesh.main.lifecycle.onChange()`，SDK 随后只尝试原端点；同 ID 重连可由游戏恢复准备状态和临时玩家状态，若底层 Pion 通道已关闭则仍需玩家从现有入口手动重进。
 - SDK 在普通浏览器页面上提供隔离于游戏样式的居中游戏菜单和随系统明暗模式切换的二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境复用同一个 `playmesh-app.js` 菜单实现。
 - 旧浏览器连接断开后，其玩家从会话成员集合移除并释放人数名额；短暂的刷新竞态由 SDK 对 `session_full` 做有限重试。
 - 刷新继续使用本局分享 token；退出游戏、会话关闭、App/Core 重启后旧 token 失效。

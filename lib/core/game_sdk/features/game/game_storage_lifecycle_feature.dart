@@ -87,7 +87,9 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     },
     rpc: {
       request: requestRpc,
+      requestStream: requestRpcStream,
       onRequest: registerRpcRequestHandler,
+      onStreamRequest: registerRpcStreamRequestHandler,
     },
     binary: {
       authorityPlayerId: "authority",
@@ -180,13 +182,14 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
             validateStorageName(bucket, "bucket");
             return storageCall("storage.clear", bucket);
           },
-          upload(file) {
+          upload(file, options) {
             validateStorageName(bucket, "bucket");
-            return storageUpload(bucket, file);
+            return storageUpload(bucket, file, options);
           },
         };
       },
     },
+    db: createDatabaseApi(),
   };
 
   const PLAYMESH_MAIN_INTERNAL_KEY =
@@ -197,6 +200,9 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     enumerable: false,
     writable: false,
   });
+  appInternalRuntime.registerWebRTCSignalingEndpointProvider?.(
+    getWebRTCSignalingEndpoint,
+  );
   registerAppPlatformUiRuntime();
   if (global.chrome && global.chrome.webview) {
     global.chrome.webview.addEventListener("message", (event) => receive(event.data));
@@ -776,26 +782,24 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
     return encoded;
   }
 
-  async function storageUpload(bucket, file) {
+  async function storageUpload(bucket, source, options) {
     await main.ready;
-    if (!file || typeof file.name !== "string" || typeof file.size !== "number") {
-      throw new Error("upload(file) 需要浏览器 File");
-    }
-    if (file.size > 256 * 1024 * 1024) {
-      throw new Error("上传文件不能超过 256 MiB");
-    }
+    const stream = normalizeStorageUploadSource(source, options);
     const config = global.__PLAYMESH_BROWSER__;
     const base = config?.bucketEndpoint || "/bucket";
-    const url = `${base}/${encodeURIComponent(bucket)}?name=${encodeURIComponent(file.name)}`;
+    const url = `${base}/${encodeURIComponent(bucket)}?name=${encodeURIComponent(stream.name)}`;
     const headers = {};
     if (config?.shareToken) {
       headers["X-Playmesh-Share-Token"] = config.shareToken;
     }
-    const response = await global.fetch(url, {
+    if (stream.type) headers["Content-Type"] = stream.type;
+    const request = {
       method: "POST",
       headers,
-      body: file,
-    });
+      body: stream.body,
+    };
+    if (stream.streaming) request.duplex = "half";
+    const response = await global.fetch(url, request);
     let payload = null;
     try {
       payload = await response.json();

@@ -25,6 +25,27 @@ void main() {
     expect(script, isNot(contains("supportBadge('App'")));
   });
 
+  test('源码工作区在新建项目与现有项目设置中配置 Web Runtime 多线程', () {
+    final html = File('$developerRoot/workspace.html').readAsStringSync();
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+
+    expect(html, contains('id="projectWebRuntimeMultithreading"'));
+    expect(
+      script,
+      contains(
+        "webRuntimeMultithreading:q('projectWebRuntimeMultithreading').value==='true'",
+      ),
+    );
+    expect(html, contains('id="manifestWebRuntimeMultithreading"'));
+    expect(
+      script,
+      contains(
+        "PlaymeshGameManifest.readGameManifestConfigValue(manifest.config,['webRuntime','multithreading'])===true",
+      ),
+    );
+    expect(script, contains('function manifestConfigFromForm()'));
+  });
+
   test('Developer Workspace consumes only the unified App localization', () {
     final html = File('$developerRoot/workspace.html').readAsStringSync();
     final script = File('$developerRoot/workspace.js').readAsStringSync();
@@ -1514,6 +1535,16 @@ void main() {
       reason:
           'The shared builder must receive only current form fields; unknown '
           'main.json fields are not copied into the new manifest.',
+    );
+    expect(manifestBuilder, contains('...manifestConfigFromForm()'));
+    expect(
+      script,
+      contains(
+        "return{config:{...existingConfig,webRuntime:{...webRuntime,multithreading:enabled}}}",
+      ),
+      reason:
+          'Saving the form must write the current boolean while retaining '
+          'unknown fields from object-shaped config values.',
     );
     expect(
       manifestBuilder,

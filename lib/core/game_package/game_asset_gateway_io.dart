@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/game_package_layout.dart';
+import '../../models/game_manifest_config.dart';
 import '../game_sdk/sdk_feature_registry.dart';
 import '../storage/game_bucket_http.dart';
 import '../storage/game_storage_service.dart';
@@ -19,6 +20,7 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
   required String entryPath,
   String? gameSdkVersion,
   String? appSdkVersion,
+  Object? config,
   GameStorageService? storage,
 }) async {
   final entry = playmeshGamePackageLayout.parseWebEntry(
@@ -43,6 +45,12 @@ Future<GameAssetGateway> startPlatformGameAssetGateway({
       entryQuery: entry.query,
       gameSdkVersion: resolvedGameSdkVersion,
       appSdkVersion: resolvedAppSdkVersion,
+      crossOriginIsolationEnabled:
+          readGameManifestConfigValue(
+            config,
+            gameWebRuntimeMultithreadingConfigPath,
+          ) ==
+          true,
       storage: storage,
     );
     gateway.listen();
@@ -62,6 +70,7 @@ class _IoGameAssetGateway implements GameAssetGateway {
     required this.entryQuery,
     required this.gameSdkVersion,
     required this.appSdkVersion,
+    required this.crossOriginIsolationEnabled,
     this.storage,
   });
 
@@ -72,6 +81,7 @@ class _IoGameAssetGateway implements GameAssetGateway {
   final String? entryQuery;
   final String gameSdkVersion;
   final String appSdkVersion;
+  final bool crossOriginIsolationEnabled;
   final GameStorageService? storage;
   final StandardJsonBucketRequestLedger _standardJsonLedger =
       StandardJsonBucketRequestLedger();
@@ -115,6 +125,9 @@ class _IoGameAssetGateway implements GameAssetGateway {
   }
 
   Future<void> _handle(HttpRequest request) async {
+    if (crossOriginIsolationEnabled) {
+      _applyGameWebViewIsolationHeaders(request.response);
+    }
     final bucketStorage = storage;
     if (bucketStorage != null &&
         await handleGameBucketRequest(
@@ -245,6 +258,12 @@ class _IoGameAssetGateway implements GameAssetGateway {
     await server.close(force: true);
     await provider.close();
   }
+}
+
+void _applyGameWebViewIsolationHeaders(HttpResponse response) {
+  response.headers
+    ..set('Cross-Origin-Opener-Policy', 'same-origin')
+    ..set('Cross-Origin-Embedder-Policy', 'require-corp');
 }
 
 String _injectSdkScripts(String html) {

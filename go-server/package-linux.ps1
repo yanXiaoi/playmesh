@@ -239,7 +239,7 @@ The runtime user needs read/write permissions for the pre-created ``data/`` dire
             )
             Assert-PathInside -ChildPath $publishedArchivePath -ParentPath $outputRoot
             Copy-Item -LiteralPath $archiveTempPath -Destination $publishedArchivePath -Force
-            Write-Warning(
+            Write-Warning (
                 "The default archive is in use; wrote the versioned archive instead: " +
                 $publishedArchivePath
             )

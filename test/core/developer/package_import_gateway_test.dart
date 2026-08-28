@@ -123,6 +123,76 @@ void main() {
     expect(chunkedBody['project']['id'], gameId);
     expect(await historyState.readAsString(), '{"revision":4}');
   });
+
+  test('上传只在新建持久项目时要求 Android applicationId', () async {
+    final library = await Directory.systemTemp.createTemp(
+      'package-import-new-project-id-',
+    );
+    addTearDown(() => library.delete(recursive: true));
+    final packages = Directory(
+      '${library.path}${Platform.pathSeparator}packages',
+    );
+    final provisioning = ProjectProvisioningService(projectsRoot: packages);
+    const legacyId = 'com.example.legacy-game';
+    await provisioning.createProject(
+      gameId: legacyId,
+      name: 'Legacy Game',
+      kind: PlaymeshProjectKind.source,
+    );
+    final repository = GameLibraryRepository(() async => const <GameSummary>[]);
+    final transfer = GamePackageTransferService(libraryRoot: library);
+    final catalog = GameLibraryDeveloperProjectCatalog(
+      repository,
+      workspaceRoot: packages,
+      projectProvisioning: provisioning,
+      packageTransfer: transfer,
+    );
+    final port = await _freePort();
+    const token = 'package-import-id-token';
+    final gateway = await startDeveloperWebGateway(
+      port: port,
+      token: token,
+      path: 'packageimportidtest',
+      catalog: catalog,
+      packageTransfer: transfer,
+      currentAuthor: () => 'Local Publisher',
+    );
+    addTearDown(gateway.close);
+    final endpoint = Uri.parse(
+      'http://127.0.0.1:$port/dev/api/packages/import',
+    );
+    const headers = {
+      HttpHeaders.authorizationHeader: 'Bearer $token',
+      HttpHeaders.contentTypeHeader: 'application/zip',
+    };
+
+    final invalidNew = await http.post(
+      endpoint,
+      headers: headers,
+      body: _packageZip('com.example.new-game'),
+    );
+    expect(
+      invalidNew.statusCode,
+      HttpStatus.badRequest,
+      reason: invalidNew.body,
+    );
+
+    const androidId = 'Com.Example.Upload_2';
+    final validNew = await http.post(
+      endpoint,
+      headers: headers,
+      body: _packageZip(androidId),
+    );
+    expect(validNew.statusCode, HttpStatus.ok, reason: validNew.body);
+    expect(jsonDecode(validNew.body)['project']['id'], androidId);
+
+    final legacyUpdate = await http.post(
+      endpoint,
+      headers: headers,
+      body: _packageZip(legacyId),
+    );
+    expect(legacyUpdate.statusCode, HttpStatus.ok, reason: legacyUpdate.body);
+  });
 }
 
 List<int> _packageZip(String gameId) {

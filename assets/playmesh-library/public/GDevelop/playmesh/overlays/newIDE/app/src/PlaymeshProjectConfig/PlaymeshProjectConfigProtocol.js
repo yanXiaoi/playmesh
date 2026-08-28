@@ -16,6 +16,7 @@ export type PlaymeshProjectConfig = {|
   minPlayers: number,
   maxPlayers: number,
   tags: Array<string>,
+  webRuntimeMultithreading: boolean,
   updatedAt: string,
 |};
 export type PlaymeshProjectConfigReadResponse =
@@ -34,6 +35,7 @@ export type PlaymeshProjectConfigPutBody = {|
   minPlayers: number,
   maxPlayers: number,
   tags: Array<string>,
+  webRuntimeMultithreading: boolean,
   expectedRevision: number,
 |};
 export type PlaymeshProjectConfigErrorEnvelope = {|
@@ -209,10 +211,12 @@ export const assertPlaymeshProjectConfig = (
       'minPlayers',
       'maxPlayers',
       'tags',
+      'webRuntimeMultithreading',
       'updatedAt',
     ]) ||
     config.schemaVersion !== PLAYMESH_PROJECT_CONFIG_SCHEMA_VERSION ||
-    config.gameId !== expectedGameId
+    config.gameId !== expectedGameId ||
+    typeof config.webRuntimeMultithreading !== 'boolean'
   ) {
     return fail();
   }
@@ -235,6 +239,7 @@ export const assertPlaymeshProjectConfig = (
     minPlayers,
     maxPlayers,
     tags: normalizePlaymeshProjectTags(config.tags),
+    webRuntimeMultithreading: config.webRuntimeMultithreading,
     updatedAt: requireUtcTimestamp(config.updatedAt),
   };
 };
@@ -276,16 +281,19 @@ export const createPlaymeshProjectConfigPutBody = (
     minPlayers,
     maxPlayers,
     tags,
+    webRuntimeMultithreading,
     expectedRevision,
   } /*: {|
   gameType: mixed,
   minPlayers: mixed,
   maxPlayers: mixed,
   tags: mixed,
+  webRuntimeMultithreading: mixed,
   expectedRevision: mixed,
 |} */
 ) /*: PlaymeshProjectConfigPutBody */ => {
   if (
+    typeof webRuntimeMultithreading !== 'boolean' ||
     typeof expectedRevision !== 'number' ||
     !Number.isSafeInteger(expectedRevision) ||
     expectedRevision < 0
@@ -304,6 +312,7 @@ export const createPlaymeshProjectConfigPutBody = (
     minPlayers: playerLimits.minPlayers,
     maxPlayers: playerLimits.maxPlayers,
     tags: normalizePlaymeshProjectTags(tags),
+    webRuntimeMultithreading,
     expectedRevision,
   };
 };

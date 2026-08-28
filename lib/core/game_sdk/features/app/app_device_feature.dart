@@ -71,6 +71,7 @@ const appDeviceSdkSource = SdkSourceFragment(
     media: {
       open: openAppMedia,
     },
+    webrtc: appWebRTCApi,
     storage: appStorageApi,
     lan: appLanApi,
     device: {
@@ -125,8 +126,11 @@ const appDeviceSdkSource = SdkSourceFragment(
       onGameMenuClose(callback) {
         return onAppGameMenuClose(callback);
       },
+      onSystemMenuRequest(callback) {
+        return onAppSystemMenuRequest(callback);
+      },
       onBack(callback) {
-        return onAppBack(callback);
+        return onAppSystemMenuRequest(callback);
       },
       openRuntimeLogs() {
         return openAppUiRuntimeLogs();
@@ -236,6 +240,12 @@ const appDeviceSdkSource = SdkSourceFragment(
     },
     recordRuntimeLatencyPong(payload) {
       recordAppRuntimeLatencyPong(payload);
+    },
+    registerWebRTCSignalingEndpointProvider(provider) {
+      if (provider !== null && typeof provider !== "function") {
+        throw new TypeError("WebRTC 信令端点 Provider 必须是函数");
+      }
+      appWebRTCSignalingEndpointProvider = provider;
     },
     registerRuntimeUi(adapter) {
       registerAppUiRuntimeAdapter(adapter);

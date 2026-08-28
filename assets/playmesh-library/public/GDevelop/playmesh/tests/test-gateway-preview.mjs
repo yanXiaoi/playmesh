@@ -344,11 +344,14 @@ const packageSource = await readFile(
       gameSdkVersion: '1.0.0',
       appSdkVersion: '1.0.0',
     }),
-    buildGDevelopGameManifest: ({ gameId: id, mode }) => ({
-      id,
-      mode,
-      game: { entry: 'index.html' },
-    }),
+    buildGDevelopGameManifest: input => {
+      globalThis.__playmeshGatewayPreviewManifestInput = input;
+      return {
+        id: input.gameId,
+        mode: input.mode,
+        game: { entry: 'index.html' },
+      };
+    },
     createPlaymeshPackageEntryProducer: fileMap => ({ fileMap }),
     createPlaymeshPackageFileMap: args => {
       const { resourcesDownloadOutput, manifest } = args;
@@ -368,6 +371,12 @@ const packageSource = await readFile(
     GDEVELOP_AUTHORITY_ENTRY: 'static/js/service/index.js',
     resolvePlaymeshProjectRuntimePlan: async () => ({
       configStatus: 'single',
+      config: {
+        minPlayers: 1,
+        maxPlayers: 1,
+        tags: [],
+        webRuntimeMultithreading: true,
+      },
       scanActivation: 'enabled',
       plan: {
         bundlePresence: 'full',
@@ -437,6 +446,11 @@ const packageSource = await readFile(
   });
   assert.equal(exportCalls, 1, 'solo warning plans must export the real game');
   assert.equal(previewPackage.manifest.mode, 'solo');
+  assert.equal(
+    globalThis.__playmeshGatewayPreviewManifestInput
+      .webRuntimeMultithreading,
+    true
+  );
   assert.equal(previewPackage.runtimePlan.plan.connectCore, false);
   assert.match(
     globalThis.__playmeshGatewayPreviewPackageArgs.fpsProbeSource,

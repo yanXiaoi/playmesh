@@ -37,6 +37,7 @@ void main() {
         'minPlayers': 3,
         'maxPlayers': 9,
         'tags': ['party', 'co-op'],
+        'webRuntimeMultithreading': true,
         'expectedRevision': 0,
       },
     );
@@ -53,6 +54,7 @@ void main() {
     expect(updatedEnvelope['config']['minPlayers'], 3);
     expect(updatedEnvelope['config']['maxPlayers'], 9);
     expect(updatedEnvelope['config']['tags'], ['party', 'co-op']);
+    expect(updatedEnvelope['config']['webRuntimeMultithreading'], isTrue);
     expect(
       updatedEnvelope['config']['updatedAt'],
       matches(RegExp(r'^\d{4}-\d{2}-\d{2}T.*Z$')),
@@ -156,7 +158,7 @@ void main() {
       repository: _FailingPutRepository(),
     );
     addTearDown(fixture.close);
-    const gameId = 'com.example.config-create-fallback';
+    const gameId = 'com.example.config_create_fallback';
 
     final created = await fixture.jsonRequest(
       'POST',
@@ -164,7 +166,7 @@ void main() {
       const {'gameId': gameId, 'origin': 'create', 'name': 'Create Fallback'},
     );
 
-    expect(created.statusCode, HttpStatus.created);
+    expect(created.statusCode, HttpStatus.created, reason: created.body);
     expect(jsonDecode(created.body)['configInitialized'], isFalse);
     expect(
       await Directory(
@@ -176,9 +178,9 @@ void main() {
   });
 
   test('DELETE 原子摘除完整源工程；tombstone 清理失败返回 pending', () async {
-    const successId = 'com.example.config-delete-success';
-    const pendingId = 'com.example.config-delete-pending';
-    const failedId = 'com.example.config-delete-failed';
+    const successId = 'com.example.config_delete_success';
+    const pendingId = 'com.example.config_delete_pending';
+    const failedId = 'com.example.config_delete_failed';
     var failDelete = false;
     var failRename = false;
     final fixture = await _GatewayFixture.create(
@@ -202,7 +204,7 @@ void main() {
         '/dev/api/gdevelop/projects',
         {'gameId': gameId, 'origin': 'create', 'name': gameId},
       );
-      expect(created.statusCode, HttpStatus.created);
+      expect(created.statusCode, HttpStatus.created, reason: created.body);
       expect(jsonDecode(created.body)['configInitialized'], isTrue);
       final file = fixture.configFile(gameId);
       final config = jsonDecode(await file.readAsString());
@@ -378,6 +380,7 @@ class _FailingPutRepository implements GDevelopProjectConfigRepository {
     int? minPlayers,
     int? maxPlayers,
     List<String>? tags,
+    bool webRuntimeMultithreading = false,
     required int expectedRevision,
   }) => throw StateError('Gateway config unavailable');
 

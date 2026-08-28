@@ -9,7 +9,6 @@
   const ID_SUFFIX_LENGTH = 10;
   const GAME_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
   const NEW_PROJECT_GAME_ID_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_]*\.)+[A-Za-z][A-Za-z0-9_]*$/;
-  const ANDROID_PACKAGE_PATTERN = /^(?:[a-z][a-z\d_]*\.)+[a-z][a-z\d_]*$/;
   const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
   const HTML_ENTRY_PATTERN = /^(?:[^/?#]+\/)*[^/?#]+\.html(?:\?(?:%[0-9A-Fa-f]{2}|[^%\s#])+)?$/i;
   const JAVASCRIPT_ENTRY_PATTERN = /\.(?:js|mjs)$/i;
@@ -54,14 +53,6 @@
     return (profile === 'android' ? ANDROID_ID_PREFIX : SOURCE_ID_PREFIX) + suffix;
   }
 
-  function isAndroidPackageName(value) {
-    return (
-      typeof value === 'string' &&
-      value.length < 255 &&
-      ANDROID_PACKAGE_PATTERN.test(value)
-    );
-  }
-
   function isValidNewProjectGameId(value) {
     return (
       typeof value === 'string' &&
@@ -72,6 +63,25 @@
 
   function normalizedString(value) {
     return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function readGameManifestConfigValue(config, fieldPath) {
+    if (!Array.isArray(fieldPath) || fieldPath.length === 0) return null;
+    let current = config;
+    for (const field of fieldPath) {
+      if (
+        typeof field !== 'string' ||
+        field.length === 0 ||
+        !current ||
+        typeof current !== 'object' ||
+        Array.isArray(current) ||
+        !Object.prototype.hasOwnProperty.call(current, field)
+      ) {
+        return null;
+      }
+      current = current[field];
+    }
+    return current;
   }
 
   function isSafeEntry(value, kind) {
@@ -241,6 +251,9 @@
       ...(mode === 'multiplayer'
         ? { authority: { entry: normalizedString(input.authorityEntry) } }
         : {}),
+      ...(Object.prototype.hasOwnProperty.call(input, 'config')
+        ? { config: input.config }
+        : {}),
     };
     return assertGameManifest(manifest);
   }
@@ -251,8 +264,8 @@
     MAIN_MANIFEST_FILENAME: 'main.json',
     ICON_FILENAME: 'icon.png',
     generateGameId,
-    isAndroidPackageName,
     isValidNewProjectGameId,
+    readGameManifestConfigValue,
     buildGameManifest,
     validateGameManifest,
     assertGameManifest,

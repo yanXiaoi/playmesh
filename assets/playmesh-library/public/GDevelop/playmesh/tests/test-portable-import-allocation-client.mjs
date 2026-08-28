@@ -22,10 +22,17 @@ const [sourceText, hostConfigSource, hostAllocationSource] = await Promise.all([
   readFile(hostConfigSourcePath, 'utf8'),
   readFile(hostAllocationSourcePath, 'utf8'),
 ]);
-const source = sourceText.replace(
-  /^\/\/ @flow\s*/,
-  ''
-);
+const source = sourceText
+  .replace(/^\/\/ @flow\s*/, '')
+  .replace(
+    "import PlaymeshGameManifest from '../PlaymeshShared/GameManifest';",
+    `const PlaymeshGameManifest = {
+      isValidNewProjectGameId: value =>
+        typeof value === 'string' &&
+        value.length <= 64 &&
+        /^(?:[A-Za-z][A-Za-z0-9_]*\\.)+[A-Za-z][A-Za-z0-9_]*$/.test(value),
+    };`
+  );
 const allocation = await import(`data:text/javascript;base64,${Buffer.from(
   source,
   'utf8'
@@ -34,8 +41,8 @@ const allocation = await import(`data:text/javascript;base64,${Buffer.from(
 const baseUrl = '/dev/api/gdevelop/project-allocation-transactions';
 const target = {
   fileIdentifier: 'browser-file-1',
-  gameId: 'com.example.imported',
-  packageName: 'com.example.imported',
+  gameId: 'Com.Example.Imported_2',
+  packageName: 'Com.Example.Imported_2',
   projectUuid: 'project-uuid-1',
   projectFilesHash: 'c'.repeat(64),
   resourceManifestHash: 'd'.repeat(64),

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../models/game_id.dart';
+import '../diagnostics/playmesh_error_diagnostic.dart';
 import '../relay/relay_tunnel.dart';
 import 'game_invitation.dart';
 import 'game_web_gateway_contract.dart';
@@ -11,11 +12,23 @@ import 'game_web_gateway_contract.dart';
 const defaultGameInvitationInspectionTimeout = Duration(seconds: 5);
 const maxGameInvitationInspectionResponseBytes = 4 * 1024;
 
-typedef RelayClientGatewayFactory =
-    Future<RelayClientGateway> Function({
+typedef RelayClientSessionFactory =
+    Future<RelayClientSession> Function({
+      required Uri coreBaseUri,
       required Uri invitationUri,
-      required RelayTarget target,
     });
+
+typedef GameCoreBaseUriProvider = Uri? Function();
+
+Future<RelayClientSession> _startRelayInspectionSession({
+  required Uri coreBaseUri,
+  required Uri invitationUri,
+}) {
+  return startRelayClientSession(
+    coreBaseUri: coreBaseUri,
+    invitationUri: invitationUri,
+  );
+}
 
 enum GameInvitationInspectionFailure {
   invalidInvitation,
@@ -25,31 +38,86 @@ enum GameInvitationInspectionFailure {
   closed,
 }
 
-class GameInvitationInspectionException implements Exception {
-  const GameInvitationInspectionException(this.failure);
+class GameInvitationInspectionException
+    implements Exception, PlaymeshDiagnosticError {
+  const GameInvitationInspectionException(
+    this.failure, {
+    this.cause,
+    this.causeStackTrace,
+    this.context = const {},
+  });
 
   final GameInvitationInspectionFailure failure;
 
   @override
-  String toString() => switch (failure) {
+  final Object? cause;
+
+  @override
+  final StackTrace? causeStackTrace;
+
+  @override
+  final Map<String, String> context;
+
+  @override
+  String get code => switch (failure) {
+    GameInvitationInspectionFailure.invalidInvitation =>
+      'invitation_inspection_invalid',
+    GameInvitationInspectionFailure.invalidResponse =>
+      'invitation_inspection_invalid_response',
+    GameInvitationInspectionFailure.unavailable =>
+      'invitation_inspection_unavailable',
+    GameInvitationInspectionFailure.timedOut =>
+      'invitation_inspection_timed_out',
+    GameInvitationInspectionFailure.closed => 'invitation_inspection_closed',
+  };
+
+  @override
+  String get message => switch (failure) {
     GameInvitationInspectionFailure.invalidInvitation => '游戏邀请无效',
     GameInvitationInspectionFailure.invalidResponse => '游戏邀请响应无效',
     GameInvitationInspectionFailure.unavailable => '游戏邀请入口不可用',
     GameInvitationInspectionFailure.timedOut => '游戏邀请检查超时',
     GameInvitationInspectionFailure.closed => '游戏邀请检查服务已关闭',
   };
+
+  @override
+  String toString() => formatPlaymeshDiagnosticError(this);
 }
 
 class InspectedGameInvitation {
-  const InspectedGameInvitation({
+  InspectedGameInvitation({
     required this.invitation,
     required this.gameId,
     required this.gameName,
-  });
+    this.resolvedEntryPath,
+    RelayClientSession? relayClientSession,
+  }) : _relayClientSessionOwner = _RelayClientSessionOwner(relayClientSession);
 
   final GameInvitation invitation;
   final String gameId;
   final String gameName;
+  final String? resolvedEntryPath;
+  final _RelayClientSessionOwner _relayClientSessionOwner;
+
+  RelayClientSession? takeRelayClientSession() =>
+      _relayClientSessionOwner.take();
+
+  Future<void> close() async {
+    final session = takeRelayClientSession();
+    await session?.close();
+  }
+}
+
+class _RelayClientSessionOwner {
+  _RelayClientSessionOwner(this._session);
+
+  RelayClientSession? _session;
+
+  RelayClientSession? take() {
+    final session = _session;
+    _session = null;
+    return session;
+  }
 }
 
 abstract interface class GameInvitationInspector {
@@ -60,19 +128,25 @@ abstract interface class GameInvitationInspector {
 
 class DefaultGameInvitationInspector implements GameInvitationInspector {
   factory DefaultGameInvitationInspector({
+    Uri? coreBaseUri,
+    GameCoreBaseUriProvider? coreBaseUriProvider,
     http.Client? httpClient,
-    RelayClientGatewayFactory relayClientGatewayFactory =
-        startRelayClientGateway,
+    RelayClientSessionFactory relayClientSessionFactory =
+        _startRelayInspectionSession,
     Duration timeout = defaultGameInvitationInspectionTimeout,
   }) => DefaultGameInvitationInspector._(
     httpClient ?? http.Client(),
-    relayClientGatewayFactory,
+    coreBaseUri,
+    coreBaseUriProvider,
+    relayClientSessionFactory,
     timeout,
   );
 
   DefaultGameInvitationInspector._(
     this._httpClient,
-    this._relayClientGatewayFactory,
+    this._coreBaseUri,
+    this._coreBaseUriProvider,
+    this._relayClientSessionFactory,
     this.timeout,
   ) {
     if (timeout.inMicroseconds <= 0) {
@@ -81,7 +155,9 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
   }
 
   final http.Client _httpClient;
-  final RelayClientGatewayFactory _relayClientGatewayFactory;
+  final Uri? _coreBaseUri;
+  final GameCoreBaseUriProvider? _coreBaseUriProvider;
+  final RelayClientSessionFactory _relayClientSessionFactory;
   final Duration timeout;
   bool _closed = false;
 
@@ -92,40 +168,61 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
         GameInvitationInspectionFailure.closed,
       );
     }
-    RelayClientGateway? relayGateway;
+    RelayClientSession? relaySession;
     try {
       var requestInvitation = invitation;
       if (invitation.usesRelay) {
-        relayGateway = await _relayClientGatewayFactory(
+        final coreBaseUri = _coreBaseUriProvider?.call() ?? _coreBaseUri;
+        if (coreBaseUri == null) {
+          throw UnsupportedError('当前加入入口没有可用的 Go Core');
+        }
+        if (coreBaseUri.scheme != 'http' ||
+            coreBaseUri.host.isEmpty ||
+            (coreBaseUri.hasPort && coreBaseUri.port == 0)) {
+          throw StateError('Go Core 地址尚未就绪: $coreBaseUri');
+        }
+        relaySession = await _relayClientSessionFactory(
+          coreBaseUri: coreBaseUri,
           invitationUri: invitation.entryUri,
-          target: RelayTarget.web,
         );
         requestInvitation = GameInvitation.parse(
-          relayGateway.localEntryUri.toString(),
+          relaySession.webGateway.localEntryUri.toString(),
         );
       }
-      return await _inspectHttp(
+      final inspected = await _inspectHttp(
         requestInvitation: requestInvitation,
         originalInvitation: invitation,
       );
+      inspected._relayClientSessionOwner._session = relaySession;
+      relaySession = null;
+      return inspected;
     } on GameInvitationInspectionException {
       rethrow;
-    } on FormatException {
-      throw const GameInvitationInspectionException(
+    } on FormatException catch (error, stackTrace) {
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.invalidInvitation,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'inspect_invitation'},
       );
-    } on UnsupportedError {
-      throw const GameInvitationInspectionException(
+    } on UnsupportedError catch (error, stackTrace) {
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.unavailable,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'inspect_invitation'},
       );
-    } on Object {
-      throw const GameInvitationInspectionException(
+    } on Object catch (error, stackTrace) {
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.unavailable,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'inspect_invitation'},
       );
     } finally {
-      // Relay 预检只借用现有 Web 回环；无论响应如何都不能把临时网关留给后续导航。
+      // 失败时立即关闭；成功会话移交给 RemoteGameLaunch 并由实际游戏页接管。
       try {
-        await relayGateway?.close();
+        await relaySession?.close();
       } on Object {
         // 清理错误不得覆盖已经得到的受控检查结果，也不得泄露 Relay 凭据。
       }
@@ -163,8 +260,10 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
       timeout,
       onTimeout: () {
         if (!abort.isCompleted) abort.complete();
-        throw const GameInvitationInspectionException(
+        throw GameInvitationInspectionException(
           GameInvitationInspectionFailure.timedOut,
+          cause: TimeoutException('游戏邀请检查超过 ${timeout.inMilliseconds}ms'),
+          context: const {'operation': 'inspect_http'},
         );
       },
     );
@@ -179,8 +278,12 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
     if ((response.contentLength ?? 0) >
         maxGameInvitationInspectionResponseBytes) {
       if (!abort.isCompleted) abort.complete();
-      throw const GameInvitationInspectionException(
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.invalidResponse,
+        cause: FormatException(
+          '游戏邀请响应超过 $maxGameInvitationInspectionResponseBytes bytes',
+        ),
+        context: const {'operation': 'decode_response'},
       );
     }
     final bodyBytes = <int>[];
@@ -188,15 +291,24 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
       if (bodyBytes.length + chunk.length >
           maxGameInvitationInspectionResponseBytes) {
         if (!abort.isCompleted) abort.complete();
-        throw const GameInvitationInspectionException(
+        throw GameInvitationInspectionException(
           GameInvitationInspectionFailure.invalidResponse,
+          cause: FormatException(
+            '游戏邀请响应超过 $maxGameInvitationInspectionResponseBytes bytes',
+          ),
+          context: const {'operation': 'decode_response'},
         );
       }
       bodyBytes.addAll(chunk);
     }
     if (response.statusCode != 200 || !_isJson(response.headers)) {
-      throw const GameInvitationInspectionException(
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.invalidResponse,
+        cause: FormatException(
+          '游戏邀请响应状态或类型无效: status=${response.statusCode} '
+          'contentType=${response.headers['content-type'] ?? '<missing>'}',
+        ),
+        context: const {'operation': 'decode_response'},
       );
     }
 
@@ -205,9 +317,12 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
       final decoded = jsonDecode(utf8.decode(bodyBytes));
       if (decoded is! Map) throw const FormatException();
       body = Map<String, Object?>.from(decoded);
-    } on Object {
-      throw const GameInvitationInspectionException(
+    } on Object catch (error, stackTrace) {
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.invalidResponse,
+        cause: error,
+        causeStackTrace: stackTrace,
+        context: const {'operation': 'decode_json'},
       );
     }
     final entry = body['entry'];
@@ -219,14 +334,17 @@ class DefaultGameInvitationInspector implements GameInvitationInspector {
         !isValidPlaymeshGameId(gameId) ||
         gameName is! String ||
         gameName.trim().isEmpty) {
-      throw const GameInvitationInspectionException(
+      throw GameInvitationInspectionException(
         GameInvitationInspectionFailure.invalidResponse,
+        cause: const FormatException('游戏邀请响应缺少合法的 entry/gameId/gameName'),
+        context: const {'operation': 'validate_response'},
       );
     }
     return InspectedGameInvitation(
       invitation: originalInvitation,
       gameId: gameId,
       gameName: gameName.trim(),
+      resolvedEntryPath: entry,
     );
   }
 

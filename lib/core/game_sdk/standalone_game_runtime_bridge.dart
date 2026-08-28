@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:playmesh_database/playmesh_database.dart';
+
+import '../storage/game_database_service.dart';
 import '../storage/game_storage_service.dart';
 import 'game_sdk_bridge.dart';
 import 'sdk_feature_registry.dart';
@@ -13,6 +17,7 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     this.gameName = 'Playmesh 游戏',
     this.tags = const <String>[],
     this.requiredCapabilities = const <String>[],
+    this.databaseService,
   });
 
   factory StandaloneGameRuntimeBridge.withStorage({
@@ -20,6 +25,7 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     required String userId,
     required String nickname,
     required GameStorageService storage,
+    GameDatabaseService? database,
     String gameName = 'Playmesh 游戏',
     List<String> tags = const <String>[],
     List<String> requiredCapabilities = const <String>[],
@@ -31,6 +37,7 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
       gameName: gameName,
       tags: tags,
       requiredCapabilities: requiredCapabilities,
+      databaseService: database,
     ).._storage = storage;
   }
 
@@ -40,6 +47,8 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
   final List<String> requiredCapabilities;
   GameStorageService? _storage;
   Future<GameStorageService>? _storageOperation;
+  GameDatabaseService? databaseService;
+  Future<GameDatabaseService>? _databaseOperation;
   final String userId;
   final String nickname;
   final StreamController<String> _outbound = StreamController.broadcast();
@@ -88,6 +97,7 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
             return true;
           },
           updateNickname: _rejectNicknameUpdate,
+          ensureDatabase: _ensureDatabase,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -125,6 +135,14 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     } on TimeoutException {
       _lifecycleOperations.remove(requestId);
     }
+    if (event == 'exit') {
+      // exit 只结束当前 WebView 文档；restart 会继续复用这个 bridge。
+      try {
+        await databaseService?.database.rollbackAllTransactions();
+      } on Object catch (error) {
+        debugPrint('重置游戏数据库事务失败: $error');
+      }
+    }
   }
 
   @override
@@ -148,12 +166,23 @@ class StandaloneGameRuntimeBridge implements GameSdkBridge {
     await _storage?.flushAll();
   }
 
+  Future<PlaymeshDatabase> _ensureDatabase() async {
+    final current = databaseService;
+    if (current != null) return current.database;
+    final created = await (_databaseOperation ??= GameDatabaseService.create(
+      gameId: gameId,
+    ));
+    databaseService = created;
+    return created.database;
+  }
+
   @override
   Future<void> close() async {
     for (final operation in _lifecycleOperations.values) {
       if (!operation.isCompleted) operation.complete();
     }
     _lifecycleOperations.clear();
+    await databaseService?.database.close();
     await _storage?.close();
     await _outbound.close();
   }

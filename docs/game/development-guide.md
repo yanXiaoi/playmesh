@@ -63,8 +63,9 @@ CLI 2.0 与本次 App 资源协议构成同步破坏性更新，不兼容根目�
 环境变量或配置项。自动化契约测试已覆盖这三个来源及其优先级，但当前环境尚未在真实
 Cocos Creator Editor 中验收菜单调用和预览生命周期。
 
-已安装游戏不依赖 CLI 工程文件；App 会严格校验清单版本，只接受 Game SDK `4.1.0`，
-并接受 App SDK `3.2.0` 或 `3.3.0`。兼容的 `3.2.0` 请求解析到当前 `3.3.0` bundle。完整命令、迁移边界与 Cocos
+已安装游戏不依赖 CLI 工程文件；App 会严格校验清单版本，接受 Game SDK `4.1.0`、`4.2.0`
+或 `4.3.0`，也接受 App SDK `3.2.0`、`3.3.0`、`3.4.0` 或 `3.5.0`，并分别解析到当前
+`4.3.0` 与 `3.5.0` bundle。完整命令、迁移边界与 Cocos
 集成见
 [`dev-cli/README.md`](../../dev-cli/README.md)。
 
@@ -86,7 +87,7 @@ Playmesh 不提供独立的 App 文件编辑器。电脑浏览器与 App 内置 
 
 本地历史位于 `packages/{gameId}/cache/developer/local-history/`，采用初始基线加逐时间操作的变更后快照。连续编辑按 5 分钟滚动窗口合并，工作区可按文件、文件夹或整个项目查看 Diff，并将指定范围恢复为某次操作的变更前或变更后状态。恢复整个项目时 `main.json` 始终由平台保留。
 
-新建项目可选择单机或联机。源码工作区的“新建项目”和 Developer CLI 的 `init` 要求项目 ID 直接满足 Android applicationId 规则：至少两个点分段，每段以 ASCII 字母开头，其余只能使用 ASCII 字母、数字或下划线，最长 64 个字符；输入框旁可一键生成符合该规则的随机 ID。该限制只作用于这两个新建入口，复制、导入、GDevelop 和旧项目仍沿用既有 gameId 兼容规则。单机骨架使用 `modes: ["solo"]`、`displayModes: ["multi_screen"]` 和玩家 `1/1`，不生成控制器与 Authority 入口；联机骨架根据显示模式生成普通多屏或单屏多人结构。AI 修改后先调用 `/dev/api/projects/{projectId}/validate`，只有不存在 `error` 诊断时才能运行。已运行项目可通过工作区“重启”按钮或 `POST /dev/api/projects/{projectId}/run/restart` 重载游戏运行时，并保留当前分享信息。
+新建项目可选择单机或联机。GDevelop、源码工作区的“新建项目”、Developer CLI 的 `init`，以及 CLI 包上传首次创建持久项目时，都要求项目 ID 直接满足同一条 Android applicationId 规则：至少两个点分段，每段以 ASCII 字母开头，其余只能使用 ASCII 字母、数字或下划线，最长 64 个字符；输入框旁可一键生成符合该规则的随机 ID。`run`/`dev` 临时预览、已有项目更新和 CLI `get` 恢复不是新建，继续接受该项目已保存的旧 gameId；不把新建规则追溯套用到存量项目。单机骨架使用 `modes: ["solo"]`、`displayModes: ["multi_screen"]` 和玩家 `1/1`，不生成控制器与 Authority 入口；联机骨架根据显示模式生成普通多屏或单屏多人结构。AI 修改后先调用 `/dev/api/projects/{projectId}/validate`，只有不存在 `error` 诊断时才能运行。已运行项目可通过工作区“重启”按钮或 `POST /dev/api/projects/{projectId}/run/restart` 重载游戏运行时，并保留当前分享信息。
 
 需要重置调试存档时，先退出正在运行的游戏，再使用工作区“清理游戏数据”按钮。该操作只删除当前项目的 `data/`，不会清理 `cache/`、项目源码或开发历史。
 
@@ -171,7 +172,7 @@ console.log(ready.main.sdkVersion, playmesh.app.runtime.getLocale());
 ```
 
 游戏只显式引入 `playmesh-main.js`，平台会在 App WebView 和普通浏览器中先注入
-`playmesh-app.js`。Game SDK `4.1.0` 在 `playmesh.main.*` 提供所有平台一致的游戏
+`playmesh-app.js`。Game SDK `4.3.0` 在 `playmesh.main.*` 提供所有平台一致的游戏
 声明、会话、玩家、角色、联机、生命周期和 Authority 主机存储 API；App SDK
 `3.3.0` 在 `playmesh.app.*` 只提供当前终端的平台环境、身份、设备能力、权限、
 输入、性能、当前设备存储、本机 Console 日志、locale、外部 HTTP(S) 链接打开和覆盖层。面向游戏代码的唯一全局对象是
@@ -275,7 +276,47 @@ const result = await playmesh.main.rpc.request(
 - 只有 Authority 可以注册 `onRequest`；Core 后台也只会把请求路由给固定 Authority，
   并拒绝非 Authority 伪造结果。客户端超时不会取消已经开始执行的 handler。
 - 单个编码后 payload 受 Binary WS 4 MiB 帧上限约束，当前 SDK 为帧头和元数据预留
-  64 KiB；大文件应继续使用游戏自己的受控文件流程，而不是把 RPC 当文件服务器。
+  64 KiB。大文件不得塞进 `request()`，应使用下面的流式 RPC。
+
+加入端不能直接调用 Authority 专属的 `main.storage.upload()`。需要把大文件交给 Authority
+处理或落入 Main Bucket 时，使用 `requestStream/onStreamRequest`；SDK 自动流式发送和接收，
+业务不需要分片、Base64 或结束字节：
+
+```js
+if (playmesh.main.session.isAuthority()) {
+  const files = playmesh.main.storage.getBucket("player_uploads");
+  playmesh.main.rpc.onStreamRequest(
+    "/files/upload",
+    (source, context) => files.upload(source, {
+      name: context.name,
+      type: context.type,
+    }),
+    {
+      onProgress(done, total) {
+        showAuthorityProgress(done, total);
+      },
+    },
+  );
+}
+
+const storedUrl = await playmesh.main.rpc.requestStream(
+  "/files/upload",
+  selectedFile,
+  {
+    onProgress(done, total) {
+      showSenderProgress(done, total);
+    },
+  },
+);
+```
+
+- 可发送 File、Blob、ArrayBuffer、Uint8Array 或 `ReadableStream<Uint8Array>`；非 File
+  建议显式传 `name/type`。handler 收到只能消费一次的 ReadableStream 和可信发送者上下文。
+- 发送进度是已交给浏览器网络栈的字节数，接收进度是 handler 已拉取的字节数；都不是落盘
+  确认。未知流的 `total` 为 `null`，进度回调失败不会中断传输。
+- EOF 是唯一结束条件，二进制内容中的任意字节不会被解释成终止符。Core 用有界缓冲和背压
+  转发，不缓存完整文件；实际运行仍会占用少量网络与流缓冲内存。
+- 单流上限 512 MiB，默认总超时 5 分钟；Authority 返回的小型结果仍受普通 RPC 上限约束。
 
 大屏游戏不在公共显示端提供“开始游戏”动作。每位控制器玩家提交准备状态，人数满足 `players.min` 且全员准备后，由 Authority 时钟自动倒计时并开始。回合推进也应由 Authority 时钟完成，不能依赖显示页面的定时器。
 
@@ -319,8 +360,9 @@ preview.src = imageUrl;
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
 - JSON 值存放在私有 `data/json`，完整 Bucket root 上限为 10 MiB；异步与同步 JSON 操作
   统一由 SDK 通过同源 HTTP `GET/PUT/DELETE` 访问，不存在 Session WS fallback。
-  `upload(file)` 仍使用独立原始文件流 `POST` 写入 `data/data`，返回运行时
-  `/bucket/...` 地址。游戏不得猜测宿主文件路径、枚举目录或自行调用内部 JSON 路由。
+  `upload(file)` 或 `upload(source, {name, type?})` 仍使用独立原始文件流 `POST` 写入
+  `data/data`，单文件上限 512 MiB，并返回运行时 `/bucket/...` 地址。游戏不得猜测宿主
+  文件路径、枚举目录或自行调用内部 JSON 路由。
 
 只需保存在玩家当前设备、且不希望其他玩家通过游戏会话访问的数据，使用 App Bucket：
 

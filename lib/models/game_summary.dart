@@ -41,6 +41,7 @@ class GameSummary {
     required this.entry,
     this.tags = const [],
     this.capabilities = const GameCapabilities(),
+    this.config,
   });
 
   final String id;
@@ -65,6 +66,7 @@ class GameSummary {
   final LocalGameEntry entry;
   final List<String> tags;
   final GameCapabilities capabilities;
+  final Object? config;
 
   bool get isRunnable => manifestError == null;
 
@@ -95,6 +97,7 @@ class GameSummary {
         entry: entry,
         tags: tags,
         capabilities: capabilities,
+        config: config,
       );
 
   GameSummary withLastOpenedAt(DateTime value) =>

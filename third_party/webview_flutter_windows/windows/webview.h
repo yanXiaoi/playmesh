@@ -175,6 +175,7 @@ class Webview {
 
   void SetSurfaceSize(size_t width, size_t height, float scale_factor);
   void SetCursorPos(double x, double y);
+  void SetCursorLeave();
   void SetPointerUpdate(int32_t pointer, WebviewPointerEventKind eventKind,
                         double x, double y, double size, double pressure);
   void SetPointerButtonState(WebviewPointerButton button, bool isDown);

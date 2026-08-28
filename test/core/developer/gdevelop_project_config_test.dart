@@ -42,6 +42,7 @@ void main() {
     expect(migrated.minPlayers, 2);
     expect(migrated.maxPlayers, 5);
     expect(migrated.tags, isEmpty);
+    expect(migrated.webRuntimeMultithreading, isFalse);
     expect(migrated.toJson()['schemaVersion'], 2);
 
     await fixture.configFile.writeAsString('{not-json');
@@ -86,10 +87,21 @@ void main() {
       'updatedAt': '2026-08-05T00:00:00.000Z',
     };
 
+    await fixture.configFile.writeAsString(jsonEncode(valid));
+    final previousSchema = (await fixture.store.read(fixture.gameId)).config!;
+    expect(previousSchema.webRuntimeMultithreading, isFalse);
+    expect(
+      previousSchema.toJson()['webRuntimeMultithreading'],
+      isFalse,
+      reason: '旧 v2 sidecar 缺少新字段时必须兼容并在下次保存时显式补 false',
+    );
+
     for (final invalid in <Object>[
       {...valid, 'extra': true},
       {...valid, 'gameId': 'com.example.someone-else'},
       {...valid, 'gameType': 'multiplayer'},
+      {...valid, 'webRuntimeMultithreading': 'true'},
+      {...valid, 'webRuntimeMultithreading': null},
     ]) {
       await fixture.configFile.writeAsString(jsonEncode(invalid));
       expect(
@@ -119,8 +131,10 @@ void main() {
     final first = await fixture.store.put(
       gameId: fixture.gameId,
       gameType: GDevelopProjectGameType.single,
+      webRuntimeMultithreading: true,
       expectedRevision: 0,
     );
+    expect(first.webRuntimeMultithreading, isTrue);
     final second = await fixture.store.put(
       gameId: fixture.gameId,
       gameType: GDevelopProjectGameType.online,
@@ -454,6 +468,7 @@ class _ThrowingConfigRepository implements GDevelopProjectConfigRepository {
     int? minPlayers,
     int? maxPlayers,
     List<String>? tags,
+    bool webRuntimeMultithreading = false,
     required int expectedRevision,
   }) async {
     putCalls += 1;

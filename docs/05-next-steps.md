@@ -12,10 +12,16 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前正式版本为 App `4.3.0+30`、Go Core
-`0.5.0`、Core 协议 `1.3.0`、Catalog API `3.0.0`、Relay 协议 `3.0.0`、
-Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`、Game SDK `4.1.0`、
-App Bridge SDK `3.3.0`；当前没有新的未发布变更。Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
+归档基线，不再用于当前生成、运行或发布。当前未发布工作版本为 App `5.1.0+37`、Runtime
+`2.1.0+11`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
+Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`、Game SDK `4.3.0`、
+App Bridge SDK `3.5.0`。本轮以 Pion WebRTC/DataChannel + TURN 替换旧 TCP Relay，并新增
+通用 HTML 信令端点；Runtime 三端固定底包曾完成重建，但 Windows 包早于当前 WebView
+光标修复，发布前必须再次重建并更新真实哈希；主 App 尚未打包或完成跨公网实机验收。
+首页扫码、“加入对局”页扫码与手工链接已经共用唯一的邀请准备方法和动态 Core 地址；加入
+准备与导航期间显示全页遮罩，错误界面保留脱敏后的完整 cause 链。后续必须优先补两台真实
+设备的两个扫码入口、LAN 手工链接与公网 TURN 验收，不能用自动测试或包内标记替代。
+Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
 `window.playmeshApp` 与公开 `__*` 内部桥接均不存在，内部协作使用不可枚举的私有
@@ -116,7 +122,8 @@ Go Core 监听 0.0.0.0:0
 权限回调中核对声明，游戏直接使用标准 Web API。Android `sensor.pose6d` 通过能力
 事件输出位姿，需要画面时再由 `playmesh.app.media` 按需打开不透明媒体源。单屏多人
 按主画面/控制器拆分方向和能力声明，空声明不会回退到另一角色；Game SDK 另提供平台
-托管的独立 Binary WebSocket、多逻辑 Channel 和 Bucket 二进制上传。
+托管的独立 Binary WebSocket、多逻辑 Channel、Bucket 二进制上传，以及可把加入端大字节源
+直接背压转发给 Authority `storage.upload()` 的 RPC Stream。
 
 移动端开发工作区顶部操作、二级菜单、弹层边界、项目搜索选择、文档跳转和界面切换动效已收口。完整归档见 `docs/status/phase-06-complete.md`，验证记录见 `docs/verification/phase-06-complete-2026-07-18.md`。
 
@@ -199,7 +206,8 @@ App Bridge SDK、Go Core、Core 与 Relay 版本在该功能中均保持现有�
 - 所有 Bucket 数据只保存在开始游戏的 Authority 主机；普通浏览器和其他 App 玩家由 Game
   SDK 通过绑定当前游戏/会话的同源 JSON Bucket HTTP GET/PUT/DELETE 路由访问，旧 Session
   WebSocket 存储 RPC 与 fallback 不保留。该路由是 SDK 内部传输，不恢复可任意调用的
-  `/api/storage`。Binary upload 继续独立使用原始字节 POST。
+  `/api/storage`。Binary upload 继续独立使用原始字节 POST；加入端大文件通过
+  `rpc.requestStream/onStreamRequest` 的私有 HTTP 数据面交给 Authority，Binary WS 只承载控制与结果。
 - FPS 由游戏在真实渲染点调用当前客户端的 `playmesh.app.performance.reportFrame()` 上报，默认显示在左上角并可从悬浮工具坞关闭。
 - 平台构建仅在用户明确要求时执行；产物结构验证必须记录到 `docs/verification/`，安装、真机运行和生产签名仍由用户或 CI 验证。
 - 公共显示端不得进入 `players` 或提交玩家动作。

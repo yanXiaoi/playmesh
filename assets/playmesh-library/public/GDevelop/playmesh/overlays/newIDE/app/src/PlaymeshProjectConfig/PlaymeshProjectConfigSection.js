@@ -7,6 +7,7 @@ import SelectField from '../UI/SelectField';
 import SelectOption from '../UI/SelectOption';
 import SemiControlledTextField from '../UI/SemiControlledTextField';
 import Text from '../UI/Text';
+import Toggle from '../UI/Toggle';
 import { usePlaymeshLocalization } from '../PlaymeshLocalization/PlaymeshLocalizationProvider';
 import { PlaymeshProjectConfigController } from './PlaymeshProjectConfigController';
 import {
@@ -109,6 +110,9 @@ const PlaymeshProjectConfigSection: React.ComponentType<{
     const displayedMinPlayers = isCurrentGame ? state.draftMinPlayers : 1;
     const displayedMaxPlayers = isCurrentGame ? state.draftMaxPlayers : 1;
     const displayedTags = isCurrentGame ? state.draftTags : [];
+    const displayedWebRuntimeMultithreading = isCurrentGame
+      ? state.draftWebRuntimeMultithreading
+      : false;
     const fieldDisabled = !isCurrentGame || state.fieldDisabled;
     const displayedStatus = isCurrentGame ? state.status : 'loading';
     const retryLoad = React.useCallback(
@@ -209,6 +213,20 @@ const PlaymeshProjectConfigSection: React.ComponentType<{
             )
           }
         />
+        <div style={{ marginTop: 12, marginBottom: 8 }}>
+          <Toggle
+            labelPosition="right"
+            label={t(playmeshProjectConfigMessages.webRuntimeMultithreading)}
+            toggled={displayedWebRuntimeMultithreading}
+            disabled={fieldDisabled}
+            onToggle={(_event, toggled) =>
+              controller.selectWebRuntimeMultithreading(toggled)
+            }
+          />
+          <Text size="body-small">
+            {t(playmeshProjectConfigMessages.webRuntimeMultithreadingHelp)}
+          </Text>
+        </div>
         {displayedStatus === 'loading' ? (
           <AlertMessage kind="info">
             {t(playmeshProjectConfigMessages.loading)}

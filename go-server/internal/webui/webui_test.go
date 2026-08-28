@@ -43,6 +43,41 @@ func TestWebLocaleResolversUseBrowserPreferenceListAndPrimaryLanguage(t *testing
 	}
 }
 
+func TestAdminRelayFormEditsTURNDeploymentWithoutLegacyTCPTimeouts(t *testing.T) {
+	html, err := assets.ReadFile("assets/admin.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := assets.ReadFile("assets/admin.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(html) + "\n" + string(script)
+	for _, required := range []string{
+		"turnUdpListen",
+		"turnTcpListen",
+		"turnPublicIp",
+		"turnPublicPort",
+		"turnRealm",
+		"turnMinPort",
+		"turnMaxPort",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("admin Relay form is missing TURN field %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"pendingConnectionTimeoutSeconds",
+		"idleTimeoutSeconds",
+		"pendingTimeout",
+		"idleTimeout",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("admin Relay form still contains retired TCP field %q", forbidden)
+		}
+	}
+}
+
 func TestLocalizationResponsesRequireRevalidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := New(config.WebUI{

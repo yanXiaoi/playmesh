@@ -633,11 +633,16 @@ async function loadRuntimeConfig() {
   form.relayBaseURL.value = value.relay.publicBaseUrl;
   document.querySelector("#public-page-link").href = value.relay.publicBaseUrl;
   form.tunnelTTL.value = value.relay.tunnelTTLSeconds;
-  form.pendingTimeout.value = value.relay.pendingConnectionTimeoutSeconds;
-  form.idleTimeout.value = value.relay.idleTimeoutSeconds;
   form.maxTunnels.value = value.relay.maxTunnels;
   form.maxPerTunnel.value = value.relay.maxConnectionsPerTunnel;
   form.maxPerIP.value = value.relay.maxConnectionsPerIP;
+  form.turnUdpListen.value = value.relay.turnUdpListen;
+  form.turnTcpListen.value = value.relay.turnTcpListen;
+  form.turnPublicIp.value = value.relay.turnPublicIp;
+  form.turnPublicPort.value = value.relay.turnPublicPort;
+  form.turnRealm.value = value.relay.turnRealm;
+  form.turnMinPort.value = value.relay.turnMinPort;
+  form.turnMaxPort.value = value.relay.turnMaxPort;
   form.supportsRelay.checked = value.supportsGameRelay;
   form.whitelist.value = JSON.stringify(value.authWhitelist, null, 2);
 }
@@ -692,11 +697,16 @@ document.querySelector("#config-form").addEventListener("submit", async (event) 
     relay: {
       publicBaseUrl: form.relayBaseURL.value,
       tunnelTTLSeconds: numeric(form, "tunnelTTL"),
-      pendingConnectionTimeoutSeconds: numeric(form, "pendingTimeout"),
-      idleTimeoutSeconds: numeric(form, "idleTimeout"),
       maxTunnels: numeric(form, "maxTunnels"),
       maxConnectionsPerTunnel: numeric(form, "maxPerTunnel"),
-      maxConnectionsPerIP: numeric(form, "maxPerIP")
+      maxConnectionsPerIP: numeric(form, "maxPerIP"),
+      turnUdpListen: form.turnUdpListen.value,
+      turnTcpListen: form.turnTcpListen.value,
+      turnPublicIp: form.turnPublicIp.value,
+      turnPublicPort: numeric(form, "turnPublicPort"),
+      turnRealm: form.turnRealm.value,
+      turnMinPort: numeric(form, "turnMinPort"),
+      turnMaxPort: numeric(form, "turnMaxPort")
     }
   };
   try {

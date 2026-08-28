@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kIsWeb, setEquals;
+    show debugPrint, debugPrintStack, defaultTargetPlatform, kIsWeb, setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:playmesh_share_ui/playmesh_share_ui.dart';
@@ -191,6 +191,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       replaceGame: _replaceWithRemoteGame,
       publish: _publishFromAppSdk,
       readShareLinks: _readShareLinksFromAppSdk,
+      coreBaseUri: widget.goCoreRuntime?.endpoint,
     );
     _developerRunId = widget.developerRunId;
     WidgetsBinding.instance.addObserver(this);
@@ -1177,6 +1178,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       launch: launch,
       userId: widget.localUserId,
       nickname: _currentNickname,
+      coreControlBaseUri: widget.goCoreRuntime?.endpoint,
       discoveryService: _ownsLanGameDiscoveryService
           ? null
           : _lanGameDiscoveryService,
@@ -1304,7 +1306,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         _relaySources = relaySources;
         _relaySourcesLoading = false;
       });
-    } on Object {
+    } on Object catch (error, stackTrace) {
+      _logRelayException('catalog.load', error, stackTrace);
       if (!mounted || _disposing) return;
       setState(() {
         _relaySourcesLoading = false;
@@ -1325,7 +1328,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
       setState(() => _relayErrorCode = 'game.relay_not_declared');
       return;
     }
-    if (relayDeclaration.transport != 'playmesh-tcp-upgrade') {
+    if (relayDeclaration.transport != 'playmesh-webrtc-datachannel') {
       setState(() => _relayErrorCode = 'game.relay_transport_unsupported');
       return;
     }
@@ -1349,7 +1352,8 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
           maxConnectionsPerTunnel: relayDeclaration.maxConnectionsPerTunnel,
         ),
       );
-    } on Object {
+    } on Object catch (error, stackTrace) {
+      _logRelayException('host.connect', error, stackTrace, source: probe);
       if (!mounted || _disposing) return;
       setState(() {
         _relaySource = null;
@@ -1363,8 +1367,13 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
     if (coordinator != null && !coordinator.isClosing) {
       try {
         await coordinator.disconnectRelay();
-      } on Object {
-        // Relay 断开属于可恢复清理；错误文本不得带上 source token。
+      } on Object catch (error, stackTrace) {
+        _logRelayException(
+          'host.disconnect',
+          error,
+          stackTrace,
+          source: _relaySource,
+        );
       }
     }
     if (!mounted || _disposing) {
@@ -1417,6 +1426,11 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
               id: player.id,
               name: player.nickname,
               connected: player.connected,
+              connectionLabel: switch (player.connectionMode) {
+                'direct' => context.tr('game.player_connection_direct'),
+                'relay' => context.tr('game.player_connection_relay'),
+                _ => context.tr('game.player_connection_lan'),
+              },
             ),
           )
           .toList(growable: false),
@@ -1519,6 +1533,25 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         .firstOrNull;
     if (probe == null) return;
     await _connectRelay(probe);
+  }
+
+  void _logRelayException(
+    String operation,
+    Object error,
+    StackTrace stackTrace, {
+    OnlineGameSourceProbe? source,
+  }) {
+    final relay = source?.declaration?.relay;
+    debugPrint(
+      '[Relay][error] operation=$operation '
+      'sourceId=${source?.source.id} '
+      'serverBaseUrl=${relay?.publicBaseUrl} '
+      'error=$error',
+    );
+    debugPrintStack(
+      label: '[Relay][stack] operation=$operation',
+      stackTrace: stackTrace,
+    );
   }
 
   int? _sharePanelLinkIndex(String id, {required String prefix}) {

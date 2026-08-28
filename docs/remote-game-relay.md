@@ -1,568 +1,262 @@
-# Playmesh 局域网与公共中转联机架构
+# 远程游戏 WebRTC / TURN 传输
 
-状态：Relay 3.0 正式基线；4.2.0 LAN 发现与统一分享协调器已发布，仍待 Android、Windows、
-macOS、Linux 实机验收；iOS 自动发现/发布显式 unsupported
-适用版本：4.2.0
-范围：App 运行时、游戏分享、在线游戏源、`go-server`
-当前协议：Relay `3.0.0`、Catalog `3.0.0`、LAN discovery wire v1
+本文描述 Relay 协议 `4.0.0`。该版本是不兼容更新：旧的 raw TCP Upgrade、应用层
+AES-GCM 字节中转和每条 TCP 连接各建一条公共 Relay 连接已经删除，3.x 邀请不能由
+4.x 客户端继续使用。
 
-## 1. 目标与破坏性边界
+## 目标与边界
 
-Playmesh 在保留现有局域网联机能力的基础上，增加仅供 Playmesh App
-使用的公共服务器中转联机能力。
+- 创建、加入、扫码和分享入口保持原有用户流程与 URL 外形。
+- 一个加入用户只建立一个 Pion `PeerConnection`。
+- 加入端每接受一个本地 TCP 连接，就创建一条独立、可靠、有序的 DataChannel。
+- `target=web` 转发游戏 HTML、JavaScript、图片和 WebSocket；`target=core` 转发
+  Session HTTP、文本 WebSocket 和 Binary WebSocket。
+- Go Server 只负责鉴权、在线租约、临时凭据 TTL、限流、信令转发以及 Pion STUN/TURN，
+  不读取业务流。
+- Authority Go Core 为通用 HTML WebRTC 信令提供局域网 STUN/TURN；监听地址直接复用
+  Flutter 已有的可绑定 IPv4 网卡遍历结果，不在 Go 中另做一套网卡选择。
+- TURN 是无法直连时的唯一公共数据兜底，不再保留第二套 TCP Relay。
+- 传输失败不做 TCP 回退，也不跨 PeerConnection 静默迁移；当前 PC 和本地连接关闭，
+  用户回到现有加入入口重新进入。
 
-Relay `2.0.0` 曾是分享运行时的破坏性架构更新：邀请密钥改放 URL fragment，
-公共中转改为 App 端到端加密传输，旧的分享 `/api/*` 业务路由被直接删除。
-这些是已经发布的历史事实，仍不恢复兼容分支、别名或迁移适配器。
-
-当前 Relay `3.0.0` 是另一项破坏性更新：Authority 不再为外层物理 `app/`
-自动增加 URL 前缀，而是把它映射为 `/`；只保留 `/playmesh/**` 和
-`/bucket/**` 两个平台注册空间。清单中的入口相对于外层物理 `app/`，例如
-`index.html` 和 `controller/index.html`，邀请内保存的实际 URL 分别为
-`/index.html` 和 `/controller/index.html`。用户首段 `app` 仍是普通路径：
-入口 `app/index.html` 对应物理 `app/app/index.html` 和 URL `/app/index.html`，
-不会别名到外层 `app/index.html`。Relay 2.x 邀请及其 opaque token 因协议差异
-不能交给 3.0 运行时继续使用。
-
-当前清单必须显式声明 `entries.game`；单屏多人还必须显式声明
-`entries.controller`，多人必须显式声明 `authority.entry`。Relay 只转交这些实际
-清单入口，不提供模板路径回退。Relay 本身不新增游戏侧 API；当前游戏代码仍只通过
-Game SDK `4.1.0` 的 `playmesh.main.*` 和 App SDK `3.3.0` 的
-`playmesh.app.*` 访问平台能力。
-
-Relay 2.0 的传输架构对游戏可观察到的变化是：App 加入游戏时页面运行在本地
-回环 Origin 下，因此可以使用安全上下文允许的浏览器功能。普通局域网浏览器
-仍直接访问主机地址；Relay 3.0 另有上文所述的根 URL 入口变化。
-
-设计约束：
-
-- 主机和客户端均不需要公网 IP。
-- 局域网和公共中转可以同时提供加入能力。
-- 局域网 App 使用本地回环入口并进行原始 TCP 透传，不增加加密。
-- 公共中转由两个 App 终端完成端到端加密。
-- Go Server 只提供临时 TCP 隧道；它没有端点密钥，密码学上无法解密游戏数据。
-- 普通浏览器只能通过局域网 Authority 地址加入。
-- 大型资源按需流式加载，不预下载完整游戏包。
-- 不新增无必要的本地 HTTP API 实体。
-
-公共中转首期不包含后台登录、管理控制台、通用反向代理、任意 TCP 端口转发和
-普通浏览器公共中转。Go Server 的游戏包分享、上传与分发属于独立的 Catalog /
-包管理领域，不进入 Relay 数据面。
-
-## 2. 总体链路
-
-### 2.1 局域网 App
+## 结构
 
 ```text
-客户端 WebView
-  -> 127.0.0.1 LocalTunnelGateway
-  -> 局域网原始 TCP 透传
-  -> 主机 Authority Gateway
-  -> Go Core Session
+加入端 WebView
+  ├─ 本地 Web 网关 ─┐
+  └─ 本地 Core 网关 ├─ 一个 Pion PeerConnection ── Authority Go Core
+                    │    ├─ DataChannel(web, connection A)
+                    │    ├─ DataChannel(web, connection B)
+                    │    └─ DataChannel(core, connection C)
+                    └─ ICE: host / srflx / relay(TURN UDP 或 TCP)
+
+Go Server
+  ├─ Relay 4.0 WebSocket：只中转 SDP、trickle ICE 与关闭信号
+  ├─ Host 在线租约、短期 peer 凭据与人数/IP/消息限流
+  └─ Pion TURN：UDP/TCP 3478，短期 TURN REST 凭据
+
+Authority Go Core（通用 HTML WebRTC）
+  └─ 各可绑定 LAN IPv4 上的 Pion STUN/TURN：动态 UDP/TCP 监听、玩家隔离凭据
 ```
 
-局域网链路不加密、不封装。每条 WebView TCP 连接直接对应一条 Authority
-连接。
+Authority Go Core 为每个加入用户维护独立的 `PeerConnection`，因此一个房间可同时服务
+多个用户；单个用户的 Web/Core 请求复用该用户的 PC，但不复用全局 DataChannel。
+DataChannel 的独立可靠有序流避免把所有 HTTP 和 WebSocket 串进一个全局队列。
 
-### 2.2 局域网 HTML
+## 控制面
+
+Flutter App 和 Runtime 不直接承载 Pion。它们只调用本机 Go Core 的回环控制 API：
+
+- `POST /v1/relay/host`：Authority 建立公共 WebRTC 会话。
+- `GET /v1/relay/host/{id}`：读取连接状态、人数和每个 peer 的模式。
+- `DELETE /v1/relay/host/{id}`：显式关闭 Authority 会话。
+- `POST /v1/relay/client`：加入端以邀请 URL 建立一个 PC，并取得 Web/Core 回环地址。
+- `GET /v1/relay/client/{id}`：读取加入端状态。
+- `DELETE /v1/relay/client/{id}`：关闭 PC、两个监听器及所有 DataChannel。
+
+加入隧道不提供 ICE restart 或自动换路控制端点。PeerConnection 失败即关闭本次加入；玩家
+返回既有加入界面后，自行选择局域网或公网邀请重新建立一条新通道。通用 HTML 信令 API
+仍只提供不透明信令转发，游戏若在自己的业务 PeerConnection 中实现 ICE restart，属于游戏
+自身行为，不会复活平台加入隧道。
+
+平台隧道关闭会同步关闭现有 web/core DataChannel 与本机 socket；游戏主 Session 连接因此
+断开，并继续通过既有 `playmesh.main.lifecycle.onChange()` 收到 `event.state` 为 `closed`
+或 `error` 的回调。SDK 与 Dart 会话客户端可以继续重试原来的本机 Session/Binary 端点，
+但平台不会借此弹出界面、导航、切换路线或创建新 PeerConnection，因此 Pion 隧道关闭后
+这些重试不会自动恢复跨设备连接。
+
+### 加入准备与连接移交
+
+扫码、手工链接、App SDK 与 Runtime SDK 的链接/扫码加入都先进入同一个
+`GameJoinCoordinator.prepareLink()`。该步骤不是 Authority 鉴权，但必须解析邀请、拒绝
+自邀请和 `expectedGameId` 不匹配，并通过受控邀请端点取得和校验 `entry/gameId/gameName`。
+这些结果是远程 App Bridge 隔离、当前游戏 SDK 上下文和本地 Bucket 命名所必需，不能通过
+直接跳过网络准备来提速。
+
+Relay 准备调用一次 `POST /v1/relay/client` 后，使用该会话的 Web 回环校验邀请。成功结果把
+同一个 Relay client session 和受控 `entry` 校验结果以单次所有权移交给 App/Runtime 游戏
+页；游戏页不再关闭会话后再次 `POST /v1/relay/client`。Dart 预检收到的 HttpOnly Cookie
+不能进入 WebView Cookie 仓库，所以 WebView 必须在已移交会话的同一 Web 回环上加载原邀请
+入口、再次 POST token，并由浏览器响应 Cookie 后重定向到受控入口。准备失败、取消、gameId
+不匹配、导航失败和页面/Runtime 退出都必须由当前所有者关闭会话。连接对象不进入公开 SDK、
+Bridge 返回值、日志或游戏 JavaScript。
+
+LAN 仍单独建立本机 Web/Core tunnel，并同样让 WebView 从原邀请入口建立自己的 Cookie；
+不得用 Dart 预检返回的 `entry` 绕过这一步。二维码识别只负责返回原始字符串；App 两个扫码入口在结果返回后的
+第一帧先显示不可操作、不可返回的“正在加入”遮罩，再开始上述准备。手工输入在点击加入时
+已经进入同一视觉状态，不增加扫码专用等待层。
+
+每个请求都必须带：
 
 ```text
-普通浏览器
-  -> 主机公开的局域网 Authority 地址
-  -> Go Core Session
+X-Playmesh-Control-Version: 1.0.0
+X-Playmesh-Request-ID: <1..128 位关联 ID>
+X-Playmesh-Timestamp: <Unix 毫秒>
 ```
 
-普通浏览器不经过 LocalTunnelGateway，也没有 App Bridge 和公共中转能力。
+成功 JSON 为 `playmesh.webrtc-tunnel.snapshot`，包含 `protocolVersion`、`timestamp`、
+同一 `requestId` 和业务字段。控制 API 只监听回环地址，并继续执行 Origin 与输入限制。
 
-### 2.3 公共中转 App
+## Go Server Relay 4.0 信令
 
-```text
-客户端 WebView
-  -> 127.0.0.1 LocalTunnelGateway
-  -> 客户端端到端加密
-  -> Go Server 原样转发密文
-  -> 主机 Tunnel Endpoint
-  -> 主机端解密
-  -> Authority Gateway
-  -> Go Core Session
-```
-
-外层 TLS 可选，App 终端间的认证加密强制启用。
-
-## 3. 分享表现层
-
-现有“二维码与链接”展开弹窗顶部提供三个同级页签：
-
-```text
-[ 局域网 ] [ 服务器 ] [ 房间状态 5 ]
-```
-
-默认显示“局域网”。页签切换只改变当前展示内容，不开启、关闭或切换实际
-联机通道。
-
-### 3.1 局域网
-
-显示局域网地址、二维码、复制链接、系统分享入口和局域网服务状态。
-
-局域网邀请固定为：
-
-```text
-http://<authority-host>:<port>/playmesh/join#inviteToken=<opaqueToken>
-```
-
-fragment 只携带不可猜的邀请凭据且不会进入首个 HTTP 请求。落地页用同源 POST
-交换短期 HttpOnly Cookie，随后重定向到当前运行模式在 `main.json` 中声明的实际
-根相对页面，例如 `/index.html` 或 `/controller/index.html`；自定义嵌套入口及其
-manifest 查询串在最终 URL 中保留，不存在任何平台查询覆盖键。链接不携带 Core
-端口、联机码、游戏 ID、游戏名称或方向。Authority 验证 Cookie 和精确入口后在
-返回 HTML 时注入 Game SDK 所需页面上下文。页面统一
-加载 Authority 提供的标准 App SDK；若位于 App WebView，SDK 通过原生 Bridge 调用
-Dart `app.bootstrap` 获取当前设备身份和能力，不使用额外 URL 参数切换 App 模式。
-
-同一个二维码：
-
-- Playmesh App 扫描后解析并保留同一个根 URL 入口，在本地回环网关下加载。
-- 普通浏览器打开后按原链接直接使用主机 Authority 地址。
-
-### 3.2 服务器
-
-服务器选择列表复用在线游戏库中已经启用的游戏源：
-
-1. 并发获取每个源的 `/apps/info`。
-2. 筛选 `supportsGameRelay == true`。
-3. 异步测量本次请求延迟。
-4. 分页显示并支持按名称、Host、建造者搜索。
-5. 每个源右侧提供“连接”按钮。
-
-连接后切换为当前服务器详情，显示服务器声明、最新延迟、连接状态、App
-专用二维码/链接和断开按钮。状态为：
-
-```text
-连接中 / 已连接 / 重试中 / 已断开
-```
-
-关闭分享弹窗不会断开中转。首期同一游戏会话只连接一个中转源。中转断开
-不影响局域网分享。
-
-公共中转邀请固定为：
-
-```text
-https://relay.example/j/<tunnelId>#inviteToken=<opaqueToken>
-```
-
-`tunnelId` 只用于定位临时隧道。`inviteToken` 由 App 本地解析，封装客户端
-Upgrade 路径、Authority 加入入口、邀请凭据、Join Capability 和端到端密钥；
-它不会进入 Go Server 的 HTTP 请求目标。
-`/j/**` 是 App 邀请标识，不是页面根路径或 Go Server 的数据面接口，页面中的
-游戏根资源、`/bucket/**`、`/playmesh/**` 不会拼接到 `/j/**` 之后。普通浏览器
-打开该地址也不能获得游戏页面。
-
-### 3.3 房间状态
-
-房间状态独立于具体分享通道，统一展示当前 Core 游戏会话中的已加入玩家：
-
-- 昵称
-- 实时延迟
-- 来源
-- 在线/重连状态
-
-来源固定为：
-
-```text
-服务器 / 局域网 App / 局域网 HTML
-```
-
-来源由 App 运行时注入给权威 Game SDK，并在加入 Core 时归一化为固定枚举。
-该字段只用于房间状态展示，当前没有远程 App 证明机制，不能作为鉴权、授权、
-封禁或计费依据。玩家按 Core `playerId` 去重，多条 HTTP、资源或 WebSocket
-连接不能重复计数。
-
-玩家延迟由每个页面当前客户端的 `playmesh-app.js` 通过该页面的 Session WebSocket
-探测 Core/Authority 往返时间，并只通过 `playmesh.app.performance.*` 暴露为本机
-展示数据；它不属于 `playmesh.main.*` 公共游戏状态，也不能参与权威游戏规则。
-游戏源列表中的服务器延迟仅代表
-`/apps/info` 请求耗时，两者不能混用。
-
-房间状态即使不在当前页签也持续订阅会话更新。页签标题实时显示当前玩家
-数量，但玩家加入或离开不会强制切换页签。
-
-## 4. 游戏源声明
-
-新增：
-
-```http
-GET /apps/info
-```
-
-支持中转的游戏源示例：
+Relay 声明固定为：
 
 ```json
 {
-  "catalogApiVersion": "3.0.0",
-  "name": "Playmesh 公共游戏源",
-  "author": "服务器建造者",
-  "homepage": "https://example.com",
-  "supportsGameRelay": true,
-  "relay": {
-    "protocolVersion": "3.0.0",
-    "transport": "playmesh-tcp-upgrade",
-    "publicBaseUrl": "https://relay.example.com",
-    "hostPath": "/relay/v1/host",
-    "clientPath": "/relay/v1/client",
-    "maxConnectionsPerTunnel": 64
-  }
+  "protocolVersion": "4.0.0",
+  "transport": "playmesh-webrtc-datachannel",
+  "publicBaseUrl": "https://relay.example",
+  "hostPath": "/relay/v1/host",
+  "clientPath": "/relay/v1/client",
+  "maxConnectionsPerTunnel": 64
 }
 ```
 
-`name`、`author`、`homepage` 可选；`author` 在游戏源界面显示为“建造者”，不要
-与游戏 Manifest 的“发布者”标签混用。名称缺失时客户端显示格式化后的
-`host:port`，HTTP 80 和 HTTPS 443 省略端口。`publicBaseUrl` 是 Go Server
-明确配置并返回的公共中转 Origin，只能包含 HTTP/HTTPS 协议、主机和可选端口；
-App 的 Host Upgrade、Client Upgrade 和最终二维码都必须使用它，不能从游戏源
-Host 或当前请求头推导。外层是否使用 TLS 直接由 `publicBaseUrl` 的 HTTP/HTTPS
-协议决定，不另设策略字段。`maxConnectionsPerTunnel` 同样来自当前 Go Server
-配置，App 用它作为主机动态连接池上限，不在客户端硬编码服务器容量。可选字段
-不存在时直接省略。
+创建、删除和 WebSocket 握手必须携带 `X-Playmesh-Relay-Version: 4.0.0`、
+`X-Playmesh-Request-ID` 与 `X-Playmesh-Timestamp`。Authority 另带来源 Bearer token 和
+`X-Playmesh-Host-Lease`；加入端带 `X-Playmesh-Join-Capability`。
 
-Catalog `3.0.0` 的 `/apps/list` 对每个 `gameId` 只返回当前 latest offer；
-`/apps/download` 必须携带 `gameId + version`，图标使用同源独立 URL。下载包仍
-保留外层物理 `app/` 目录，offer 内的入口使用 `index.html` 这类根相对值，也可
-使用 `app/index.html` 指向其中的同名用户子目录。Relay 只读取 `/apps/info` 中的
-中转声明，不改变这些 Catalog 规则。客户端对 Catalog 和 Relay 都执行精确版本
-匹配；2.x 声明不会作为 3.0 源继续使用。
-
-### 4.1 App 自带游戏源
-
-App 自带的游戏库分享服务器不支持公共中转，声明固定为：
+服务端签发的 `playmesh.relay.credentials` 包含房间 ID、Host lease、Join capability、
+首次附着/初始 ICE 凭据到期时间及短期 ICE servers。主机信令连接附着后，房间不再由该时间
+硬过期；服务端每次加入都为该 peer 重新签发一组临时 ICE servers，并在 `peer.joined` 与
+`connected` 的 payload 中分别交给主机和加入端。信令 WebSocket 只接受以下帧：
 
 ```json
 {
-  "catalogApiVersion": "3.0.0",
-  "name": "{用户昵称}的游戏库",
-  "supportsGameRelay": false,
-  "userUpload": {
-    "supported": false
-  }
+  "type": "description | candidate | peer.error | close",
+  "protocolVersion": "4.0.0",
+  "timestamp": 1787587200000,
+  "requestId": "signal-id",
+  "peerId": "服务端认证的 peer ID（仅 Host 路由时使用）",
+  "payload": {}
 }
 ```
 
-不返回建造者、主页或 `relay`，用户不能修改这些固定字段。
+`peer.error` 只允许 Host 发往对应的已认证 peer，用于保留 Authority 建立
+`PeerConnection`、offer 或 candidate 失败的原始原因；Client 不能伪造该帧发往 Host。
+服务端生成 `connected`、`peer.joined`、`peer.left` 和关闭信号。它不会解析
+SDP/Candidate payload 的业务含义；消息大小、速率、房间人数、IP 并发和临时凭据 TTL
+仍受限。主机与客户端信令连接使用心跳识别无 FIN/RST 的失联连接。
 
-## 5. Authority 暴露面
+## 邀请和 DataChannel 首帧
 
-游戏分享运行时采用严格的最小公开面，只允许向加入方提供：
+公共邀请仍是 `https://server/j/{room}#inviteToken=...`。片段内承载
+`playmesh.relay.invitation`、协议 `4.0.0`、签发/历史凭据时间、client path、Join capability、
+Authority 入口、分享 token 与 32 字节流证明密钥。URL fragment 不会随 HTTP 请求发给
+Go Server。`expiresAt` 为 4.0.0 wire 兼容字段，不再决定二维码/链接寿命；客户端必须以
+服务端是否仍接受当前 tunnel capability 为准。主机信令持续在线时原邀请持续有效，主机
+断开、主动停止分享或服务端关闭时，原二维码和原链接一起失效，重新分享会生成新邀请。
 
-```text
-外层物理 app/ 映射出的全部非保留根资源，例如 /index.html、/controller/**、/static/**、/app/**
-/bucket/**
-/playmesh/**
-SDK 无法替代的底层连接能力，例如当前游戏受控的 WebSocket Upgrade
+每条业务 DataChannel 打开后先发送长度前缀 JSON：
+
+```json
+{
+  "type": "playmesh.relay.stream",
+  "protocolVersion": "1.0.0",
+  "timestamp": 1787587200000,
+  "connectionId": "随机且在当前 peer 内唯一",
+  "target": "web | core",
+  "routeEpoch": 123,
+  "proof": "HMAC-SHA256"
+}
 ```
 
-`/playmesh` 和 `/bucket` 是仅有的平台保留顶层命名空间。`/app/**` 仅在物理
-`app/app/**` 存在时作为普通游戏路径提供，不是外层目录的别名。上述清单是
-Authority 对加入方的完整公开边界，而不是接口示例。新增功能必须
-遵循“SDK 优先”原则：凡是能够由 Game SDK 或 App Bridge SDK 表达、校验和
-路由的能力，均应优先通过修改 SDK 实现，不得为了接入便利而新增分享 HTTP
-业务接口。只有受浏览器沙箱限制、确实无法由 SDK 替代，且本质上属于连接或
-传输层的能力，才允许扩展 Authority 的底层入口。
+Authority 校验时间窗、目标、HMAC、同一 peer 固定的 `routeEpoch`、连接 ID 重放和并发上限，
+再连接固定回环目标。远端不能提交任意主机/端口。
 
-任何新增底层入口都必须同时满足：
+## ICE 与 TURN
 
-- 固定绑定当前游戏和当前会话。
-- 不能接受任意目标 Host、端口或 URL。
-- 在建立连接前完成身份、分享授权和会话校验。
-- 不向游戏代码暴露底层连接对象。
-- 不重复实现 SDK 已有的身份、昵称、存储、能力或会话操作。
-- 同步更新协议文档、失败语义和回归测试。
+### Authority 局域网 ICE
 
-旧分享网关中的以下路由直接删除：
+主 App 与 Runtime 在启动 Go Core 时，直接复用
+`resolveBindableLanIpv4InterfaceAddresses(includeLinkLocal: false)` 的结果，并分别通过移动端
+绑定参数或 Windows `-local-turn-addresses` 参数传入 Core。Core 不自行遍历网卡；无可用
+地址时只跳过局域网 ICE，不阻止 Core 启动。
 
-```text
-/api/app-capabilities
-/api/join
-/api/storage
-/api/player/nickname
-/v1/sessions/** 普通 HTTP 代理
+首次申请通用信令端点时，Core 在每个传入 IPv4 上按实际可绑定结果惰性启动 Pion STUN/TURN，
+使用动态 UDP/TCP 端口，并把本机 ICE 配置放在公网配置之前返回。TURN 凭据按
+`sessionId + Core 已认证 playerId + identifier` 隔离，最长 6 小时；每个凭据最多 4 个
+allocation，Core 全局最多 256 个。多个玩家不会共享身份、配额或信令路由。
+
+局域网 TURN 只允许回环、私网、运营商级 NAT 和基准测试网段中的 peer 地址，不能被当作
+公网开放代理。它可以提供非 mDNS 的 IPv4 srflx/relay candidate，但不是防火墙穿透特权：
+Windows 仍需允许当前 Go Core 可执行程序收发局域网 TCP/UDP，Wi-Fi AP 客户端隔离也会阻断
+客户端到 Authority。此时只能修正网络策略或使用可到达的 Go Server 公网 TURN。
+
+### Go Server 公网 ICE
+
+Go Server 使用 Pion TURN，同时监听 UDP 与 TCP。部署至少配置：
+
+- `relay.turnUdpListen`、`relay.turnTcpListen`；
+- `relay.turnPublicIp`、`relay.turnPublicPort`；
+- `relay.turnRealm`；
+- `relay.turnMinPort`、`relay.turnMaxPort`，并在防火墙/NAT 开放该 UDP 端口段；
+- 环境变量 `PLAYMESH_TURN_SHARED_SECRET`，至少 32 字节。
+
+公网 TURN 用户名和密码在每个加入用户附着时重新临时生成，TTL 只约束该 peer 的 ICE/TURN
+凭据，不约束在线房间或邀请。若候选对任一侧为 relay，Core 记录
+`connectionMode=relay`；否则记录 `direct`。该结果来自 Pion 实际选中候选对，不采信 HTML
+或加入请求自报。
+
+Go Server 只校验配置结构和可绑定性，不在启动时按“公网、私网或回环”地址性质拒绝
+`turnPublicIp`；NAT 映射与公开地址由部署者负责。配置地址不可达时，客户端 ICE 失败诊断会
+报告连接/收集状态、候选类型与已脱敏 ICE URL，不包含 TURN 用户名、密码、邀请或共享密钥。
+
+## 通用 HTML WebRTC 信令
+
+App SDK `3.4.0` 新增：
+
+```js
+const endpoint = await playmesh.app.webrtc.getSignalingEndpoint("camera/main");
+const pc = new RTCPeerConnection({ iceServers: endpoint.iceServers });
+const socket = new WebSocket(endpoint.url);
 ```
 
-加入、昵称、存储和能力通过 Game SDK、App Bridge、App 加入流程和当前受控
-Session WebSocket 完成。`app-capabilities` 不再是 HTTP 接口，而是客户端
-本地 `playmesh-app.js` 根据本机插件注册表和授权状态提供的 SDK 能力。
+端点绑定当前 `sessionId + identifier + Core 已认证 playerId`，票据 30 秒过期且只能使用
+一次。信令帧必须带 `type`、`version`、`timestamp`、`requestId`、目标玩家和 JSON
+`payload`。Core 只按 Authority 星形拓扑转发，并注入可信 `senderPlayerId`；HTML 自行管理
+SDP、trickle ICE、轨道、DataChannel、码率、权限提示、前后摄像头、ICE restart 和关闭。
+平台不会替 HTML 建立媒体源，也不会把媒体流送入 Session 数据通道。`iceServers` 优先包含
+可用的 Authority 局域网 STUN/TURN；当前会话同时具备公网 Relay 时，再追加 Go Server
+STUN/TURN。这里的“优先”是返回数组固定为本地在前、公共在后；浏览器最终仍按 ICE
+candidate priority 与连通性检查选择候选对，并不把数组顺序当作强制路由。HTML 必须把完整
+列表传给同一个 `RTCPeerConnection`，不能假设列表非空。
 
-## 6. SDK 所有权
+## 房间成员连接方式
 
-> **AI 上下文最小披露原则：面向游戏开发 AI 的提示词，只提供完成当前任务所必需、可由游戏代码调用或必须遵守的公开契约。回环代理、内部路由、中转鉴权、密钥协商、加密通道和 Relay 协议均属于平台实现，不得进入游戏 AI 提示词。**
+Core 在宿主会话快照的内部 `Player.connectionMode` 返回：
 
-权威 Game SDK 必须来自主机：
+- `lan`：请求直接从本地/LAN 入口进入；
+- `direct`：远程加入 PC 使用非 relay ICE 候选对；
+- `relay`：实际选中 TURN relay 候选。
 
-```text
-/playmesh/sdk/v1/playmesh-main.js
-```
+该内部字段不进入公开 Game SDK。主 App 与 Runtime 的分享/邀请房间成员列表分别显示
+“局域网”“直连”“中转”。已经打开的房间面板必须订阅后续 Session 快照，不能只在打开时
+读取一次，也不能只按在线人数去重；昵称、在线状态或连接方式变化都要立即重建。断线成员
+保留原模式和离线状态，重新通过现有入口加入后由 Core 重新判定。
 
-它包含全局数据、游戏状态、会话协议和公共 SDK 契约。
+## 安全和资源上限
 
-当前客户端 SDK 同样由 Authority 提供：
+- Host lease 与 Join capability 均随机并使用常量时间摘要比较，其有效性绑定当前在线房间；
+  ICE/TURN、请求时间戳和一次性票据继续受各自 TTL 约束。
+- SDP/ICE 信令与通用 SDK 信令都有消息大小、时间偏差和每秒消息上限。
+- 通用 SDK 信令每个会话玩家最多占用 32 个待消费票据与活动标识符连接，Core 全局最多
+  保留 4096 个未过期票据。
+- Authority 局域网 TURN 使用进程内随机密钥和玩家/标识符隔离的短期凭据，只允许局域网
+  peer；每凭据最多 4 个 allocation，Core 全局最多 256 个。
+- 每用户一个 PC、每本地连接一个 DataChannel；每 peer 最多跟踪 4096 个活动连接 ID。
+- TURN 只使用短期凭据；Go Server 不获得邀请 fragment 中的流证明密钥和分享 token。
+- DataChannel 的 DTLS/SCTP 提供传输保护；Relay 4 不再重复实现应用层 AES 帧协议。
+- 关闭 Host、Client、PC、信令或本地监听器时，关联连接显式回收；未附着房间由创建 TTL
+  兜底，已附着房间由主机信令连接和心跳持有，不能按固定运行时长清除。
 
-```text
-/playmesh/sdk/v1/playmesh-app.js
-```
+## 兼容和验收
 
-它提供统一的客户端 SDK 表面。普通浏览器没有原生 Bridge，按 HTML 模式运行；
-App WebView 检测到 `PlaymeshAppBridge` 或 `chrome.webview` 后，通过
-`app.bootstrap` 从 Dart 获取当前客户端身份、Core 回环地址、能力和设备上下文。
-不再启动本地 App SDK HTTP 服务，也不通过 URL 参数或绝对脚本地址切换 App
-模式。LocalTunnelGateway 仍只做原始 TCP 透传，不解析 HTTP。
+Relay `3.0.0 -> 4.0.0` 为 MAJOR 更新，没有降级或双栈。升级时必须同时更新主 App、
+Runtime、Go Core 与 Go Server。旧会话和旧邀请应自然失效，不能迁移到新协议。
 
-## 7. LocalTunnelGateway
-
-所有 App 客户端通过稳定的本地回环 Origin 加载游戏：
-
-```text
-http://127.0.0.1:<local-port>
-```
-
-本地不生成自签名证书。页面 LocalTunnelGateway 只负责监听回环端口、建立
-上游连接、双向复制、背压、取消、超时和关闭，不解析 HTTP、URL、Header、
-Cookie、Range、WebSocket 或 Game SDK。局域网 App 的 Core 回环端口在每条
-连接开始前执行一次固定的 `/playmesh/core` 受控 Upgrade；Dart 从邀请 fragment
-取得 `inviteToken` 并只在该 Upgrade Header 中提交，Authority 校验后只连接本局
-Core。Upgrade 完成后同样只复制原始字节，不公开或接受任意 Host、端口与 URL。
-
-传输驱动：
-
-```text
-LanDirectTransport     原始 TCP 透传
-RelayEncryptedTransport 端到端加密后经 Go Server 传输
-```
-
-Authority 必须接受回环形式的 Host、使用相对资源地址，并避免把页面重定向到
-固定局域网 IP。
-
-## 8. GameShareCoordinator
-
-主机 App 使用一个统一协调器管理当前房间的分享生产链：
-
-```text
-GameShareCoordinator
-  - Core/standalone share access + GameWebGateway
-  - LAN URL + Relay joinUri
-  - UDP multicast publication lease
-  - immutable GameShareLinkSnapshot + QR bytes
-  - generation / concurrency / cleanup
-```
-
-分享通道与 UDP multicast 公开是正交状态。游戏启动和开发预览默认不公开；打开分享面板或
-本机房主调用无参数 `playmesh.app.lan.setPublished()` 时，协调器复用同一个通道并向
-App 级 `LanGameDiscoveryService` 申请 publication lease。Android、Windows、macOS、Linux
-使用固定 `239.255.80.77:53584`、wire v1 的唯一自定义 IPv4 UDP multicast 链；iOS 自动
-发现/发布显式不支持，但扫码、手工邀请与分享链接保留。
-该链不保留旧服务记录、第二发现栈或已知节点单播探测，主机 IP 只取数据报真实 source；
-AP 隔离、VLAN、防火墙、禁用组播及 VPN/虚拟网卡策略仍可能使设备互不可见。
-并发入口等待同一 Future，成功后本局幂等。关闭分享弹窗不释放授权或撤销公开；退出
-游戏、页面销毁或进程结束才停止公告、best-effort 发送 goodbye，并关闭 Relay、网关和
-分享授权。
-
-multicast 公开失败不关闭已经建立的 LAN 分享通道，手工复制和扫码继续可用；后续
-`setPublished()` 只重试公开。没有非回环 IPv4 时 LAN 快照为空且发布返回
-`discovery_unavailable`，不能用 `127.0.0.1` 伪装可公开地址。清理采用终止优先的
-best-effort 顺序，generation/cancellation 检查保证晚到 Gateway、Relay 或二维码结果
-不会写回新游戏或已关闭页面。
-
-LAN 与 Relay 必须组合成一个 `GameShareLinkSnapshot`：LAN 来自
-`GameWebGateway.shareLinks()` 的首次生产结果，WAN 只来自当前有效
-`RelayHostSession.joinUri`；LAN 在前、WAN 在后并按完整 URL 去重。Relay 建立 Authority
-入口时必须使用网关显式提供的 `loopbackInvitationUri`，不能依赖公开 LAN 列表的第一项。
-LAN 可显式包含只供游戏分享使用的 `169.254/16` link-local；该放宽不得传给 Developer
-Gateway 或 Relay 内部入口。
-共享 `ShareQrCodeEncoder` 为每个精确 URL 生成唯一 PNG bytes，分享面板直接渲染，App
-SDK 只序列化 Data URL；任何消费者都不得重新枚举网卡、拼 URL 或生成二维码。
-
-App SDK `getShareLinks()` 仅允许宿主确认的当前本机 Authority/standalone host，返回的
-LAN/Relay URL 与二维码都是 bearer 凭据。Go Server 仍不得接收 Authority 分享 token、
-页面入口或端到端密钥；平台日志、磁盘、分析和异常也不得记录完整 URL、token 或 PNG。
-玩家在线状态、昵称和延迟继续只以 Go Core 会话为权威，不由分享协调器建立第二份玩家
-状态。
-
-## 9. Go Server
-
-Go Server 是轻量、可独立部署的游戏包源与公共中转载体。游戏包分享、上传、列表
-和下载遵循 [Catalog API](catalog-api.md) 与
-[Go Server 开发约定](platform/go-server-development.md)，不复用 Relay 的隧道
-凭证、连接状态或存储。
-
-Relay 声明由 `server.json` 配置，其中 `relay.publicBaseUrl` 明确指定对外可访问的
-HTTP/HTTPS Origin。反向代理、TLS 终止或公网域名部署时必须配置为客户端实际可访问
-的地址，不能依赖监听地址、请求 `Host` 或转发头自动猜测。
-
-### 9.1 控制面
-
-主机创建隧道：
-
-```http
-POST /relay/v1/host
-Authorization: Bearer <source-token>
-```
-
-返回临时 `tunnelId`、仅主机使用的 `hostLease`、限定该隧道的
-`joinCapability` 和过期时间。端到端密钥不由 Go Server 生成或返回，而是由
-主机 App 使用安全随机数在本地生成。Go Server 不返回完整邀请；App 使用声明中
-的 `publicBaseUrl` 作为 Origin，生成 App 专用邀请：
-
-```text
-http[s]://relay.example/j/<tunnelId>#inviteToken=<opaqueToken>
-```
-
-`opaqueToken` 只放在 URL fragment，内部封装客户端 Upgrade 路径、Authority
-加入入口、邀请凭据、Join Capability 和
-端到端密钥。fragment 不属于 HTTP 请求目标，不会随普通页面请求、创建隧道请求
-或 Upgrade 请求发送给中转服务器；客户端 App 在本地解析后只向真正的
-`/relay/v1/client` Upgrade 发送 `tunnelId` 和 Join Capability，再把受控加入入口
-恢复为
-`http://127.0.0.1:{localPort}/playmesh/join#inviteToken=<authorityInviteToken>`。
-WebView 在本机回环 Origin 下交换 HttpOnly Cookie，随后由 Authority 重定向到
-manifest 声明的实际页面及查询串。即使 Go
-Server 完全不受信任，它也拿不到页面入口、Authority 分享 Token 或端到端密钥。
-
-客户端不能提交 `targetHost`、`targetPort` 或 `targetURL`。
-
-### 9.2 数据面
-
-主机维持待接收连接：
-
-```http
-GET /relay/v1/host?tunnelId=<id>
-Connection: Upgrade
-Upgrade: playmesh-tunnel
-Authorization: Bearer <source-token>
-X-Playmesh-Host-Lease: <lease>
-```
-
-主机 App 不再固定预建 16 条连接。每个隧道初始只建立
-`min(4, maxConnectionsPerTunnel)` 条热连接；某条热连接被客户端配对后立即
-异步补回热连接，活跃 HTTP、资源或 WebSocket 连接结束后对应槽位自然退出。
-总连接数始终不超过 `/apps/info` 声明的 `maxConnectionsPerTunnel`。连接建立
-失败或 Go Server 返回限流时按指数退避重试，不绕过服务器最终限流。
-
-客户端每条本地 TCP 连接建立：
-
-```http
-GET /relay/v1/client?tunnelId=<id>
-Connection: Upgrade
-Upgrade: playmesh-tunnel
-X-Playmesh-Join-Capability: <capability>
-```
-
-鉴权和配对完成后，Go Server 只执行双向 `io.Copy`。它可以看到隧道协议的连接
-元数据以及密文字节，但端点密钥从未发送给它，因此无法还原 HTTP、静态资源、
-Game SDK 消息或 WebSocket 内容。游戏内部的 WebSocket Upgrade 只是加密流中的
-普通字节。
-
-### 9.3 端到端加密
-
-只有公共中转链路强制加密。每条浏览器 TCP 连接建立一条持续的透明加密流；
-HTTP 请求、Range 资源响应和 WebSocket frame 均自动通过该流，不由业务消息逐条
-调用加解密 API。当前协议使用：
-
-- 主机 App 本地生成的 256 位随机端点密钥
-- 每条连接独立的 128 位随机 Salt
-- HKDF-SHA256 派生双向独立密钥
-- AES-256-GCM 认证加密
-- 双向独立的单调计数器与 Nonce 空间
-- 32 KiB 上限的加密记录分帧、长度校验和认证失败即断开
-
-Go Server 只持有 `tunnelId`、Host Lease 和 Join Capability；这些字段用于隧道
-鉴权与配对，不参与端点内容密钥派生。
-
-外层 TLS 可选，但公共部署推荐启用，以额外保护隧道元数据和加入凭证。
-
-## 10. Gin 鉴权中间件
-
-Source Token 必须通过全局 Gin 中间件处理，Handler 不得自行实现 Token
-比较：
-
-```text
-Recovery
--> Request ID
--> Access Log
--> CORS
--> Body/Handshake Limit
--> Rate Limit
--> Source Token Middleware
--> Host Lease / Relay Capability Middleware
--> Handler
-```
-
-`auth.token` 为空时关闭 Source Token 校验；非空时，除配置白名单外统一要求
-`Authorization: Bearer <token>`。
-
-默认白名单：
-
-```text
-GET /health
-GET /relay/v1/client
-```
-
-`/relay/v1/client` 虽免 Source Token，仍必须经过独立的
-Relay Capability 中间件。所有鉴权在 Upgrade/Hijack 前完成。
-
-## 11. 安全边界
-
-- Tunnel Endpoint 在主机创建分享时固定绑定当前游戏 Authority。
-- 客户端不能选择目标地址。
-- Capability 只能进入指定临时隧道。
-- 主机断开或游戏结束后隧道立即失效。
-- Go Server 没有端点密钥，无法解密游戏路径、内容、SDK 消息或玩家昵称。
-- 普通浏览器不能把 App 邀请转换成公网游戏网页。
-- 官方 App 协议没有任意目标参数，Go Server 也不提供目标选择或转发接口，
-  因而普通调用方不能把它直接当作通用 HTTP/TCP 代理。
-- 日志不得记录完整 Source Token、Host Lease、Join Capability 或
-  `inviteToken`；Authority 分享 Token 和端点密钥不得进入任何 Go Server 请求、
-  响应、内存状态或日志。
-
-服务端必须限制隧道创建频率、单 IP/单隧道连接数、待配对连接数、空闲时间
-和隧道生命周期，并在销毁隧道时关闭全部关联连接。
-
-端到端加密也带来一项明确限制：Go Server 无法检查密文是否确实属于游戏流量，
-因此当前“仅供 App 使用”是官方客户端流程、Source Token 和临时 Capability
-共同形成的产品边界，不是远程 App 的密码学证明。持有有效 Host Source Token
-的改造客户端理论上可以转发任意字节。若威胁模型需要阻止这类客户端，必须另行
-引入设备证明、安装证明或客户端证书；不得通过把端点密钥交给 Go Server 来实现。
-
-## 12. 大型资源
-
-游戏资源不预下载，必须保持：
-
-- 流式传输
-- 请求取消
-- TCP 背压
-- 动态 `/bucket/**`
-- 长连接和 WebSocket
-
-LocalTunnelGateway 和 Go Server 均不得把完整响应读入内存，也不得改写或吞掉
-Authority 已提供的 Range、206、ETag 或缓存语义；这些 HTTP 能力由 Authority
-资源服务决定。
-
-## 13. 验收基线
-
-- 分享弹窗存在“局域网 / 服务器 / 房间状态”三个同级页签。
-- 局域网与中转可以同时加入同一 Core 会话。
-- 房间状态统一展示所有玩家的昵称、RTT、来源和连接状态。
-- 玩家来源正确区分服务器、局域网 App、局域网 HTML。
-- App 通过回环 Origin 运行，普通浏览器行为不变。
-- 局域网邀请通过 fragment 凭据交换 HttpOnly Cookie，再重定向到 `main.json`
-  声明的根相对入口及查询串；普通浏览器仍可直接加入，App 解析同一链接后在本地
-  回环 Origin 下执行相同握手。
-- 公共邀请只含 `tunnelId + fragment inviteToken`，浏览器误扫不会把
-  `inviteToken` 发送给 Go Server。
-- 局域网链路不加密，公共中转数据始终端到端加密。
-- `playmesh-main.js` 与 `playmesh-app.js` 都由 Authority 按清单 SDK 版本提供；当前
-  客户端只提供原生 App Bridge 与 Dart `app.bootstrap` 返回的平台上下文；两者
-  成对注入，旧 `playmesh.js` 不兼容。
-- Go Server 从未获得端点密钥，密码学上无法解密所转发的密文，因而也无法解析游戏协议。
-- Token 由全局中间件验证，白名单可配置。
-- Relay 与 Catalog 当前声明均为 `3.0.0`；旧 2.x 邀请和 opaque token 不兼容。
-  `app/...` 清单入口合法，并按原值解析到物理 `app/app/...` 与运行时 `/app/...`，
-  不提供指向外层 `app/...` 的别名。
-- Relay 不额外增加 Game/App SDK 公共 API；游戏包仍有物理 `app/`，开发模板和 AI
-  提示词显式声明根相对入口，并继续遵守最小披露原则。
+自动验证覆盖：Relay 鉴权/限流/多客户端信令、公网 TURN 临时凭据、Authority 局域网 TURN
+实际 allocation、两个玩家的隔离凭据、两个并发加入用户、Web/Core 独立大流、Binary
+WebSocket、协议元数据和关闭。正式发布前仍必须手工验证 Android/Windows 同 LAN（含防火墙
+放行与多个用户）、跨公网直连、强制 TURN UDP、强制 TURN TCP、NAT/防火墙映射、摄像头
+权限和长时网络切换。

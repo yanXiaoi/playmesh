@@ -8,6 +8,12 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
     'pattern': r'^[a-f0-9]{64}$',
   };
 
+  static const _newProjectIdSchema = <String, Object?>{
+    'type': 'string',
+    'maxLength': 64,
+    'pattern': r'^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$',
+  };
+
   static const _workspaceTargetSchema = <String, Object?>{
     'type': 'object',
     'additionalProperties': false,
@@ -21,8 +27,8 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
     ],
     'properties': {
       'fileIdentifier': {'type': 'string'},
-      'gameId': {'type': 'string'},
-      'packageName': {'type': 'string'},
+      'gameId': _newProjectIdSchema,
+      'packageName': _newProjectIdSchema,
       'projectUuid': {'type': 'string'},
       'projectFilesHash': _hashSchema,
       'resourceManifestHash': _hashSchema,
@@ -38,7 +44,7 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
         'type': 'string',
         'pattern': r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$',
       },
-      'gameId': {'type': 'string'},
+      'gameId': _newProjectIdSchema,
       'origin': {
         'type': 'string',
         'enum': ['create', 'import', 'copy'],
@@ -88,7 +94,7 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
       'resourceManifestHash',
     ],
     'properties': {
-      'packageName': {'type': 'string'},
+      'packageName': _newProjectIdSchema,
       'projectUuid': {'type': 'string'},
       'projectFilesHash': _hashSchema,
       'projectFilesSize': {'type': 'integer', 'minimum': 1},
@@ -269,13 +275,17 @@ class _GDevelopProjectAllocationOperation implements _DeveloperHttpOperation {
             (body['clientId'] != null && body['clientId'] is! String)) {
           throw const FormatException('GDevelop allocation PREPARE 请求无效');
         }
-        final transaction = await gateway.gdevelopProjectAllocation.prepare(
+        final identity = ProjectProvisioningService.validateNewProjectIdentity(
           gameId: body['gameId']! as String,
+          name: body['name'] as String? ?? body['gameId']! as String,
+        );
+        final transaction = await gateway.gdevelopProjectAllocation.prepare(
+          gameId: identity.gameId,
           idempotencyKey: body['idempotencyKey']! as String,
           origin: GDevelopProjectAllocationOrigin.parse(
             body['origin']! as String,
           ),
-          name: body['name'] as String?,
+          name: identity.name,
           clientId: body['clientId'] as String?,
           workspaceTarget: GDevelopProjectAllocationWorkspaceTarget.fromJson(
             body['workspaceTarget'],

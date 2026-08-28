@@ -73,7 +73,7 @@ func printUsage() {
   playmesh-cli init                初始化原生项目并选择 JavaScript/TypeScript
   playmesh-cli init cocos          初始化当前 Cocos Creator 3.x 项目
   playmesh-cli update              更新 SDK，并由项目适配器升级集成
-  playmesh-cli run                 临时上传、校验并运行，不发布且不附加日志
+  playmesh-cli run                 原样上传固定包资源并启动临时开发预览
   playmesh-cli logs                实时输出当前项目运行日志
   playmesh-cli dev [adapter-args]  使用适配器准备本地开发资源并在真实 App 中运行
   playmesh-cli capabilities --json 输出目标 App 当前注册的能力目录

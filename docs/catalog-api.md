@@ -61,8 +61,8 @@ Authorization: Bearer optional-read-token
   "homepage": "https://example.com",
   "supportsGameRelay": true,
   "relay": {
-    "protocolVersion": "3.0.0",
-    "transport": "playmesh-tcp-upgrade",
+    "protocolVersion": "4.0.0",
+    "transport": "playmesh-webrtc-datachannel",
     "publicBaseUrl": "https://relay.example.com",
     "hostPath": "/relay/v1/host",
     "clientPath": "/relay/v1/client",
@@ -82,6 +82,10 @@ Authorization: Bearer optional-read-token
 - `name` 是源官方名称，只在源详情辅助展示，不能覆盖用户维护的本地源名称。
 - `author` 的界面标签是“建造者”；游戏 Manifest 的 `author` 标签是“发布者”。
 - `supportsGameRelay` 与 `relay` 必须同时成立或同时不存在。
+- Relay `4.0.0` 只声明 SDP/ICE 信令与 Pion TURN/DataChannel 能力；不再存在 raw TCP
+  Upgrade 数据 Relay。Catalog API 版本不因独立 Relay 协议升级而改变。
+- `maxConnectionsPerTunnel` 在 Relay 4 表示一个隧道允许的并发加入 PeerConnection 数，
+  不是 TCP 热连接或 DataChannel 数；每个加入用户只占一个名额。
 - `userUpload` 为必填对象；`supported=false` 时不得带协议、路径或大小字段。
 - 所有协议版本使用严格 `MAJOR.MINOR.PATCH`。
 - `publicBaseUrl` 只能是 HTTP/HTTPS Origin；端点路径由声明提供。
