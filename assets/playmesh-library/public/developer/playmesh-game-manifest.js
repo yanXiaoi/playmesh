@@ -14,7 +14,7 @@
   const JAVASCRIPT_ENTRY_PATTERN = /\.(?:js|mjs)$/i;
   const RESERVED_PATH_PATTERN = /^(?:playmesh|bucket)(?:\/|$)/i;
   const INVALID_PATH_PATTERN = /(^|\/)\.{1,2}(?:\/|\?|$)|[\\#]|^[^?]*%|^[A-Za-z][A-Za-z0-9+.-]*:/;
-  const allowedOrientations = new Set(['landscape', 'portrait']);
+  const allowedOrientations = new Set(['landscape', 'portrait', 'system']);
   const allowedModes = new Set(['solo', 'multiplayer']);
   const allowedDisplayModes = new Set([
     'multi_screen',
@@ -126,7 +126,7 @@
       }
     }
     if (!allowedOrientations.has(manifest.orientation)) {
-      fail('orientation', 'must be landscape or portrait');
+      fail('orientation', 'must be landscape, portrait, or system');
     }
     if (
       !Array.isArray(manifest.modes) ||

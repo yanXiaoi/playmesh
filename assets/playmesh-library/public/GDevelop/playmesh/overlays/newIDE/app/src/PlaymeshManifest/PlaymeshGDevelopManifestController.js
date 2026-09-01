@@ -15,7 +15,7 @@ export type PlaymeshGameMode = 'solo' | 'multiplayer';
 export type PlaymeshDisplayMode =
   | 'multi_screen'
   | 'single_screen_multiplayer';
-export type PlaymeshOrientation = 'landscape' | 'portrait';
+export type PlaymeshOrientation = 'landscape' | 'portrait' | 'system';
 
 export type GDevelopGameManifest = {|
   id: string,
@@ -132,9 +132,7 @@ export const getPlaymeshOrientationFromGDevelop = (
   if (orientation === 'portrait' || orientation === 'landscape') {
     return orientation;
   }
-  return project.getGameResolutionHeight() > project.getGameResolutionWidth()
-    ? 'portrait'
-    : 'landscape';
+  return 'system';
 };
 
 export const isGDevelopMultiplayerProject = (

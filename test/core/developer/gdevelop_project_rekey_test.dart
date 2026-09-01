@@ -36,13 +36,13 @@ void main() {
     final seed = await fixture.seed('com.example.rekey-old');
     final oldRoot = await fixture.resolver.projectRootLocation(seed.gameId);
     final newRoot = await fixture.resolver.projectRootLocation(
-      'com.example.rekey-new',
+      'com.example.rekey_new',
     );
     final sourceBefore = await fixture.identityBytes(oldRoot);
 
     final prepared = await fixture.prepare(
       seed,
-      newGameId: 'com.example.rekey-new',
+      newGameId: 'com.example.rekey_new',
     );
     expect(prepared.phase, GDevelopProjectRekeyPhase.prepared);
     expect(await oldRoot.exists(), isTrue);
@@ -57,7 +57,7 @@ void main() {
     );
     expect(
       () => fixture.resolver.ensureProjectRoot(
-        gameId: 'com.example.rekey-new',
+        gameId: 'com.example.rekey_new',
         origin: GDevelopProjectEnsureOrigin.open,
       ),
       throwsA(isA<ProjectProvisioningMissing>()),
@@ -75,22 +75,35 @@ void main() {
     );
     expect(await oldRoot.exists(), isTrue, reason: '浏览器 ACK 前禁止删除 old');
     expect(await newRoot.exists(), isTrue);
+    final targetMetadata = Map<String, Object?>.from(
+      jsonDecode(
+            await File(
+              '${newRoot.path}${Platform.pathSeparator}.playmesh'
+              '${Platform.pathSeparator}project.json',
+            ).readAsString(),
+          )
+          as Map,
+    );
+    expect(
+      targetMetadata['identityPolicy'],
+      ProjectProvisioningService.androidApplicationIdIdentityPolicy,
+    );
     expect(
       jsonDecode(
         await File(
           '${newRoot.path}${Platform.pathSeparator}main.json',
         ).readAsString(),
       )['id'],
-      'com.example.rekey-new',
+      'com.example.rekey_new',
     );
-    final targetConfig = await fixture.config.read('com.example.rekey-new');
-    expect(targetConfig.config?.gameId, 'com.example.rekey-new');
+    final targetConfig = await fixture.config.read('com.example.rekey_new');
+    expect(targetConfig.config?.gameId, 'com.example.rekey_new');
     expect(targetConfig.config?.revision, seed.config.revision + 1);
     expect(
       (await fixture.history.current(
-        'com.example.rekey-new',
+        'com.example.rekey_new',
       ))?.version.projectId,
-      'com.example.rekey-new',
+      'com.example.rekey_new',
       reason: '旧历史不重写，通过 metadata alias 以新身份读取',
     );
     expect(fixture.approvalMigrations, isEmpty);
@@ -100,13 +113,13 @@ void main() {
     final acknowledged = await fixture.rekey.acknowledge(
       oldGameId: seed.gameId,
       txId: prepared.txId,
-      browserEvidence: fixture.ackFor(newGameId: 'com.example.rekey-new'),
+      browserEvidence: fixture.ackFor(newGameId: 'com.example.rekey_new'),
     );
     expect(acknowledged.phase, GDevelopProjectRekeyPhase.oldCleaned);
     expect(await oldRoot.exists(), isFalse);
     expect(await newRoot.exists(), isTrue);
     expect(fixture.approvalMigrations, [
-      'com.example.rekey-old->com.example.rekey-new',
+      'com.example.rekey-old->com.example.rekey_new',
     ]);
     expect(fixture.closedAiSessions, ['com.example.rekey-old']);
     expect(fixture.stoppedPreviews, ['com.example.rekey-old']);

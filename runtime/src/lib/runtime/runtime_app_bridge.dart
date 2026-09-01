@@ -45,6 +45,8 @@ final class RuntimeAppBridge {
     'app.storage.remove',
     'app.storage.clear',
     'app.lan.discover',
+    'app.lan.discovery.subscribe',
+    'app.lan.discovery.unsubscribe',
     'app.lan.joinDiscovered',
     'app.lan.joinByLink',
     'app.lan.scanQr',
@@ -354,6 +356,34 @@ final class RuntimeAppBridge {
               'host': game.host,
             },
         ];
+      case 'app.lan.discovery.subscribe':
+        _requirePayload(payload, const {'subscriptionId'});
+        final subscriptionId = _requireLanSubscriptionId(payload);
+        await _requireLanHost().subscribeDiscoveredGames(
+          subscriptionId,
+          (snapshot) => send(
+            _encodeBridgeMessage({
+              'type': 'app.lan.discovery.snapshot',
+              'subscriptionId': subscriptionId,
+              'state': snapshot.state.name,
+              'games': [
+                for (final game in snapshot.games)
+                  {
+                    'instanceId': game.instanceId,
+                    'gameId': game.gameId,
+                    'name': game.name,
+                    'host': game.host,
+                  },
+              ],
+            }),
+          ),
+        );
+        return null;
+      case 'app.lan.discovery.unsubscribe':
+        _requirePayload(payload, const {'subscriptionId'});
+        final subscriptionId = _requireLanSubscriptionId(payload);
+        await _requireLanHost().unsubscribeDiscoveredGames(subscriptionId);
+        return null;
       case 'app.lan.joinDiscovered':
         _requireAllowedPayload(payload, const {'instanceId', 'userActivation'});
         _requireUserActivation(payload, action: '加入游戏');
@@ -778,8 +808,11 @@ final class RuntimeAppBridge {
     }
     if (orientation != null &&
         orientation != 'portrait' &&
-        orientation != 'landscape') {
-      throw const FormatException('orientation 必须是 portrait 或 landscape');
+        orientation != 'landscape' &&
+        orientation != 'system') {
+      throw const FormatException(
+        'orientation 必须是 portrait、landscape 或 system',
+      );
     }
     await display.setFullscreen(enabled, orientation: orientation as String?);
     return null;
@@ -802,6 +835,17 @@ final class RuntimeAppBridge {
         '$action 需要当前用户操作',
       );
     }
+  }
+
+  String _requireLanSubscriptionId(Map<String, Object?> payload) {
+    final subscriptionId = payload['subscriptionId'];
+    if (subscriptionId is! String ||
+        !RegExp(
+          r'^app-ui-join-[A-Za-z0-9_-]{1,128}$',
+        ).hasMatch(subscriptionId)) {
+      throw const RuntimeAppSdkException('invalid_argument', '局域网发现订阅 ID 无效');
+    }
+    return subscriptionId;
   }
 
   Future<void> resetDocument() async {

@@ -167,6 +167,8 @@ class _IoGameWebGateway implements GameWebGateway {
   final GameStorageService storage;
   final StandardJsonBucketRequestLedger _standardJsonLedger =
       StandardJsonBucketRequestLedger();
+  final GameBucketChunkUploadRegistry _chunkUploads =
+      GameBucketChunkUploadRegistry();
   @override
   final String invitationToken = _randomSessionToken();
   final String browserSessionToken = _randomSessionToken();
@@ -212,6 +214,7 @@ class _IoGameWebGateway implements GameWebGateway {
     if (await handleGameBucketRequest(
       request,
       storage: storage,
+      chunkUploads: _chunkUploads,
       authorizeUpload: (request) =>
           request.headers.value(playmeshShareTokenHeader) == shareToken
           ? StandardJsonBucketAuthorization(
@@ -583,6 +586,7 @@ class _IoGameWebGateway implements GameWebGateway {
     if (_closed) return;
     _closed = true;
     try {
+      await _chunkUploads.close();
       await server.close(force: true);
     } finally {
       await resourceProvider.close();

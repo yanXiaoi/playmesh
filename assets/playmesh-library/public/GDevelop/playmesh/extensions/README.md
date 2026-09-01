@@ -30,6 +30,12 @@ hand. The public editor surface is split into `Main SDK（游戏 SDK）` and
 by the host, so the extension does not expose a second ready action or load a
 second SDK copy.
 
+Browser multiplayer previews and exported games use that same SDK identity flow:
+when no valid nickname is stored, it saves `浏览器` followed by four random
+lowercase letters or digits without opening a setup dialog. Existing nicknames
+and manual renaming in game information remain available; the extension does
+not generate or store a separate nickname.
+
 The generator embeds the current 256×256 public Playmesh brand derivative at
 `../../../developer/playmesh-logo.png` into both `iconUrl` and
 `previewIconUrl`. Regenerate the extension after the shared brand assets are

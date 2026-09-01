@@ -243,7 +243,7 @@ class AppSdkCommandContext {
     required this.confirmCapabilities,
     required this.capabilityRuntime,
     required this.mediaRuntime,
-    required this.sendCapabilityEvent,
+    required this.sendAppEvent,
     required this.disposeCapability,
     required this.setFullscreen,
     required this.openSharePanel,
@@ -266,7 +266,9 @@ class AppSdkCommandContext {
   final Object? Function() confirmCapabilities;
   final CapabilityRuntime capabilityRuntime;
   final AppMediaRuntime mediaRuntime;
-  final Future<void> Function(Map<String, Object?> message) sendCapabilityEvent;
+
+  /// 发送不属于命令回包的 App SDK 内部或公开事件。
+  final Future<void> Function(Map<String, Object?> message) sendAppEvent;
   final Future<Object?> Function(Map<String, Object?> payload)
   disposeCapability;
   final Future<Object?> Function(Map<String, Object?> payload) setFullscreen;

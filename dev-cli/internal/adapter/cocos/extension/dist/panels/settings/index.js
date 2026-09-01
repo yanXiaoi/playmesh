@@ -67,6 +67,7 @@ module.exports = Editor.Panel.define({
             <select data-field="orientation">
               <option value="landscape">横屏</option>
               <option value="portrait">竖屏</option>
+              <option value="system" selected>跟随系统</option>
             </select>
           </label>
           <label class="field">
@@ -88,6 +89,7 @@ module.exports = Editor.Panel.define({
             <select data-field="controller-orientation">
               <option value="portrait">竖屏</option>
               <option value="landscape">横屏</option>
+              <option value="system" selected>跟随系统</option>
             </select>
           </label>
           <label class="field controller span-2">

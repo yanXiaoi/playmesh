@@ -38,7 +38,7 @@
 | WebIDE 生成模块 | `apply-source-policy.mjs` 生成的 `PlaymeshShared/GDevelop*Source.js` |
 | 官方最低层 I/O seam | `apply-source-policy.mjs` 对锁定 Multiplayer、PlayerAuthentication 与 storage 文件的精确补丁 |
 | 预览/发布替换 | Playmesh runtime substitution registry、预览 launcher 与发布 file-map 处理链 |
-| Playmesh 清单配置投影 | `PlaymeshGDevelopManifestController` 从项目 sidecar 接收 `webRuntimeMultithreading`，预览与发布 controller 复用同一构建器 |
+| Playmesh 清单配置投影 | `PlaymeshGDevelopManifestController` 从项目 sidecar 接收 `webRuntimeMultithreading`，并把 GDevelop 官方横屏/竖屏/默认方向投影为 `landscape`/`portrait`/`system`；预览与发布 controller 复用同一构建器；扩展中新建的 SDK 全屏动作方向选择器默认 `system` |
 
 ## 重放与打包
 

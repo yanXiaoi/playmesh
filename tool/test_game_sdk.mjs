@@ -11,6 +11,8 @@ const standardStorageData = new Map();
 const synchronousStorageRequests = [];
 const synchronousStorageLedger = new Map();
 const rpcStreamBodies = new Map();
+const rpcStreamChunkUploads = new Map();
+const bucketChunkUploads = new Map();
 let dropNextSynchronousStorageResponse = false;
 const appInternalKey = Symbol.for("playmesh.app.internal.v1");
 const mainInternalKey = Symbol.for("playmesh.main.internal.v1");
@@ -487,12 +489,35 @@ globalThis.window = {
   crypto: webcrypto,
   async fetch(url, options) {
     const parsedUrl = new URL(String(url), "http://playmesh.local");
-    if (parsedUrl.pathname === "/v1/sessions/s-1/rpc-stream" && options.method === "POST") {
+    assert.equal(
+      options?.body instanceof ReadableStream,
+      false,
+      "SDK must not use a ReadableStream as an HTTP request body",
+    );
+    assert.equal(options?.duplex, undefined, "SDK must not depend on fetch duplex mode");
+    if (
+      parsedUrl.pathname === "/v1/sessions/s-1/rpc-stream" &&
+      options.method === "POST" &&
+      parsedUrl.searchParams.get("transport") === "chunked-v1"
+    ) {
       const socket = MockWebSocket.last;
       socket.rpcSequence += 1n;
       const rpcId = socket.rpcSequence;
       const consumePath = `/v1/sessions/s-1/rpc-streams/stream-${rpcId}`;
-      rpcStreamBodies.set(consumePath, options.body);
+      const uploadPath = `/v1/sessions/s-1/rpc-stream-uploads/upload-${rpcId}`;
+      let streamController;
+      const body = new ReadableStream({
+        start(controller) {
+          streamController = controller;
+        },
+      });
+      rpcStreamBodies.set(consumePath, body);
+      rpcStreamChunkUploads.set(uploadPath, {
+        rpcId,
+        socket,
+        streamController,
+        nextSequence: 0,
+      });
       const fields = [
         "p-authority",
         parsedUrl.searchParams.get("path"),
@@ -519,9 +544,40 @@ globalThis.window = {
         offset += value.length;
       }
       setTimeout(() => socket.receive(incoming), 0);
-      return new Promise((resolve) => {
-        socket.rpcStreamRequests.set(rpcId.toString(), { resolve });
-      });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { uploadPath, chunkBytes: 64 * 1024 };
+        },
+      };
+    }
+    if (rpcStreamChunkUploads.has(parsedUrl.pathname)) {
+      const upload = rpcStreamChunkUploads.get(parsedUrl.pathname);
+      if (options.method === "POST") {
+        assert.equal(
+          Number(parsedUrl.searchParams.get("sequence")),
+          upload.nextSequence,
+        );
+        assert.ok(options.body instanceof Uint8Array);
+        assert.ok(options.body.byteLength <= 64 * 1024);
+        upload.streamController.enqueue(new Uint8Array(options.body));
+        upload.nextSequence += 1;
+        return { ok: true, status: 204 };
+      }
+      if (options.method === "PATCH") {
+        const response = new Promise((resolve) => {
+          upload.socket.rpcStreamRequests.set(upload.rpcId.toString(), { resolve });
+        });
+        upload.streamController.close();
+        rpcStreamChunkUploads.delete(parsedUrl.pathname);
+        return response;
+      }
+      if (options.method === "DELETE") {
+        upload.streamController.error(new Error("upload cancelled"));
+        rpcStreamChunkUploads.delete(parsedUrl.pathname);
+        return { ok: true, status: 204 };
+      }
     }
     if (rpcStreamBodies.has(parsedUrl.pathname) && options.method === "GET") {
       const source = rpcStreamBodies.get(parsedUrl.pathname);
@@ -606,30 +662,69 @@ globalThis.window = {
         },
       };
     }
-    let bodyBytes = null;
-    if (options.body instanceof ReadableStream) {
-      const reader = options.body.getReader();
-      const chunks = [];
-      let length = 0;
-      try {
-        while (true) {
-          const item = await reader.read();
-          if (item.done) break;
-          const chunk = new Uint8Array(item.value);
-          chunks.push(chunk);
-          length += chunk.length;
-        }
-      } finally {
-        reader.releaseLock();
+    if (
+      parsedUrl.pathname.startsWith("/bucket/") &&
+      parsedUrl.pathname !== "/bucket/_playmesh-stream/v1" &&
+      options.method === "POST" &&
+      parsedUrl.searchParams.get("transport") === "chunked-v1"
+    ) {
+      const uploadPath = `/bucket/_playmesh-stream/v1/upload-${bucketChunkUploads.size + 1}`;
+      bucketChunkUploads.set(uploadPath, {
+        chunks: [],
+        nextSequence: 0,
+        targetUrl: `${parsedUrl.pathname}${parsedUrl.searchParams.has("name")
+          ? `?name=${encodeURIComponent(parsedUrl.searchParams.get("name"))}`
+          : ""}`,
+      });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { uploadPath, chunkBytes: 64 * 1024 };
+        },
+      };
+    }
+    if (bucketChunkUploads.has(parsedUrl.pathname)) {
+      const upload = bucketChunkUploads.get(parsedUrl.pathname);
+      if (options.method === "POST") {
+        assert.equal(
+          Number(parsedUrl.searchParams.get("sequence")),
+          upload.nextSequence,
+        );
+        assert.ok(options.body instanceof Uint8Array);
+        assert.ok(options.body.byteLength <= 64 * 1024);
+        upload.chunks.push(new Uint8Array(options.body));
+        upload.nextSequence += 1;
+        return { ok: true, status: 204 };
       }
-      bodyBytes = new Uint8Array(length);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bodyBytes.set(chunk, offset);
-        offset += chunk.length;
+      if (options.method === "PATCH") {
+        const length = upload.chunks.reduce((total, chunk) => total + chunk.length, 0);
+        const bodyBytes = new Uint8Array(length);
+        let offset = 0;
+        for (const chunk of upload.chunks) {
+          bodyBytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        uploads.push({
+          url: upload.targetUrl,
+          options: { ...options, method: "POST" },
+          bodyBytes,
+        });
+        bucketChunkUploads.delete(parsedUrl.pathname);
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { url: "/bucket/fishing_save/1777777777777.bin" };
+          },
+        };
+      }
+      if (options.method === "DELETE") {
+        bucketChunkUploads.delete(parsedUrl.pathname);
+        return { ok: true, status: 204 };
       }
     }
-    uploads.push({ url, options, bodyBytes });
+    uploads.push({ url, options, bodyBytes: null });
     return {
       ok: true,
       async json() {

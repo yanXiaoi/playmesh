@@ -2,41 +2,75 @@
 
 ## 状态
 
-- 状态：App `5.1.0+37`、Runtime `2.1.0+11` 已完成当前源码与受影响自动化验证；Runtime
-  Android x86_64、Android ARM64 与 Windows x64 固定底包已从当前源码重建并同步更新
-  `resources/runtime/update.json`。主 App 与 Go Server 本轮未打包；Runtime 尚未发布，也未
-  完成 Android、Windows、长时在线和公网 TURN 跨设备手工验收。最新正式发行仍为
-  `4.5.0+33`。
-- 当前工作树：Runtime `2.1.0+11`、Go Core `0.7.0`、Core 协议 `1.5.0`、Game SDK
+- 状态：App `5.1.0+37`、Runtime `2.1.0+12` 已完成当前源码与受影响自动化验证；
+  GDevelop WebIDE、Runtime Android x86_64/ARM64/Windows x64 固定底包与主 App
+  Android/Windows 正式包已从当前源码重建并通过发行门禁。当前候选尚未完成 Android、
+  Windows、长时在线和公网 TURN 跨设备手工验收；最新正式发行仍为 `4.5.0+33`。
+- 当前工作树：Runtime `2.1.0+12`、Go Core `0.7.0`、Core 协议 `1.5.0`、Game SDK
   `4.3.0`、App Bridge SDK `3.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
   GDevelop Playmesh 扩展 `2.1.0`、Developer API / OpenAPI `5.0.0`、Developer CLI
   `2.0.0`。
-- 当前详细日志：`docs/version/5.0.1.md`；最新正式发布日志：`docs/version/4.5.0.md`。
+- 当前候选详细日志：`docs/version/5.1.0.md`；最新正式发布日志：`docs/version/4.5.0.md`。
   本文件后续内容保留既有版本归档。
 
 ## 未发布变更
 
+- 浏览器多人入口没有有效本地昵称时，自动生成并保存“浏览器”加 4 位随机小写字母或
+  数字，不再弹出首次昵称输入框。已有昵称、游戏信息中的手动改名、App 身份、玩家 ID、
+  重连和单机分享行为保留；本地存储不可用时仍可加入，但刷新后无法保证复用身份。
+  这是未发布 Game SDK `4.3.0` 的初始化实现调整，公开 API 和协议不变，不新增版本。
+  主 App 生成资源、Runtime 共用 SDK 来源与 GDevelop 扩展消费约定已同步；2026-08-31
+  已重建 Runtime `2.1.0+12` 三端固定底包，并确认各包内都包含本次昵称调整。主 App
+  安装包未重建，远端下载源未推送。
+- 修复 App SDK“加入游戏”面板只显示首次局域网发现快照的问题。面板现在直接订阅主 App
+  与 Runtime 共用的唯一发现 lease，房间公告出现、更新、goodbye 或 TTL 失效时立即显示、
+  更新或隐藏；订阅成功后房间保持可点击，并持续显示小型“持续扫描中...”状态。关闭面板、
+  菜单或文档时撤销界面订阅。公开 `playmesh.app.lan.discoverGames()` 签名和一次性返回语义
+  不变，该兼容修复合入尚未发布的 App SDK `3.5.0` 与 Runtime `2.1.0+11`，不新增版本。
+- 游戏清单的主画面与单屏多人控制器方向新增显式 `system`（跟随系统）。自动启动选择
+  `system` 时只请求全屏，不向 App/Runtime/浏览器指定、锁定或解除方向；App SDK 的
+  `device.setFullscreen()` 与 `ui.enterFullscreen()` 显式传入 `system` 时则解除已有方向锁。
+  新建、普通网页导入、CLI/Cocos 脚手架及 GDevelop SDK 动作的方向默认值统一为 `system`，
+  已有清单的显式横屏或竖屏不迁移。
+  源码工作区、普通网页包导入、Developer CLI/Cocos、GDevelop 投影、Runtime、Schema、
+  生成声明和测试已同步；变化合入现有 App SDK `3.5.0`、CLI `2.0.0` 与 GDevelop 扩展
+  `2.1.0`，未新增版本。
 - Runtime 的游戏包清单与 Game/App 宿主握手不再要求 SDK 请求版本精确命中历史发行枚举；
   改为接受兼容基线至随包最高 Bundle 的严格语义版本闭区间。当前接受 Game SDK
   `4.1.0`～`4.3.0`、App SDK `3.2.0`～`3.5.0`，包括区间内未单独枚举的 PATCH/MINOR；
   基线前、格式错误及高于随包 Bundle 的新版本继续拒绝。
 - Runtime App 宿主补齐与主 App 一致的 `_playmeshAppStorageSync.endpoint`、同步逻辑 Bucket
-  读写和生命周期关闭。该修复已进入本轮 `v2.1.0-build11` 三端固定底包。
+  读写和生命周期关闭。该修复此前已进入 `v2.1.0-build11`，本次 `build12` 继续保留。
 - Game SDK `4.3.0` 兼容新增 `rpc.requestStream(path, source, options?)` 与
   `rpc.onStreamRequest(path, handler, options?)`。Binary WS 仅承载鉴权控制和小型结果，实际
   File/Blob/ArrayBuffer/Uint8Array/ReadableStream 字节通过 Core 一次性 HTTP 数据面、32 KiB
   有界 pipe 和背压流向固定 Authority，以 EOF 结束，不使用结束字节、不缓存完整文件。
+  原先把 ReadableStream 直接作为 Fetch 请求体并设置 `duplex: "half"` 的实现不兼容普通浏览器、
+  Android WebView 和 Core HTTP/1.1，现已在同一未发布版本内改为私有 `chunked-v1` 会话：最多
+  64 KiB 的普通请求体顺序上传、单分块在途并显式完成/取消；已知长度且无发送进度的来源继续
+  使用单次普通 HTTP body。`StorageBucket.upload(ReadableStream)` 同步使用该兼容通道。
   Authority 可把收到的 ReadableStream 直接交给 `storage.upload(source, {name, type})`；单流
   上限 512 MiB，每玩家最多 4 个、每局最多 16 个，默认超时 5 分钟。发送与接收 options 均
   支持 `(transferredBytes, totalBytes)` 进度监听；未知总量为 `null`，回调失败不影响传输。
 
-### Runtime 固定底包 `v2.1.0-build11`
+### Runtime 固定底包 `v2.1.0-build12`（2026-08-31）
+
+因生成新的可分发底包，Runtime 构建号从 `11` 递增到 `12`，语义版本与公开 SDK 版本
+不变。Android x86_64、Android ARM64 和 Windows x64 均完成重建与统一包校验，已同步
+`resources/runtime/` 的三个固定文件与 `update.json`；旧 `build11` 归档保留。
+三个包内的四份 SDK 均与本次主 App 生成源逐字节一致，浏览器自动昵称逻辑已进入各包。
+Runtime 静态检查、90 项 Flutter 测试、Go Core 测试与浏览器 SDK 回归全部通过。
+完整大小、SHA-256、构建故障处理和已知限制见
+[Runtime build12 验证记录](../verification/runtime-2.1.0-build12-2026-08-31.md)。
+本轮未安装真机、未发布远端，也未重建主 App 或 Go Server。
+
+### 历史 Runtime 固定底包 `v2.1.0-build11`
 
 | 制品 | 架构 | 大小 | SHA-256 |
 | --- | --- | ---: | --- |
-| `playmesh-runtime-x86.apk` | Android x86_64 | 59,077,291 B | `d31449132b822c51906e8752bb796548693c4ef975b16b6ed4096d32aa05914f` |
-| `playmesh-runtime-arm.apk` | Android ARM64 | 51,688,128 B | `58b687fe53079b50184a1b99a86b49834c272a56454f292c583ef8b4708a8f02` |
-| `playmesh-runtime-win.zip` | Windows x64 | 20,558,952 B | `d7427c0fca5a609aa1290b4da111aed2c24ba162057cc030ef0418c21644fe38` |
+| `playmesh-runtime-x86.apk` | Android x86_64 | 59,095,995 B | `c7d08fc69b9969e91bd9e521c1f96eeaee1bca68fb18728c2f6895d258951875` |
+| `playmesh-runtime-arm.apk` | Android ARM64 | 51,690,444 B | `13dd6b5742208bed0811110b6b2521255b91a40994a0473bdb75231f0f822c17` |
+| `playmesh-runtime-win.zip` | Windows x64 | 20,572,489 B | `21567922f79a1840a92fa504c5d47a722a592fbf58360161207a5759d83adad5` |
 
 正式构建脚本完成 Android ABI、签名、16 KiB 对齐、SDK 哈希、Windows 包结构和安装后解密
 校验。首次 Windows 并行编译因 MSVC `C1060` 堆空间不足失败；构建入口固定为默认 2 路 Ninja

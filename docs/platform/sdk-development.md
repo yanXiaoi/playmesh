@@ -104,6 +104,12 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 可以因终端布局自适应，但其游戏信息和性能数据仍只能读取 `playmesh-main.js`。
 旧 `playmesh.js` 文件不兼容、不保留。
 
+浏览器多人身份初始化统一经过 Game SDK 的 `resolveBrowserNickname()`：优先复用有效
+本地昵称；缺失或无效时生成“浏览器”加 4 位随机小写字母或数字，沿用
+`playmesh.nickname.v1` 保存，不创建首次输入层。游戏信息中的手动改名仍经过
+`playmesh.main.player.setNickname()`；App 身份、玩家 ID、重连和单机分享流程不变。
+昵称仅供展示，不保证唯一。Runtime 与 GDevelop 继续消费同一 SDK，不另建昵称实现。
+
 ## 当前公开 SDK 方法
 
 当前 Game SDK 为 `4.3.0`，App Bridge SDK 为 `3.5.0`。下表是当前公开面；
@@ -187,18 +193,25 @@ Authority 可以调用 `onRequest(path, handler)`。handler 可直接返回值�
 会话、Authority 身份、path、帧大小、并发和超时，业务 payload 始终作为不透明字节转发。
 
 Game SDK `4.3.0` 的 `requestStream/onStreamRequest` 把大字节源拆成控制面与数据面：Binary
-WebSocket 只通知固定 Authority 并返回小型编码结果；File、Blob、ArrayBuffer、Uint8Array
-或 `ReadableStream<Uint8Array>` 通过 SDK 私有、同会话鉴权的 HTTP body 流向 Core，再由
-一次性 Authority GET 以 `io.Pipe`、32 KiB 有界缓冲和背压转发。结束条件是 HTTP EOF，不能
-增加业务结束字节。流不进入 Binary 帧、JSON/Base64、临时文件或完整内存缓冲；“无完整文件
-缓存”不能写成“零内存占用”。只有固定 Authority 可以注册和消费，游戏不能构造私有端点。
+WebSocket 只通知固定 Authority 并返回小型编码结果。已知长度且未监听发送进度的 File、Blob、
+ArrayBuffer、Uint8Array 可直接使用普通 HTTP body；真正的 `ReadableStream<Uint8Array>`，以及
+需要发送进度的来源，必须使用 SDK 私有的 `chunked-v1` 上传会话：先初始化，再用普通、已知长度、
+最多 64 KiB 的 HTTP 请求体顺序发送分块，最后显式完成或取消。任一时刻只能有一个分块在途，
+不得把 `ReadableStream` 直接作为 Fetch 请求体，也不得依赖 `duplex: "half"`；这是普通浏览器、
+Android WebView 和 Core HTTP/1.1 的共同兼容边界。
 
-发送和接收 options 都可注册 `(transferredBytes, totalBytes)` 进度回调。发送进度表示 Fetch
-已从 source 拉取字节，接收进度表示 handler 已拉取字节；都不等同于网络确认或磁盘落盘。
-未知 ReadableStream 的总量为 `null`，回调异常只记录、不得改变传输结果。单流上限 512 MiB，
-SDK 每页面与 Core 每玩家最多并发 4 个，Core 每局最多 16 个；默认总超时 5 分钟，可配置
-1 秒至 30 分钟。handler 结果仍走普通 RPC 编码并保持 `4 MiB - 64 KiB` 上限。Authority 可把
-收到的 ReadableStream 直接传给 `StorageBucket.upload(source, {name, type})`，全链路保持背压。
+Core 在每个分块响应前把字节写入一次性 Authority GET 的 `io.Pipe`，以 32 KiB 有界缓冲和
+背压转发；完成请求关闭 pipe 后，Authority 以 HTTP EOF 结束，不能增加业务结束字节。流不进入
+Binary 帧、JSON/Base64、临时文件或完整内存缓冲；“无完整文件缓存”不能写成“零内存占用”。
+只有固定 Authority 可以注册和消费，游戏不能构造私有端点。`StorageBucket.upload()` 对真正
+ReadableStream 使用相同的顺序分块协议，主 App 与 Runtime 网关必须实现相同行为。
+
+发送和接收 options 都可注册 `(transferredBytes, totalBytes)` 进度回调。发送进度表示 SDK
+分块循环已从 source 拉取字节，接收进度表示 handler 已拉取字节；都不等同于网络确认或磁盘
+落盘。未知 ReadableStream 的总量为 `null`，回调异常只记录、不得改变传输结果。单流上限
+512 MiB，SDK 每页面与 Core 每玩家最多并发 4 个，Core 每局最多 16 个；默认总超时 5 分钟，
+可配置 1 秒至 30 分钟。handler 结果仍走普通 RPC 编码并保持 `4 MiB - 64 KiB` 上限。Authority
+可把收到的 ReadableStream 直接传给 `StorageBucket.upload(source, {name, type})`，全链路保持背压。
 
 面向游戏开发者的唯一全局对象是 `window.playmesh`，其根级公开成员严格只有
 `ready`、`main` 与 `app`。`window.playmeshApp` 不存在，公开的 `main`/`app`
@@ -303,9 +316,14 @@ multicast wire v1（1 秒公告、4 秒 TTL、单包最多 1200 字节），不�
 发现栈或已知节点单播适配器；`host` 来自数据报 source IP，而不是 JavaScript 或 payload。
 Android、Windows、macOS、Linux 支持该宿主能力，iOS/Web 返回明确不可用。
 
-统一加入弹窗调用 `discoverGames()` 时只将局域网房间列表标记为 busy，并在该区域显示简短
-的“扫描中”动效；扫码和邀请链接输入不得随发现请求锁定。发现完成、失败或弹窗关闭都必须
-清除列表扫描状态，减少动态效果偏好下不得持续旋转。
+统一加入弹窗打开时通过 `app.lan` feature 的注册表内私有订阅命令消费宿主同一个发现
+lease；首次快照和后续 resolved/lost/TTL 更新必须立即增加、替换或移除房间按钮，不允许
+定时调用公开 `discoverGames()` 轮询，也不得建立第二份发现缓存。建立订阅前只将房间区域
+标记为 busy；订阅成功后必须解除 busy、保持房间按钮可操作，并持续显示小型
+“持续扫描中...”状态。扫码和邀请链接输入不得随发现订阅锁定。关闭弹窗、关闭菜单或文档
+重置时按订阅 ID 撤销界面投影；失败时清除持续扫描状态。订阅命令与快照消息属于平台 UI
+私有协议，不进入 `.d.ts`、SDK Manifest 的公开 API、提示词或游戏可调用对象；公开
+`discoverGames()` 的签名与一次性返回语义保持不变。
 
 `getShareLinks()` 是新的明确安全授权：只允许 Playmesh App WebView 中宿主确认的当前
 本机 Authority/standalone host，返回冻结的 `{url,type,img}` 数组；`url` 是完整 LAN
@@ -314,6 +332,14 @@ Android、Windows、macOS、Linux 支持该宿主能力，iOS/Web 返回明确�
 浏览器、远程加入页、非房主或失效 context 必须拒绝。平台不得记录、持久化、分析或在
 错误中回显 URL、token、PNG；但已经被授权的房主游戏代码能够自行复制和外传它们，
 旧的绝对禁读结论不再适用。
+
+屏幕方向合同由清单自动启动和 SDK 主动调用共同使用，但二者不能混淆。清单
+`orientation/controllerOrientation` 接受 `landscape`、`portrait`、`system`；自动启动遇到
+`system` 时必须只请求全屏并真正省略 Bridge 方向字段，浏览器也不得调用方向 `lock()` 或
+`unlock()`。公开 `device.setFullscreen(true, orientation?)` 与
+`ui.enterFullscreen(orientation?)` 则允许游戏显式传入 `system`，此时宿主或浏览器必须解除
+当前页面已有方向锁；省略参数仍表示不做方向操作。退出全屏不得携带方向。该兼容新增合入
+现有 App SDK `3.5.0`，不增加新版本。
 
 App UI feature 另提供同步无返回值的
 `playmesh.app.ui.disableSystemMenuTriggers()`。方法严格无参数，仅在 `app.ready` 完成后

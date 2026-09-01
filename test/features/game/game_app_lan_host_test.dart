@@ -58,6 +58,50 @@ void main() {
     expect(games.single.host, '192.168.1.20:16667');
   });
 
+  test('发现订阅立即推送房间出现与移除，取消后停止界面投影', () async {
+    final harness = _HostHarness();
+    addTearDown(harness.close);
+    final updates = <AppLanDiscoverySnapshot>[];
+    const subscriptionId = 'app-ui-join-host-test';
+
+    await harness.host.subscribeDiscoveredGames(
+      subscriptionId,
+      (snapshot) async => updates.add(snapshot),
+    );
+    expect(updates, hasLength(1));
+    expect(updates.single.state, AppLanDiscoveryState.ready);
+    expect(updates.single.games, isEmpty);
+
+    final discovery = harness.platform.discoveries.single;
+    final room = _record(
+      platformId: 'live-room',
+      instanceId: _remoteInstanceId,
+      gameId: _expectedGameId,
+      name: 'Live room',
+      address: '192.168.1.20',
+    );
+    discovery.add(room);
+    await _waitUntil(() => updates.last.games.length == 1);
+    expect(updates.last.games.single.instanceId, _remoteInstanceId);
+
+    discovery.add(LanGamePlatformLost(room.platformId));
+    await _waitUntil(() => updates.length >= 3 && updates.last.games.isEmpty);
+
+    await harness.host.unsubscribeDiscoveredGames(subscriptionId);
+    final updateCount = updates.length;
+    discovery.add(
+      _record(
+        platformId: 'after-unsubscribe',
+        instanceId: _otherInstanceId,
+        gameId: _expectedGameId,
+        name: 'Ignored room',
+        address: '192.168.1.30',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(updates, hasLength(updateCount));
+  });
+
   test('discover 建立短期 instance 映射，resetDocument 后立即失效', () async {
     final harness = _HostHarness(
       discoveryDuration: const Duration(milliseconds: 40),

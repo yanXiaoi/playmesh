@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
@@ -12,6 +13,9 @@ const _synchronousStorageHeader = 'x-playmesh-storage-sync';
 const playmeshStandardJsonBucketPath = '/bucket/_playmesh-json/v1';
 const playmeshStandardJsonProtocolVersion = '1.0.0';
 const playmeshEndpointBoundStorageGameId = '@playmesh-current-game';
+const playmeshChunkedBucketUploadPath = '/bucket/_playmesh-stream/v1';
+const playmeshChunkedBucketUploadTransport = 'chunked-v1';
+const playmeshChunkedBucketUploadBytes = 64 * 1024;
 const _standardJsonEnvelopeBytes = 128 * 1024;
 const _maxSynchronousGetPayloadBytes = 12 * 1024;
 const _maxSynchronousGetQueryBytes = 16 * 1024;
@@ -95,10 +99,207 @@ class StandardJsonBucketRequestLedger {
   }
 }
 
+class GameBucketChunkUploadRegistry {
+  static const _maxUploadsPerScope = 4;
+  static const _uploadTimeout = Duration(minutes: 30);
+
+  final Map<String, _GameBucketChunkUpload> _uploads = {};
+  bool _closed = false;
+
+  Future<String> open({
+    required GameStorageService storage,
+    required String scope,
+    required String bucket,
+    required String originalName,
+    required int? contentLength,
+  }) async {
+    if (_closed) throw const FormatException('存储上传网关已经关闭');
+    if (contentLength != null &&
+        (contentLength < 0 ||
+            contentLength > GameStorageService.maxUploadBytes)) {
+      throw const FormatException('上传文件不能超过 512 MiB');
+    }
+    final activeForScope = _uploads.values
+        .where((upload) => upload.scope == scope)
+        .length;
+    if (activeForScope >= _maxUploadsPerScope) {
+      throw const FormatException('当前页面等待中的文件上传过多');
+    }
+    final random = Random.secure();
+    var token = '';
+    do {
+      token = base64Url
+          .encode(List<int>.generate(32, (_) => random.nextInt(256)))
+          .replaceAll('=', '');
+    } while (_uploads.containsKey(token));
+    final controller = StreamController<List<int>>(sync: true);
+    late final _GameBucketChunkUpload upload;
+    final result = storage
+        .upload(
+          bucket: bucket,
+          originalName: originalName,
+          data: controller.stream,
+          contentLength: contentLength,
+        )
+        .then<_GameBucketUploadOutcome>(
+          (url) => _GameBucketUploadOutcome(url: url),
+          onError: (Object error, StackTrace stackTrace) =>
+              _GameBucketUploadOutcome(error: error, stackTrace: stackTrace),
+        );
+    upload = _GameBucketChunkUpload(
+      scope: scope,
+      contentLength: contentLength,
+      controller: controller,
+      result: result,
+      onTimeout: () => unawaited(abort(token: token, scope: scope)),
+    );
+    _uploads[token] = upload;
+    return '$playmeshChunkedBucketUploadPath/$token';
+  }
+
+  Future<void> append({
+    required String token,
+    required String scope,
+    required int sequence,
+    required Uint8List bytes,
+  }) {
+    final upload = _authorized(token, scope);
+    return upload.append(sequence, bytes);
+  }
+
+  Future<String> complete({
+    required String token,
+    required String scope,
+  }) async {
+    final upload = _authorized(token, scope);
+    try {
+      return await upload.complete();
+    } finally {
+      _uploads.remove(token);
+    }
+  }
+
+  Future<void> abort({required String token, required String scope}) async {
+    final upload = _uploads[token];
+    if (upload == null) return;
+    if (upload.scope != scope) throw const FormatException('存储上传会话无效');
+    _uploads.remove(token);
+    await upload.abort();
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final uploads = _uploads.values.toList(growable: false);
+    _uploads.clear();
+    await Future.wait(uploads.map((upload) => upload.abort()));
+  }
+
+  _GameBucketChunkUpload _authorized(String token, String scope) {
+    final upload = _uploads[token];
+    if (upload == null || upload.scope != scope) {
+      throw const FormatException('存储上传会话无效');
+    }
+    return upload;
+  }
+}
+
+class _GameBucketChunkUpload {
+  _GameBucketChunkUpload({
+    required this.scope,
+    required this.contentLength,
+    required this.controller,
+    required this.result,
+    required void Function() onTimeout,
+  }) : _timer = Timer(GameBucketChunkUploadRegistry._uploadTimeout, onTimeout);
+
+  final String scope;
+  final int? contentLength;
+  final StreamController<List<int>> controller;
+  final Future<_GameBucketUploadOutcome> result;
+  final Timer _timer;
+  Future<void> _tail = Future<void>.value();
+  int _nextSequence = 0;
+  int _written = 0;
+  bool _closed = false;
+
+  Future<T> _serial<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    _tail = _tail.then((_) async {
+      try {
+        completer.complete(await operation());
+      } on Object catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<void> append(int sequence, Uint8List bytes) => _serial(() async {
+    if (_closed) throw const FormatException('存储上传已经结束');
+    if (sequence != _nextSequence) {
+      throw const FormatException('存储上传分块顺序无效');
+    }
+    if (bytes.isEmpty || bytes.length > playmeshChunkedBucketUploadBytes) {
+      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+    }
+    final next = _written + bytes.length;
+    if (next > GameStorageService.maxUploadBytes ||
+        (contentLength != null && next > contentLength!)) {
+      throw const FormatException('上传文件不能超过声明大小或 512 MiB');
+    }
+    await controller.addStream(Stream<List<int>>.value(bytes));
+    _written = next;
+    _nextSequence++;
+  });
+
+  Future<String> complete() => _serial(() async {
+    if (_closed) throw const FormatException('存储上传已经结束');
+    if (contentLength != null && _written != contentLength!) {
+      await _abortInternal(const FormatException('上传文件实际大小与声明大小不一致'));
+      throw const FormatException('上传文件实际大小与声明大小不一致');
+    }
+    _closed = true;
+    _timer.cancel();
+    await controller.close();
+    final outcome = await result;
+    if (outcome.error != null) {
+      Error.throwWithStackTrace(outcome.error!, outcome.stackTrace!);
+    }
+    return outcome.url!;
+  });
+
+  Future<void> abort() => _serial(() async {
+    await _abortInternal(const _GameBucketUploadCancelled());
+  });
+
+  Future<void> _abortInternal(Object error) async {
+    if (_closed) return;
+    _closed = true;
+    _timer.cancel();
+    controller.addError(error);
+    await controller.close();
+    await result;
+  }
+}
+
+class _GameBucketUploadOutcome {
+  const _GameBucketUploadOutcome({this.url, this.error, this.stackTrace});
+
+  final String? url;
+  final Object? error;
+  final StackTrace? stackTrace;
+}
+
+class _GameBucketUploadCancelled implements Exception {
+  const _GameBucketUploadCancelled();
+}
+
 /// 处理同源 `/bucket` 文件上传与读取。返回 false 表示请求不属于该路由。
 Future<bool> handleGameBucketRequest(
   HttpRequest request, {
   required GameStorageService storage,
+  required GameBucketChunkUploadRegistry chunkUploads,
   StandardJsonBucketAuthorizer? authorizeUpload,
   StandardJsonBucketAuthorizer? authorizeStandardJson,
   StandardJsonBucketRequestLedger? standardJsonLedger,
@@ -112,6 +313,17 @@ Future<bool> handleGameBucketRequest(
       storage: storage,
       authorize: authorizeStandardJson,
       ledger: standardJsonLedger,
+    );
+    return true;
+  }
+
+  if (segments.length == 4 &&
+      '/${segments.take(3).join('/')}' == playmeshChunkedBucketUploadPath) {
+    await _handleChunkedBucketUpload(
+      request,
+      token: segments[3],
+      authorize: authorizeUpload,
+      registry: chunkUploads,
     );
     return true;
   }
@@ -141,6 +353,43 @@ Future<bool> handleGameBucketRequest(
       await _json(request.response, HttpStatus.badRequest, {
         'error': '缺少上传文件名',
       });
+      return true;
+    }
+    if (request.uri.queryParameters['transport'] ==
+        playmeshChunkedBucketUploadTransport) {
+      final rawSize = request.uri.queryParameters['size'];
+      final contentLength = rawSize == null ? null : int.tryParse(rawSize);
+      if (rawSize != null && contentLength == null) {
+        await _jsonError(
+          request.response,
+          HttpStatus.badRequest,
+          'storage_stream_size_invalid',
+          '上传文件 size 必须是非负整数',
+        );
+        return true;
+      }
+      try {
+        final uploadPath = await chunkUploads.open(
+          storage: storage,
+          scope: authorization.scope,
+          bucket: segments[1],
+          originalName: originalName,
+          contentLength: contentLength,
+        );
+        await _json(request.response, HttpStatus.created, {
+          'uploadPath': uploadPath,
+          'chunkBytes': playmeshChunkedBucketUploadBytes,
+        });
+      } on FormatException catch (error) {
+        await _jsonError(
+          request.response,
+          error.message.toString().contains('512 MiB')
+              ? HttpStatus.requestEntityTooLarge
+              : HttpStatus.badRequest,
+          'storage_stream_open_invalid',
+          error.message.toString(),
+        );
+      }
       return true;
     }
     try {
@@ -201,6 +450,102 @@ Future<bool> handleGameBucketRequest(
     await _text(request.response, HttpStatus.notFound, '文件不存在');
   }
   return true;
+}
+
+Future<void> _handleChunkedBucketUpload(
+  HttpRequest request, {
+  required String token,
+  required StandardJsonBucketAuthorizer? authorize,
+  required GameBucketChunkUploadRegistry registry,
+}) async {
+  final authorization = authorize?.call(request);
+  if (authorization == null ||
+      authorization.scope.isEmpty ||
+      !authorization.isAuthority) {
+    await _jsonError(
+      request.response,
+      HttpStatus.forbidden,
+      authorization?.isAuthority == false
+          ? 'not_authority'
+          : 'storage_session_invalid',
+      authorization?.isAuthority == false
+          ? '只有 Authority 主机可以写入 Main Bucket'
+          : '存储会话无效',
+    );
+    return;
+  }
+  try {
+    switch (request.method) {
+      case 'POST':
+        final sequence = int.tryParse(
+          request.uri.queryParameters['sequence'] ?? '',
+        );
+        if (sequence == null || sequence < 0) {
+          throw const FormatException('存储上传分块序号必须是非负整数');
+        }
+        final bytes = await _readChunkedBucketBody(request);
+        await registry.append(
+          token: token,
+          scope: authorization.scope,
+          sequence: sequence,
+          bytes: bytes,
+        );
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+        return;
+      case 'PATCH':
+        if (request.contentLength > 0) {
+          throw const FormatException('存储上传完成请求不能携带请求体');
+        }
+        final url = await registry.complete(
+          token: token,
+          scope: authorization.scope,
+        );
+        await _json(request.response, HttpStatus.created, {'url': url});
+        return;
+      case 'DELETE':
+        await registry.abort(token: token, scope: authorization.scope);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+        return;
+      default:
+        await _jsonError(
+          request.response,
+          HttpStatus.methodNotAllowed,
+          'storage_stream_method_invalid',
+          '存储上传方法不受支持',
+        );
+    }
+  } on FormatException catch (error) {
+    await _jsonError(
+      request.response,
+      error.message.toString().contains('512 MiB')
+          ? HttpStatus.requestEntityTooLarge
+          : HttpStatus.badRequest,
+      'storage_stream_invalid',
+      error.message.toString(),
+    );
+  }
+}
+
+Future<Uint8List> _readChunkedBucketBody(HttpRequest request) async {
+  if (request.contentLength <= 0 ||
+      request.contentLength > playmeshChunkedBucketUploadBytes) {
+    throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+  }
+  final builder = BytesBuilder(copy: false);
+  var received = 0;
+  await for (final chunk in request) {
+    received += chunk.length;
+    if (received > playmeshChunkedBucketUploadBytes) {
+      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+    }
+    builder.add(chunk);
+  }
+  if (received != request.contentLength) {
+    throw const FormatException('存储上传分块长度不匹配');
+  }
+  return builder.takeBytes();
 }
 
 Future<void> _handleStandardJson(

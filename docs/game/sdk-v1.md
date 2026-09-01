@@ -120,7 +120,7 @@ bootstrap 超时、版本拒绝或宿主错误会直接使 `app.ready`、`main.r
 重新显示，不保存结果。用户同意后继续初始化，即使某项标记为“本平台暂不支持”也不会
 阻塞；用户拒绝时 Promise 以 `capability_denied` 拒绝，并由 SDK 请求退出当前游戏。
 
-Game SDK 会把当前页面的方向传给 App SDK 宿主桥；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过居中游戏菜单的全屏操作再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺失时由 SDK 生成 ID 或弹出昵称输入层，然后建立 WebSocket。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
+Game SDK 会把当前页面的固定方向传给 App SDK 宿主桥；普通浏览器首页与控制器首页会在不显示提示层、不阻塞 SDK 初始化的前提下尽力调用 Fullscreen API，并在成功后尝试 Screen Orientation API。清单方向为 `system` 时，自动启动只请求全屏，方向参数会被真正省略，也不会调用浏览器的方向锁定或解除接口。浏览器因缺少用户手势等原因拒绝时只记录信息并继续游玩，用户仍可通过居中游戏菜单的全屏操作再次触发。通过 App 打开的联机页面自动使用 App 身份和昵称；普通浏览器读取 `localStorage` 中的玩家 ID 与昵称，缺少 ID 时由 SDK 生成；没有有效昵称时自动生成并保存“浏览器”加 4 位随机小写字母或数字，不显示昵称输入层，然后建立 WebSocket。本地存储不可用时仍可使用本次生成的身份加入，但刷新后无法保证复用。单机浏览器分享页完成 SDK 初始化后不创建玩家和 Session、不生成昵称、不显示昵称界面，也不建立 WebSocket。其他初始化失败时 Promise 会拒绝，页面应展示可恢复错误。
 
 ## 游戏声明
 
@@ -557,6 +557,23 @@ SDK 会在发出命令前同步记录当前游戏 DOM 的焦点元素。分享�
 普通浏览器再回退到游戏文档。这个私有过程不会把分享 Token、链接、二维码
 或 App 本地化词典暴露给游戏。
 
+### 全屏与屏幕方向
+
+```js
+await playmesh.app.device.setFullscreen(true, "landscape");
+await playmesh.app.ui.enterFullscreen("portrait");
+
+// 显式解除当前页面已有的方向锁，随后跟随系统。
+await playmesh.app.ui.enterFullscreen("system");
+```
+
+`playmesh.app.device.setFullscreen(true, orientation?)` 与
+`playmesh.app.ui.enterFullscreen(orientation?)` 的方向参数都接受 `landscape`、
+`portrait` 或 `system`。固定值请求锁定相应方向；显式传入 `system` 请求解除已有方向锁。
+省略参数表示本次不做任何方向操作，与显式 `system` 不同。退出全屏必须调用
+`setFullscreen(false)` 或 `ui.exitFullscreen()`，退出调用携带方向会以
+`invalid_argument` 拒绝。
+
 ### `playmesh.app.ui.disableSystemMenuTriggers()`
 
 ```js
@@ -768,18 +785,25 @@ const url = await playmesh.main.rpc.requestStream(
 `name`、`type` 和 `size` 的上下文。已知源大小会传入 `size`；原始 ReadableStream 未知长度时
 为 `null`。
 
-发送端 `onProgress` 表示 source 字节已被 Fetch 拉取并交给浏览器网络栈，不表示对端确认、
+发送端 `onProgress` 表示 source 字节已被 SDK 分块循环拉取，不表示分块请求完成、对端确认、
 TCP ACK 或磁盘落盘；接收端 `onProgress` 表示对应字节已由 handler 拉取。回调参数固定为
 `(transferredBytes, totalBytes)`，未知总量时 `totalBytes` 为 `null`。SDK 会忽略并记录进度
 回调自身的同步异常或 Promise 拒绝，不能让仅用于 UI 的监听器中断传输。Authority handler
 返回且 `requestStream()` resolve，只表示业务处理完成；转存到 Bucket 时以 `upload()` Promise
 完成作为宿主已接收文件的确认。
 
-字节流以标准 HTTP body EOF 结束，不定义也不扫描结束字节，因此所有 0～255 字节值都可原样
-出现。Binary WebSocket 只承载鉴权后的开始控制帧和小型 RPC 结果；实际字节走 Core 的一次性、
-同会话 HTTP 流入口。游戏不得读取 token 或自行构造该私有入口。Core 只允许当前在线固定
-Authority 消费一次，并以 32 KiB 有界缓冲和背压在发送方与接收方之间转发；这表示不会缓存
-完整文件或落临时盘，不表示进程在传输时“零内存占用”。
+字节流不定义也不扫描结束字节，因此所有 0～255 字节值都可原样出现。已知长度且没有发送进度
+监听的 File、Blob、ArrayBuffer、Uint8Array 可以使用普通 HTTP body；真正的 ReadableStream，
+以及启用发送进度的来源，会由 SDK 私有 `chunked-v1` 通道拆成最多 64 KiB 的普通 HTTP 请求体，
+按序逐块发送，完成时关闭 Authority 数据面并由标准 HTTP EOF 结束。SDK 不会把 ReadableStream
+直接交给 Fetch，也不依赖 `duplex: "half"`，因此可运行于普通浏览器、Android WebView 与
+Core 的 HTTP/1.1 服务。
+
+Binary WebSocket 只承载鉴权后的开始控制帧和小型 RPC 结果；实际字节走 Core 的一次性、同会话
+HTTP 流入口。游戏不得读取 token 或自行构造该私有入口。Core 只允许当前在线固定 Authority
+消费一次；每个分块必须等 Core 写入 32 KiB 有界 pipe 后才能继续，保持背压且只允许一个分块
+在途。这表示不会缓存完整文件或落临时盘，不表示进程在传输时“零内存占用”。Authority 把收到
+的流交给 `StorageBucket.upload()` 时，Bucket 网关采用同一顺序分块规则。
 
 单个流上限为 512 MiB；每个发送页面最多同时等待 4 个流，Core 每个玩家最多 4 个、每局最多
 16 个。`timeoutMs` 必须是 1000～1800000 的整数，默认 300000，覆盖上传、Authority 消费和
@@ -912,7 +936,8 @@ JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/
 上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch`
 的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。JSON 网关是
 固定绑定当前游戏和会话的 SDK 内部传输，不是游戏可自行构造的公开业务接口；
-`upload(...)` 仍独立使用原始字节 `POST` 和 `data/data` 目录，绝不与 JSON root 混存。
+`upload(...)` 仍独立使用原始字节：已知长度来源使用普通 `POST`，ReadableStream 使用顺序
+分块会话，并统一写入 `data/data` 目录，绝不与 JSON root 混存。
 浏览器 `localStorage` 只允许 SDK 保存玩家 ID 与昵称偏好，不保存玩家凭证或 Bucket；其他
 App 玩家访问同一 Authority 主机存储服务。
 
@@ -1051,7 +1076,7 @@ panel。
 ## 浏览器行为
 
 - 当前页面角色对应的 `required` 或 `controllerRequired` 非空时，浏览器每次加载都由主 SDK 弹出能力确认；空数组是有效声明，绝不回退到另一角色。不支持项只做标注，不阻止同意后进入。
-- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 游戏菜单保留全屏操作；`playmesh.ready` 和加入对局不依赖全屏成功。
+- 浏览器主游戏页和控制器页都会无弹窗尽力自动全屏，并在 SDK 游戏菜单保留全屏操作；清单为 `system` 时自动请求省略方向且不调用方向锁定/解除接口；`playmesh.ready` 和加入对局不依赖全屏成功。
 - `playmesh-app.js` 在捕获阶段监听 `Escape`、浏览器返回键、Android Menu keyCode 和菜单键。Android/桌面返回入口与普通浏览器悬浮按钮都在入口事件到达后执行 `onSystemMenuRequest()`，只有 `NEXT` 才继续各自符合当前配置的 SDK 默认流程；原生层不注入、不转发这些网页按键。
 - 普通浏览器加载 Authority 主机提供的默认 App SDK；默认菜单至少提供继续、刷新、游戏信息、运行日志和退出游戏，且只有普通浏览器显示可拖动悬浮入口。
 - 普通多人多屏分享加载清单显式声明的 `main.json.entries.game`，浏览器玩家加入
@@ -1061,7 +1086,7 @@ panel。
 - 自定义嵌套 HTML 入口由网关按入口所在目录设置页面基准 URL，页面内相对 CSS、脚本
   和图片仍解析到当前游戏的运行时根路径，不会改变 SDK、会话或存储边界。
 - 浏览器入口由主机分享网关注入配置，游戏不能自行拼接地址或 token。
-- 分享 URL 和宿主注入配置不携带临时昵称。SDK 首次进入时显示昵称输入层并写入 `localStorage`，后续刷新自动复用昵称。
+- 分享 URL 和宿主注入配置不携带临时昵称。SDK 在没有有效本地昵称时自动生成“浏览器”加 4 位随机小写字母或数字并写入 `localStorage`，不弹出输入层；后续刷新自动复用昵称，游戏信息中的手动修改入口保留。随机昵称不保证唯一，玩家身份仍由持久化 ID 区分。
 - 浏览器每次刷新都重新调用加入接口，但复用 `localStorage` 中的玩家 ID 和昵称；短期凭证不持久化。运行中旧连接掉线会先触发 `playmesh.main.lifecycle.onChange()`，SDK 随后只尝试原端点；同 ID 重连可由游戏恢复准备状态和临时玩家状态，若底层 Pion 通道已关闭则仍需玩家从现有入口手动重进。
 - SDK 在普通浏览器页面上提供隔离于游戏样式的居中游戏菜单和随系统明暗模式切换的二级弹窗；修改昵称后更新 Core 会话和本地昵称偏好。App 扫码加入环境复用同一个 `playmesh-app.js` 菜单实现。
 - 旧浏览器连接断开后，其玩家从会话成员集合移除并释放人数名额；短暂的刷新竞态由 SDK 对 `session_full` 做有限重试。

@@ -168,8 +168,7 @@ class AppWebViewBridge {
           confirmCapabilities: _confirmCapabilities,
           capabilityRuntime: _capabilityRuntime,
           mediaRuntime: mediaRuntime,
-          sendCapabilityEvent: (message) =>
-              send(_encodeAppBridgeMessage(message)),
+          sendAppEvent: (message) => send(_encodeAppBridgeMessage(message)),
           disposeCapability: _disposeCapability,
           setFullscreen: _fullscreen,
           openSharePanel: _openSharePanel,

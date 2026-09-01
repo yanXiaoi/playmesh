@@ -220,6 +220,8 @@ export const assertPlaymeshProjectConfig = (
   ) {
     return fail();
   }
+  const webRuntimeMultithreading /*: boolean */ =
+    config.webRuntimeMultithreading;
   let gameType /*: PlaymeshProjectGameType */;
   try {
     gameType = validatePlaymeshProjectGameType(config.gameType);
@@ -239,7 +241,7 @@ export const assertPlaymeshProjectConfig = (
     minPlayers,
     maxPlayers,
     tags: normalizePlaymeshProjectTags(config.tags),
-    webRuntimeMultithreading: config.webRuntimeMultithreading,
+    webRuntimeMultithreading,
     updatedAt: requireUtcTimestamp(config.updatedAt),
   };
 };

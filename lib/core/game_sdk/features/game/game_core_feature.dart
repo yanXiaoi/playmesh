@@ -11,7 +11,7 @@ type PlaymeshUnsubscribe = () => void;
 
 /** SDK 可以跨 Bridge、HTTP 或 WebSocket 传输的 JSON 值。不能包含函数、循环引用或类实例。 */
 type PlaymeshJson = null | boolean | number | string | PlaymeshJson[] | { [key: string]: PlaymeshJson };
-type PlaymeshOrientation = "landscape" | "portrait";
+type PlaymeshOrientation = "landscape" | "portrait" | "system";
 type PlaymeshDisplayMode = "solo" | "multi_screen" | "single_screen_multiplayer";
 
 /** 当前会话中的玩家。 */
@@ -477,7 +477,7 @@ interface PlaymeshAppUiApi {
   openSharePanel(): Promise<void>;
   /** 打开 SDK 运行日志覆盖层。 @playmesh-completion playmesh.app.ui.openRuntimeLogs */
   openRuntimeLogs(): Promise<boolean>;
-  /** 进入全屏。 @playmesh-completion playmesh.app.ui.enterFullscreen */
+  /** 进入全屏；system 表示解除已有方向锁并跟随系统。 @playmesh-completion playmesh.app.ui.enterFullscreen */
   enterFullscreen(orientation?: PlaymeshOrientation): Promise<unknown>;
   /** 退出全屏。 @playmesh-completion playmesh.app.ui.exitFullscreen */
   exitFullscreen(): Promise<unknown>;
@@ -540,7 +540,7 @@ interface PlaymeshAppApi {
   readonly device: {
     /** 返回宿主平台名称，例如 `android` 或 `windows`；普通浏览器返回 `null`。 @playmesh-completion playmesh.app.device.getPlatform */
     getPlatform(): string | null;
-    /** 请求 App WebView 进入或退出全屏；进入时可同时锁定横屏或竖屏。 @playmesh-completion playmesh.app.device.setFullscreen */
+    /** 请求 App WebView 进入或退出全屏；进入时可锁定横屏/竖屏，system 表示解除已有方向锁并跟随系统。 @playmesh-completion playmesh.app.device.setFullscreen */
     setFullscreen(enabled: boolean, orientation?: PlaymeshOrientation): Promise<unknown>;
     /** 订阅 App 统一输入事件。 @returns 取消订阅函数。 @playmesh-completion playmesh.app.device.onInput */
     onInput(callback: (input: unknown) => void): PlaymeshUnsubscribe;

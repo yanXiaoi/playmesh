@@ -116,7 +116,7 @@ class _AppCapabilityFeature implements _AppSdkCommandFeature {
       case 'app.capability.create':
         return context.capabilityRuntime.create(
           command.payload,
-          context.sendCapabilityEvent,
+          context.sendAppEvent,
         );
       case 'app.capability.invoke':
         return context.capabilityRuntime.invoke(command.payload);

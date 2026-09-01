@@ -58,9 +58,9 @@ void main() {
     );
     await _pumpAsync(tester);
 
-    expect(find.text('Playmesh 5.0.1'), findsOneWidget);
+    expect(find.text('Playmesh 5.1.0'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Playmesh 5.0.1')).dy,
+      tester.getTopLeft(find.text('Playmesh 5.1.0')).dy,
       lessThan(tester.getTopLeft(find.text('Core 0.1.0')).dy),
     );
     expect(find.text('在线'), findsOneWidget);

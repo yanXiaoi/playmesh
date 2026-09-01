@@ -113,6 +113,10 @@
       }
       return;
     }
+    if (message.type === "app.lan.discovery.snapshot") {
+      receiveAppLanDiscoverySnapshot(message);
+      return;
+    }
     if (message.type !== "app.command.result" && message.type !== "app.command.error") return;
     const operation = pending.get(message.requestId);
     if (!operation) return;
@@ -833,6 +837,8 @@
   let appUiSharePending = false;
   let appUiJoinLoadGeneration = 0;
   let appUiJoinGames = new Map();
+  let appUiJoinDiscoverySubscription = null;
+  let appUiJoinScanningKey = "join.scanning";
   const appUiConsoleLogs = [];
   const appUiGameMenuOpenListeners = new Set();
   const appUiGameMenuCloseListeners = new Set();
@@ -1472,13 +1478,21 @@
     ui.joinRooms.setAttribute?.("aria-disabled", String(active));
   }
 
-  function setAppUiJoinScanning(scanning) {
+  function setAppUiJoinScanning(
+    scanning,
+    blocking = false,
+    labelKey = "join.scanning",
+  ) {
     const ui = appFallbackUi;
     if (!ui?.joinResults) return;
     const active = scanning === true;
-    ui.joinResults.setAttribute?.("aria-busy", String(active));
-    ui.joinRooms.setAttribute?.("aria-disabled", String(active));
+    const pending = active && blocking === true;
+    appUiJoinScanningKey = labelKey;
+    ui.joinResults.setAttribute?.("aria-busy", String(pending));
+    ui.joinRooms.setAttribute?.("aria-disabled", String(pending));
     ui.joinLoading.hidden = !active;
+    ui.joinLoading.classList?.toggle("continuous", active && !pending);
+    ui.joinLoadingLabel.textContent = appUiText(labelKey);
   }
 
   function renderAppUiJoinGames(games) {
@@ -1494,25 +1508,58 @@
     ui.joinEmpty.hidden = games.length !== 0;
   }
 
-  async function loadAppUiJoinGames(generation) {
+  function stopAppUiJoinDiscovery() {
+    const subscription = appUiJoinDiscoverySubscription;
+    appUiJoinDiscoverySubscription = null;
+    subscription?.unsubscribe?.();
+  }
+
+  async function subscribeAppUiJoinGames(generation) {
     const ui = appFallbackUi;
     if (!ui || generation !== appUiJoinLoadGeneration) return;
     ui.joinRooms.innerHTML = "";
     ui.joinEmpty.hidden = true;
     setAppUiJoinError();
-    setAppUiJoinScanning(true);
+    setAppUiJoinScanning(true, true, "join.starting");
+    const subscription = subscribeAppLanDiscovery((snapshot) => {
+      if (generation !== appUiJoinLoadGeneration ||
+          ui.joinLayer.hidden ||
+          appUiJoinDiscoverySubscription !== subscription) {
+        return;
+      }
+      if (snapshot.state === "ready") {
+        renderAppUiJoinGames(snapshot.games);
+        setAppUiJoinError();
+        setAppUiJoinScanning(true, false, "join.scanning");
+        return;
+      }
+      if (snapshot.state === "scanning") {
+        setAppUiJoinScanning(true, true, "join.starting");
+        return;
+      }
+      renderAppUiJoinGames([]);
+      setAppUiJoinScanning(false);
+      setAppUiJoinError(appLanError(
+        "discovery_unavailable",
+        "局域网发现不可用",
+      ));
+    });
+    appUiJoinDiscoverySubscription = subscription;
     try {
-      const games = await appLanApi.discoverGames();
-      if (generation !== appUiJoinLoadGeneration || ui.joinLayer.hidden) return;
-      renderAppUiJoinGames(games);
+      await subscription.ready;
+      if (generation !== appUiJoinLoadGeneration ||
+          ui.joinLayer.hidden ||
+          appUiJoinDiscoverySubscription !== subscription) {
+        subscription.unsubscribe();
+      }
     } catch (error) {
       if (generation !== appUiJoinLoadGeneration || ui.joinLayer.hidden) return;
+      if (appUiJoinDiscoverySubscription === subscription) {
+        appUiJoinDiscoverySubscription = null;
+      }
       renderAppUiJoinGames([]);
       setAppUiJoinError(error);
-    } finally {
-      if (generation === appUiJoinLoadGeneration && !ui.joinLayer.hidden) {
-        setAppUiJoinScanning(false);
-      }
+      setAppUiJoinScanning(false);
     }
   }
 
@@ -1540,7 +1587,8 @@
     ui.joinInput.value = "";
     ui.joinLayer.hidden = false;
     ui.joinScan.focus?.({ preventScroll: true });
-    void loadAppUiJoinGames(generation);
+    stopAppUiJoinDiscovery();
+    void subscribeAppUiJoinGames(generation);
     return true;
   }
 
@@ -1548,6 +1596,7 @@
     const ui = appFallbackUi;
     if (!ui || ui.joinLayer.hidden) return false;
     appUiJoinLoadGeneration += 1;
+    stopAppUiJoinDiscovery();
     appUiJoinGames = new Map();
     ui.joinLayer.hidden = true;
     setAppUiJoinScanning(false);
@@ -1743,7 +1792,7 @@
       .layer{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;cursor:default;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));color:var(--pm-text)}.scrim{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(circle at 50% 42%,#21304a52 0,transparent 48%),var(--pm-overlay);backdrop-filter:blur(12px) saturate(1.08);-webkit-backdrop-filter:blur(12px) saturate(1.08)}.sidebar{box-sizing:border-box;position:relative;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(100%,480px);max-height:min(720px,calc(100dvh - 36px));overflow:hidden;padding:10px;border:0;border-radius:22px;background:linear-gradient(145deg,var(--pm-surface-strong),var(--pm-surface));box-shadow:0 24px 72px var(--pm-shadow),0 1px 0 #ffffff0f inset;animation:menu-arrive .18s cubic-bezier(.2,.8,.2,1)}.head{display:flex;align-items:center;gap:12px;padding:8px 10px 16px;border-bottom:1px solid var(--pm-divider)}.brand{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:850 18px/1 system-ui}.title{margin:0;color:var(--pm-text);font-size:19px;line-height:1.25;font-weight:780;letter-spacing:.01em}.actions-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch;padding:10px 0}.action{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--pm-text);font:650 14px/1.25 system-ui,"Microsoft YaHei",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,box-shadow .14s ease}.action:hover{background:var(--pm-hover)}.action.continue{background:#2dd4bf14;color:var(--pm-accent)}.action.exit{min-height:48px;color:var(--pm-error);background:transparent}.icon{display:grid;place-items:center;flex:0 0 24px;width:24px;color:inherit;font:800 18px/1 system-ui}.foot{padding-top:6px;border-top:1px solid var(--pm-divider)}
       .dialog-layer{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;cursor:default;padding:16px;background:var(--pm-overlay);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.dialog{box-sizing:border-box;width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;padding:20px;border:0;border-radius:18px;background:var(--pm-surface);color:var(--pm-text);box-shadow:0 20px 60px var(--pm-shadow)}.dialog h2{margin:0 0 16px;font-size:20px}.dialog p{color:var(--pm-muted);line-height:1.6}.dialog-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}.dialog button{height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--pm-text);cursor:pointer}.dialog button:hover{background:var(--pm-hover)}.info-hero{display:flex;align-items:center;gap:13px;margin-bottom:14px;padding:14px;border:0;border-radius:14px;background:#2dd4bf0d}.info-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--pm-accent-strong);color:#fff;font:800 20px/1 ui-monospace,monospace}.game-name{min-width:0;margin:0!important;color:var(--pm-text)!important;font-size:17px;font-weight:750;overflow-wrap:anywhere}.info-hero,.info-grid,.game-name,.info-label,.info-value{cursor:text;user-select:text;-webkit-user-select:text}.info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:0;overflow:hidden;border:0;border-radius:14px;background:var(--pm-divider)}.info-item{min-width:0;padding:12px 13px;background:var(--pm-surface-strong)}.info-item.wide{grid-column:1/-1}.info-label{display:block;margin:0 0 5px;color:var(--pm-muted);font-size:11px;font-weight:700;letter-spacing:.05em}.info-value{display:block;margin:0;color:var(--pm-text);font:650 13px/1.45 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.info-value.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.01em}.logs-output{box-sizing:border-box;height:min(58dvh,480px);margin:0;padding:12px;overflow:auto;border:0;border-radius:12px;background:var(--pm-log);color:var(--pm-text);cursor:text;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.performance-panel{position:fixed;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));z-index:2147483647;display:flex;gap:10px;padding:0;border:0;background:transparent;color:#fff;text-shadow:0 1px 3px #000,0 0 8px #000;font:750 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;pointer-events:none}
       .game-tags-wrap{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px}.game-tags-label{flex:0 0 auto;color:var(--pm-muted);font-size:12px;font-weight:750}.game-tags{display:flex;flex:1 1 auto;gap:7px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:1px 1px 5px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.game-tag{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:260px;padding:6px 10px;border:1px solid var(--pm-border);border-radius:999px;background:#2dd4bf12;color:var(--pm-text);font:650 12px/1.2 system-ui,"Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.game-tag-mark{color:var(--pm-accent);font:800 12px/1 ui-monospace,monospace}
-      .join-dialog{width:min(100%,520px);padding:16px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.dialog-head h2{margin:0}.dialog-close{flex:0 0 38px;width:38px;padding:0!important;font-size:22px!important}.join-results{min-height:58px}.join-rooms{display:grid;gap:6px;max-height:min(34dvh,260px);overflow:auto;overscroll-behavior:contain}.join-room{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;height:auto!important;min-height:48px;padding:9px 12px!important;background:var(--pm-surface-strong)!important;text-align:left}.join-room-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:720}.join-room-host{color:var(--pm-muted);font:12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace}.join-loading{display:flex;align-items:center;justify-content:center;gap:9px;min-height:58px;color:var(--pm-muted);font-size:13px}.join-spinner{box-sizing:border-box;width:17px;height:17px;border:2px solid var(--pm-border);border-top-color:var(--pm-accent);border-radius:50%;animation:join-scan .72s linear infinite}.join-empty,.join-error{padding:13px;color:var(--pm-muted);font-size:13px;text-align:center}.join-error{color:var(--pm-error)}.join-controls{display:grid;gap:8px;margin-top:10px}.join-scan{width:100%;background:#2dd4bf14!important;color:var(--pm-accent)!important;font-weight:720!important}.join-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.join-input{box-sizing:border-box;min-width:0;height:42px;padding:0 12px;border:1px solid var(--pm-border);border-radius:10px;background:var(--pm-surface-strong);color:var(--pm-text);font:14px/1 system-ui,"Microsoft YaHei",sans-serif}.join-input:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.join-submit{background:var(--pm-accent-strong)!important;color:#fff!important;font-weight:720!important}.join-room:disabled,.join-scan:disabled,.join-submit:disabled,.join-input:disabled{opacity:.55;cursor:wait}
+      .join-dialog{width:min(100%,520px);padding:16px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.dialog-head h2{margin:0}.dialog-close{flex:0 0 38px;width:38px;padding:0!important;font-size:22px!important}.join-results{min-height:58px}.join-rooms{display:grid;gap:6px;max-height:min(34dvh,260px);overflow:auto;overscroll-behavior:contain}.join-room{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;height:auto!important;min-height:48px;padding:9px 12px!important;background:var(--pm-surface-strong)!important;text-align:left}.join-room-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:720}.join-room-host{color:var(--pm-muted);font:12px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace}.join-loading{display:flex;align-items:center;justify-content:flex-start;gap:7px;min-height:0;padding:8px 4px 2px;color:var(--pm-muted);font-size:12px}.join-spinner{box-sizing:border-box;width:13px;height:13px;border:2px solid var(--pm-border);border-top-color:var(--pm-accent);border-radius:50%;animation:join-scan .72s linear infinite}.join-loading.continuous .join-spinner{border:0;background:var(--pm-accent);box-shadow:0 0 0 3px #2dd4bf20;animation:menu-breathe 2s ease-in-out infinite}.join-empty,.join-error{padding:13px;color:var(--pm-muted);font-size:13px;text-align:center}.join-error{color:var(--pm-error)}.join-controls{display:grid;gap:8px;margin-top:10px}.join-scan{width:100%;background:#2dd4bf14!important;color:var(--pm-accent)!important;font-weight:720!important}.join-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.join-input{box-sizing:border-box;min-width:0;height:42px;padding:0 12px;border:1px solid var(--pm-border);border-radius:10px;background:var(--pm-surface-strong);color:var(--pm-text);font:14px/1 system-ui,"Microsoft YaHei",sans-serif}.join-input:focus-visible{outline:2px solid var(--pm-focus);outline-offset:2px}.join-submit{background:var(--pm-accent-strong)!important;color:#fff!important;font-weight:720!important}.join-room:disabled,.join-scan:disabled,.join-submit:disabled,.join-input:disabled{opacity:.55;cursor:wait}
       [hidden]{display:none!important}@keyframes menu-breathe{0%,100%{opacity:.35;transform:scale(.96)}50%{opacity:.85;transform:scale(1.04)}}@keyframes menu-arrive{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}@keyframes join-scan{to{transform:rotate(1turn)}}@media(prefers-reduced-motion:reduce){.menu-fab,.action{transition:none}.menu-fab::before{animation:none;opacity:.55}.sidebar{animation:none}.join-spinner{animation:none}}@media(max-width:440px){.sidebar{border-radius:18px}.actions-list,.info-grid{grid-template-columns:1fr}.action{min-height:50px}}
     </style>
     ${menuButtonMarkup}
@@ -2066,7 +2115,7 @@
     ui.infoTitle.textContent = appUiText("info.title");
     ui.logsTitle.textContent = appUiText("logs.title");
     ui.joinTitle.textContent = appUiText("join.title");
-    ui.joinLoadingLabel.textContent = appUiText("join.scanning");
+    ui.joinLoadingLabel.textContent = appUiText(appUiJoinScanningKey);
     ui.joinEmpty.textContent = appUiText("join.empty");
     ui.joinInput.setAttribute?.("placeholder", appUiText("join.input"));
     ui.joinInput.setAttribute?.("aria-label", appUiText("join.input"));
@@ -2111,6 +2160,7 @@
       return Promise.resolve(false);
     }
     appUiJoinLoadGeneration += 1;
+    stopAppUiJoinDiscovery();
     appUiJoinGames = new Map();
     ui.joinLayer.hidden = true;
     ui.layer.hidden = true;
@@ -2185,12 +2235,27 @@
       });
   }
 
-  async function setAppUiFullscreen(enabled) {
+  async function applyAppUiBrowserOrientation(orientation) {
+    if (orientation === undefined) return;
+    const screenOrientation = global.screen?.orientation;
+    if (orientation === "system") {
+      screenOrientation?.unlock?.();
+      return;
+    }
+    const lock = screenOrientation?.lock;
+    if (typeof lock !== "function") {
+      throw new Error("当前浏览器不支持锁定屏幕方向");
+    }
+    await lock.call(screenOrientation, orientation);
+  }
+
+  async function setAppUiFullscreen(enabled, orientation) {
     try {
       if (bootstrap?.available === true) {
-        await publicAppApi.device.setFullscreen(enabled);
+        await publicAppApi.device.setFullscreen(enabled, orientation);
       } else if (enabled) {
         await global.document?.documentElement?.requestFullscreen?.();
+        await applyAppUiBrowserOrientation(orientation);
       } else if (global.document?.fullscreenElement) {
         await global.document.exitFullscreen?.();
       }
@@ -2409,6 +2474,54 @@
     });
   }
 
+  const appLanDiscoverySubscriptions = new Map();
+
+  function receiveAppLanDiscoverySnapshot(message) {
+    const subscriptionId = message.subscriptionId;
+    const listener = typeof subscriptionId === "string"
+      ? appLanDiscoverySubscriptions.get(subscriptionId)
+      : null;
+    if (!listener || !Array.isArray(message.games) ||
+        !["scanning", "ready", "permissionDenied", "unsupported", "failed"]
+          .includes(message.state)) {
+      return;
+    }
+    try {
+      listener(Object.freeze({
+        state: message.state,
+        games: Object.freeze(message.games.map(freezeAppLanGame)),
+      }));
+    } catch (error) {
+      global.console?.warn?.("Playmesh 局域网发现更新无效", error);
+    }
+  }
+
+  function subscribeAppLanDiscovery(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("局域网发现订阅回调必须是函数");
+    }
+    const subscriptionId =
+      `app-ui-join-${Date.now()}-${++sequence}`;
+    appLanDiscoverySubscriptions.set(subscriptionId, listener);
+    let subscribed = true;
+    const ready = request("app.lan.discovery.subscribe", { subscriptionId })
+      .catch((error) => {
+        appLanDiscoverySubscriptions.delete(subscriptionId);
+        subscribed = false;
+        throw error;
+      });
+    return Object.freeze({
+      ready,
+      unsubscribe() {
+        if (!subscribed) return;
+        subscribed = false;
+        appLanDiscoverySubscriptions.delete(subscriptionId);
+        void request("app.lan.discovery.unsubscribe", { subscriptionId })
+          .catch(() => {});
+      },
+    });
+  }
+
   const appLanApi = Object.freeze({
     async discoverGames() {
       requireAppLanReady();
@@ -2553,8 +2666,11 @@
       setFullscreen(enabled, orientation) {
         if (orientation !== undefined &&
             orientation !== "landscape" &&
-            orientation !== "portrait") {
-          return Promise.reject(new TypeError("orientation 必须是 landscape 或 portrait"));
+            orientation !== "portrait" &&
+            orientation !== "system") {
+          return Promise.reject(new TypeError(
+            "orientation 必须是 landscape、portrait 或 system",
+          ));
         }
         if (enabled !== true && orientation !== undefined) {
           return Promise.reject(new TypeError("退出全屏时不能声明 orientation"));
@@ -2611,7 +2727,7 @@
         if (bootstrap?.available === true) {
           return publicAppApi.device.setFullscreen(true, orientation);
         }
-        return setAppUiFullscreen(true);
+        return setAppUiFullscreen(true, orientation);
       },
       exitFullscreen() {
         return setAppUiFullscreen(false);

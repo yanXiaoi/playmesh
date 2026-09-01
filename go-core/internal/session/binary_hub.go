@@ -542,7 +542,6 @@ func (b *binaryHub) respondRPC(peer *binaryPeer, frame binaryClientFrame) {
 				message: "Authority RPC 错误响应格式无效",
 			}
 		}
-		b.removePendingRPCLocked(session, pending)
 		pending.stream.finish(result)
 		return
 	}

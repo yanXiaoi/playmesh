@@ -36,6 +36,19 @@ void main() {
     expect(manifest.controllerOrientation, GameOrientation.portrait);
   });
 
+  test('主屏和控制器都允许跟随系统方向', () {
+    final manifest = GameManifest.fromJson(
+      validManifest()
+        ..['orientation'] = 'system'
+        ..['controllerOrientation'] = 'system',
+    );
+
+    expect(manifest.orientation, GameOrientation.system);
+    expect(manifest.controllerOrientation, GameOrientation.system);
+    expect(manifest.toJson(), containsPair('orientation', 'system'));
+    expect(manifest.toJson(), containsPair('controllerOrientation', 'system'));
+  });
+
   test('游戏标签最多允许五个', () {
     final fiveTags = validManifest()..['tags'] = ['派对', '多人', '体感', '合作', '休闲'];
     final sixTags = validManifest()

@@ -16,6 +16,8 @@ const gameRpcSdkSource = SdkSourceFragment(
   const RPC_STREAM_MAX_TIMEOUT_MS = 1800000;
   const RPC_STREAM_MAX_PENDING = 4;
   const RPC_STREAM_MAX_BYTES = 512 * 1024 * 1024;
+  const RPC_STREAM_CHUNK_BYTES = 64 * 1024;
+  const RPC_STREAM_CHUNK_TRANSPORT = "chunked-v1";
   const RPC_TAG_UNDEFINED = 0;
   const RPC_TAG_NULL = 1;
   const RPC_TAG_FALSE = 2;
@@ -114,20 +116,201 @@ const gameRpcSdkSource = SdkSourceFragment(
     }
   }
 
-  function rpcStreamSourceAsReadable(stream) {
-    if (stream.streaming) return stream.body;
-    if (typeof global.Blob === "function" && stream.body instanceof global.Blob) {
-      return stream.body.stream();
-    }
-    const bytes = stream.body instanceof Uint8Array
-      ? stream.body
-      : new Uint8Array(stream.body);
-    return new global.ReadableStream({
-      start(controller) {
-        controller.enqueue(bytes);
-        controller.close();
+  function createRpcStreamChunkReader(stream) {
+    let offset = 0;
+    let transferredBytes = 0;
+    let sourceReader = null;
+    let sourceChunk = null;
+    let sourceChunkOffset = 0;
+    let released = false;
+    if (stream.streaming) sourceReader = stream.body.getReader();
+    reportRpcStreamProgress(stream.onProgress, 0, stream.size);
+
+    const release = () => {
+      if (released || !sourceReader) return;
+      released = true;
+      try {
+        sourceReader.releaseLock();
+      } catch (_) {
+        // 流结束或取消时可能已自动释放。
+      }
+    };
+
+    const report = (bytes) => {
+      transferredBytes += bytes;
+      if (transferredBytes > RPC_STREAM_MAX_BYTES) {
+        throw rpcError("rpc_stream_too_large", "RPC 流不能超过 512 MiB");
+      }
+      reportRpcStreamProgress(
+        stream.onProgress,
+        transferredBytes,
+        stream.size,
+      );
+    };
+
+    return {
+      async read() {
+        if (stream.streaming) {
+          while (!sourceChunk || sourceChunkOffset >= sourceChunk.byteLength) {
+            const chunk = await sourceReader.read();
+            if (chunk.done) {
+              release();
+              return null;
+            }
+            if (!(chunk.value instanceof Uint8Array)) {
+              throw rpcError(
+                "rpc_stream_chunk_invalid",
+                "RPC ReadableStream 的每个 chunk 必须是 Uint8Array",
+              );
+            }
+            if (chunk.value.byteLength === 0) continue;
+            sourceChunk = chunk.value;
+            sourceChunkOffset = 0;
+          }
+          const end = Math.min(
+            sourceChunk.byteLength,
+            sourceChunkOffset + RPC_STREAM_CHUNK_BYTES,
+          );
+          const value = sourceChunk.subarray(sourceChunkOffset, end);
+          sourceChunkOffset = end;
+          report(value.byteLength);
+          return value;
+        }
+
+        if (
+          typeof global.Blob === "function" &&
+          stream.body instanceof global.Blob
+        ) {
+          if (offset >= stream.body.size) return null;
+          const end = Math.min(stream.body.size, offset + RPC_STREAM_CHUNK_BYTES);
+          const value = new Uint8Array(
+            await stream.body.slice(offset, end).arrayBuffer(),
+          );
+          offset = end;
+          report(value.byteLength);
+          return value;
+        }
+
+        const bytes = stream.body instanceof Uint8Array
+          ? stream.body
+          : new Uint8Array(stream.body);
+        if (offset >= bytes.byteLength) return null;
+        const end = Math.min(bytes.byteLength, offset + RPC_STREAM_CHUNK_BYTES);
+        const value = bytes.subarray(offset, end);
+        offset = end;
+        report(value.byteLength);
+        return value;
       },
+      async cancel(reason) {
+        if (!sourceReader || released) return;
+        try {
+          await sourceReader.cancel(reason);
+        } finally {
+          release();
+        }
+      },
+    };
+  }
+
+  async function chunkedStreamResponseError(response, fallbackMessage) {
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (_) {
+      // 非 JSON 错误继续使用稳定 fallback。
+    }
+    const details = payload?.error;
+    return rpcError(
+      typeof details?.code === "string" ? details.code : "stream_upload_failed",
+      typeof details?.message === "string"
+        ? details.message
+        : typeof details === "string"
+          ? details
+          : fallbackMessage,
+    );
+  }
+
+  async function uploadRpcStreamChunks({
+    endpoint,
+    stream,
+    headers,
+    signal,
+    expectedPathPrefix,
+    errorMessage,
+  }) {
+    const resolvedEndpoint = new URL(endpoint, global.location?.href);
+    const openEndpoint = new URL(resolvedEndpoint);
+    openEndpoint.searchParams.set("transport", RPC_STREAM_CHUNK_TRANSPORT);
+    const openResponse = await global.fetch(openEndpoint, {
+      method: "POST",
+      headers,
+      signal,
     });
+    if (!openResponse.ok) {
+      throw await chunkedStreamResponseError(openResponse, errorMessage);
+    }
+    let opened = null;
+    try {
+      opened = await openResponse.json();
+    } catch (_) {
+      // 统一按私有协议损坏处理。
+    }
+    if (
+      typeof opened?.uploadPath !== "string" ||
+      opened.chunkBytes !== RPC_STREAM_CHUNK_BYTES
+    ) {
+      throw rpcError("stream_transport_invalid", "流式上传初始化响应无效");
+    }
+    const uploadEndpoint = new URL(opened.uploadPath, resolvedEndpoint);
+    if (
+      uploadEndpoint.origin !== resolvedEndpoint.origin ||
+      !uploadEndpoint.pathname.startsWith(expectedPathPrefix)
+    ) {
+      throw rpcError("stream_transport_invalid", "流式上传地址无效");
+    }
+
+    const reader = createRpcStreamChunkReader(stream);
+    let sequence = 0;
+    let completed = false;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk === null) break;
+        const chunkEndpoint = new URL(uploadEndpoint);
+        chunkEndpoint.searchParams.set("sequence", String(sequence));
+        const response = await global.fetch(chunkEndpoint, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/octet-stream" },
+          body: chunk,
+          signal,
+        });
+        if (!response.ok) {
+          const error = await chunkedStreamResponseError(response, errorMessage);
+          if (error.code === "rpc_stream_finished") {
+            await reader.cancel(error);
+            break;
+          }
+          throw error;
+        }
+        sequence++;
+      }
+      const response = await global.fetch(uploadEndpoint, {
+        method: "PATCH",
+        headers,
+        signal,
+      });
+      completed = true;
+      return response;
+    } finally {
+      if (!completed) {
+        await reader.cancel(rpcError("stream_upload_cancelled", "流式上传已取消"));
+        try {
+          await global.fetch(uploadEndpoint, { method: "DELETE", headers });
+        } catch (_) {
+          // 取消是 best-effort；保留最初的传输错误。
+        }
+      }
+    }
   }
 
   function trackRpcStreamProgress(source, totalBytes, callback) {
@@ -731,14 +914,6 @@ const gameRpcSdkSource = SdkSourceFragment(
     endpoint.searchParams.set("timeoutMs", String(stream.timeoutMs));
     endpoint.searchParams.set("name", stream.name);
     if (stream.size !== null) endpoint.searchParams.set("size", String(stream.size));
-    if (stream.onProgress) {
-      stream.body = trackRpcStreamProgress(
-        rpcStreamSourceAsReadable(stream),
-        stream.size,
-        stream.onProgress,
-      );
-      stream.streaming = true;
-    }
     const controller = new AbortController();
     const pendingRequest = { controller, error: null };
     rpcStreamPending.add(pendingRequest);
@@ -750,17 +925,26 @@ const gameRpcSdkSource = SdkSourceFragment(
       controller.abort();
     }, stream.timeoutMs);
     try {
-      const request = {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${transport.token}`,
-          "Content-Type": stream.type,
-        },
-        body: stream.body,
-        signal: controller.signal,
+      const headers = {
+        "Authorization": `Bearer ${transport.token}`,
+        "Content-Type": stream.type,
       };
-      if (stream.streaming) request.duplex = "half";
-      const response = await global.fetch(endpoint, request);
+      const response = stream.streaming || stream.onProgress
+        ? await uploadRpcStreamChunks({
+            endpoint,
+            stream,
+            headers,
+            signal: controller.signal,
+            expectedPathPrefix:
+              `/v1/sessions/${encodeURIComponent(transport.session.id)}/rpc-stream-uploads/`,
+            errorMessage: "Authority RPC 流上传失败",
+          })
+        : await global.fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: stream.body,
+            signal: controller.signal,
+          });
       if (!response.ok) throw await rpcStreamResponseError(response);
       const encoded = new Uint8Array(await response.arrayBuffer());
       if (encoded.length > RPC_MAX_PAYLOAD_BYTES) {

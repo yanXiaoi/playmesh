@@ -810,9 +810,12 @@ class OnlineGameDetailPage extends StatelessWidget {
             'single_screen_multiplayer'
         ? context.tr('game.display_single_screen')
         : context.tr('game.display_multi_screen');
-    String orientationLabel(String value) => value == 'landscape'
-        ? context.tr('library.landscape')
-        : context.tr('library.portrait');
+    String orientationLabel(String value) => switch (value) {
+      'landscape' => context.tr('library.landscape'),
+      'portrait' => context.tr('library.portrait'),
+      'system' => context.tr('library.system'),
+      _ => value,
+    };
     final facts = <GameDetailFactData>[
       GameDetailFactData(
         icon: Icons.person_outline,

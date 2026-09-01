@@ -1,5 +1,5 @@
 【当前显示类型：单屏多人】
-main.json 必须分别声明主画面 `orientation` 与控制器 `controllerOrientation`。进入全屏时 SDK/宿主会按当前页面角色请求对应方向；页面仍须使用响应式布局处理浏览器拒绝方向锁定的情况。
+main.json 必须分别声明主画面 `orientation` 与控制器 `controllerOrientation`，值为 `landscape`、`portrait` 或 `system`。固定方向进入全屏时 SDK/宿主会按当前页面角色请求对应方向；`system` 自动启动时只请求全屏且不指定方向。页面仍须使用响应式布局处理浏览器拒绝全屏或方向锁定的情况。
 capabilities.json 的 `required` 仅供 entries.game 主画面使用，`controllerRequired` 仅供 entries.controller 控制器使用；空数组表示该端没有声明能力，不得回退或合并另一端；两端不得越权使用对方声明的能力。
 主机加载 `main.json` 显式声明且真实存在的 `entries.game`，作为公共显示端与 Authority Client；所有玩家加载同样必须显式声明且真实存在的 `entries.controller`。两个入口都不得省略或依赖默认入口。公共显示端不属于 session.players，playmesh.main.player.getCurrent() 必须按 null 处理，不得调用 playmesh.main.player.setNickname()；加入 Session 的控制器 Player 可正常调用。
 

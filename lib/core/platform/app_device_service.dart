@@ -50,6 +50,7 @@ class AppDeviceService {
           DeviceOrientation.portraitUp,
           DeviceOrientation.portraitDown,
         ],
+        GameOrientation.system => const [],
       });
     }
   }

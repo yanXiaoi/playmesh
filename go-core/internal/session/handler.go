@@ -112,6 +112,10 @@ func (h *Handler) SetWebRTCICEServerProvider(
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	path := strings.TrimPrefix(request.URL.Path, "/v1/sessions")
+	if sessionID, token, ok := parseRPCStreamUploadPath(path); ok {
+		h.handleRPCStreamUpload(writer, request, sessionID, token)
+		return
+	}
 	switch {
 	case path == "" && request.Method == http.MethodPost:
 		h.create(writer, request)

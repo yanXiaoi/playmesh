@@ -55,6 +55,10 @@ Authority 主机显示。上述实现均位于 Runtime 自有模块，
 标识与转圈。统一加入弹窗发现房间时只在局域网列表内显示扫描动效；分享命令只让菜单中的
 分享按钮进入等待态，并保证宿主分享层先绘制首帧再准备通道。
 
+Runtime 清单方向接受 `landscape`、`portrait`、`system`。固定方向在启动全屏时传给显示
+控制器；`system` 的自动启动只进入全屏并省略方向参数。游戏通过 App SDK 主动传入
+`system` 时才解除当前 Android 页面已有方向锁，退出后统一恢复系统方向。
+
 ## 全功能固定底包与模块边界
 
 固定 MVP 包含相机、麦克风、MIDI、振动、Pose6D、WebRTC、扫码和 LAN/中转能力。
@@ -220,6 +224,10 @@ cd runtime/src
   runtime-packages.json
 ```
 
+三端制品全部通过门禁后，统一脚本还会自动覆盖仓库 `resources/runtime/` 中的三个固定
+底包，并最后更新同目录 `update.json` 的版本与平台 SHA-256。该同步属于正式构建的一部分，
+不得只更新 `../resource/` 阶段产物或手工保留旧发布哈希。
+
 相同版本目录默认禁止覆盖；开发期确认需要重建同一版本时显式传 `-Force`，正式发布应
 提升 `pubspec.yaml` 版本。清单记录真实平台/ABI、文件长度与 SHA-256。Windows 必须以
 完整 ZIP 分发，不能只复制其中的 `playmesh-runtime.exe`。
@@ -241,6 +249,12 @@ Runtime 不保存 Game SDK / App SDK 的源码快照。`build_runtime.ps1` 会�
 正式 SDK 产物以临时硬链接放入 Flutter asset 目录；Android/Windows 编译结束或失败后都会
 清理这些链接。`-SkipSdkGeneration` 只跳过生成步骤，仍会从主 App 当前产物建立临时链接，
 因此 Runtime 始终只有一个 SDK 内容来源。
+
+浏览器多人分享入口同样使用该 SDK 的自动昵称初始化：无有效本地昵称时保存“浏览器”加
+4 位随机字母或数字，不弹出首次输入框；已有昵称和游戏信息中的手动改名不变。此行为已于
+2026-08-31 随 `v2.1.0-build12` 的三个固定底包构建进入安装包；旧 APK/ZIP 不会自动变化。
+包内 SDK、哈希与构建限制见
+[`build12 验证记录`](../../docs/verification/runtime-2.1.0-build12-2026-08-31.md)。
 
 Android release 启用 R8、资源收缩和 Go `-s -w -trimpath`；Windows Go Core 同样去除
 符号并作为 `playmesh-core.exe` 随 Runtime 分发。符号映射不会进入底包。

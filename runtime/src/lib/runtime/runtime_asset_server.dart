@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,9 @@ final class RuntimeAssetServer {
   });
 
   static const _browserSessionCookie = 'playmesh_runtime_session';
+  static const _chunkedUploadPath = '/bucket/_playmesh-stream/v1';
+  static const _chunkedUploadTransport = 'chunked-v1';
+  static const _chunkBytes = 64 * 1024;
 
   final RuntimeGamePackage game;
   final RuntimeStorage storage;
@@ -50,6 +54,8 @@ final class RuntimeAssetServer {
   final RuntimePlatformUiCatalog platformUi;
   final String invitationToken = _randomToken();
   final String _browserSessionToken = _randomToken();
+  final _RuntimeChunkUploadRegistry _chunkUploads =
+      _RuntimeChunkUploadRegistry();
   HttpServer? _server;
   bool _sharingEnabled = true;
 
@@ -123,7 +129,10 @@ final class RuntimeAssetServer {
       final authorityRequest = _isLocalRequest(request);
       final requiresAuthority =
           request.uri.path == '/bucket/_playmesh-json/v1' ||
-          request.method == 'POST';
+          request.uri.path.startsWith('$_chunkedUploadPath/') ||
+          request.method == 'POST' ||
+          request.method == 'PATCH' ||
+          request.method == 'DELETE';
       if (requiresAuthority && !authorityRequest) {
         await _jsonError(
           request.response,
@@ -536,6 +545,11 @@ final class RuntimeAssetServer {
 
   Future<void> _binaryBucket(HttpRequest request) async {
     final segments = request.uri.pathSegments;
+    if (segments.length == 4 &&
+        '/${segments.take(3).join('/')}' == _chunkedUploadPath) {
+      await _chunkedBucketUpload(request, segments[3]);
+      return;
+    }
     if (request.method == 'POST' && segments.length == 2) {
       final originalName = request.uri.queryParameters['name'];
       if (originalName == null || originalName.isEmpty) {
@@ -545,6 +559,47 @@ final class RuntimeAssetServer {
           'runtime_upload_name_missing',
           '缺少上传文件名',
         );
+        return;
+      }
+      if (request.uri.queryParameters['transport'] == _chunkedUploadTransport) {
+        final rawSize = request.uri.queryParameters['size'];
+        final contentLength = rawSize == null ? null : int.tryParse(rawSize);
+        if (rawSize != null && contentLength == null) {
+          await _jsonError(
+            request.response,
+            HttpStatus.badRequest,
+            'runtime_upload_size_invalid',
+            '上传文件 size 必须是非负整数',
+          );
+          return;
+        }
+        try {
+          final uploadPath = await _chunkUploads.open(
+            storage: storage,
+            scope: 'runtime:${game.manifest.id}',
+            bucket: segments[1],
+            originalName: originalName,
+            contentLength: contentLength,
+          );
+          request.response.statusCode = HttpStatus.created;
+          request.response.headers
+            ..contentType = ContentType.json
+            ..set(HttpHeaders.cacheControlHeader, 'no-store')
+            ..set('X-Content-Type-Options', 'nosniff');
+          request.response.write(
+            jsonEncode({'uploadPath': uploadPath, 'chunkBytes': _chunkBytes}),
+          );
+          await request.response.close();
+        } on FormatException catch (error) {
+          await _jsonError(
+            request.response,
+            error.message.toString().contains('512 MiB')
+                ? HttpStatus.requestEntityTooLarge
+                : HttpStatus.badRequest,
+            'runtime_upload_stream_invalid',
+            error.message.toString(),
+          );
+        }
         return;
       }
       try {
@@ -620,15 +675,283 @@ final class RuntimeAssetServer {
     await request.response.close();
   }
 
+  Future<void> _chunkedBucketUpload(HttpRequest request, String token) async {
+    const scopePrefix = 'runtime:';
+    final scope = '$scopePrefix${game.manifest.id}';
+    try {
+      switch (request.method) {
+        case 'POST':
+          final sequence = int.tryParse(
+            request.uri.queryParameters['sequence'] ?? '',
+          );
+          if (sequence == null || sequence < 0) {
+            throw const FormatException('存储上传分块序号必须是非负整数');
+          }
+          final bytes = await _readRuntimeUploadChunk(request);
+          await _chunkUploads.append(
+            token: token,
+            scope: scope,
+            sequence: sequence,
+            bytes: bytes,
+          );
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+          return;
+        case 'PATCH':
+          if (request.contentLength > 0) {
+            throw const FormatException('存储上传完成请求不能携带请求体');
+          }
+          final url = await _chunkUploads.complete(token: token, scope: scope);
+          request.response.statusCode = HttpStatus.created;
+          request.response.headers
+            ..contentType = ContentType.json
+            ..set(HttpHeaders.cacheControlHeader, 'no-store')
+            ..set('X-Content-Type-Options', 'nosniff');
+          request.response.write(jsonEncode({'url': url}));
+          await request.response.close();
+          return;
+        case 'DELETE':
+          await _chunkUploads.abort(token: token, scope: scope);
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+          return;
+        default:
+          await _jsonError(
+            request.response,
+            HttpStatus.methodNotAllowed,
+            'runtime_upload_method_invalid',
+            '存储上传方法不受支持',
+          );
+      }
+    } on FormatException catch (error) {
+      await _jsonError(
+        request.response,
+        error.message.toString().contains('512 MiB')
+            ? HttpStatus.requestEntityTooLarge
+            : HttpStatus.badRequest,
+        'runtime_upload_stream_invalid',
+        error.message.toString(),
+      );
+    }
+  }
+
   Future<void> close() async {
     final server = _server;
     _server = null;
+    await _chunkUploads.close();
     await server?.close(force: true);
   }
 
   void revokeSharing() {
     _sharingEnabled = false;
   }
+}
+
+Future<Uint8List> _readRuntimeUploadChunk(HttpRequest request) async {
+  if (request.contentLength <= 0 ||
+      request.contentLength > RuntimeAssetServer._chunkBytes) {
+    throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+  }
+  final builder = BytesBuilder(copy: false);
+  var received = 0;
+  await for (final chunk in request) {
+    received += chunk.length;
+    if (received > RuntimeAssetServer._chunkBytes) {
+      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+    }
+    builder.add(chunk);
+  }
+  if (received != request.contentLength) {
+    throw const FormatException('存储上传分块长度不匹配');
+  }
+  return builder.takeBytes();
+}
+
+final class _RuntimeChunkUploadRegistry {
+  static const _maxUploadsPerScope = 4;
+  static const _uploadTimeout = Duration(minutes: 30);
+
+  final Map<String, _RuntimeChunkUpload> _uploads = {};
+  bool _closed = false;
+
+  Future<String> open({
+    required RuntimeStorage storage,
+    required String scope,
+    required String bucket,
+    required String originalName,
+    required int? contentLength,
+  }) async {
+    if (_closed) throw const FormatException('存储上传网关已经关闭');
+    if (contentLength != null &&
+        (contentLength < 0 || contentLength > RuntimeStorage.maxUploadBytes)) {
+      throw const FormatException('上传文件不能超过 512 MiB');
+    }
+    if (_uploads.values.where((upload) => upload.scope == scope).length >=
+        _maxUploadsPerScope) {
+      throw const FormatException('当前页面等待中的文件上传过多');
+    }
+    var token = '';
+    do {
+      token = _randomToken();
+    } while (_uploads.containsKey(token));
+    final controller = StreamController<List<int>>(sync: true);
+    final result = storage
+        .upload(
+          bucket: bucket,
+          originalName: originalName,
+          data: controller.stream,
+          contentLength: contentLength,
+        )
+        .then<_RuntimeUploadOutcome>(
+          (url) => _RuntimeUploadOutcome(url: url),
+          onError: (Object error, StackTrace stackTrace) =>
+              _RuntimeUploadOutcome(error: error, stackTrace: stackTrace),
+        );
+    late final _RuntimeChunkUpload upload;
+    upload = _RuntimeChunkUpload(
+      scope: scope,
+      contentLength: contentLength,
+      controller: controller,
+      result: result,
+      onTimeout: () => unawaited(abort(token: token, scope: scope)),
+    );
+    _uploads[token] = upload;
+    return '${RuntimeAssetServer._chunkedUploadPath}/$token';
+  }
+
+  Future<void> append({
+    required String token,
+    required String scope,
+    required int sequence,
+    required Uint8List bytes,
+  }) => _authorized(token, scope).append(sequence, bytes);
+
+  Future<String> complete({
+    required String token,
+    required String scope,
+  }) async {
+    final upload = _authorized(token, scope);
+    try {
+      return await upload.complete();
+    } finally {
+      _uploads.remove(token);
+    }
+  }
+
+  Future<void> abort({required String token, required String scope}) async {
+    final upload = _uploads[token];
+    if (upload == null) return;
+    if (upload.scope != scope) throw const FormatException('存储上传会话无效');
+    _uploads.remove(token);
+    await upload.abort();
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final uploads = _uploads.values.toList(growable: false);
+    _uploads.clear();
+    await Future.wait(uploads.map((upload) => upload.abort()));
+  }
+
+  _RuntimeChunkUpload _authorized(String token, String scope) {
+    final upload = _uploads[token];
+    if (upload == null || upload.scope != scope) {
+      throw const FormatException('存储上传会话无效');
+    }
+    return upload;
+  }
+}
+
+final class _RuntimeChunkUpload {
+  _RuntimeChunkUpload({
+    required this.scope,
+    required this.contentLength,
+    required this.controller,
+    required this.result,
+    required void Function() onTimeout,
+  }) : _timer = Timer(_RuntimeChunkUploadRegistry._uploadTimeout, onTimeout);
+
+  final String scope;
+  final int? contentLength;
+  final StreamController<List<int>> controller;
+  final Future<_RuntimeUploadOutcome> result;
+  final Timer _timer;
+  Future<void> _tail = Future<void>.value();
+  int _nextSequence = 0;
+  int _written = 0;
+  bool _closed = false;
+
+  Future<T> _serial<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    _tail = _tail.then((_) async {
+      try {
+        completer.complete(await operation());
+      } on Object catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<void> append(int sequence, Uint8List bytes) => _serial(() async {
+    if (_closed) throw const FormatException('存储上传已经结束');
+    if (sequence != _nextSequence) {
+      throw const FormatException('存储上传分块顺序无效');
+    }
+    if (bytes.isEmpty || bytes.length > RuntimeAssetServer._chunkBytes) {
+      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+    }
+    final next = _written + bytes.length;
+    if (next > RuntimeStorage.maxUploadBytes ||
+        (contentLength != null && next > contentLength!)) {
+      throw const FormatException('上传文件不能超过声明大小或 512 MiB');
+    }
+    await controller.addStream(Stream<List<int>>.value(bytes));
+    _written = next;
+    _nextSequence++;
+  });
+
+  Future<String> complete() => _serial(() async {
+    if (_closed) throw const FormatException('存储上传已经结束');
+    if (contentLength != null && _written != contentLength!) {
+      await _abortInternal(const FormatException('上传文件实际大小与声明大小不一致'));
+      throw const FormatException('上传文件实际大小与声明大小不一致');
+    }
+    _closed = true;
+    _timer.cancel();
+    await controller.close();
+    final outcome = await result;
+    if (outcome.error != null) {
+      Error.throwWithStackTrace(outcome.error!, outcome.stackTrace!);
+    }
+    return outcome.url!;
+  });
+
+  Future<void> abort() => _serial(() async {
+    await _abortInternal(const _RuntimeUploadCancelled());
+  });
+
+  Future<void> _abortInternal(Object error) async {
+    if (_closed) return;
+    _closed = true;
+    _timer.cancel();
+    controller.addError(error);
+    await controller.close();
+    await result;
+  }
+}
+
+final class _RuntimeUploadOutcome {
+  const _RuntimeUploadOutcome({this.url, this.error, this.stackTrace});
+
+  final String? url;
+  final Object? error;
+  final StackTrace? stackTrace;
+}
+
+final class _RuntimeUploadCancelled implements Exception {
+  const _RuntimeUploadCancelled();
 }
 
 String _randomToken() {

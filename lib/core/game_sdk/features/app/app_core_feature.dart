@@ -123,6 +123,10 @@ const PLAYMESH_APP_DECLARATION = String.raw`
       }
       return;
     }
+    if (message.type === "app.lan.discovery.snapshot") {
+      receiveAppLanDiscoverySnapshot(message);
+      return;
+    }
     if (message.type !== "app.command.result" && message.type !== "app.command.error") return;
     const operation = pending.get(message.requestId);
     if (!operation) return;

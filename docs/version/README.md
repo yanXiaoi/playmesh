@@ -28,12 +28,13 @@
 
 ## 当前基线
 
-- 当前工作树：App `5.1.0+37`、Runtime `2.1.0+11`、Game SDK `4.3.0`、App Bridge SDK
+- 当前工作树：App `5.1.0+37`、Runtime `2.1.0+12`、Game SDK `4.3.0`、App Bridge SDK
   `3.5.0`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议
   `4.0.0`、GDevelop Playmesh 扩展 `2.1.0`、Developer API `5.0.0`、Developer CLI
-  `2.0.0`。本轮未重建主 App、Runtime 三端固定底包或 Go Server 包；现有 Runtime
-  APK/ZIP 不包含当前 App Bucket 同步修复与 RPC Stream，发布前必须重建并更新真实哈希。
-  当前工作树尚未发布或完成跨设备手工验收。
+  `2.0.0`。2026-09-01 已从当前源码重建并验证 GDevelop WebIDE、Runtime 三端固定底包与
+  主 App Android/Windows 正式包，四份 SDK 在主仓、Runtime 清单与 GDevelop 消费面一致。
+  当前候选尚未完成跨设备手工验收。
+- 当前预发布候选详细日志：`docs/version/5.1.0.md`
 - 最近已归档版本详细日志：`docs/version/5.0.1.md`
 - 最新正式发行详细日志：`docs/version/4.5.0.md`
 - 当前开发临时日志：`docs/version/NEXT.md`（没有未发布变更时只记录发行基线）

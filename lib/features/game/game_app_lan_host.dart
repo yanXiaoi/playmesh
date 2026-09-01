@@ -89,6 +89,12 @@ class GameAppLanHostAdapter implements AppLanHost {
   LanGameDiscoveryLease? _discoveryLease;
   Future<LanGameDiscoveryLease>? _discoveryStartOperation;
   Future<void>? _discoveryReleaseOperation;
+  StreamSubscription<LanGameDiscoverySnapshot>? _discoverySubscription;
+  int _discoveryWatchRevision = 0;
+  String? _pendingDiscoveryWatchId;
+  String? _discoveryWatchId;
+  AppLanDiscoveryListener? _discoveryWatchListener;
+  Future<void> _discoveryDelivery = Future<void>.value();
   int _documentGeneration = 0;
   bool _navigationStarted = false;
   bool _closed = false;
@@ -105,27 +111,59 @@ class GameAppLanHostAdapter implements AppLanHost {
     if (snapshot.state != LanGameDiscoveryState.ready) {
       throw const SdkCommandException('discovery_unavailable', '局域网发现不可用');
     }
-    final selfInstanceId = _selfInstanceId();
-    final games = snapshot.games
-        .where(
-          (game) =>
-              game.gameId == expectedGameId &&
-              game.instanceId != selfInstanceId,
-        )
-        .toList(growable: false);
+    final games = _visibleGames(snapshot, expectedGameId: expectedGameId);
     _discoveredInstances
       ..clear()
       ..addAll(games.map((game) => game.instanceId));
-    return games
-        .map(
-          (game) => AppLanDiscoveredGame(
-            instanceId: game.instanceId,
-            gameId: game.gameId,
-            name: game.name,
-            host: game.host,
-          ),
-        )
-        .toList(growable: false);
+    return _projectGames(games);
+  }
+
+  @override
+  Future<void> subscribeDiscoveredGames(
+    String subscriptionId,
+    AppLanDiscoveryListener listener,
+  ) async {
+    _requireActive();
+    final generation = _documentGeneration;
+    final revision = ++_discoveryWatchRevision;
+    _pendingDiscoveryWatchId = subscriptionId;
+    _discoveryWatchId = null;
+    _discoveryWatchListener = null;
+    final lease = await _acquireDiscoveryLease(generation);
+    _checkGeneration(generation);
+    if (revision != _discoveryWatchRevision ||
+        _pendingDiscoveryWatchId != subscriptionId) {
+      throw const SdkCommandException('operation_cancelled', '局域网发现订阅已取消');
+    }
+    if (lease.current.state != LanGameDiscoveryState.ready) {
+      _pendingDiscoveryWatchId = null;
+      throw const SdkCommandException('discovery_unavailable', '局域网发现不可用');
+    }
+    _pendingDiscoveryWatchId = null;
+    _discoveryWatchId = subscriptionId;
+    _discoveryWatchListener = listener;
+    await _deliverDiscoverySnapshot(
+      subscriptionId,
+      listener,
+      lease.current,
+      generation,
+    );
+  }
+
+  @override
+  Future<void> unsubscribeDiscoveredGames(String subscriptionId) async {
+    if (_pendingDiscoveryWatchId != subscriptionId &&
+        _discoveryWatchId != subscriptionId) {
+      return;
+    }
+    _discoveryWatchRevision += 1;
+    if (_pendingDiscoveryWatchId == subscriptionId) {
+      _pendingDiscoveryWatchId = null;
+    }
+    if (_discoveryWatchId == subscriptionId) {
+      _discoveryWatchId = null;
+      _discoveryWatchListener = null;
+    }
   }
 
   @override
@@ -176,6 +214,7 @@ class GameAppLanHostAdapter implements AppLanHost {
   void resetDocument() {
     if (_closed) return;
     _documentGeneration += 1;
+    _clearDiscoveryWatch();
     _discoveredInstances.clear();
     _navigationStarted = false;
     unawaited(_releaseDiscoveryLease());
@@ -185,6 +224,7 @@ class GameAppLanHostAdapter implements AppLanHost {
     if (_closed) return;
     _closed = true;
     _documentGeneration += 1;
+    _clearDiscoveryWatch();
     _discoveredInstances.clear();
     final startOperation = _discoveryStartOperation;
     if (startOperation != null) {
@@ -231,6 +271,12 @@ class GameAppLanHostAdapter implements AppLanHost {
             );
           }
           _discoveryLease = lease;
+          _applyDiscoverySnapshot(lease.current);
+          _discoverySubscription = lease.snapshots.listen((snapshot) {
+            if (_isCurrent(generation)) {
+              _applyDiscoverySnapshot(snapshot);
+            }
+          });
           return lease;
         })
         .whenComplete(() {
@@ -247,6 +293,9 @@ class GameAppLanHostAdapter implements AppLanHost {
     if (active != null) return active;
     final lease = _discoveryLease;
     _discoveryLease = null;
+    final subscription = _discoverySubscription;
+    _discoverySubscription = null;
+    await subscription?.cancel();
     if (lease == null) return;
     late final Future<void> operation;
     operation = lease.close().whenComplete(() {
@@ -256,6 +305,81 @@ class GameAppLanHostAdapter implements AppLanHost {
     });
     _discoveryReleaseOperation = operation;
     await operation;
+  }
+
+  List<DiscoveredLanGame> _visibleGames(
+    LanGameDiscoverySnapshot snapshot, {
+    String? expectedGameId,
+  }) {
+    final gameId = expectedGameId ?? _gameId();
+    final selfInstanceId = _selfInstanceId();
+    return snapshot.games
+        .where(
+          (game) => game.gameId == gameId && game.instanceId != selfInstanceId,
+        )
+        .toList(growable: false);
+  }
+
+  List<AppLanDiscoveredGame> _projectGames(Iterable<DiscoveredLanGame> games) =>
+      games
+          .map(
+            (game) => AppLanDiscoveredGame(
+              instanceId: game.instanceId,
+              gameId: game.gameId,
+              name: game.name,
+              host: game.host,
+            ),
+          )
+          .toList(growable: false);
+
+  void _applyDiscoverySnapshot(LanGameDiscoverySnapshot snapshot) {
+    final games = _visibleGames(snapshot);
+    _discoveredInstances
+      ..clear()
+      ..addAll(games.map((game) => game.instanceId));
+    final subscriptionId = _discoveryWatchId;
+    final listener = _discoveryWatchListener;
+    if (subscriptionId != null && listener != null) {
+      unawaited(
+        _deliverDiscoverySnapshot(
+          subscriptionId,
+          listener,
+          snapshot,
+          _documentGeneration,
+        ).catchError((Object _) {}),
+      );
+    }
+  }
+
+  Future<void> _deliverDiscoverySnapshot(
+    String subscriptionId,
+    AppLanDiscoveryListener listener,
+    LanGameDiscoverySnapshot snapshot,
+    int generation,
+  ) {
+    final projected = AppLanDiscoverySnapshot(
+      state: _projectDiscoveryState(snapshot.state),
+      games: _projectGames(_visibleGames(snapshot)),
+    );
+    final previous = _discoveryDelivery;
+    late final Future<void> operation;
+    operation = previous.catchError((Object _) {}).then((_) async {
+      if (!_isCurrent(generation) ||
+          _discoveryWatchId != subscriptionId ||
+          !identical(_discoveryWatchListener, listener)) {
+        return;
+      }
+      await listener(projected);
+    });
+    _discoveryDelivery = operation;
+    return operation;
+  }
+
+  void _clearDiscoveryWatch() {
+    _discoveryWatchRevision += 1;
+    _pendingDiscoveryWatchId = null;
+    _discoveryWatchId = null;
+    _discoveryWatchListener = null;
   }
 
   Future<AppLanJoinAction> _prepareJoin(
@@ -326,3 +450,13 @@ class GameAppLanHostAdapter implements AppLanHost {
     }
   }
 }
+
+AppLanDiscoveryState _projectDiscoveryState(LanGameDiscoveryState state) =>
+    switch (state) {
+      LanGameDiscoveryState.scanning => AppLanDiscoveryState.scanning,
+      LanGameDiscoveryState.ready => AppLanDiscoveryState.ready,
+      LanGameDiscoveryState.permissionDenied =>
+        AppLanDiscoveryState.permissionDenied,
+      LanGameDiscoveryState.unsupported => AppLanDiscoveryState.unsupported,
+      LanGameDiscoveryState.failed => AppLanDiscoveryState.failed,
+    };

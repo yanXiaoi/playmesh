@@ -2318,7 +2318,7 @@ typedExecuteSpecs.push(
   {
     command: 'playmesh.app.device.setFullscreen', name: 'SetDeviceFullscreen', group: 'App SDK ❯ Device environment', label: '设置设备全屏状态',
     description: '请求 App WebView 进入或退出全屏；进入时可选方向锁定。',
-    parameters: [requiredBoolean('Enabled', '是否进入全屏。'), requiredBoolean('UseOrientation', '是否显式传入方向。'), optionalString('Orientation', '全屏方向；UseOrientation 为否时真正省略。', ['landscape', 'portrait'])],
+    parameters: [requiredBoolean('Enabled', '是否进入全屏。'), requiredBoolean('UseOrientation', '是否显式传入方向。'), optionalString('Orientation', '全屏方向；system 表示解除已有方向锁并跟随系统，UseOrientation 为否时真正省略。', ['landscape', 'portrait', 'system'], 'system')],
     result: '将宿主返回的开放结果写入变量。', args: `(${argumentCode('UseOrientation')} ? [${argumentCode('Enabled')}, ${argumentCode('Orientation')}] : [${argumentCode('Enabled')}])`,
   },
   { command: 'playmesh.app.ui.disableSystemMenuTriggers', name: 'DisableSystemMenuTriggers', group: 'App SDK ❯ UI', label: '禁用系统菜单自动触发', description: '解除当前文档用于自动打开系统游戏菜单的按键与返回触发。', args: '[]', void: true },
@@ -2334,7 +2334,7 @@ typedExecuteSpecs.push(
   { command: 'playmesh.app.ui.openRuntimeLogs', name: 'OpenRuntimeLogs', group: 'App SDK ❯ UI', label: '打开 SDK 运行日志', description: '打开 SDK 运行日志覆盖层。', result: '将是否成功打开写入变量。', args: '[]' },
   {
     command: 'playmesh.app.ui.enterFullscreen', name: 'EnterUiFullscreen', group: 'App SDK ❯ UI', label: '通过平台界面进入全屏', description: '进入全屏；可省略方向。',
-    parameters: [requiredBoolean('UseOrientation', '是否显式传入方向。'), optionalString('Orientation', '全屏方向。', ['landscape', 'portrait'])], result: '将宿主开放结果写入变量。', args: `(${argumentCode('UseOrientation')} ? [${argumentCode('Orientation')}] : [])`,
+    parameters: [requiredBoolean('UseOrientation', '是否显式传入方向。'), optionalString('Orientation', '全屏方向；system 表示解除已有方向锁并跟随系统。', ['landscape', 'portrait', 'system'], 'system')], result: '将宿主开放结果写入变量。', args: `(${argumentCode('UseOrientation')} ? [${argumentCode('Orientation')}] : [])`,
   },
   { command: 'playmesh.app.ui.exitFullscreen', name: 'ExitUiFullscreen', group: 'App SDK ❯ UI', label: '通过平台界面退出全屏', description: '退出全屏。', result: '将宿主开放结果写入变量。', args: '[]' },
   { command: 'playmesh.app.ui.openGameInfo', name: 'OpenGameInfo', group: 'App SDK ❯ UI', label: '打开游戏信息', description: '打开 SDK 游戏信息覆盖层。', result: '将是否成功打开写入变量。', args: '[]' },

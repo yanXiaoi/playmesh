@@ -74,6 +74,8 @@ const signalingCommands = [];
 const joinCommands = [];
 const joinUrls = [];
 const rpcStreamUploadCommands = [];
+const rpcStreamChunkUploads = new Map();
+const bucketChunkUploads = new Map();
 let joins = 0;
 
 function browserBucketRevision(bucket) {
@@ -174,9 +176,11 @@ function createPage(
 ) {
   const consoleEntries = [];
   const fullscreenRequests = [];
+  const documentFullscreenRequests = [];
   const runtimeGameDeclarations = [];
   const nativeSidebarRequests = [];
   const orientationLocks = [];
+  const orientationUnlocks = [];
   const windowListeners = new Map();
   const shadowRoots = [];
   let document = null;
@@ -282,8 +286,8 @@ function createPage(
       get innerHTML() { return shadowHtml.at(-1) || ""; },
       appendChild() {},
       querySelector(selector) {
-        const element = elements[selector];
-        if (element) element.__root = root;
+        const element = elements[selector] ??= fakeElement(selector);
+        element.__root = root;
         return element;
       },
       querySelectorAll() { return []; },
@@ -327,6 +331,7 @@ function createPage(
     clientWidth: 800,
     clientHeight: 600,
     async requestFullscreen() {
+      documentFullscreenRequests.push(true);
       document.fullscreenElement = document.documentElement;
     },
   };
@@ -460,7 +465,8 @@ function createPage(
       joinCode: "ABC123",
       shareToken: "game-token",
       bucketEndpoint: "/bucket",
-      orientation: "portrait",
+      mode: uiOptions.mode || "multiplayer",
+      orientation: uiOptions.orientation || "portrait",
       ...(uiOptions.requiredCapabilities
         ? { requiredCapabilities: [...uiOptions.requiredCapabilities] }
         : { requiredCapabilities: [] }),
@@ -476,10 +482,21 @@ function createPage(
       setItem: (key, value) => browserLocalStorage.set(key, value),
     },
     document,
-    location: { reload() {} },
+    location: { href: "http://playmesh.local/game.html", reload() {} },
     XMLHttpRequest: BrowserStorageXMLHttpRequest,
     fetch: async (url, options) => {
       const requestUrl = String(url);
+      const parsedUrl = new URL(requestUrl, "http://playmesh.local");
+      assert.equal(
+        options?.body instanceof ReadableStream,
+        false,
+        "browser fetch must never receive a ReadableStream request body",
+      );
+      assert.equal(
+        options?.duplex,
+        undefined,
+        "browser HTTP/1.1 transport must not use fetch duplex",
+      );
       if (requestUrl.startsWith("/bucket/_playmesh-json/v1")) {
         const encodedBody = options.body || Buffer.from(
           new URL(requestUrl, "http://playmesh.local").searchParams.get("payload"),
@@ -540,6 +557,55 @@ function createPage(
           }),
         };
       }
+      if (
+        parsedUrl.pathname.startsWith("/bucket/") &&
+        parsedUrl.searchParams.get("transport") === "chunked-v1"
+      ) {
+        const token = `bucket-${bucketChunkUploads.size + 1}`;
+        bucketChunkUploads.set(token, {
+          url: requestUrl,
+          options,
+          chunks: [],
+        });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            uploadPath: `/bucket/_playmesh-stream/v1/${token}`,
+            chunkBytes: 64 * 1024,
+          }),
+        };
+      }
+      if (parsedUrl.pathname.startsWith("/bucket/_playmesh-stream/v1/")) {
+        const token = parsedUrl.pathname.split("/").at(-1);
+        const upload = bucketChunkUploads.get(token);
+        assert.ok(upload);
+        if (options.method === "POST") {
+          assert.equal(
+            parsedUrl.searchParams.get("sequence"),
+            String(upload.chunks.length),
+          );
+          assert.ok(options.body instanceof Uint8Array);
+          upload.chunks.push(new Uint8Array(options.body));
+          return { ok: true, status: 204 };
+        }
+        if (options.method === "PATCH") {
+          const bodyBytes = Uint8Array.from(upload.chunks.flatMap((chunk) => [...chunk]));
+          uploadCommands.push({ ...upload, bodyBytes });
+          bucketChunkUploads.delete(token);
+          return {
+            ok: true,
+            status: 201,
+            json: async () => ({
+              url: "/bucket/browser_save/1770000000001.bin",
+            }),
+          };
+        }
+        if (options.method === "DELETE") {
+          bucketChunkUploads.delete(token);
+          return { ok: true, status: 204 };
+        }
+      }
       if (requestUrl.startsWith("/bucket/")) {
         uploadCommands.push({ url, options });
         return {
@@ -549,25 +615,60 @@ function createPage(
           }),
         };
       }
-      if (new URL(requestUrl).pathname === "/v1/sessions/s-1/rpc-stream") {
+      if (
+        parsedUrl.pathname === "/v1/sessions/s-1/rpc-stream" &&
+        parsedUrl.searchParams.get("transport") === "chunked-v1"
+      ) {
+        const token = `rpc-${rpcStreamChunkUploads.size + 1}`;
+        rpcStreamChunkUploads.set(token, {
+          url: requestUrl,
+          options,
+          chunks: [],
+        });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            uploadPath: `/v1/sessions/s-1/rpc-stream-uploads/${token}`,
+            chunkBytes: 64 * 1024,
+          }),
+        };
+      }
+      if (parsedUrl.pathname.startsWith("/v1/sessions/s-1/rpc-stream-uploads/")) {
+        const token = parsedUrl.pathname.split("/").at(-1);
+        const upload = rpcStreamChunkUploads.get(token);
+        assert.ok(upload);
+        if (options.method === "POST") {
+          assert.equal(
+            parsedUrl.searchParams.get("sequence"),
+            String(upload.chunks.length),
+          );
+          assert.ok(options.body instanceof Uint8Array);
+          upload.chunks.push(new Uint8Array(options.body));
+          return { ok: true, status: 204 };
+        }
+        if (options.method === "PATCH") {
+          const bodyBytes = Uint8Array.from(upload.chunks.flatMap((chunk) => [...chunk]));
+          rpcStreamUploadCommands.push({ ...upload, bodyBytes });
+          rpcStreamChunkUploads.delete(token);
+          const encoded = Uint8Array.from([
+            5, 0, 0, 0, 6,
+            ...new TextEncoder().encode("stored"),
+          ]);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => encoded.buffer,
+          };
+        }
+        if (options.method === "DELETE") {
+          rpcStreamChunkUploads.delete(token);
+          return { ok: true, status: 204 };
+        }
+      }
+      if (parsedUrl.pathname === "/v1/sessions/s-1/rpc-stream") {
         let bodyBytes;
-        if (options.body instanceof ReadableStream) {
-          const chunks = [];
-          let length = 0;
-          const reader = options.body.getReader();
-          while (true) {
-            const chunk = await reader.read();
-            if (chunk.done) break;
-            chunks.push(chunk.value);
-            length += chunk.value.byteLength;
-          }
-          bodyBytes = new Uint8Array(length);
-          let offset = 0;
-          for (const chunk of chunks) {
-            bodyBytes.set(chunk, offset);
-            offset += chunk.byteLength;
-          }
-        } else if (options.body instanceof Blob) {
+        if (options.body instanceof Blob) {
           bodyBytes = new Uint8Array(await options.body.arrayBuffer());
         } else {
           bodyBytes = options.body instanceof Uint8Array
@@ -731,6 +832,9 @@ function createPage(
         async lock(orientation) {
           orientationLocks.push(orientation);
         },
+        unlock() {
+          orientationUnlocks.push(true);
+        },
       },
     },
     innerWidth: 800,
@@ -823,9 +927,11 @@ function createPage(
   window.__gameFocusTarget = gameFocusTarget;
   window.__consoleEntries = consoleEntries;
   window.__fullscreenRequests = fullscreenRequests;
+  window.__documentFullscreenRequests = documentFullscreenRequests;
   window.__runtimeGameDeclarations = runtimeGameDeclarations;
   window.__nativeSidebarRequests = nativeSidebarRequests;
   window.__orientationLocks = orientationLocks;
+  window.__orientationUnlocks = orientationUnlocks;
   window.__historyOperations = historyOperations;
   window.__sockets = FakeWebSocket.instances;
   window.__dispatchWindowEvent = (type, event) => {
@@ -890,44 +996,16 @@ firstPage.playmesh.main.session.onPlayerLeave((event) => playerLeaveEvents.push(
 firstPage.playmesh.main.session.onPlayerReconnect((event) => playerReconnectEvents.push(event));
 assert.equal(typeof firstPage.playmesh.app.runtime.getLocale, "function");
 assert.equal(firstPage.playmesh.app.runtime.getLocale(), "zh-CN");
-while (!firstPage.__ui.form.onsubmit) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-assert.equal(firstPage.__ui[".overlay"].hidden, false, "首次进入应显示昵称输入层");
-await new Promise((resolve) => setTimeout(resolve, 0));
-const firstProfileRoot = firstPage.__shadowRoots.at(-1);
-assert.equal(
-  firstProfileRoot.activeElement,
-  firstPage.__ui.input,
-  "nickname dialog must move focus into its first field",
-);
-const nicknameTab = emitKey(
-  firstPage.__ui[".overlay"],
-  firstPage.__ui.input,
-  "Tab",
-);
-assert.equal(nicknameTab.defaultPrevented, true);
-assert.equal(
-  firstProfileRoot.activeElement,
-  firstPage.__ui[".save"],
-  "required nickname dialog must trap Tab without exposing its hidden cancel button",
-);
-emitKey(
-  firstPage.__ui[".overlay"],
-  firstPage.__ui[".save"],
-  "Tab",
-  { shiftKey: true },
-);
-assert.equal(firstProfileRoot.activeElement, firstPage.__ui.input);
-emitKey(firstPage.__ui[".overlay"], firstPage.__ui.input, "Backspace");
-assert.equal(
-  firstPage.__ui[".overlay"].hidden,
-  false,
-  "editing keys inside the nickname input must not close its dialog",
-);
-firstPage.__ui.input.value = "缓存玩家";
-await firstPage.__ui.form.onsubmit({ preventDefault() {} });
 const firstBootstrap = await firstPage.playmesh.ready;
+const generatedNickname = browserLocalStorage.get("playmesh.nickname.v1");
+assert.match(generatedNickname, /^浏览器[a-z0-9]{4}$/);
+assert.equal(firstBootstrap.main.player.nickname, generatedNickname);
+assert.equal(joinCommands[0].nickname, generatedNickname);
+assert.equal(
+  firstPage.__mountedHosts.includes("playmesh-browser-nickname-ui"),
+  false,
+  "首次进入应自动生成昵称，不创建昵称输入层",
+);
 assert.strictEqual(
   firstBootstrap.app,
   await firstPage.playmesh.app.ready,
@@ -977,7 +1055,7 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(
   firstPage.document.activeElement,
   firstPage.__gameFocusTarget,
-  "closing the initial nickname dialog must restore the page focus",
+  "automatic nickname setup must leave the page focus unchanged",
 );
 while (firstPage.__orientationLocks.length === 0) {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -986,6 +1064,12 @@ assert.deepEqual(
   firstPage.__orientationLocks,
   ["portrait"],
   "浏览器应无弹窗尽力自动进入全屏并锁定方向",
+);
+await firstPage.playmesh.app.ui.enterFullscreen("system");
+assert.equal(
+  firstPage.__orientationUnlocks.length,
+  1,
+  "SDK 显式选择 system 时应解除浏览器方向锁定",
 );
 assert.equal(firstPage.playmesh.app.isAvailable(), false);
 assert.equal(firstPage.playmesh.app.identity.getCurrent(), null);
@@ -1066,6 +1150,7 @@ assert.equal(browserStreamUrl.pathname, "/v1/sessions/s-1/rpc-stream");
 assert.equal(browserStreamUrl.searchParams.get("path"), "/files/store");
 assert.equal(browserStreamUrl.searchParams.get("name"), "guest-save.bin");
 assert.equal(browserStreamUrl.searchParams.get("size"), "4");
+assert.equal(browserStreamUrl.searchParams.get("transport"), "chunked-v1");
 assert.equal(
   browserStreamUpload.options.headers.Authorization,
   "Bearer player-token-1",
@@ -1075,7 +1160,8 @@ assert.deepEqual(
   [1, 0, 255, 9],
 );
 assert.deepEqual(browserStreamProgress, [[0, 4], [4, 4]]);
-assert.equal(browserStreamUpload.options.duplex, "half");
+assert.equal(browserStreamUpload.options.body, undefined);
+assert.equal(browserStreamUpload.options.duplex, undefined);
 const unknownStreamProgress = [];
 const unknownStreamResult = await firstPage.playmesh.main.rpc.requestStream(
   "/files/store",
@@ -1097,6 +1183,10 @@ assert.equal(
   new URL(rpcStreamUploadCommands[1].url).searchParams.has("size"),
   false,
 );
+assert.equal(
+  new URL(rpcStreamUploadCommands[1].url).searchParams.get("transport"),
+  "chunked-v1",
+);
 assert.deepEqual(rpcStreamUploadCommands[1].bodyBytes, Uint8Array.from([7, 8]));
 assert.deepEqual(unknownStreamProgress, [[0, null], [2, null]]);
 await assert.rejects(
@@ -1112,7 +1202,7 @@ assert.equal(
   1,
   "browser stream bytes must use HTTP instead of another Binary RPC request",
 );
-assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), true);
+assert.equal(firstPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), false);
 assert.equal(
   firstPage.__mountedHosts.includes("playmesh-browser-fullscreen"),
   false,
@@ -1204,8 +1294,43 @@ assert.deepEqual(Object.keys(appPage.playmesh.main).filter((key) => key.startsWi
 assert.deepEqual(appPage.__fullscreenRequests, [
   { enabled: true, orientation: "portrait" },
 ]);
-assert.equal(joinCommands.at(-1).playerId, "u-current-app");
-assert.equal(joinCommands.at(-1).nickname, "App 玩家");
+const systemAppPage = createPage(
+  { userId: "u-system-app", nickname: "跟随系统玩家" },
+  false,
+  ["zh-CN"],
+  "zh-CN",
+  null,
+  {
+    mode: "solo",
+    orientation: "system",
+    gameId: "com.playmesh.system-app-test",
+  },
+);
+await systemAppPage.playmesh.ready;
+assert.deepEqual(systemAppPage.__fullscreenRequests, [
+  { enabled: true, orientation: undefined },
+], "清单 system 在 App 中启动时必须只请求全屏，不指定方向");
+const systemBrowserPage = createPage(
+  null,
+  false,
+  ["zh-CN"],
+  "zh-CN",
+  null,
+  {
+    mode: "solo",
+    orientation: "system",
+    gameId: "com.playmesh.system-browser-test",
+  },
+);
+await systemBrowserPage.playmesh.ready;
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(systemBrowserPage.__documentFullscreenRequests.length, 1);
+assert.deepEqual(systemBrowserPage.__orientationLocks, []);
+assert.deepEqual(systemBrowserPage.__orientationUnlocks, []);
+const currentAppJoin = joinCommands.findLast(
+  (command) => command.playerId === "u-current-app",
+);
+assert.equal(currentAppJoin?.nickname, "App 玩家");
 assert.equal(appPage.__ui[".edit"].hidden, true);
 assert.equal(appPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), false);
 // Game SDK 不再桥接 App 菜单按键，也不再创建平台菜单覆盖层。
@@ -1215,7 +1340,7 @@ assert.equal(
   true,
   "WebSocket open 后立即到达的最新会话快照不得丢失",
 );
-assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), "缓存玩家");
+assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), generatedNickname);
 const hostBucket = firstPage.playmesh.main.storage.getBucket("browser_save");
 assert.equal(hostBucket.flush, undefined);
 await hostBucket.setData("score", 18);
@@ -1267,12 +1392,34 @@ assert.equal(
   "game-token",
 );
 assert.equal(uploadCommands[0].options.body, uploadedFile);
+assert.equal(
+  await hostBucket.upload(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(Uint8Array.from([9, 0, 8, 7]));
+        controller.close();
+      },
+    }),
+    { name: "stream.bin", type: "application/octet-stream" },
+  ),
+  "/bucket/browser_save/1770000000001.bin",
+);
+assert.equal(uploadCommands.length, 2);
+assert.equal(
+  new URL(uploadCommands[1].url).searchParams.get("transport"),
+  "chunked-v1",
+);
+assert.equal(new URL(uploadCommands[1].url).searchParams.get("size"), null);
+assert.deepEqual(uploadCommands[1].bodyBytes, Uint8Array.from([9, 0, 8, 7]));
+assert.equal(uploadCommands[1].options.body, undefined);
+assert.equal(uploadCommands[1].options.duplex, undefined);
 
 const refreshedPage = createPage();
 await refreshedPage.playmesh.ready;
 assert.equal(joins, 3, "刷新必须使用持久化浏览器身份重新加入");
 assert.equal(refreshedPage.playmesh.main.player.getCurrent().id, persistedBrowserId);
-assert.equal(refreshedPage.playmesh.main.player.getCurrent().nickname, "缓存玩家");
+assert.equal(refreshedPage.playmesh.main.player.getCurrent().nickname, generatedNickname);
+assert.equal(refreshedPage.__mountedHosts.includes("playmesh-browser-nickname-ui"), false);
 assert.equal(
   refreshedPage.playmesh.main.player.getCurrent().id,
   firstPage.playmesh.main.player.getCurrent().id,
@@ -1478,29 +1625,36 @@ assert.equal(
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(historyBackCount, 1);
 
-const cachedNickname = browserLocalStorage.get("playmesh.nickname.v1");
-browserLocalStorage.delete("playmesh.nickname.v1");
-const requiredNicknameBackPage = createPage();
-const requiredNicknameBackResult = requiredNicknameBackPage.playmesh.ready.then(
-  () => null,
-  (error) => error,
-);
-while (!requiredNicknameBackPage.__ui.form.onsubmit) {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-emitKey(
-  requiredNicknameBackPage.__ui[".overlay"],
-  requiredNicknameBackPage.__ui.input,
-  "Escape",
-);
-const requiredNicknameBackError = await requiredNicknameBackResult;
-assert.equal(requiredNicknameBackError?.name, "AbortError");
-assert.equal(requiredNicknameBackPage.__ui[".overlay"].hidden, true);
+const editNicknamePage = createPage();
+await editNicknamePage.playmesh.ready;
+assert.equal(editNicknamePage.playmesh.main.player.getCurrent().nickname, "修改后的玩家");
+editNicknamePage.playmesh.app.ui.configure({ fallbackUi: true });
+await editNicknamePage.playmesh.app.ui.openGameInfo();
+const editNicknameResult = editNicknamePage.__ui[".info-edit"].onclick();
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(
-  requiredNicknameBackPage.document.activeElement,
-  requiredNicknameBackPage.__gameFocusTarget,
-);
-browserLocalStorage.set("playmesh.nickname.v1", cachedNickname);
+const profileRoot = editNicknamePage.__shadowRoots.at(-1);
+assert.equal(editNicknamePage.__ui[".overlay"].hidden, false);
+assert.equal(editNicknamePage.__ui.input.value, "修改后的玩家");
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(profileRoot.activeElement, editNicknamePage.__ui.input);
+const nicknameTab = emitKey(editNicknamePage.__ui[".overlay"], editNicknamePage.__ui.input, "Tab");
+assert.equal(nicknameTab.defaultPrevented, true);
+assert.equal(profileRoot.activeElement, editNicknamePage.__ui[".close"]);
+emitKey(editNicknamePage.__ui[".overlay"], editNicknamePage.__ui.input, "Tab", { shiftKey: true });
+assert.equal(profileRoot.activeElement, editNicknamePage.__ui[".save"]);
+emitKey(editNicknamePage.__ui[".overlay"], editNicknamePage.__ui.input, "Backspace");
+assert.equal(editNicknamePage.__ui[".overlay"].hidden, false);
+emitKey(editNicknamePage.__ui[".overlay"], editNicknamePage.__ui.input, "Escape");
+await editNicknameResult;
+assert.equal(editNicknamePage.__ui[".overlay"].hidden, true);
+assert.equal(editNicknamePage.playmesh.main.player.getCurrent().nickname, "修改后的玩家");
+assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), "修改后的玩家");
+const saveNicknameResult = editNicknamePage.__ui[".info-edit"].onclick();
+await new Promise((resolve) => setTimeout(resolve, 0));
+editNicknamePage.__ui.input.value = "菜单修改玩家";
+await editNicknamePage.__ui.form.onsubmit({ preventDefault() {} });
+await saveNicknameResult;
+assert.equal(editNicknamePage.playmesh.main.player.getCurrent().nickname, "菜单修改玩家");
+assert.equal(browserLocalStorage.get("playmesh.nickname.v1"), "菜单修改玩家");
 
 console.log("Game SDK browser identity, fullscreen, logging, reconnect, and lifecycle contract passed");

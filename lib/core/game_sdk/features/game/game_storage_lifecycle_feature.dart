@@ -264,15 +264,18 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   });
 
   async function connectBrowserFullscreen(config) {
+    const launchOrientation = config.orientation === "system"
+      ? undefined
+      : config.orientation;
     if (appSdk.isAvailable() && typeof appSdk.device?.setFullscreen === "function") {
       try {
-        await appSdk.device.setFullscreen(true, config.orientation);
+        await appSdk.device.setFullscreen(true, launchOrientation);
         global.console?.info?.("Playmesh 扫码加入页面已自动进入全屏");
       } catch (error) {
         global.console?.warn?.("Playmesh 扫码加入页面自动全屏失败，游戏将继续", error);
       }
     } else {
-      void requestBrowserFullscreen(config.orientation).catch((error) => {
+      void requestBrowserFullscreen(launchOrientation).catch((error) => {
         global.console?.info?.(
           "浏览器未允许自动全屏，可通过游戏菜单手动进入",
           error,
@@ -303,12 +306,17 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   }
 
   async function lockBrowserOrientation(orientation) {
+    const screenOrientation = global.screen?.orientation;
+    if (orientation === "system") {
+      screenOrientation?.unlock?.();
+      return;
+    }
     if (orientation !== "landscape" && orientation !== "portrait") return;
-    const lock = global.screen?.orientation?.lock;
+    const lock = screenOrientation?.lock;
     if (typeof lock !== "function") {
       throw new Error("当前浏览器不支持锁定屏幕方向");
     }
-    await lock.call(global.screen.orientation, orientation);
+    await lock.call(screenOrientation, orientation);
   }
 
   async function requestBrowserFullscreen(orientation) {
@@ -793,13 +801,28 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       headers["X-Playmesh-Share-Token"] = config.shareToken;
     }
     if (stream.type) headers["Content-Type"] = stream.type;
-    const request = {
-      method: "POST",
-      headers,
-      body: stream.body,
-    };
-    if (stream.streaming) request.duplex = "half";
-    const response = await global.fetch(url, request);
+    const response = stream.streaming
+      ? await uploadRpcStreamChunks({
+          endpoint: (() => {
+            const endpoint = new URL(
+              url,
+              global.location?.href || "http://playmesh.local/",
+            );
+            if (stream.size !== null) {
+              endpoint.searchParams.set("size", String(stream.size));
+            }
+            return endpoint;
+          })(),
+          stream,
+          headers,
+          expectedPathPrefix: "/bucket/_playmesh-stream/v1/",
+          errorMessage: "文件上传失败",
+        })
+      : await global.fetch(url, {
+          method: "POST",
+          headers,
+          body: stream.body,
+        });
     let payload = null;
     try {
       payload = await response.json();
@@ -815,13 +838,10 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   async function resolveBrowserNickname() {
     const cached = readBrowserNickname();
     if (cached) return cached;
-    return openBrowserNicknameDialog({
-      required: true,
-      current: "",
-      submit(nickname) {
-        writeBrowserNickname(nickname);
-      },
-    });
+    const suffix = Math.floor(Math.random() * 36 ** 4).toString(36).padStart(4, "0");
+    const nickname = `浏览器${suffix}`;
+    writeBrowserNickname(nickname);
+    return nickname;
   }
 
   function readBrowserNickname() {
@@ -1070,7 +1090,6 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
 
   async function editBrowserNickname() {
     const value = await openBrowserNicknameDialog({
-      required: false,
       current: bootstrap?.player?.nickname || readBrowserNickname() || "",
       submit: main.player.setNickname,
     });
@@ -1080,21 +1099,18 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
   async function openBrowserNicknameDialog(options) {
     const ui = await ensureBrowserNicknameUi();
     if (!ui) throw new Error("浏览器昵称界面不可用");
-    ui.nicknameRequired = options.required === true;
-    ui.title.textContent = platformText(
-      ui.nicknameRequired ? "nickname.set_title" : "nickname.edit_title",
-    );
+    ui.title.textContent = platformText("nickname.edit_title");
     ui.input.value = options.current;
     ui.error.textContent = "";
-    ui.close.hidden = options.required;
+    ui.close.hidden = false;
     openPlatformUiLayer(
       ui.overlay,
       ui.input,
-      options.returnFocus || (options.required ? null : ui.pageReturnFocus),
+      options.returnFocus || ui.pageReturnFocus,
     );
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let settled = false;
-      const finish = (value, error = null) => {
+      const finish = (value) => {
         if (settled) return;
         settled = true;
         ui.onNicknameBack = null;
@@ -1102,18 +1118,11 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
           ui.overlay,
           options.returnFocus || ui.pageReturnFocus,
         );
-        if (error) reject(error);
-        else resolve(value);
+        resolve(value);
       };
       ui.onNicknameBack = () => {
         if (ui.submit.disabled) return;
-        if (!ui.nicknameRequired) {
-          finish(null);
-          return;
-        }
-        const error = new Error("Browser nickname setup was cancelled");
-        error.name = "AbortError";
-        finish(null, error);
+        finish(null);
       };
       ui.close.onclick = () => finish(null);
       ui.form.onsubmit = async (event) => {
@@ -1261,9 +1270,7 @@ const gameStorageLifecycleSdkSource = SdkSourceFragment(
       ui.nicknameLabel.textContent = platformText("nickname.label");
     }
     if (ui.title && !ui.overlay.hidden) {
-      ui.title.textContent = platformText(
-        ui.nicknameRequired ? "nickname.set_title" : "nickname.edit_title",
-      );
+      ui.title.textContent = platformText("nickname.edit_title");
     }
     setPlatformControlLabel(ui.close, "common.cancel", { visible: true });
     setPlatformControlLabel(ui.submit, "common.save", { visible: true });

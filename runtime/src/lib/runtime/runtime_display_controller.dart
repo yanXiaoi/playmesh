@@ -14,8 +14,10 @@ final class RuntimeDisplayController with FullScreenListener {
   bool _listening = false;
   bool _closed = false;
 
-  Future<void> enter(String orientation) =>
-      setFullscreen(true, orientation: orientation);
+  Future<void> enter(String orientation) => setFullscreen(
+    true,
+    orientation: orientation == 'system' ? null : orientation,
+  );
 
   Future<bool> isFullscreen() async {
     if (Platform.isWindows) return windowManager.isFullScreen();
@@ -26,8 +28,11 @@ final class RuntimeDisplayController with FullScreenListener {
     if (_closed) throw StateError('Runtime 显示控制器已关闭');
     if (orientation != null &&
         orientation != 'portrait' &&
-        orientation != 'landscape') {
-      throw const FormatException('orientation 必须是 portrait 或 landscape');
+        orientation != 'landscape' &&
+        orientation != 'system') {
+      throw const FormatException(
+        'orientation 必须是 portrait、landscape 或 system',
+      );
     }
     if (!enabled && orientation != null) {
       throw const FormatException('退出全屏时不能声明 orientation');
@@ -70,17 +75,18 @@ final class RuntimeDisplayController with FullScreenListener {
   }
 
   Future<void> _setAndroidOrientation(String orientation) =>
-      SystemChrome.setPreferredOrientations(
-        orientation == 'portrait'
-            ? const [
-                DeviceOrientation.portraitUp,
-                DeviceOrientation.portraitDown,
-              ]
-            : const [
-                DeviceOrientation.landscapeLeft,
-                DeviceOrientation.landscapeRight,
-              ],
-      );
+      SystemChrome.setPreferredOrientations(switch (orientation) {
+        'portrait' => const [
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ],
+        'landscape' => const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+        'system' => const [],
+        _ => throw StateError('未校验的 Runtime 屏幕方向: $orientation'),
+      });
 
   Future<void> restore() async {
     if (_closed) return;

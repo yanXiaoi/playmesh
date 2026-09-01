@@ -46,6 +46,28 @@ void main() {
     expect(script, contains('function manifestConfigFromForm()'));
   });
 
+  test('源码工作区的新建项目与缺省方向都跟随系统', () {
+    final html = File('$developerRoot/workspace.html').readAsStringSync();
+    final script = File('$developerRoot/workspace.js').readAsStringSync();
+
+    expect(
+      RegExp(
+        r'id="(?:manifest|project)(?:Controller)?Orientation"[^>]*>[\s\S]*?value="system"[^>]*selected',
+      ).allMatches(html),
+      hasLength(4),
+    );
+    expect(
+      script,
+      contains("q('manifestOrientation').value=manifest.orientation||'system'"),
+    );
+    expect(
+      script,
+      contains(
+        "q('manifestControllerOrientation').value=manifest.controllerOrientation||'system'",
+      ),
+    );
+  });
+
   test('Developer Workspace consumes only the unified App localization', () {
     final html = File('$developerRoot/workspace.html').readAsStringSync();
     final script = File('$developerRoot/workspace.js').readAsStringSync();

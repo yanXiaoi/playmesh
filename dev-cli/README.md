@@ -136,6 +136,12 @@ CLI 每次保存都把界面当前值写为 `main.json.config.webRuntime.multith
 替换。只有精确布尔值 `true` 才请求 App 的公共 WebView 资源网关启用 COOP/COEP；
 `config` 的接收、传输和通用清单校验仍不检查其类型或内部字段。
 
+主画面方向与单屏多人控制器方向都提供“横屏 / 竖屏 / 跟随系统”三个选项，分别写为
+`landscape`、`portrait`、`system`。新建项目的主画面与控制器方向默认都是 `system`；已有
+清单的显式方向不改写。`system` 必须显式保存，不能写成 `auto` 或省略字段；
+游戏自动启动时只请求全屏，不指定方向。Cocos 构建配置的显式 `auto` 投影为
+`system`，不再根据设计分辨率把该值猜成横屏或竖屏。该变化合入现有 CLI `2.0.0`。
+
 只有单屏多人模式保存 `entries.controller`、`controllerOrientation` 和控制器能力，
 控制器 HTML 地址由用户配置。单人模式以及联机多屏多人模式都会删除这些字段；切换
 模式时不会继承上一种模式的控制器配置。多人模式的权威逻辑 JS 地址同样由用户配置。

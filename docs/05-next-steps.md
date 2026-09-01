@@ -13,11 +13,12 @@
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
 归档基线，不再用于当前生成、运行或发布。当前未发布工作版本为 App `5.1.0+37`、Runtime
-`2.1.0+11`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
+`2.1.0+12`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`、Game SDK `4.3.0`、
 App Bridge SDK `3.5.0`。本轮以 Pion WebRTC/DataChannel + TURN 替换旧 TCP Relay，并新增
-通用 HTML 信令端点；Runtime 三端固定底包曾完成重建，但 Windows 包早于当前 WebView
-光标修复，发布前必须再次重建并更新真实哈希；主 App 尚未打包或完成跨公网实机验收。
+通用 HTML 信令端点；Runtime 三端固定底包已于 2026-08-31 重建为 `v2.1.0-build12`，
+包含当前 WebView 光标修复与浏览器自动昵称，固定文件及真实哈希已同步；主 App 尚未
+打包或完成跨公网实机验收，远端资源也尚未推送。
 首页扫码、“加入对局”页扫码与手工链接已经共用唯一的邀请准备方法和动态 Core 地址；加入
 准备与导航期间显示全页遮罩，错误界面保留脱敏后的完整 cause 链。后续必须优先补两台真实
 设备的两个扫码入口、LAN 手工链接与公网 TURN 验收，不能用自动测试或包内标记替代。
@@ -39,7 +40,7 @@ App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏�
 ```text
 游戏库扫描 playmesh-library/packages/{gameId}/main.json
   -> 游戏详情
-  -> 应用 orientation，并行尝试可选全屏
+  -> 固定 orientation 时应用方向；system 时只尝试可选全屏
   -> GamePage / GameLauncher
   -> InstalledGameWebResourceSource / InstalledGameWebResourceProvider
   -> GameAssetGateway / WebView / Game SDK + App SDK
@@ -198,7 +199,7 @@ App Bridge SDK、Go Core、Core 与 Relay 版本在该功能中均保持现有�
 - Core 每次启动都使用系统分配端口，实际端口由宿主上报。
 - 开发者 Gateway 与 Core 分离，默认固定端口 `16666`，可在首页“制作游戏”页修改；不得为了修改开发者端口重启 Core。
 - Android 发布物包含 `playmesh_core.aar`，Windows 发布物包含 Runner 同目录的 `playmesh-core.exe`。
-- `orientation`、`displayModes` 和 `modes` 是独立维度；当前 `displayModes` 与 `modes` 都只能声明一个值。
+- `orientation`、`displayModes` 和 `modes` 是独立维度；方向必须显式为 `landscape`、`portrait` 或 `system`，其中 `system` 自动启动时只请求全屏；当前 `displayModes` 与 `modes` 都只能声明一个值。
 - 浏览器分享 token 在当前游戏会话期间有效，关闭附加层和刷新游戏不撤销；退出游戏、会话结束或 Core 重启后失效。
 - 分享地址列表可点选，二维码始终对应当前选中的地址。
 - 主机与 App 扫码加入页使用同一套悬浮工具语义；主机分享入口为一级按钮，所有 App 游戏工具只保留返回而不重复提供退出。普通浏览器由 SDK 提供不含 App 导航和分享能力的对应功能区。

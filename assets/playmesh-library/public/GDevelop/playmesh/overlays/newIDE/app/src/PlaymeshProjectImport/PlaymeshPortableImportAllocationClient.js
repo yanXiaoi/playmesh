@@ -301,6 +301,7 @@ const assertReadyConfigEvidence = (
       'minPlayers',
       'maxPlayers',
       'tags',
+      'webRuntimeMultithreading',
       'updatedAt',
     ]) ||
     config.schemaVersion !== PROJECT_CONFIG_SCHEMA_VERSION ||
@@ -315,7 +316,8 @@ const assertReadyConfigEvidence = (
     (config.gameType === 'single' &&
       (config.minPlayers !== 1 || config.maxPlayers !== 1)) ||
     !Array.isArray(config.tags) ||
-    config.tags.length > PROJECT_CONFIG_MAXIMUM_TAGS
+    config.tags.length > PROJECT_CONFIG_MAXIMUM_TAGS ||
+    typeof config.webRuntimeMultithreading !== 'boolean'
   ) {
     return invalidResponse();
   }
@@ -337,6 +339,7 @@ const assertReadyConfigEvidence = (
       minPlayers: config.minPlayers,
       maxPlayers: config.maxPlayers,
       tags,
+      webRuntimeMultithreading: config.webRuntimeMultithreading,
       updatedAt: requireTimestamp(config.updatedAt),
     },
   };

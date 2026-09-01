@@ -1025,6 +1025,19 @@ for (const [pattern, label] of forbiddenRuntimePatterns) {
 const publicFunctions = extension.eventsFunctions.filter(
   eventsFunction => !eventsFunction.private
 );
+for (const functionName of ['SetDeviceFullscreen', 'EnterUiFullscreen']) {
+  const eventsFunction = publicFunctions.find(
+    candidate => candidate.name === functionName
+  );
+  const orientation = eventsFunction?.parameters?.find(
+    parameter => parameter.name === 'Orientation'
+  );
+  assert.equal(
+    orientation?.defaultValue,
+    '"system"',
+    `${functionName} must default its explicit orientation selector to system`
+  );
+}
 const completeAppBackRequest = publicFunctions.find(
   eventsFunction => eventsFunction.name === 'CompleteAppBackRequest'
 );

@@ -1,9 +1,9 @@
 {
-  "version": "v2.1.0-build11",
+  "version": "v2.1.0-build12",
   "platform": {
     "android": {
       "x86": {
-        "sha256": "d31449132b822c51906e8752bb796548693c4ef975b16b6ed4096d32aa05914f",
+        "sha256": "09606010e07c094753573c4d4fef20dae9c5e0220b88113a69e683eb6fae5fd9",
         "downloads": [
           {
             "name": "Github",
@@ -16,7 +16,7 @@
         ]
       },
       "arm": {
-        "sha256": "58b687fe53079b50184a1b99a86b49834c272a56454f292c583ef8b4708a8f02",
+        "sha256": "27e651b15df77179be0723dc0694a45d352ec2ca990592e93310e7e39cf0297e",
         "downloads": [
           {
             "name": "Github",
@@ -30,7 +30,7 @@
       }
     },
     "windows": {
-      "sha256": "d7427c0fca5a609aa1290b4da111aed2c24ba162057cc030ef0418c21644fe38",
+      "sha256": "7bbd0e6d91e7d2e53ebe49c5e70c87f1de382a2a9faadf4f0b4883254e80e77e",
       "downloads": [
         {
           "name": "Github",

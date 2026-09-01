@@ -118,9 +118,9 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
 | `lastModifiedAt` | 新发布必有，旧包可缺省 | 最后上传的 Unix 毫秒时间戳，只读；缺省由 App 外壳显示本地化“无”，有值时按设备本地时区显示 |
 | `remarks` | 否 | 游戏简介，缺省为空字符串 |
 | `version` | 是 | `MAJOR.MINOR.PATCH` |
-| `sdkVersion` | 是 | 支持 `4.1.0` 或 `4.2.0`；新建、更新与 CLI 运行写入当前 `4.2.0` |
-| `appSdkVersion` | 是 | 支持 `3.2.0`、`3.3.0` 或 `3.4.0`；新建、更新与 CLI 发布写入当前 `3.4.0` |
-| `orientation` | 是 | `landscape` 或 `portrait` |
+| `sdkVersion` | 是 | 支持 `4.1.0`、`4.2.0` 或 `4.3.0`；新建、更新与 CLI 运行写入当前 `4.3.0` |
+| `appSdkVersion` | 是 | 支持 `3.2.0`、`3.3.0`、`3.4.0` 或 `3.5.0`；新建、更新与 CLI 发布写入当前 `3.5.0` |
+| `orientation` | 是 | `landscape`、`portrait` 或 `system` |
 | `controllerOrientation` | 单屏多人必填 | 控制器全屏方向；其他显示模式禁止声明 |
 | `modes` | 是 | 单元素数组，值为 `solo` 或 `multiplayer` |
 | `displayModes` | 是 | 单元素数组，值为 `multi_screen` 或 `single_screen_multiplayer` |
@@ -228,7 +228,7 @@ CLI 本地开发副本继续保留物理 `app/`，但 App、CLI 开发代理和�
 
 ## 屏幕方向
 
-游戏必须声明主画面 `orientation`；单屏多人还必须声明 `controllerOrientation`。App 在创建 WebView 前按当前角色应用方向，SDK 进入全屏时把方向传给原生宿主；普通浏览器使用 Fullscreen API 后尽力调用 Screen Orientation API。浏览器可能拒绝锁定，游戏页面仍须使用响应式布局。离开游戏后恢复系统方向。
+游戏必须声明主画面 `orientation`；单屏多人还必须声明 `controllerOrientation`。新建、导入和脚手架生成的主画面与控制器默认都显式写入 `system`，已有清单的显式方向不迁移。`landscape` 与 `portrait` 在创建 WebView 前按当前角色应用，并在进入全屏时传给原生宿主；`system` 表示跟随设备设置，自动启动时只进入全屏，不指定、锁定或解除方向。游戏主动调用 SDK 并传入 `system` 时会解除当前页面已有的方向锁。普通浏览器可能拒绝全屏或方向锁定，游戏页面仍须使用响应式布局。离开游戏后恢复系统方向。
 
 ## 存储目录
 

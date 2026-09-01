@@ -87,7 +87,7 @@ func TestInitCocosCreatesIsolatedProjectAndExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	if created.Name != "Cocos Arena" || created.Mode != "solo" ||
-		created.Orientation != "landscape" {
+		created.Orientation != "system" {
 		t.Fatalf("adapter defaults were not applied: %#v", created)
 	}
 	for _, relative := range []string{
@@ -175,7 +175,9 @@ func TestCocosAdapterReadsProjectNameAndUsesVisibleDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if defaults.Name != "Puzzle Lab" || defaults.Mode != "solo" ||
-		defaults.Orientation != "landscape" || defaults.Tags != "cocos" {
+		defaults.Orientation != "system" ||
+		defaults.ControllerOrientation != "system" ||
+		defaults.Tags != "cocos" {
 		t.Fatalf("unexpected Cocos defaults: %#v", defaults)
 	}
 }

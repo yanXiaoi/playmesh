@@ -16,6 +16,27 @@ final class RuntimeLanDiscoveredGame {
   final String host;
 }
 
+enum RuntimeLanDiscoveryState {
+  scanning,
+  ready,
+  permissionDenied,
+  unsupported,
+  failed,
+}
+
+final class RuntimeLanDiscoverySnapshot {
+  RuntimeLanDiscoverySnapshot({
+    required this.state,
+    required Iterable<RuntimeLanDiscoveredGame> games,
+  }) : games = List.unmodifiable(games);
+
+  final RuntimeLanDiscoveryState state;
+  final List<RuntimeLanDiscoveredGame> games;
+}
+
+typedef RuntimeLanDiscoveryListener =
+    Future<void> Function(RuntimeLanDiscoverySnapshot snapshot);
+
 final class RuntimeLanJoinAction {
   const RuntimeLanJoinAction(this.afterResponse);
 
@@ -36,6 +57,13 @@ final class RuntimeLanShareLink {
 
 abstract interface class RuntimeLanHost {
   Future<List<RuntimeLanDiscoveredGame>> discoverGames();
+
+  Future<void> subscribeDiscoveredGames(
+    String subscriptionId,
+    RuntimeLanDiscoveryListener listener,
+  );
+
+  Future<void> unsubscribeDiscoveredGames(String subscriptionId);
 
   Future<RuntimeLanJoinAction> prepareDiscoveredJoin(String instanceId);
 

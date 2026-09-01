@@ -5,7 +5,7 @@
     "commit": "9ef4a53e6a9b351618a1e60a99f7d7f4baf36361"
   },
   "overlay": {
-    "treeSha256": "c4424af87f1b4b9b7eb38c615ad3b512831f9c5e2380dd8dcea6362c69881939"
+    "treeSha256": "c5b9b2a9a9ae5912470445e6cfe5e1e8be9a403098ac79b74df3b57aced67a5c"
   },
   "generatedFiles": [
     {
@@ -50,7 +50,7 @@
     },
     {
       "relativePath": "newIDE/app/src/PlaymeshShared/GameManifest.js",
-      "postPatchSha256": "48b274a6ffc5bc1a0eab4aa27e8590eec9b59978b85bb3e1e11bb85074356500"
+      "postPatchSha256": "19094bf1a77f6b6dc34f512a08dd59ce98e02889658bcdb51e9795febeedd73d"
     },
     {
       "relativePath": "newIDE/app/src/PlaymeshShared/GDevelopAuthorityBootstrapSource.js",

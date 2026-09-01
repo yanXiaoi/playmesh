@@ -111,6 +111,7 @@ const configEvidence = gameId => ({
     minPlayers: 2,
     maxPlayers: 5,
     tags: ['联机'],
+    webRuntimeMultithreading: false,
     updatedAt: timestamp,
   },
 });

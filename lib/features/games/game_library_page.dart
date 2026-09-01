@@ -1434,9 +1434,11 @@ String gameLibraryMetadata(BuildContext context, GameSummary game) {
   final displayMode = game.displayMode == 'single_screen_multiplayer'
       ? context.tr('library.single_screen_multiplayer')
       : context.tr('library.multi_screen_multiplayer');
-  final orientation = game.orientation == GameOrientation.landscape
-      ? context.tr('library.landscape')
-      : context.tr('library.portrait');
+  final orientation = switch (game.orientation) {
+    GameOrientation.landscape => context.tr('library.landscape'),
+    GameOrientation.portrait => context.tr('library.portrait'),
+    GameOrientation.system => context.tr('library.system'),
+  };
   return 'v${game.version} · $mode · $displayMode · $orientation';
 }
 

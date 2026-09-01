@@ -3,7 +3,8 @@ import 'game_capabilities.dart';
 
 enum GameOrientation {
   landscape('landscape'),
-  portrait('portrait');
+  portrait('portrait'),
+  system('system');
 
   const GameOrientation(this.manifestValue);
 

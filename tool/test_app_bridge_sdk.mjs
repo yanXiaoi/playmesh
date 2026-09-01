@@ -406,6 +406,15 @@ assert.deepEqual(
   commands.find((item) => item.command === "app.device.fullscreen").payload,
   { enabled: true, orientation: "portrait" },
 );
+await app.device.setFullscreen(true, "system");
+assert.deepEqual(
+  commands.findLast((item) => item.command === "app.device.fullscreen").payload,
+  { enabled: true, orientation: "system" },
+);
+await assert.rejects(
+  app.device.setFullscreen(true, "auto"),
+  /orientation.*landscape.*portrait.*system/,
+);
 assert.equal(commands.some((item) => item.command === "app.capability.create"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.invoke"), true);
 assert.equal(commands.some((item) => item.command === "app.capability.dispose"), true);

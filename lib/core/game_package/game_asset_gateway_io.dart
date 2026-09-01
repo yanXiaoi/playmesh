@@ -85,6 +85,8 @@ class _IoGameAssetGateway implements GameAssetGateway {
   final GameStorageService? storage;
   final StandardJsonBucketRequestLedger _standardJsonLedger =
       StandardJsonBucketRequestLedger();
+  final GameBucketChunkUploadRegistry _chunkUploads =
+      GameBucketChunkUploadRegistry();
   bool _closed = false;
 
   @override
@@ -133,6 +135,7 @@ class _IoGameAssetGateway implements GameAssetGateway {
         await handleGameBucketRequest(
           request,
           storage: bucketStorage,
+          chunkUploads: _chunkUploads,
           authorizeUpload: (request) =>
               request.connectionInfo?.remoteAddress.isLoopback == true
               ? StandardJsonBucketAuthorization(
@@ -255,6 +258,7 @@ class _IoGameAssetGateway implements GameAssetGateway {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    await _chunkUploads.close();
     await server.close(force: true);
     await provider.close();
   }

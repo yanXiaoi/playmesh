@@ -81,8 +81,11 @@ const appDeviceSdkSource = SdkSourceFragment(
       setFullscreen(enabled, orientation) {
         if (orientation !== undefined &&
             orientation !== "landscape" &&
-            orientation !== "portrait") {
-          return Promise.reject(new TypeError("orientation 必须是 landscape 或 portrait"));
+            orientation !== "portrait" &&
+            orientation !== "system") {
+          return Promise.reject(new TypeError(
+            "orientation 必须是 landscape、portrait 或 system",
+          ));
         }
         if (enabled !== true && orientation !== undefined) {
           return Promise.reject(new TypeError("退出全屏时不能声明 orientation"));
@@ -139,7 +142,7 @@ const appDeviceSdkSource = SdkSourceFragment(
         if (bootstrap?.available === true) {
           return publicAppApi.device.setFullscreen(true, orientation);
         }
-        return setAppUiFullscreen(true);
+        return setAppUiFullscreen(true, orientation);
       },
       exitFullscreen() {
         return setAppUiFullscreen(false);

@@ -1,0 +1,14 @@
+name: playmesh_database
+description: Shared isolated SQLite runtime for Playmesh games.
+publish_to: none
+
+version: 1.0.0
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  sqlite3: ^3.1.0
+
+dev_dependencies:
+  test: ^1.28.0

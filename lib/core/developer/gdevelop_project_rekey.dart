@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 
+import '../../models/game_id.dart';
 import 'foundation/gdevelop_project_mutation_lock.dart';
 import 'foundation/pending_project_commit_store.dart';
 import 'gdevelop_project_config.dart';
@@ -1738,6 +1739,12 @@ class GDevelopProjectRekeyCoordinator {
       ..['gameId'] = newGameId
       ..['previousGameIds'] = sortedPrevious
       ..['updatedAt'] = clock().toUtc().toIso8601String();
+    if (isValidPlaymeshNewProjectGameId(newGameId)) {
+      metadata['identityPolicy'] =
+          ProjectProvisioningService.androidApplicationIdIdentityPolicy;
+    } else {
+      metadata.remove('identityPolicy');
+    }
     await _writeJson(metadataFile, metadata);
 
     final currentRoot = Directory(

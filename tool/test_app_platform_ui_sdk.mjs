@@ -152,6 +152,7 @@ function createPage({
   const commands = [];
   const consoleEntries = [];
   const synchronousAppBuckets = new Map();
+  const lanDiscoverySubscriptions = new Set();
   let pendingDiscoveryResult = null;
   let pendingSharePanelResult = null;
   const document = {
@@ -424,13 +425,10 @@ function createPage({
             appBuckets.set(bucket, bucketValues);
           } else if (command.command === "app.storage.clear") {
             appBuckets.set(bucket, new Map());
-          } else if (command.command === "app.lan.discover") {
-            result = [{
-              instanceId: "room-current-game",
-              gameId: "com.playmesh.current-game",
-              name: "客厅房间",
-              host: "192.168.1.23",
-            }];
+          } else if (command.command === "app.lan.discovery.subscribe") {
+            lanDiscoverySubscriptions.add(command.payload.subscriptionId);
+          } else if (command.command === "app.lan.discovery.unsubscribe") {
+            lanDiscoverySubscriptions.delete(command.payload.subscriptionId);
           }
           const response = {
             type: "app.command.result",
@@ -458,9 +456,25 @@ function createPage({
                 }
               : result,
           };
-          if (command.command === "app.lan.discover" && deferDiscovery) {
+          const completeLanDiscoverySubscription = () => {
+            if (command.command === "app.lan.discovery.subscribe") {
+              window[appInternalKey].receive({
+                type: "app.lan.discovery.snapshot",
+                subscriptionId: command.payload.subscriptionId,
+                state: "ready",
+                games: [{
+                  instanceId: "room-current-game",
+                  gameId: "com.playmesh.current-game",
+                  name: "客厅房间",
+                  host: "192.168.1.23",
+                }],
+              });
+            }
+            window[appInternalKey].receive(response);
+          };
+          if (command.command === "app.lan.discovery.subscribe" && deferDiscovery) {
             pendingDiscoveryResult = () => {
-              window[appInternalKey].receive(response);
+              completeLanDiscoverySubscription();
             };
             return;
           }
@@ -470,7 +484,7 @@ function createPage({
             };
             return;
           }
-          window[appInternalKey].receive(response);
+          completeLanDiscoverySubscription();
         });
       },
     };
@@ -502,6 +516,16 @@ function createPage({
     gameFocus,
     dispatchKey,
     localState,
+    emitLanDiscovery(games, state = "ready") {
+      for (const subscriptionId of lanDiscoverySubscriptions) {
+        window[appInternalKey].receive({
+          type: "app.lan.discovery.snapshot",
+          subscriptionId,
+          state,
+          games,
+        });
+      }
+    },
     completeDiscovery() {
       assert.ok(pendingDiscoveryResult, "没有待完成的局域网发现请求");
       const complete = pendingDiscoveryResult;
@@ -1228,7 +1252,7 @@ pendingUi[".join"].click();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(pendingUi[".join-layer"].hidden, false);
 assert.equal(pendingUi[".join-loading"].hidden, false);
-assert.equal(pendingUi[".join-loading-label"].textContent, "扫描中");
+assert.equal(pendingUi[".join-loading-label"].textContent, "正在启动扫描...");
 assert.equal(pendingUi[".join-results"].getAttribute("aria-busy"), "true");
 assert.equal(pendingUi[".join-rooms"].getAttribute("aria-disabled"), "true");
 assert.equal(pendingUi[".join-layer"].getAttribute("aria-busy"), null);
@@ -1237,11 +1261,27 @@ assert.equal(pendingUi[".join-input"].disabled, false);
 assert.equal(pendingUi[".join-submit"].disabled, false);
 pendingUiPage.completeDiscovery();
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(pendingUi[".join-loading"].hidden, true);
+assert.equal(pendingUi[".join-loading"].hidden, false);
+assert.equal(pendingUi[".join-loading-label"].textContent, "持续扫描中...");
 assert.equal(pendingUi[".join-results"].getAttribute("aria-busy"), "false");
 assert.equal(pendingUi[".join-rooms"].getAttribute("aria-disabled"), "false");
 assert.equal(pendingUi[".join-rooms"].innerHTML.includes("客厅房间"), true);
+pendingUiPage.emitLanDiscovery([]);
+assert.equal(pendingUi[".join-rooms"].innerHTML.includes("客厅房间"), false);
+assert.equal(pendingUi[".join-empty"].hidden, false);
+pendingUiPage.emitLanDiscovery([{
+  instanceId: "room-current-game",
+  gameId: "com.playmesh.current-game",
+  name: "新出现的房间",
+  host: "192.168.1.24",
+}]);
+assert.equal(pendingUi[".join-rooms"].innerHTML.includes("新出现的房间"), true);
 pendingUi[".join-close"].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  pendingUiPage.commands.includes("app.lan.discovery.unsubscribe"),
+  true,
+);
 
 const appPage = createPage({ app: true });
 const earlyEscape = appPage.dispatchKey("Escape", 27);

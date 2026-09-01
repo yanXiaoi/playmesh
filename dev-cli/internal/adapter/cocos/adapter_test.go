@@ -471,7 +471,7 @@ func TestValidateCocosIntegrationAllowsUserAppOutputDirectory(t *testing.T) {
 	}
 }
 
-func TestCocosProjectOrientationUsesLatestBuildProfileAndDesignResolution(
+func TestCocosProjectOrientationMapsAutoToFollowSystem(
 	t *testing.T,
 ) {
 	root := t.TempDir()
@@ -492,9 +492,9 @@ func TestCocosProjectOrientationUsesLatestBuildProfileAndDesignResolution(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || orientation != "portrait" {
+	if !found || orientation != "system" {
 		t.Fatalf(
-			"auto orientation must use portrait design resolution, got %q found=%v",
+			"auto orientation must follow the system, got %q found=%v",
 			orientation,
 			found,
 		)

@@ -25,6 +25,7 @@ class SystemGameOrientationController
   bool? _wasFullScreen;
   Completer<void>? _fullscreenCompleter;
   bool _listening = false;
+  GameOrientation? _appliedOrientation;
 
   bool get _supportsOrientationLock {
     return isMobileAppPlatform;
@@ -71,7 +72,13 @@ class SystemGameOrientationController
       );
     }
 
-    if (_supportsOrientationLock) await _setPreferredOrientation(orientation);
+    if (_supportsOrientationLock) {
+      if (orientation != GameOrientation.system ||
+          _appliedOrientation != null) {
+        await _setPreferredOrientation(orientation);
+      }
+      _appliedOrientation = orientation;
+    }
   }
 
   Future<void> _setPreferredOrientation(GameOrientation orientation) =>
@@ -84,6 +91,7 @@ class SystemGameOrientationController
           DeviceOrientation.portraitUp,
           DeviceOrientation.portraitDown,
         ],
+        GameOrientation.system => const [],
       });
 
   Future<bool> _waitForDesktopFullscreen() async {
@@ -103,6 +111,7 @@ class SystemGameOrientationController
     if (_supportsOrientationLock) {
       await SystemChrome.setPreferredOrientations(const []);
     }
+    _appliedOrientation = null;
 
     final wasFullScreen = _wasFullScreen;
     _wasFullScreen = null;

@@ -48,6 +48,8 @@ void main() {
       'app.input.takeover',
       'app.ui.openSharePanel',
       'app.lan.discover',
+      'app.lan.discovery.subscribe',
+      'app.lan.discovery.unsubscribe',
       'app.lan.joinDiscovered',
       'app.lan.joinByLink',
       'app.lan.scanQr',

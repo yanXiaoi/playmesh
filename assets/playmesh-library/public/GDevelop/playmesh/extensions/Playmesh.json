@@ -6334,12 +6334,12 @@
           "type": "yesorno"
         },
         {
-          "description": "全屏方向；UseOrientation 为否时真正省略。",
+          "description": "全屏方向；system 表示解除已有方向锁并跟随系统，UseOrientation 为否时真正省略。",
           "name": "Orientation",
           "type": "stringWithSelector",
-          "supplementaryInformation": "[\"landscape\",\"portrait\"]",
+          "supplementaryInformation": "[\"landscape\",\"portrait\",\"system\"]",
           "optional": true,
-          "defaultValue": "\"\""
+          "defaultValue": "\"system\""
         },
         {
           "description": "将宿主返回的开放结果写入变量。",
@@ -6620,12 +6620,12 @@
           "type": "yesorno"
         },
         {
-          "description": "全屏方向。",
+          "description": "全屏方向；system 表示解除已有方向锁并跟随系统。",
           "name": "Orientation",
           "type": "stringWithSelector",
-          "supplementaryInformation": "[\"landscape\",\"portrait\"]",
+          "supplementaryInformation": "[\"landscape\",\"portrait\",\"system\"]",
           "optional": true,
-          "defaultValue": "\"\""
+          "defaultValue": "\"system\""
         },
         {
           "description": "将宿主开放结果写入变量。",

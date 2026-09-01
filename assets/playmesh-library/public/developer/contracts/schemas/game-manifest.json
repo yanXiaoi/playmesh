@@ -63,13 +63,15 @@
     "orientation": {
       "enum": [
         "landscape",
-        "portrait"
+        "portrait",
+        "system"
       ]
     },
     "controllerOrientation": {
       "enum": [
         "landscape",
-        "portrait"
+        "portrait",
+        "system"
       ]
     },
     "modes": {

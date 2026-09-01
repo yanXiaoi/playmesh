@@ -360,7 +360,7 @@ RPC Stream HTTP（按需、一次性）
 
 游戏库只负责展示游戏并提供明确的“查看详情”操作。游戏详情页以紧凑信息区展示名称、发布者、最后上传时间、版本、简介、人数、模式、主画面/控制器方向、SDK 版本和运行入口，并提供唯一的“开始游戏”操作；点击后进入独立的游戏页，不在游戏库或详情页内嵌 WebView，也不在详情页重复提供游戏包导出。清单中的时间保存为 Unix 毫秒时间戳，展示时转换为当前设备时区。
 
-主机入口必须通过 `GameLaunchArguments.enterFullscreenOnLaunch` 显式声明是否请求启动全屏。游戏库详情与首页快速游戏固定传 `true`；开发者工作区、CLI `run` 与 CLI `dev` 共用开发启动入口，Android/iOS 手持端传 `true`，Windows、macOS 与 Linux 桌面端传 `false` 并保持窗口化。控制器/加入端由独立的 `RemoteGamePage` 按当前终端策略进入全屏，不再通过 `GamePage` 的本地控制器角色分支启动。全屏请求不阻塞游戏运行时和会话初始化；App/WebView 通过原生宿主处理全屏和方向，普通浏览器由 Game SDK 无提示层地尽力调用 Fullscreen API 与 Screen Orientation API，被浏览器拒绝时继续游玩，并保留 SDK 悬浮工具栏的全屏按钮供用户手势重试。离开游戏页时恢复进入前的全屏状态和系统默认方向；窗口化开发页若经 SDK 临时进入全屏，退出时也会清理该状态。
+主机入口必须通过 `GameLaunchArguments.enterFullscreenOnLaunch` 显式声明是否请求启动全屏。游戏库详情与首页快速游戏固定传 `true`；开发者工作区、CLI `run` 与 CLI `dev` 共用开发启动入口，Android/iOS 手持端传 `true`，Windows、macOS 与 Linux 桌面端传 `false` 并保持窗口化。控制器/加入端由独立的 `RemoteGamePage` 按当前终端策略进入全屏，不再通过 `GamePage` 的本地控制器角色分支启动。全屏请求不阻塞游戏运行时和会话初始化；App/WebView 通过原生宿主处理全屏和方向，普通浏览器由 Game SDK 无提示层地尽力调用 Fullscreen API 与 Screen Orientation API，被浏览器拒绝时继续游玩，并保留 SDK 悬浮工具栏的全屏按钮供用户手势重试。清单方向为 `system` 时，自动启动路径只请求全屏，不向原生宿主或浏览器 Screen Orientation API 传入方向；游戏通过 SDK 主动传入 `system` 时才解除当前页面已有的方向锁。离开游戏页时恢复进入前的全屏状态和系统默认方向；窗口化开发页若经 SDK 临时进入全屏，退出时也会清理该状态。
 
 Android 主 Activity 声明接收 `ACTION_VIEW` 和 `ACTION_SEND`。原生层取得系统授予的 `content://` 读取权限后，将文件复制到应用缓存并通过 `playmesh/open_file` MethodChannel 交给 Flutter：压缩包复用 Playmesh 游戏包导入校验；单个 HTML 使用独立 WebView 执行，不注入 SDK、Bridge、存储或联机能力。游戏 WebView、扫码远程 WebView 和独立 HTML WebView 的右上角悬浮工具均提供进入与退出全屏按钮。
 
@@ -1102,7 +1102,7 @@ App 第一次打开本局分享面板时生成随机 token，并将它绑定到�
 - `players.min` 和 `players.max` 最低为 1，且 `min` 不得大于 `max`。Go Core Session 的
   `players.max` 运行时上限为 32；`max: 1` 表示游戏不需要多人会话。
 - `modes` 是单元素数组，必须且只能声明 `solo` 或 `multiplayer`；值为 `multiplayer` 时必须提供 `authority.entry`。
-- `orientation` 是必填字段，只允许 `landscape`（横屏）或 `portrait`（竖屏）。单屏多人还必须声明 `controllerOrientation`，其他显示模式禁止声明。App 必须在创建游戏 WebView 前按当前角色应用方向，并在退出游戏后恢复系统方向。
+- `orientation` 是必填字段，只允许 `landscape`（横屏）、`portrait`（竖屏）或 `system`（跟随系统）。单屏多人还必须声明 `controllerOrientation`，其他显示模式禁止声明。固定方向必须在创建游戏 WebView 前按当前角色应用；`system` 启动时只进入全屏而不指定方向；退出游戏后恢复系统方向。
 - `sdkVersion` 和 `appSdkVersion` 都是必填字段，声明游戏要求的两套平台 SDK；当前 Game SDK 允许明确版本 `4.1.0`、`4.2.0`、`4.3.0`，App SDK 允许明确版本 `3.2.0`、`3.3.0`、`3.4.0`、`3.5.0`。版本使用 `MAJOR.MINOR.PATCH`；CLI 新建、更新以及普通运行会把项目清单更新为当前版本。运行时按注册表的 `supportedRequestedVersions` 精确解析，Game 请求解析到兼容的 `4.3.0` bundle，App 请求解析到兼容的 `3.5.0` bundle；`3.2.1` 等未发布版本以及兼容基线外、未知或格式错误的值拒绝启动。后续升级必须继续接受升级前已支持的全部明确请求版本。
 - `capabilities.json` 只负责声明游戏必需的平台能力，不混入 `main.json`。`required` 用于主游戏页面，单屏多人可用 `controllerRequired` 独立声明控制器页面需求；能力 ID 按功能命名，不绑定 App 或浏览器实现，平台按运行角色和环境选择适配器。
 - 平台能力由 `lib/core/capabilities/` 下的插件注册表统一维护。每个能力拥有独立目录，并在同一插件中定义描述符、`apiVersion`、方法、事件、可用性、实例创建、自检与释放；SDK 弹窗、开发者可视化编辑器、运行时校验和对外能力接口都从该注册表生成。Flutter 不支持运行时目录扫描，新增插件后只需在默认注册入口增加该插件，不再维护平行元数据或测试适配器。
@@ -1209,7 +1209,7 @@ MVP 建议默认关闭普通浏览器发布，由用户在每次游玩时单独�
 浏览器打开房主分享的局域网地址
   -> Authority 分享网关从根路径返回当前模式的页面和权威 Game SDK 配置
   -> SDK 读取 localStorage 中的持久化 playerId 与昵称偏好
-  -> 缺少 playerId 时生成 p_ 前缀随机 ID；昵称不存在时显示输入层
+  -> 缺少 playerId 时生成 p_ 前缀随机 ID；无有效昵称时自动生成并保存“浏览器”加 4 位随机字母或数字，不显示输入层
   -> SDK 直接调用受控 Core Join 能力，服务端校验该 playerId 未被在线连接占用并签发短期凭证
   -> SDK 建立受控 Session WebSocket 并解除游戏初始化等待
 ```
@@ -1273,8 +1273,9 @@ SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不重复显示�
 |---|---|
 | `landscape` | 横屏游戏；允许系统选择左右横屏方向。 |
 | `portrait` | 竖屏游戏；允许系统选择上下竖屏方向。 |
+| `system` | 跟随系统；自动启动时只进入全屏，不设置、锁定或解除屏幕方向。 |
 
-所需字段缺失、使用 `auto` 或其他未知值都应在游戏包校验阶段拒绝，不能等到 WebView 启动后再猜测。
+所需字段缺失、使用 `auto` 或其他未知值都应在游戏包校验阶段拒绝，不能等到 WebView 启动后再猜测；跟随系统必须显式写为 `system`。
 
 App 和普通浏览器都根据会话选择的 `displayMode` 选择入口，并向页面注入 `displayMode`、`role` 和会话上下文。大屏模式的 `role` 通常为 `controller`，普通模式的 `role` 通常为 `game`。Playmesh 不规定控制器或游戏页面的具体内容。
 

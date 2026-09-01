@@ -32,7 +32,7 @@ class _OrdinaryWebPackageImportDialogState
   late GameOrientation _orientation;
   GameMode _mode = GameMode.solo;
   GameDisplayMode _displayMode = GameDisplayMode.multiScreen;
-  GameOrientation _controllerOrientation = GameOrientation.portrait;
+  GameOrientation _controllerOrientation = GameOrientation.system;
   late String _gameEntry;
   String? _controllerEntry;
 
@@ -45,7 +45,7 @@ class _OrdinaryWebPackageImportDialogState
     _nameController = TextEditingController(
       text: widget.inspection.suggestedName,
     );
-    _orientation = GameOrientation.landscape;
+    _orientation = GameOrientation.system;
     _gameEntry = widget.inspection.suggestedGameEntry;
     _controllerEntry =
         widget.inspection.suggestedControllerEntry ??
@@ -311,10 +311,11 @@ class _OrdinaryWebPackageImportDialogState
     );
   }
 
-  String _orientationLabel(GameOrientation orientation) =>
-      orientation == GameOrientation.landscape
-      ? context.tr('library.landscape')
-      : context.tr('library.portrait');
+  String _orientationLabel(GameOrientation orientation) => switch (orientation) {
+    GameOrientation.landscape => context.tr('library.landscape'),
+    GameOrientation.portrait => context.tr('library.portrait'),
+    GameOrientation.system => context.tr('library.system'),
+  };
 
   void _submit() {
     if (_formKey.currentState?.validate() != true) return;

@@ -7,8 +7,8 @@
   "version": "0.1.0",
   "sdkVersion": "4.3.0",
   "appSdkVersion": "3.5.0",
-  "orientation": "landscape",
-  "controllerOrientation": "portrait",
+  "orientation": "system",
+  "controllerOrientation": "system",
   "modes": [
     "multiplayer"
   ],

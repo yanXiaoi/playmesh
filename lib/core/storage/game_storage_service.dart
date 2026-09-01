@@ -27,7 +27,7 @@ class GameStorageService {
   static const maxStandardJsonBytes = 10 * 1024 * 1024;
   static const maxLogicalBucketNameBytes = 64 * 1024;
   static const maxSynchronousBucketNameBytes = 4 * 1024;
-  static const maxUploadBytes = 516 * 1024 * 1024;
+  static const maxUploadBytes = 512 * 1024 * 1024;
   static const systemAvatarBucket = '_sys-user-avatars';
   static const gdevelopStorageRootKey = r'$playmesh.gdevelop.root.v1';
   static const _mappedBucketFormat = 'playmesh.logical-bucket.v1';

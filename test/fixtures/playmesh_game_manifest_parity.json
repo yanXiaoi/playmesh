@@ -91,6 +91,42 @@
       }
     },
     {
+      "name": "follow system solo",
+      "input": {
+        "id": "com.playmesh.game.system12345",
+        "name": "Follow System",
+        "author": "Playmesh",
+        "lastModifiedAt": 3,
+        "remarks": "",
+        "version": "1.0.0",
+        "sdkVersion": "4.1.0",
+        "appSdkVersion": "3.3.0",
+        "orientation": "system",
+        "mode": "solo",
+        "displayMode": "multi_screen",
+        "minPlayers": 1,
+        "maxPlayers": 1,
+        "gameEntry": "index.html",
+        "tags": []
+      },
+      "manifest": {
+        "id": "com.playmesh.game.system12345",
+        "name": "Follow System",
+        "author": "Playmesh",
+        "lastModifiedAt": 3,
+        "remarks": "",
+        "version": "1.0.0",
+        "sdkVersion": "4.1.0",
+        "appSdkVersion": "3.3.0",
+        "orientation": "system",
+        "modes": ["solo"],
+        "displayModes": ["multi_screen"],
+        "players": {"min": 1, "max": 1},
+        "entries": {"game": "index.html"},
+        "tags": []
+      }
+    },
+    {
       "name": "android single screen multiplayer",
       "input": {
         "id": "com.playmesh.game.g1234567890",
@@ -139,6 +175,7 @@
     {"name": "too many tags", "valid": false, "set": {"tags": ["1", "2", "3", "4", "5", "6"]}},
     {"name": "long tag remains protocol compatible", "valid": true, "repeat": {"path": "tags.0", "character": "t", "count": 65}},
     {"name": "bad orientation", "valid": false, "set": {"orientation": "diagonal"}},
+    {"name": "follow system orientation", "valid": true, "set": {"orientation": "system"}},
     {"name": "solo single-screen value remains protocol compatible", "valid": true, "set": {"displayModes": ["single_screen_multiplayer"]}},
     {"name": "bad players", "valid": false, "set": {"players": {"min": 4, "max": 2}}},
     {"name": "unsafe game entry", "valid": false, "set": {"entries": {"game": "../index.html"}}},

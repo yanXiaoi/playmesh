@@ -48,6 +48,7 @@ export type PlaymeshHistoryRestoreConfig = {|
   minPlayers: number,
   maxPlayers: number,
   tags: Array<string>,
+  webRuntimeMultithreading: boolean,
   updatedAt: string,
 |};
 export type PlaymeshHistoryRestoreHistoryEvidence = {|

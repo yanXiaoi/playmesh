@@ -47,6 +47,7 @@ export type PlaymeshProjectRekeyConfig = {|
   minPlayers: number,
   maxPlayers: number,
   tags: Array<string>,
+  webRuntimeMultithreading: boolean,
   updatedAt: string,
 |};
 export type PlaymeshProjectRekeyConfigEvidence =
@@ -330,13 +331,17 @@ const assertConfig = (
       'minPlayers',
       'maxPlayers',
       'tags',
+      'webRuntimeMultithreading',
       'updatedAt',
     ]) ||
     config.schemaVersion !== 2 ||
-    validatePlaymeshProjectConfigGameId(config.gameId) !== expectedGameId
+    validatePlaymeshProjectConfigGameId(config.gameId) !== expectedGameId ||
+    typeof config.webRuntimeMultithreading !== 'boolean'
   ) {
     return fail();
   }
+  const webRuntimeMultithreading /*: boolean */ =
+    config.webRuntimeMultithreading;
   const gameType = validatePlaymeshProjectGameType(config.gameType);
   const minPlayers = config.minPlayers;
   const maxPlayers = config.maxPlayers;
@@ -361,6 +366,7 @@ const assertConfig = (
     minPlayers,
     maxPlayers,
     tags: normalizePlaymeshProjectTags(config.tags),
+    webRuntimeMultithreading,
     updatedAt: requireTimestamp(config.updatedAt),
   };
 };

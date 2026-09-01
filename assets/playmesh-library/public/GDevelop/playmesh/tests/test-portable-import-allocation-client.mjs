@@ -100,6 +100,7 @@ const currentHostProjectConfig = {
   minPlayers: 1,
   maxPlayers: 1,
   tags: [],
+  webRuntimeMultithreading: false,
   updatedAt: '2026-08-05T00:00:00.000Z',
 };
 const allocationEvidenceForConfig = config => ({

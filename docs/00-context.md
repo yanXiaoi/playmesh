@@ -80,7 +80,7 @@ Flutter App
 
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
 `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。
-当前工作版本为 Playmesh `5.1.0+37`、Runtime `2.1.0+11`、Go Core `0.7.0`、Core 协议
+当前工作版本为 Playmesh `5.1.0+37`、Runtime `2.1.0+12`、Go Core `0.7.0`、Core 协议
 `1.5.0`、Game SDK `4.3.0`、App Bridge SDK `3.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
 唯一手写源、统一 feature 注册、运行时自动组装和版本通道发行。Game SDK 只接受
@@ -152,7 +152,7 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
   `playmesh.app.ui.disableSystemMenuTriggers()` 单向解绑。该操作不关闭显式菜单 API，
   页面刷新后恢复默认绑定，多余参数必须拒绝且不能产生副作用。
 - 游戏库右上角可以手动后台扫描；扫描期间继续展示旧缓存，成功后原子替换列表，新增游戏不要求重启 App。App 级缓存保留 revision、刷新时间和搜索索引，为后续分页/搜索提供数据源。
-- 游戏必须声明横屏或竖屏；WebView 创建前切换方向，离开后恢复。
+- 游戏必须声明横屏、竖屏或跟随系统；固定方向在 WebView 创建前应用，跟随系统启动时只进入全屏且不指定方向，离开后恢复系统方向。
 - Go Core 使用系统分配端口，设置页展示当前实际服务地址和结构化状态。
 - `flutter test` 不再依赖 Counter 文案，改为验证 Playmesh 首页或导航入口。
 
@@ -174,7 +174,7 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
   `discoverGames()` 仍只投影当前 `gameId` 的 `instanceId/gameId/name/host`，不增加内部
   展示元数据或图标端点。
 - 游戏声明文件是游戏能力的来源，至少描述名称、版本、运行入口、单机/联机模式和人数范围。
-- 游戏声明必须使用 `orientation` 明确声明 `landscape` 或 `portrait`，不允许缺失或自动猜测。
+- 游戏声明必须使用 `orientation` 明确声明 `landscape`、`portrait` 或 `system`；`system` 是显式跟随设备设置，不允许缺失或根据分辨率自动猜测。
 - 游戏声明文件使用 `displayModes` 声明唯一显示模式：`single_screen_multiplayer`（大屏模式）或 `multi_screen`（普通模式）。当前不允许同时声明两者。
 - 大屏模式下主机使用清单显式声明的 `entries.game` 作为公共显示端与 Authority
   Client，不属于 `players`；所有玩家使用同样必须显式声明的 `entries.controller`。
@@ -210,7 +210,7 @@ Flutter Counter Demo 和 Go 默认示例均已替换。游戏页面不绕过 Gam
 - 主游戏网页和控制端网页都可以通过同级可选 `capabilities.json` 声明平台能力；能力 code、中文名、说明和 App/HTML 适配状态由统一能力注册表提供。
 - `main.json` 不再定义 `permissions`；传感器以及后续摄像头、麦克风等受保护能力只使用同级 `capabilities.json`。浏览器自身的 DOM 键盘事件或浏览器原生权限不依赖游戏清单字段。
 - 是否允许普通浏览器访问游戏，是游玩期间的会话设置，由用户单独确认，默认不公开。
-- 未安装 App 的玩家通过房主分享的局域网地址进入浏览器游戏端或控制端。SDK 在浏览器 `localStorage` 中持久化随机玩家 ID 与昵称，刷新后复用同一身份；分享链接不携带昵称或玩家 ID。
+- 未安装 App 的玩家通过房主分享的局域网地址进入浏览器游戏端或控制端。SDK 在浏览器 `localStorage` 中持久化随机玩家 ID 与昵称；没有有效昵称时自动生成“浏览器”加 4 位随机小写字母或数字并保存，不弹出首次昵称输入框。刷新后复用同一身份，仍可从游戏信息中修改昵称；分享链接不携带昵称或玩家 ID。
 - 公开浏览器页面前必须提示游戏包和不可信网络风险，并使用短期会话凭证。
 - 用户昵称可修改；唯一 ID 首次创建时自动生成，之后保持稳定，避免仅依赖昵称识别玩家。
 - 头像只保存到本地，MVP 不做云端头像同步。

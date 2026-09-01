@@ -130,10 +130,10 @@ func TestConfigureJSONAcceptsCustomSingleScreenControllerPath(
 		Manifest: configureManifest{
 			Name:                  "Configured",
 			Version:               "2.0.0",
-			Orientation:           "portrait",
+			Orientation:           "system",
 			Mode:                  "multiplayer",
 			DisplayMode:           "single_screen_multiplayer",
-			ControllerOrientation: "landscape",
+			ControllerOrientation: "system",
 			ControllerEntry:       "controls/pad.html",
 			AuthorityEntry:        "static/js/service/index.js",
 			MinPlayers:            2,
@@ -168,6 +168,10 @@ func TestConfigureJSONAcceptsCustomSingleScreenControllerPath(
 	entries := manifest["entries"].(map[string]any)
 	if entries["controller"] != "controls/pad.html" {
 		t.Fatalf("custom controller path was not written: %#v", entries)
+	}
+	if manifest["orientation"] != "system" ||
+		manifest["controllerOrientation"] != "system" {
+		t.Fatalf("follow-system orientations were not written: %#v", manifest)
 	}
 	if _, err := os.Stat(
 		filepath.Join(

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -228,6 +229,149 @@ func TestRPCStreamRoutesHTTPBodyToAuthorityWithoutBinaryPayload(t *testing.T) {
 	if result.err != nil || result.status != http.StatusOK ||
 		!bytes.Equal(result.body, resultPayload) {
 		t.Fatalf("upload result = %#v", result)
+	}
+}
+
+func TestRPCStreamChunkedUploadSupportsHTTP1BrowserTransport(t *testing.T) {
+	server, host, guest, hostSession, guestSession := binaryTestSession(t)
+	defer server.Close()
+	defer hostSession.CloseNow()
+	defer guestSession.CloseNow()
+
+	hostBinary := dialBinary(t, server.URL, host)
+	defer hostBinary.CloseNow()
+	guestBinary := dialBinary(t, server.URL, guest)
+	defer guestBinary.CloseNow()
+
+	payload := bytes.Repeat([]byte("browser-http1-stream-"), 8192)
+	query := url.Values{
+		"path":      {"/files/upload"},
+		"timeoutMs": {"5000"},
+		"name":      {"browser.bin"},
+		"size":      {strconv.Itoa(len(payload))},
+		"transport": {rpcStreamChunkTransport},
+	}
+	open, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/sessions/"+host.Session.ID+"/rpc-stream?"+query.Encode(),
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open.Header.Set("Authorization", "Bearer "+guest.Credential.Token)
+	open.Header.Set("Content-Type", "application/octet-stream")
+	openResponse, err := http.DefaultClient.Do(open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer openResponse.Body.Close()
+	var opened struct {
+		UploadPath string `json:"uploadPath"`
+		ChunkBytes int    `json:"chunkBytes"`
+	}
+	if err := json.NewDecoder(openResponse.Body).Decode(&opened); err != nil {
+		t.Fatal(err)
+	}
+	if openResponse.StatusCode != http.StatusCreated ||
+		opened.ChunkBytes != rpcStreamChunkBytes || opened.UploadPath == "" {
+		t.Fatalf("open status=%d response=%#v", openResponse.StatusCode, opened)
+	}
+
+	incoming := readBinaryRPCStreamIncoming(t, hostBinary)
+	type consumeResult struct {
+		payload []byte
+		status  int
+		err     error
+	}
+	consumed := make(chan consumeResult, 1)
+	go func() {
+		request, requestErr := http.NewRequest(
+			http.MethodGet,
+			server.URL+incoming.consumePath,
+			nil,
+		)
+		if requestErr != nil {
+			consumed <- consumeResult{err: requestErr}
+			return
+		}
+		request.Header.Set("Authorization", "Bearer "+host.Credential.Token)
+		response, requestErr := http.DefaultClient.Do(request)
+		if requestErr != nil {
+			consumed <- consumeResult{err: requestErr}
+			return
+		}
+		defer response.Body.Close()
+		body, readErr := io.ReadAll(response.Body)
+		consumed <- consumeResult{payload: body, status: response.StatusCode, err: readErr}
+	}()
+
+	for sequence, offset := 0, 0; offset < len(payload); sequence++ {
+		end := min(offset+rpcStreamChunkBytes, len(payload))
+		request, requestErr := http.NewRequest(
+			http.MethodPost,
+			server.URL+opened.UploadPath+"?sequence="+strconv.Itoa(sequence),
+			bytes.NewReader(payload[offset:end]),
+		)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		request.Header.Set("Authorization", "Bearer "+guest.Credential.Token)
+		response, requestErr := http.DefaultClient.Do(request)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("chunk %d status = %d", sequence, response.StatusCode)
+		}
+		offset = end
+	}
+
+	type completeResult struct {
+		status int
+		body   []byte
+		err    error
+	}
+	completed := make(chan completeResult, 1)
+	go func() {
+		request, requestErr := http.NewRequest(
+			http.MethodPatch,
+			server.URL+opened.UploadPath,
+			nil,
+		)
+		if requestErr != nil {
+			completed <- completeResult{err: requestErr}
+			return
+		}
+		request.Header.Set("Authorization", "Bearer "+guest.Credential.Token)
+		response, requestErr := http.DefaultClient.Do(request)
+		if requestErr != nil {
+			completed <- completeResult{err: requestErr}
+			return
+		}
+		defer response.Body.Close()
+		body, readErr := io.ReadAll(response.Body)
+		completed <- completeResult{status: response.StatusCode, body: body, err: readErr}
+	}()
+
+	streamed := <-consumed
+	if streamed.err != nil || streamed.status != http.StatusOK ||
+		!bytes.Equal(streamed.payload, payload) {
+		t.Fatalf("consume result = %#v", streamed)
+	}
+	resultPayload := []byte{5, 0, 0, 0, 2, 'o', 'k'}
+	writeBinary(t, hostBinary, binaryRPCResponseFrame(
+		incoming.rpcID,
+		binaryStatusOK,
+		resultPayload,
+		"",
+		"",
+	))
+	result := <-completed
+	if result.err != nil || result.status != http.StatusOK ||
+		!bytes.Equal(result.body, resultPayload) {
+		t.Fatalf("complete result = %#v", result)
 	}
 }
 

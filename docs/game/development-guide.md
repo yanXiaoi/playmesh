@@ -462,7 +462,7 @@ if (playmesh.app.capabilities.getAvailable().includes('device.vibration')) {
 
 - `main.json.id` 与包目录名一致，版本使用 `MAJOR.MINOR.PATCH`。
 - 每次准备发布游戏内容时，按 `PATCH` 修复、`MINOR` 兼容新增、`MAJOR` 不兼容变更升级 `main.json.version`；内置工作区同步维护 SDK 字段，CLI 则在发布前按本地生成文件自动覆盖 `sdkVersion/appSdkVersion`。工作区通过“项目设置”或 manifest API 修改清单，普通文件接口仍只读，项目 `id` 永远不能修改。
-- `orientation` 明确为 `landscape` 或 `portrait`。
+- `orientation` 明确为 `landscape`、`portrait` 或 `system`；`system` 启动时只请求全屏，不指定方向。
 - `entries.game` 已显式声明且解析出的 HTML 存在；单屏多人同时显式声明
   `entries.controller`，且解析出的 HTML 存在。
 - 包根 `icon.png` 可选；存在时必须通过平台的 PNG、大小和尺寸校验。

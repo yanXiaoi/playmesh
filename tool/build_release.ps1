@@ -95,6 +95,38 @@ function Resolve-AndroidFlutter {
   return (Resolve-Path -LiteralPath $candidate).Path
 }
 
+function Resolve-FlutterInvocation {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FlutterBatch
+  )
+
+  if ($env:FLUTTER_ALREADY_LOCKED -ne 'true') {
+    return [pscustomobject]@{
+      Command = $FlutterBatch
+      PrefixArguments = @()
+    }
+  }
+
+  $flutterRoot = [IO.Path]::GetFullPath(
+    (Join-Path (Split-Path -Parent $FlutterBatch) '..')
+  )
+  $dart = Join-Path $flutterRoot 'bin\cache\dart-sdk\bin\dart.exe'
+  $packageConfig = Join-Path $flutterRoot `
+    'packages\flutter_tools\.dart_tool\package_config.json'
+  $snapshot = Join-Path $flutterRoot 'bin\cache\flutter_tools.snapshot'
+  foreach ($required in @($dart, $packageConfig, $snapshot)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+      throw "Flutter SDK reentrant entry point is missing: $required"
+    }
+  }
+
+  return [pscustomobject]@{
+    Command = $dart
+    PrefixArguments = @("--packages=$packageConfig", $snapshot)
+  }
+}
+
 if ($buildAndroid) {
   $keyProperties = Join-Path $repoRoot 'android\key.properties'
   if ((-not (Test-Path -LiteralPath $keyProperties)) -and (-not $AllowDebugSigning)) {
@@ -102,6 +134,7 @@ if ($buildAndroid) {
   }
 
   $androidFlutterExecutable = Resolve-AndroidFlutter $AndroidFlutter
+  $androidFlutterInvocation = Resolve-FlutterInvocation $androidFlutterExecutable
   $androidFlutterRoot = Split-Path -Parent (Split-Path -Parent $androidFlutterExecutable)
   $androidLocalPropertiesPath = Join-Path $repoRoot 'android\local.properties'
   $androidLocalProperties = if (Test-Path -LiteralPath $androidLocalPropertiesPath) {
@@ -136,7 +169,10 @@ if ($buildAndroid) {
   }
 
   Write-Output "Android Flutter: $androidFlutterExecutable"
-  & $androidFlutterExecutable build apk --release --no-pub
+  $androidFlutterArguments = @($androidFlutterInvocation.PrefixArguments) + @(
+    'build', 'apk', '--release', '--no-pub'
+  )
+  & $androidFlutterInvocation.Command @androidFlutterArguments
   if ($LASTEXITCODE -ne 0) {
     throw "Android release build failed: $LASTEXITCODE"
   }

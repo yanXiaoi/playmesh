@@ -15,6 +15,28 @@ final class AppLanDiscoveredGame {
   final String host;
 }
 
+enum AppLanDiscoveryState {
+  scanning,
+  ready,
+  permissionDenied,
+  unsupported,
+  failed,
+}
+
+/// App SDK 平台 UI 使用的局域网发现只读投影。
+final class AppLanDiscoverySnapshot {
+  AppLanDiscoverySnapshot({
+    required this.state,
+    required Iterable<AppLanDiscoveredGame> games,
+  }) : games = List.unmodifiable(games);
+
+  final AppLanDiscoveryState state;
+  final List<AppLanDiscoveredGame> games;
+}
+
+typedef AppLanDiscoveryListener =
+    Future<void> Function(AppLanDiscoverySnapshot snapshot);
+
 /// 已完成邀请预检、只等待 Bridge 回包后执行的加入动作。
 final class AppLanJoinAction {
   const AppLanJoinAction(this.afterResponse);
@@ -28,6 +50,13 @@ final class AppLanJoinAction {
 /// 发现服务、网关、Relay、token 或二维码编码器。
 abstract interface class AppLanHost {
   Future<List<AppLanDiscoveredGame>> discoverGames();
+
+  Future<void> subscribeDiscoveredGames(
+    String subscriptionId,
+    AppLanDiscoveryListener listener,
+  );
+
+  Future<void> unsubscribeDiscoveredGames(String subscriptionId);
 
   Future<AppLanJoinAction> prepareDiscoveredJoin(String instanceId);
 
@@ -119,6 +148,54 @@ const appLanSdkSource = SdkSourceFragment(
       url: value.url,
       type: value.type,
       img: value.img,
+    });
+  }
+
+  const appLanDiscoverySubscriptions = new Map();
+
+  function receiveAppLanDiscoverySnapshot(message) {
+    const subscriptionId = message.subscriptionId;
+    const listener = typeof subscriptionId === "string"
+      ? appLanDiscoverySubscriptions.get(subscriptionId)
+      : null;
+    if (!listener || !Array.isArray(message.games) ||
+        !["scanning", "ready", "permissionDenied", "unsupported", "failed"]
+          .includes(message.state)) {
+      return;
+    }
+    try {
+      listener(Object.freeze({
+        state: message.state,
+        games: Object.freeze(message.games.map(freezeAppLanGame)),
+      }));
+    } catch (error) {
+      global.console?.warn?.("Playmesh 局域网发现更新无效", error);
+    }
+  }
+
+  function subscribeAppLanDiscovery(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("局域网发现订阅回调必须是函数");
+    }
+    const subscriptionId =
+      `app-ui-join-${Date.now()}-${++sequence}`;
+    appLanDiscoverySubscriptions.set(subscriptionId, listener);
+    let subscribed = true;
+    const ready = request("app.lan.discovery.subscribe", { subscriptionId })
+      .catch((error) => {
+        appLanDiscoverySubscriptions.delete(subscriptionId);
+        subscribed = false;
+        throw error;
+      });
+    return Object.freeze({
+      ready,
+      unsubscribe() {
+        if (!subscribed) return;
+        subscribed = false;
+        appLanDiscoverySubscriptions.delete(subscriptionId);
+        void request("app.lan.discovery.unsubscribe", { subscriptionId })
+          .catch(() => {});
+      },
     });
   }
 
@@ -222,6 +299,8 @@ final class _AppLanFeature implements _AppSdkCommandFeature {
   @override
   Set<String> get commands => const {
     'app.lan.discover',
+    'app.lan.discovery.subscribe',
+    'app.lan.discovery.unsubscribe',
     'app.lan.joinDiscovered',
     'app.lan.joinByLink',
     'app.lan.scanQr',
@@ -245,16 +324,31 @@ final class _AppLanFeature implements _AppSdkCommandFeature {
           host.discoverGames,
           fallbackCode: 'discovery_unavailable',
         );
-        return games
-            .map(
-              (game) => <String, Object?>{
-                'instanceId': game.instanceId,
-                'gameId': game.gameId,
-                'name': game.name,
-                'host': game.host,
-              },
-            )
-            .toList(growable: false);
+        return _appLanGamesToJson(games);
+      case 'app.lan.discovery.subscribe':
+        _requireAppLanPayload(command.payload, const {'subscriptionId'});
+        final subscriptionId = _requireAppLanSubscriptionId(command.payload);
+        await _runAppLanOperation(
+          () => host.subscribeDiscoveredGames(
+            subscriptionId,
+            (snapshot) => context.sendAppEvent({
+              'type': 'app.lan.discovery.snapshot',
+              'subscriptionId': subscriptionId,
+              'state': snapshot.state.name,
+              'games': _appLanGamesToJson(snapshot.games),
+            }),
+          ),
+          fallbackCode: 'discovery_unavailable',
+        );
+        return null;
+      case 'app.lan.discovery.unsubscribe':
+        _requireAppLanPayload(command.payload, const {'subscriptionId'});
+        final subscriptionId = _requireAppLanSubscriptionId(command.payload);
+        await _runAppLanOperation(
+          () => host.unsubscribeDiscoveredGames(subscriptionId),
+          fallbackCode: 'discovery_unavailable',
+        );
+        return null;
       case 'app.lan.joinDiscovered':
         _rejectUnknownAppLanPayload(command.payload, const {
           'instanceId',
@@ -322,6 +416,28 @@ final class _AppLanFeature implements _AppSdkCommandFeature {
     }
     throw StateError('未注册的 App LAN 命令: ${command.name}');
   }
+}
+
+List<Map<String, Object?>> _appLanGamesToJson(
+  Iterable<AppLanDiscoveredGame> games,
+) => games
+    .map(
+      (game) => <String, Object?>{
+        'instanceId': game.instanceId,
+        'gameId': game.gameId,
+        'name': game.name,
+        'host': game.host,
+      },
+    )
+    .toList(growable: false);
+
+String _requireAppLanSubscriptionId(Map<String, Object?> payload) {
+  final subscriptionId = payload['subscriptionId'];
+  if (subscriptionId is! String ||
+      !RegExp(r'^app-ui-join-[A-Za-z0-9_-]{1,128}$').hasMatch(subscriptionId)) {
+    throw const SdkCommandException('invalid_argument', '局域网发现订阅 ID 无效');
+  }
+  return subscriptionId;
 }
 
 void _requireAppLanPayload(

@@ -702,6 +702,8 @@ assert.equal("latencyMs" in sdkSchema.$defs.Player.properties, false);
 assert.equal("connectionMode" in sdkSchema.$defs.Player.properties, false);
 assert.equal(defaultGameManifest.sdkVersion, "4.3.0");
 assert.equal(defaultGameManifest.appSdkVersion, "3.5.0");
+assert.equal(defaultGameManifest.orientation, "system");
+assert.equal(defaultGameManifest.controllerOrientation, "system");
 assert.deepEqual(defaultGameManifest.config, {
   webRuntime: { multithreading: false },
 });
@@ -716,6 +718,16 @@ assert.deepEqual(gameManifestSchema.properties.appSdkVersion.enum, [
   "3.4.0",
   "3.5.0",
 ]);
+assert.deepEqual(gameManifestSchema.properties.orientation.enum, [
+  "landscape",
+  "portrait",
+  "system",
+]);
+assert.deepEqual(gameManifestSchema.properties.controllerOrientation.enum, [
+  "landscape",
+  "portrait",
+  "system",
+]);
 assert.equal(
   sdkManifest.projectRules.appSdkVersion,
   "main.json appSdkVersion is required and must be one of 3.2.0, 3.3.0, 3.4.0, 3.5.0; new projects use 3.5.0",
@@ -729,7 +741,12 @@ assert.deepEqual(sdkManifest.compatibility, {
   app: {
     baselineVersions: ["3.2.0", "3.3.0"],
     bundleVersion: "3.5.0",
-    supportedRequestedVersions: ["3.2.0", "3.3.0", "3.4.0", "3.5.0"],
+    supportedRequestedVersions: [
+      "3.2.0",
+      "3.3.0",
+      "3.4.0",
+      "3.5.0",
+    ],
   },
 });
 assert.match(

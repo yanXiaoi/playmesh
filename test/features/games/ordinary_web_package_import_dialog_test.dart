@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/game_package/ordinary_web_package_importer.dart';
 import 'package:playmesh/features/games/ordinary_web_package_import_dialog.dart';
 import 'package:playmesh/models/game_manifest.dart';
+import 'package:playmesh/models/game_summary.dart';
 
 import '../../support/localized_test_app.dart';
 
@@ -73,6 +74,8 @@ void main() {
     expect(result, isNotNull);
     expect(result!.mode, GameMode.multiplayer);
     expect(result!.displayMode, GameDisplayMode.singleScreenMultiplayer);
+    expect(result!.orientation, GameOrientation.system);
+    expect(result!.controllerOrientation, GameOrientation.system);
     expect(result!.gameEntry, 'index.html');
     expect(result!.controllerEntry, 'controller.html');
   });

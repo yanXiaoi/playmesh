@@ -205,10 +205,11 @@ class _ManifestFacts extends StatelessWidget {
     final displayMode = game.displayMode == 'single_screen_multiplayer'
         ? context.tr('game.display_single_screen')
         : context.tr('game.display_multi_screen');
-    String orientationLabel(GameOrientation value) =>
-        value == GameOrientation.landscape
-        ? context.tr('library.landscape')
-        : context.tr('library.portrait');
+    String orientationLabel(GameOrientation value) => switch (value) {
+      GameOrientation.landscape => context.tr('library.landscape'),
+      GameOrientation.portrait => context.tr('library.portrait'),
+      GameOrientation.system => context.tr('library.system'),
+    };
     final facts = <GameDetailFactData>[
       GameDetailFactData(
         icon: Icons.person_outline,

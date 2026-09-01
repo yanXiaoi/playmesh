@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,6 +52,23 @@ type SignalFrame struct {
 	PeerID          string          `json:"peerId,omitempty"`
 	Payload         json.RawMessage `json:"payload,omitempty"`
 	Reason          string          `json:"reason,omitempty"`
+}
+
+type SignalRouteError struct {
+	Code    string
+	Message string
+	Cause   error
+}
+
+func (e *SignalRouteError) Error() string {
+	if e.Cause == nil {
+		return e.Message
+	}
+	return fmt.Sprintf("%s: %v", e.Message, e.Cause)
+}
+
+func (e *SignalRouteError) Unwrap() error {
+	return e.Cause
 }
 
 type signalPeer struct {
@@ -188,7 +206,7 @@ func normalizeSignalFrame(frame SignalFrame) (SignalFrame, error) {
 		frame.Timestamp = time.Now().UnixMilli()
 	}
 	if frame.RequestID == "" {
-		requestID, err := randomToken(12)
+		requestID, err := randomRelayRequestID()
 		if err != nil {
 			return SignalFrame{}, err
 		}
@@ -377,35 +395,55 @@ func (m *Manager) DetachClient(tunnel *Tunnel, peerID string, peer *signalPeer) 
 	}
 }
 
-func (m *Manager) RouteFromHost(tunnel *Tunnel, frame SignalFrame, size int) bool {
-	if frame.PeerID == "" ||
-		(frame.Type != "description" && frame.Type != "candidate" &&
-			frame.Type != "peer.error" && frame.Type != "close") {
-		return false
+func (m *Manager) RouteFromHost(tunnel *Tunnel, frame SignalFrame, size int) error {
+	if frame.PeerID == "" {
+		return &SignalRouteError{
+			Code: "host_peer_id_missing", Message: "Authority 信令缺少 peerId",
+		}
+	}
+	if frame.Type != "description" && frame.Type != "candidate" &&
+		frame.Type != "peer.error" && frame.Type != "close" {
+		return &SignalRouteError{
+			Code: "host_signal_type_unsupported", Message: "Authority 信令类型不受支持",
+		}
 	}
 	tunnel.mutex.Lock()
 	client := tunnel.clients[frame.PeerID]
 	tunnel.mutex.Unlock()
 	if client == nil {
-		return true
+		return nil
 	}
 	m.bytesHostToClient.Add(int64(size))
-	return client.write(frame) == nil
+	if err := client.write(frame); err != nil {
+		return &SignalRouteError{
+			Code: "client_signal_write_failed", Message: "向加入端写入信令失败", Cause: err,
+		}
+	}
+	return nil
 }
 
-func (m *Manager) RouteFromClient(tunnel *Tunnel, peerID string, frame SignalFrame, size int) bool {
+func (m *Manager) RouteFromClient(tunnel *Tunnel, peerID string, frame SignalFrame, size int) error {
 	if frame.Type != "description" && frame.Type != "candidate" && frame.Type != "close" {
-		return false
+		return &SignalRouteError{
+			Code: "client_signal_type_unsupported", Message: "加入端信令类型不受支持",
+		}
 	}
 	frame.PeerID = peerID
 	tunnel.mutex.Lock()
 	host := tunnel.host
 	tunnel.mutex.Unlock()
 	if host == nil {
-		return false
+		return &SignalRouteError{
+			Code: "host_signal_unavailable", Message: "Authority 信令端当前不可用",
+		}
 	}
 	m.bytesClientToHost.Add(int64(size))
-	return host.write(frame) == nil
+	if err := host.write(frame); err != nil {
+		return &SignalRouteError{
+			Code: "host_signal_write_failed", Message: "向 Authority 写入信令失败", Cause: err,
+		}
+	}
+	return nil
 }
 
 func (m *Manager) Stats() Stats {
@@ -491,4 +529,12 @@ func randomToken(byteCount int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func randomRelayRequestID() (string, error) {
+	value, err := randomToken(12)
+	if err != nil {
+		return "", err
+	}
+	return "relay-" + value, nil
 }

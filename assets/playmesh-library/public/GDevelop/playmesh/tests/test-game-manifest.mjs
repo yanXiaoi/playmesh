@@ -306,7 +306,7 @@ assert.equal(
 projectState.orientation = 'default';
 assert.equal(
   controller.getPlaymeshOrientationFromGDevelop(project),
-  'landscape'
+  'system'
 );
 projectState.orientation = 'landscape';
 

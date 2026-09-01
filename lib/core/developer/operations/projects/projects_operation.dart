@@ -16,11 +16,11 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
       'description': {'type': 'string'},
       'orientation': {
         'type': 'string',
-        'enum': ['landscape', 'portrait'],
+        'enum': ['landscape', 'portrait', 'system'],
       },
       'controllerOrientation': {
         'type': 'string',
-        'enum': ['landscape', 'portrait'],
+        'enum': ['landscape', 'portrait', 'system'],
       },
       'displayMode': {'type': 'string'},
       'mode': {'type': 'string'},
@@ -68,7 +68,7 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
         'name': '示例游戏',
         'mode': 'solo',
         'displayMode': 'multi_screen',
-        'orientation': 'landscape',
+        'orientation': 'system',
         'minPlayers': 1,
         'maxPlayers': 1,
         'webRuntimeMultithreading': false,
@@ -103,7 +103,7 @@ class _ProjectsOperation implements _DeveloperHttpOperation {
     }
     final body = await _jsonBody(request);
     final orientation = GameOrientation.fromManifestValue(
-      body['orientation'] as String? ?? 'landscape',
+      body['orientation'] as String? ?? 'system',
     );
     final displayMode = body['displayMode'] as String? ?? 'multi_screen';
     final controllerOrientationValue = body['controllerOrientation'] as String?;

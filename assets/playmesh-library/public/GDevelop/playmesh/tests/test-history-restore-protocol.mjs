@@ -45,6 +45,7 @@ const config = {
   minPlayers: 2,
   maxPlayers: 5,
   tags: [],
+  webRuntimeMultithreading: false,
   updatedAt: timestamp,
 };
 const readyConfigEvidence = {

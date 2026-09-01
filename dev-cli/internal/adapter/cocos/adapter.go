@@ -310,7 +310,7 @@ func (Cocos) Defaults(root string) (scaffold.Defaults, error) {
 			break
 		}
 	}
-	orientation := "landscape"
+	orientation := "system"
 	projectOrientation, found, err := cocosProjectOrientation(
 		root,
 		"web-mobile",
@@ -328,7 +328,7 @@ func (Cocos) Defaults(root string) (scaffold.Defaults, error) {
 		Mode:                  "solo",
 		Orientation:           orientation,
 		DisplayMode:           "multi_screen",
-		ControllerOrientation: "portrait",
+		ControllerOrientation: "system",
 		ControllerEntry:       "controller/index.html",
 		AuthorityEntry:        "static/js/service/index.js",
 		MinPlayers:            2,
@@ -651,7 +651,10 @@ func cocosProjectOrientation(
 	if err != nil {
 		return "", false, err
 	}
-	if found && profileOrientation != "auto" {
+	if found {
+		if profileOrientation == "auto" {
+			return "system", true, nil
+		}
 		return profileOrientation, true, nil
 	}
 	for _, relative := range []string{

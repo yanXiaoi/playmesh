@@ -591,6 +591,52 @@ void main() {
     expect(host.preparedDiscovered, isEmpty);
   });
 
+  test('App LAN 私有订阅在回包前发送首个快照并持续推送房间移除', () async {
+    final host = _FakeAppLanHost();
+    final bridge = AppWebViewBridge(
+      userId: 'u-app-lan-subscription',
+      nickname: 'LAN 玩家',
+      lanHost: host,
+    );
+    addTearDown(bridge.close);
+    final messages = <Map<String, Object?>>[];
+    const subscriptionId = 'app-ui-join-test-0001';
+
+    final subscribed = await _command(
+      bridge,
+      'app.lan.discovery.subscribe',
+      'lan-subscribe',
+      payload: const {'subscriptionId': subscriptionId},
+      messages: messages,
+    );
+
+    expect(subscribed['type'], 'app.command.result');
+    expect(messages.map((message) => message['type']), [
+      'app.lan.discovery.snapshot',
+      'app.command.result',
+    ]);
+    expect(messages.first['subscriptionId'], subscriptionId);
+    expect(messages.first['state'], 'ready');
+    expect(messages.first['games'], hasLength(1));
+
+    await host.discoveryListeners[subscriptionId]!(
+      AppLanDiscoverySnapshot(
+        state: AppLanDiscoveryState.ready,
+        games: const [],
+      ),
+    );
+    expect(messages.last['type'], 'app.lan.discovery.snapshot');
+    expect(messages.last['games'], isEmpty);
+
+    await _command(
+      bridge,
+      'app.lan.discovery.unsubscribe',
+      'lan-unsubscribe',
+      payload: const {'subscriptionId': subscriptionId},
+    );
+    expect(host.discoveryListeners, isEmpty);
+  });
+
   test('App LAN 加入只在成功回包后执行宿主动作', () async {
     final events = <String>[];
     final sendMayFinish = Completer<void>();
@@ -784,6 +830,28 @@ void main() {
     expect(response['type'], 'app.command.result');
     expect(deviceService.fullscreenCalls, [
       (enabled: true, orientation: GameOrientation.portrait),
+    ]);
+  });
+
+  test('全屏命令允许恢复为跟随系统方向', () async {
+    final deviceService = _FakeDeviceService();
+    final bridge = AppWebViewBridge(
+      userId: 'u-system',
+      nickname: 'System',
+      deviceService: deviceService,
+    );
+    addTearDown(bridge.close);
+
+    final response = await _command(
+      bridge,
+      'app.device.fullscreen',
+      'fullscreen-system',
+      payload: {'enabled': true, 'orientation': 'system'},
+    );
+
+    expect(response['type'], 'app.command.result');
+    expect(deviceService.fullscreenCalls, [
+      (enabled: true, orientation: GameOrientation.system),
     ]);
   });
 
@@ -1079,6 +1147,7 @@ class _FakeAppLanHost implements AppLanHost {
   final Object? discoverError;
   GameShareLinkSnapshot shareSnapshot;
   final List<String> preparedDiscovered = [];
+  final Map<String, AppLanDiscoveryListener> discoveryListeners = {};
   int publishCount = 0;
   int resetCount = 0;
 
@@ -1094,6 +1163,25 @@ class _FakeAppLanHost implements AppLanHost {
         host: 'Living room',
       ),
     ];
+  }
+
+  @override
+  Future<void> subscribeDiscoveredGames(
+    String subscriptionId,
+    AppLanDiscoveryListener listener,
+  ) async {
+    discoveryListeners[subscriptionId] = listener;
+    await listener(
+      AppLanDiscoverySnapshot(
+        state: AppLanDiscoveryState.ready,
+        games: await discoverGames(),
+      ),
+    );
+  }
+
+  @override
+  Future<void> unsubscribeDiscoveredGames(String subscriptionId) async {
+    discoveryListeners.remove(subscriptionId);
   }
 
   @override

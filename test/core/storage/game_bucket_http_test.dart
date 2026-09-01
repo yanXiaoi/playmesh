@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,6 +15,7 @@ void main() {
   late HttpServer server;
   late StreamSubscription<HttpRequest> subscription;
   late Uri endpoint;
+  late GameBucketChunkUploadRegistry chunkUploads;
   var authorized = true;
   var scope = 'session-a';
 
@@ -24,6 +26,7 @@ void main() {
       libraryRoot: root,
     );
     final ledger = StandardJsonBucketRequestLedger();
+    chunkUploads = GameBucketChunkUploadRegistry();
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     endpoint = Uri.parse(
       'http://127.0.0.1:${server.port}$playmeshStandardJsonBucketPath',
@@ -33,6 +36,9 @@ void main() {
         final handled = await handleGameBucketRequest(
           request,
           storage: storage,
+          chunkUploads: chunkUploads,
+          authorizeUpload: (_) =>
+              authorized ? StandardJsonBucketAuthorization(scope) : null,
           authorizeStandardJson: (_) =>
               authorized ? StandardJsonBucketAuthorization(scope) : null,
           standardJsonLedger: ledger,
@@ -53,6 +59,7 @@ void main() {
   });
 
   tearDown(() async {
+    await chunkUploads.close();
     await subscription.cancel();
     await server.close(force: true);
     await storage.close();
@@ -522,6 +529,50 @@ void main() {
     socket.destroy();
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(await storage.getData('save', 'partial'), isNull);
+  });
+
+  test('HTTP/1.1 顺序分块上传保持字节并在完成前不发布文件', () async {
+    final payload = List<int>.generate(
+      playmeshChunkedBucketUploadBytes * 2 + 17,
+      (index) => index % 256,
+    );
+    final openUri = endpoint.replace(
+      path: '/bucket/assets',
+      queryParameters: {
+        'name': 'stream.bin',
+        'transport': playmeshChunkedBucketUploadTransport,
+        'size': '${payload.length}',
+      },
+    );
+    final opened = await http.post(openUri);
+    expect(opened.statusCode, HttpStatus.created);
+    final openPayload = jsonDecode(opened.body) as Map;
+    expect(openPayload['chunkBytes'], playmeshChunkedBucketUploadBytes);
+    final uploadUri = endpoint.resolve(openPayload['uploadPath']! as String);
+
+    var sequence = 0;
+    for (var offset = 0; offset < payload.length; sequence++) {
+      final end = min(
+        offset + playmeshChunkedBucketUploadBytes,
+        payload.length,
+      );
+      final response = await http.post(
+        uploadUri.replace(queryParameters: {'sequence': '$sequence'}),
+        headers: const {'Content-Type': 'application/octet-stream'},
+        body: payload.sublist(offset, end),
+      );
+      expect(response.statusCode, HttpStatus.noContent);
+      offset = end;
+    }
+
+    final completeRequest = http.Request('PATCH', uploadUri);
+    final completed = await http.Response.fromStream(
+      await completeRequest.send(),
+    );
+    expect(completed.statusCode, HttpStatus.created);
+    final url = (jsonDecode(completed.body) as Map)['url']! as String;
+    final fileName = Uri.parse(url).pathSegments.last;
+    expect(await storage.dataFile('assets', fileName).readAsBytes(), payload);
   });
 
   test('逻辑名哈希文件带可校验 envelope，合法旧桶仍用原文件', () async {

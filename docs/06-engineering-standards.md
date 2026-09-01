@@ -90,7 +90,7 @@ Game Package
 - 游戏自定义数据必须通过 `playmesh.main.storage.getBucket(bucket)` 持久化。JSON 值存放在 `packages/{gameId}/data/json/{bucket}.json`；`upload(file)` 写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`。不能写入游戏包目录或直接操作文件系统。
 - 平台只按 `gameId + bucket` 选择上述目录，不得自动增加 `{userId}` 层。游戏需要区分用户时，由开发者在 Bucket、key 或 JSON 内容中自行设计。
 - 异步方法和 `upload(file)` 的 Bucket 名称必须匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；SDK 在调用前校验，Flutter 存储层在落盘前再次校验。同步方法仅为锁定运行时适配器额外接受 1 至 4096 UTF-8 字节的原始逻辑名，并映射到带原名校验的安全物理 envelope；不能借此放宽同一 Bucket 的异步方法。私有 key `$playmesh.gdevelop.root.v1` 只允许同步 GDevelop 适配路径。
-- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。完整 Bucket JSON root 上限为 10 MiB。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 使用原始请求体流式写盘，不允许 Base64 或 JSON 包装，单文件上限为 512 MiB。
+- `getData`、`setData`、`removeData` 和 `clearData` 默认操作宿主内存缓存，App 按固定时间窗口或脏数据阈值批量持久化，不能每次 API 调用都写磁盘。完整 Bucket JSON root 上限为 10 MiB。游戏不提供 flush 接口；WebView 重启、退出或会话关闭前由 App 等待最终落盘。`upload(file)` 的已知长度来源可使用普通原始请求体；ReadableStream 必须通过私有顺序分块通道流式写盘，不允许 Base64、JSON 包装、完整文件缓冲或 Fetch 流式请求体，单文件上限为 512 MiB。
 - 异步 JSON API 与 `getDataSync/setDataSync` 必须统一走同一个绑定当前游戏/会话的同源 HTTP Bucket 网关：GET 读取、PUT 写入、DELETE 删除或清空，并共同使用 SHA-256、requestId 幂等和 revision/CAS。同步方法只允许锁定运行时 seam 使用主线程同步 XHR；不预热、不设 timer、不提供手动 flush，失败立即抛错。旧 Session WebSocket 存储请求/响应、pending/settle 接收器、双读、双写和 fallback 必须从 SDK、App host、GameRuntimeBridge 与 Go Core 主链彻底删除，并以全仓来源门禁防止回归。
 - 持久化数据的唯一落盘端是开始游戏的 Authority 主机；所有 JSON HTTP 请求最终调用该项目共享的主机内存协调器和延迟落盘服务。该网关是 SDK 内部传输而非游戏可构造的公开业务 API，不能恢复 `/api/storage` 或允许任意 gameId。浏览器 `localStorage` 不得保存游戏 Bucket，加入设备不得创建自己的数据副本。`upload(file)` 继续独立使用 HTTP POST 与 `data/data`，不能进入 JSON envelope 或 `data/json`。
 - `packages/{gameId}/app/` 是 WebView 静态映射根。运行时只把 `data/data` 中的文件映射为不可枚举的 `/bucket/{bucket}/{timestamp-file}`；`data/json` 始终私有，任何资源服务、路径拼接和预览接口都必须拒绝访问或穿越到该目录。
@@ -240,6 +240,11 @@ WebView -> GameAssetGateway -> DevelopmentGameWebResourceProvider
   IP、多人当前/最大人数或“单机”，并支持自动更新和手动刷新。点击加入后必须保留发现
   lease 与短期候选，直到统一预检及候选复查结束。App SDK `discoverGames()` 继续只导出
   `instanceId/gameId/name/host`，不得新增内部展示字段或图标端点。
+- App SDK 统一加入面板必须通过注册表内的私有订阅命令直接消费同一个发现 lease 的只读
+  快照；房间出现、更新、goodbye 或 TTL 失效时立即增加、替换或移除对应按钮。订阅成功后
+  列表不得保持 `aria-busy` 或禁用加入操作，并持续显示小型“持续扫描中...”状态；关闭加入
+  面板、关闭菜单或文档重置时必须按订阅 ID 撤销界面投影。该内部消息不得进入 `.d.ts`、
+  SDK Manifest 的公开 API、游戏提示词或 `playmesh.app.lan` 公共方法。
 - `playmesh.app.lan.getShareLinks()` 是 App-only 本机 Authority/standalone host 的明确
   授权，返回完整 bearer LAN/Relay URL 与逐链接 PNG Data URL；不新增 capability、确认
   弹窗或 user activation。普通浏览器、远程加入页、非房主和失效上下文必须拒绝。旧的
@@ -322,12 +327,12 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
   分享网关、Catalog 和 CLI 必须使用同一清单值。
 - 对外提供的 SDK、开发者通道和 Go API 必须提供机器可读接口文档；AI 应通过正式 API 契约调用能力，不为单个 AI 客户端编写专用 Agent。
 - HTTP 接口使用 OpenAPI，数据、事件和错误使用 JSON Schema；每个接口记录权限、风险等级、幂等性、重试规则和示例。
-- `main.json.orientation` 必填且只允许 `landscape` 或 `portrait`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。WebView 必须按当前页面角色在方向应用完成后创建，进入全屏时把对应方向传到原生宿主，退出游戏后恢复系统方向。
+- `main.json.orientation` 必填且只允许 `landscape`、`portrait` 或 `system`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。固定方向必须在 WebView 创建前按当前页面角色应用；`system` 的自动启动只请求全屏，不向原生宿主或浏览器指定、锁定或解除方向；SDK 主动传入 `system` 时才解除已有方向锁。退出游戏后恢复系统方向。
 - `main.json.author` 与 `lastModifiedAt` 是平台只读发布元数据。网页、Agent 和 CLI 上传时必须分别以当前 App 昵称和 Unix 毫秒时间戳覆盖，普通 manifest 编辑不得修改；旧包缺失时不得阻断扫描。缺失 `author` 在模型中保持空动态值，App 固定外壳用统一 `app.json` 显示本地化“未知发布者”；非空发布者始终逐字显示。缺失时间由 App 外壳显示本地化“无”，有值时按设备本地时区换算。
 - `sdkVersion/appSdkVersion` 均为必填字段，用于声明游戏包要求的 SDK 版本；统一 Dart
-  注册表当前只接受 Game SDK `4.1.0`，并接受 App Bridge SDK
-  `3.2.0`、`3.3.0`、`3.4.0`。Game 请求使用 `4.1.0` bundle，App 请求使用
-  兼容的 `3.4.0` bundle。
+  注册表当前接受 Game SDK `4.1.0`、`4.2.0`、`4.3.0`，并接受 App Bridge SDK
+  `3.2.0`、`3.3.0`、`3.4.0`、`3.5.0`。Game 请求使用兼容的 `4.3.0`
+  bundle，App 请求使用兼容的 `3.5.0` bundle。
   当前兼容基线外、未知值和格式错误值直接拒绝。
 - SDK 使用 `MAJOR.MINOR.PATCH` 标识契约版本。版本升级必须同步更新发行定义、Manifest、
   Schema、模板、生成产物、测试和文档；已经完成的 Game SDK 4.0 命名空间切换不追溯兼容
@@ -382,7 +387,7 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
 | Playmesh App | `5.1.0+37` | `pubspec.yaml` |
-| Playmesh Runtime | `2.1.0+11` | `runtime/src/pubspec.yaml` |
+| Playmesh Runtime | `2.1.0+12` | `runtime/src/pubspec.yaml` |
 | Go Core | `0.7.0` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.5.0` | Flutter/Go health、会话、玩家、WebRTC 与 RPC 流控制协议定义 |
 | Game SDK | `4.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
@@ -421,7 +426,7 @@ WebSocket 子协议；不得使用环境代理或转发 `/playmesh/**`、`/bucke
 
 所有 Developer Gateway 整包发布必须经过开发者本地历史事务，Agent/CLI 不得绕过；整包恢复覆盖必需 `main.json`、可选 `capabilities.json`、可选 `icon.png` 与必需 `app/`。开发者工作区禁止通过普通文件接口写入 `main.json`，只允许可视化项目设置和受校验的 manifest API 更新；`id`、`author` 和 `lastModifiedAt` 始终不可修改，其他字段经完整清单校验后可保存。所有包导入、导出和下载中转使用按入口固定命名的临时 ZIP，操作前覆盖旧文件、完成后删除；并发请求必须串行，禁止按次数生成永久累积的随机中转文件。
 
-Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`；命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时先对 `main.json` 做严格版本校验：永久兼容基线集合包含 Game SDK `4.1.0` 以及 App Bridge SDK `3.2.0`、`3.3.0`，当前 App 集合再追加 `3.4.0`，然后由注册表解析到对应兼容 bundle；未在 `supportedRequestedVersions` 列出的中间值仍须拒绝。SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。后续 SDK 升级时兼容请求集合只可追加、不得缩小，公开命名空间、函数、参数接受范围、返回结构、事件、错误 code 与调用语义不得破坏；增量增加新函数使用 `MINOR` 版本。
+Game SDK 与 App Bridge SDK 的唯一手写源是 `lib/core/game_sdk/features/` 下的 Dart feature。每项功能的 TypeScript/声明片段与 Dart 宿主命令执行器必须保存在同一个 feature 文件，并在 `sdk_feature_registry.dart` 统一注册；Bridge 本身只负责消息解析、上下文组装、统一分发和回包。Game SDK 引用 App SDK 版本时只允许手写 `__PLAYMESH_APP_SDK_VERSION__` 占位符，由即时注册表和正式生成器从同批 App bundle 注入 `.ts/.js/.d.ts`，禁止硬编码版本或 `*-empty` 伪版本。每个命令执行器必须声明 `supportedVersions`；命令名不要求全局唯一，但注册表必须拒绝相同命令和相同版本命中两个执行器。运行游戏时先对 `main.json` 做严格版本校验：永久兼容基线集合包含 Game SDK `4.1.0` 以及 App Bridge SDK `3.2.0`、`3.3.0`，当前 App 集合再追加 `3.4.0`、`3.5.0`，然后由注册表解析到对应兼容 bundle；未在 `supportedRequestedVersions` 列出的中间值仍须拒绝。SDK 发出的宿主命令携带实际 bundle 版本并再次经过同一注册表校验。后续 SDK 升级时兼容请求集合只可追加、不得缩小，公开命名空间、函数、参数接受范围、返回结构、事件、错误 code 与调用语义不得破坏；增量增加新函数使用 `MINOR` 版本。
 
 开发运行时、游戏资源网关、分享网关、Developer Gateway、SDK 下载和 AI 声明都直接从 Dart 注册表组装 `.js/.d.ts` 与版本，不允许回退读取可能陈旧的打包静态 SDK，也不允许用测试注入脚本绕过注册表。正式构建先执行 `node tool/generate_sdk.mjs`，从同一注册表生成 `sdk-src/*.ts` 中间产物和 `public/sdk/v1/` 下的 `.js/.d.ts`，同步关联契约，并强制校验 TypeScript 发出的命令集合与已注册 Dart 执行器集合一致。一次版本变更必须同步更新默认模板、机器契约、编辑器补全、明确兼容请求版本集合、测试断言和开发文档，并在版本或验证记录中写明升级原因。默认骨架和开发下载暴露当前版本；机器契约与校验器必须同时保留仍受支持的清单请求版本，不依赖历史静态文件、字段双写、命名空间 shim 或网关旁路。
 
@@ -616,10 +621,13 @@ Go Core 只校验连接、会话、角色、凭证、消息格式、大小、频
 - SDK 应记录动作从提交到权威确认的耗时，便于区分本机 JS 处理、App 桥接、Go 转发和局域网传输问题。
 - Binary WS 单帧上限为 4 MiB，单次定向发送最多 1024 个去重目标，单连接允许每秒 2000 帧和 64 MiB 入站流量，出站队列上限为 32 MiB，每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。内部 RPC 每局最多挂起 256 项、每个发送者最多 32 项、总 payload 最多 32 MiB，请求超时为 100～60000 ms；SDK 单值编码上限为 `4 MiB - 64 KiB`。这些是局域网防失控边界，不是建议业务速率。多目标 payload 只能上行一次并由 Core 扇出；广播目标由 Core 按 Channel 当前在线成员展开并排除发送者。可靠帧达到上限时必须返回错误，连续状态应优先使用 `sendLatest` 合并尚未发送的状态帧。
 - 大字节文件不得分片塞入普通 RPC 或 Binary 帧；使用 `rpc.requestStream/onStreamRequest`。
-  Binary WS 只承载流控制与小型结果，字节体通过同会话鉴权的一次性 HTTP 流转发，以 EOF
-  结束。Core 必须使用有界缓冲和背压，不得拼接完整文件或无界排队；单流上限 512 MiB，
-  每玩家最多 4 个、每局最多 16 个，默认超时 5 分钟且只允许 1 秒至 30 分钟。发送/接收
-  进度回调只观察各自 source 拉取量，未知总量为 `null`，回调异常不得改变传输结果。
+  Binary WS 只承载流控制与小型结果。ReadableStream 或启用发送进度的来源必须使用私有
+  `chunked-v1` 会话，以最多 64 KiB 的普通 HTTP 请求体顺序上传并显式完成/取消；不得把
+  ReadableStream 作为 Fetch 请求体或设置 `duplex: "half"`。Core 必须在响应每个分块前把
+  字节写入一次性 Authority HTTP 数据面，以有界 pipe、单分块在途和 EOF 保持背压，不得拼接
+  完整文件或无界排队；单流上限 512 MiB，每玩家最多 4 个、每局最多 16 个，默认超时 5 分钟
+  且只允许 1 秒至 30 分钟。发送/接收进度回调只观察各自 source 拉取量，未知总量为 `null`，
+  回调异常不得改变传输结果。StorageBucket 的 ReadableStream 上传必须采用相同规则。
 
 ## 完成定义
 

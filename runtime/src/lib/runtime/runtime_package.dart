@@ -356,8 +356,8 @@ List<String> _enumValues(
 
 String _orientation(Map<String, Object?> source, String field) {
   final value = _requiredString(source, field);
-  if (value != 'portrait' && value != 'landscape') {
-    throw FormatException('$field 必须是 portrait 或 landscape');
+  if (value != 'portrait' && value != 'landscape' && value != 'system') {
+    throw FormatException('$field 必须是 portrait、landscape 或 system');
   }
   return value;
 }

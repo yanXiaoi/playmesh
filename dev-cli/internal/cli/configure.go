@@ -376,11 +376,13 @@ func promptConfigureRequestWithCapabilities(
 		[]promptOption{
 			{"landscape", "横屏"},
 			{"portrait", "竖屏"},
+			{"system", "跟随系统"},
 		},
 		choiceDefaultIndex(
 			[]promptOption{
 				{"landscape", "横屏"},
 				{"portrait", "竖屏"},
+				{"system", "跟随系统"},
 			},
 			current.Manifest.Orientation,
 			0,
@@ -474,11 +476,13 @@ func promptConfigureRequestWithCapabilities(
 			[]promptOption{
 				{"portrait", "竖屏"},
 				{"landscape", "横屏"},
+				{"system", "跟随系统"},
 			},
 			choiceDefaultIndex(
 				[]promptOption{
 					{"portrait", "竖屏"},
 					{"landscape", "横屏"},
+					{"system", "跟随系统"},
 				},
 				current.Manifest.ControllerOrientation,
 				0,
@@ -749,7 +753,8 @@ func validateConfigureRequest(
 		return errors.New("项目备注不能超过 500 个字符")
 	}
 	if request.Manifest.Orientation != "landscape" &&
-		request.Manifest.Orientation != "portrait" {
+		request.Manifest.Orientation != "portrait" &&
+		request.Manifest.Orientation != "system" {
 		return errors.New("游戏方向无效")
 	}
 	if request.Manifest.Mode != "solo" &&
@@ -791,7 +796,8 @@ func validateConfigureRequest(
 	}
 	if request.Manifest.DisplayMode == "single_screen_multiplayer" {
 		if request.Manifest.ControllerOrientation != "portrait" &&
-			request.Manifest.ControllerOrientation != "landscape" {
+			request.Manifest.ControllerOrientation != "landscape" &&
+			request.Manifest.ControllerOrientation != "system" {
 			return errors.New("控制器方向无效")
 		}
 		if err := validateControllerEntry(

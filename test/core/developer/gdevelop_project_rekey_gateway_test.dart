@@ -119,7 +119,7 @@ void main() {
     final fixture = await _RekeyGatewayFixture.create();
     addTearDown(fixture.close);
     const oldGameId = 'com.example.rekey-gateway-old';
-    const newGameId = 'com.example.rekey-gateway-new';
+    const newGameId = 'com.example.rekey_gateway_new';
     final expected = await fixture.seed(oldGameId);
     final prepareBody = fixture.prepareBody(
       newGameId: newGameId,
@@ -162,6 +162,7 @@ void main() {
     );
     expect(lockedNew.statusCode, HttpStatus.conflict);
     expect(fixture.errorCode(lockedNew), 'gdevelop_project_mutation_locked');
+    expect(await fixture.rootFor(newGameId).exists(), isFalse);
 
     final lockedPreview = await http.post(
       fixture.uri('/dev/api/gdevelop/projects/$oldGameId/preview'),
@@ -173,6 +174,7 @@ void main() {
       fixture.errorCode(lockedPreview),
       'gdevelop_project_mutation_locked',
     );
+    expect(await fixture.rootFor(newGameId).exists(), isFalse);
 
     final lockedPublish = await http.post(
       fixture.uri('/dev/api/packages/import'),
@@ -187,12 +189,13 @@ void main() {
       fixture.errorCode(lockedPublish),
       'gdevelop_project_mutation_locked',
     );
+    expect(await fixture.rootFor(newGameId).exists(), isFalse);
 
     final committed = await fixture.jsonRequest(
       'POST',
       '/dev/api/gdevelop/projects/$oldGameId/rekey-transactions/$txId/commit',
     );
-    expect(committed.statusCode, HttpStatus.ok);
+    expect(committed.statusCode, HttpStatus.ok, reason: committed.body);
     expect(fixture.transaction(committed)['phase'], 'NEW_PUBLISHED');
     expect(await fixture.rootFor(oldGameId).exists(), isTrue);
     expect(await fixture.rootFor(newGameId).exists(), isTrue);
