@@ -12,17 +12,17 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。最新已公开基线为 App `5.1.1+38`（GitHub/Gitee
-Pre-release）、Runtime `2.1.1+13`、Go Core `0.7.1`、Core 协议 `1.6.0`、Catalog API
+归档基线，不再用于当前生成、运行或发布。最新已公开稳定基线为 App `5.1.1+38`
+（GitHub/Gitee Release）、Runtime `2.1.1+13`、Go Core `0.7.1`、Core 协议 `1.6.0`、Catalog API
 `3.0.0`、Relay 协议 `4.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`、Game SDK `4.3.0`、
 App Bridge SDK `3.5.0`。本轮以 Pion WebRTC/DataChannel + TURN 替换旧 TCP Relay，并新增
 通用 HTML 信令端点；Runtime 三端固定底包已重建为 `v2.1.1-build13`，主 App Android 与
-Windows 正式包也已作为 5.1.1 build 38 附件公开。跨公网与平台实机验收仍未完成。
+Windows 正式包也已作为 5.1.1 build 38 附件公开。发布人已确认完成目标发布环境测试；
+具体设备、网络矩阵与原始日志未纳入仓库。
 首页扫码、“加入对局”页扫码与手工链接已经共用唯一的邀请准备方法和动态 Core 地址；加入
-准备与导航期间显示全页遮罩，错误界面保留脱敏后的完整 cause 链。5.1.1 已公开预发布不代表
-这些场景已经验收；后续仍必须补两台真实设备的两个扫码入口、LAN 手工链接与公网 TURN
-验收，不能用自动测试或包内标记替代。
+准备与导航期间显示全页遮罩，错误界面保留脱敏后的完整 cause 链。稳定线结论采用发布人
+提供的目标环境测试结果；仓库自动测试或包内标记仍不能替代未提交证据的平台矩阵。
 Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；

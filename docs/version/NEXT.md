@@ -3,8 +3,8 @@
 ## 状态
 
 - 发布基线：App `5.1.1+38`，Git 标签 `v5.1.1-build38`。该版本已在 GitHub 与 Gitee
-  作为 Pre-release 公开，Android universal、Windows x64 portable 与校验文件均已提供；
-  最新稳定正式发行仍为 `4.5.0+33`。
+  从 Pre-release 提升为稳定正式发行，Android universal、Windows x64 portable 与校验
+  文件均已提供。
 - 5.1.1 组件基线：Runtime `2.1.1+13`、Go Core `0.7.1`、Core 协议 `1.6.0`、Game SDK
   `4.3.0`、App Bridge SDK `3.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、GDevelop
   Playmesh 扩展 `2.1.0`、Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。
@@ -79,7 +79,7 @@
   `4 MiB - 64 KiB` 编码上限、32 KiB pipe 背压缓冲和 512 MiB 单流上限不变。
 - 主 App Bucket 网关、独立 Runtime 网关和 Go Core RPC 流端点同步返回并校验
   1 MiB，仍保证单分块在途和顺序背压。单上传的在途 HTTP 分块内存上界因此增大
-  16 倍，发布前需执行 Android、Windows 和普通浏览器大文件实机验收。
+  16 倍；发布人已确认完成目标发布环境测试，具体平台矩阵与原始日志未纳入仓库。
 - 这项内部传输性能调整不增加 GDevelop 公开方法，扩展仍通过同一 Game SDK 进入上传链路。
   版本评估结论同上；Runtime 三端制品与主 App Android/Windows 正式制品均已重建。
 
@@ -113,5 +113,5 @@
 - 主 App 正式构建已替换 `resources/app/playmesh.apk`、`resources/app/playmesh.zip` 和
   `resources/app/update.json`，固定镜像与版本化附件逐字节一致。
 - 已完成 Flutter、Runtime、Go Core、SDK/提示词回归，以及 Runtime 三端正式底包和 WebIDE
-  开发打包、主 App 正式构建与发布门禁；Android、Windows、跨设备和公网 TURN 手工验收
-  仍未完成，因此本版以 Pre-release 发布。
+  开发打包、主 App 正式构建与发布门禁；发布人随后确认完成目标发布环境测试并同意把本版
+  从 Pre-release 提升为稳定正式发行。该实机结论由用户提供，本自动任务未独立复现。

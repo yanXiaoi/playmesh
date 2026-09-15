@@ -32,15 +32,16 @@ Go Server（可选外部服务）
 ## 当前实现边界
 
 第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。最新已公开
-App 基线为 `5.1.1+38`（GitHub/Gitee Pre-release），搭载 Game SDK `4.3.0`、App Bridge SDK
+App 稳定基线为 `5.1.1+38`（GitHub/Gitee Release），搭载 Game SDK `4.3.0`、App Bridge SDK
 `3.5.0` 与 Developer API / OpenAPI `5.0.0`；完整组件矩阵和发布状态见
 `docs/version/README.md`、`docs/version/5.1.1.md` 与 `docs/version/NEXT.md`。Runtime
 `2.1.1+13` 三端底包和主 App Android/Windows 正式安装包均来自同一发布源码并通过门禁；
 本地实现
 基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能
 继续作为当前项目、SDK 或 Catalog 的生成基线。
-LAN 发现与 App SDK 已随 4.2.0 发布并完成自动化验证；Android、Windows、macOS、Linux
-的跨设备实机验收仍未完成，不能把正式构建写成跨设备验收完成。iOS 自动发现/发布明确为 `unsupported`，扫码、
+LAN 发现与 App SDK 已随 4.2.0 发布并完成自动化验证；5.1.1 发布人已确认目标发布环境
+测试完成，但仓库没有具体设备与网络矩阵，不能扩写为所有平台均已独立验证。iOS 自动
+发现/发布明确为 `unsupported`，扫码、
 手工邀请和分享链接仍可使用。
 
 ```text

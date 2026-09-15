@@ -80,7 +80,7 @@ Flutter App
 
 第一至第六阶段均已完成并归档，第六阶段是最后一个阶段；其中 Playmesh
 `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字只描述当时历史事实。
-最新已公开基线为 Playmesh `5.1.1+38`（GitHub/Gitee Pre-release）、Runtime `2.1.1+13`、
+最新已公开稳定基线为 Playmesh `5.1.1+38`（GitHub/Gitee Release）、Runtime `2.1.1+13`、
 Go Core `0.7.1`、Core 协议
 `1.6.0`、Game SDK `4.3.0`、App Bridge SDK `3.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`。两套 SDK 已收敛为 Dart
@@ -95,7 +95,8 @@ Runtime 三端底包与 WebIDE 开发包均已从该基线构建并通过自动�
 所有更改必须先按 `06-engineering-standards.md` 的当前版本定义评估受影响组件并
 按需升级版本号，同时维护 `docs/version/` 详细日志和 App 内简略日志。
 4.2.0 已正式发布，但局域网发现与 App SDK 的 Android、Windows、macOS、Linux
-跨设备实机验收尚未完成，不能把正式包构建等同于这些平台的实机验收；iOS 自动发现/发布明确为
+发布人已确认完成目标发布环境测试；具体设备、网络矩阵与日志未进入仓库，不能把该确认
+扩写为未记录平台的独立验证；iOS 自动发现/发布明确为
 `unsupported`，只保留扫码、手工邀请和分享链接入口。
 
 App 内置 Developer Workspace 和平台注入游戏 WebView 的 UI 都使用 App

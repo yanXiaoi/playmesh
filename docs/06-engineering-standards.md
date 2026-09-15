@@ -392,7 +392,7 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - Flutter App 每次形成新的可分发构建时，除语义版本外还必须递增 `+build`；只修改说明文字且不形成新构建时不递增 App 版本。
 - 纯文档勘误、阶段归档或未改变执行约束的提示词整理，不单独推动运行时版本；一旦提示词、Schema、Manifest 或 OpenAPI 反映了新的运行时契约，必须与对应组件在同一变更中升级。
 
-版本按组件独立维护，不升级没有受到影响的组件。当前实现已随 5.1.1 build 38 公开预发布；
+版本按组件独立维护，不升级没有受到影响的组件。当前实现已随 5.1.1 build 38 稳定正式发布；
 发布状态与制品边界以版本日志为准：
 
 | 组件 | 当前实现版本 | 版本来源 |
