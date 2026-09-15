@@ -1,0 +1,20 @@
+name: playmesh_file_system_access
+description: Native File System Access bridge used by Playmesh WebViews.
+publish_to: none
+
+version: 1.0.0
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  file_selector: ^1.1.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: top.zfjmm.playmesh_file_system_access
+        pluginClass: PlaymeshFileSystemAccessPlugin

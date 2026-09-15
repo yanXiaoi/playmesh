@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/developer/developer_project_validation.dart';
 
 void main() {
-  test('项目校验返回可定位的入口、资源和危险文件诊断', () async {
+  test('项目校验返回可定位的入口和危险文件诊断', () async {
     final workspace = await Directory.systemTemp.createTemp(
       'playmesh-project-validation-',
     );
@@ -49,31 +49,90 @@ void main() {
     expect(report.valid, isFalse);
     expect(
       report.diagnostics.map((diagnostic) => diagnostic.code),
-      containsAll([
-        'controller_entry_missing',
-        'resource_missing',
-        'forbidden_publish_file',
-      ]),
-    );
-    final missingResource = report.diagnostics.singleWhere(
-      (diagnostic) => diagnostic.code == 'resource_missing',
-    );
-    expect(missingResource.path, 'app/index.html');
-    expect(missingResource.line, 3);
-    expect(missingResource.column, isNotNull);
-    expect(missingResource.messageArguments, {
-      'reference': '/static/image/missing.png',
-    });
-    expect(missingResource.hintArguments, {
-      'resolvedPath': 'app/static/image/missing.png',
-    });
-    expect(
-      missingResource.toJson(),
-      containsPair('message', missingResource.message),
+      containsAll(['controller_entry_missing', 'forbidden_publish_file']),
     );
     expect(
-      missingResource.toJson(),
-      containsPair('messageArguments', missingResource.messageArguments),
+      report.diagnostics.map((diagnostic) => diagnostic.code),
+      isNot(contains('resource_missing')),
+    );
+  });
+
+  test('项目校验不静态推断源码资源引用是否存在', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'playmesh-dynamic-module-validation-',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
+
+    await _write(workspace, 'main.json', '''{
+  "id": "com.example.dynamic-module",
+  "name": "Dynamic Module",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
+  "version": "1.0.0",
+  "sdkVersion": "4.1.0",
+  "appSdkVersion": "3.3.0",
+  "orientation": "landscape",
+  "modes": ["solo"],
+  "displayModes": ["multi_screen"],
+  "players": {"min": 1, "max": 1},
+  "entries": {"game": "index.html"}
+}''');
+    await _write(workspace, 'app/index.html', '''<!doctype html>
+<link rel="stylesheet" href="./generated/theme.css">
+<script type="module" src="./generated/bootstrap.js"></script>''');
+    await _write(workspace, 'app/runtime.js', '''
+export async function loadModule(name) {
+  return import("./generated/" + name + ".js");
+}
+''');
+
+    final report = await const DeveloperProjectValidator().validate(
+      projectId: 'com.example.dynamic-module',
+      workspace: workspace,
+    );
+
+    expect(report.valid, isTrue, reason: '${report.diagnostics}');
+    expect(
+      report.diagnostics.map((diagnostic) => diagnostic.code),
+      isNot(contains('resource_missing')),
+    );
+  });
+
+  test('取消资源存在性推断后仍拒绝越出 Web 根目录', () async {
+    final workspace = await Directory.systemTemp.createTemp(
+      'playmesh-resource-escape-validation-',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
+
+    await _write(workspace, 'main.json', '''{
+  "id": "com.example.resource-escape",
+  "name": "Resource Escape",
+  "author": "Test Author",
+  "lastModifiedAt": 1784851200000,
+  "version": "1.0.0",
+  "sdkVersion": "4.1.0",
+  "appSdkVersion": "3.3.0",
+  "orientation": "landscape",
+  "modes": ["solo"],
+  "displayModes": ["multi_screen"],
+  "players": {"min": 1, "max": 1},
+  "entries": {"game": "index.html"}
+}''');
+    await _write(
+      workspace,
+      'app/index.html',
+      '<script type="module" src="../outside.js"></script>',
+    );
+
+    final report = await const DeveloperProjectValidator().validate(
+      projectId: 'com.example.resource-escape',
+      workspace: workspace,
+    );
+
+    expect(report.valid, isFalse);
+    expect(
+      report.diagnostics.map((diagnostic) => diagnostic.code),
+      contains('resource_path_escape'),
     );
   });
 

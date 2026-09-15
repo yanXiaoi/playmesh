@@ -261,9 +261,10 @@ WebView -> GameAssetGateway -> DevelopmentGameWebResourceProvider
   异常、超时或非法返回值按 `NEXT` 处理。
 - 统一菜单的“加入游戏”入口必须与分享/邀请共用 Authority 主机可见性，且额外要求存在
   App 原生 Bridge；加入端 WebView 和普通浏览器都不得显示或触发该入口。
-- Go Core 主 Session WebSocket 不设置每连接每秒消息条数上限；帧大小、认证、权限和
-  出站队列等既有边界仍保留。SDK `startAuthority.tickRate` 与 `submitState.rateHz` 的公开
-  上限统一为 60 Hz。
+- Go Core 主 Session WebSocket 不设置每连接每秒消息条数上限，单条消息上限为 1 MiB；
+  超限消息必须在流式读取并丢弃后记录结构化日志，只拒绝当前消息，不得关闭主连接。
+  普通会话 HTTP JSON 请求体上限同为 1 MiB；认证、权限和出站队列等既有边界仍保留。
+  SDK `startAuthority.tickRate` 与 `submitState.rateHz` 的公开上限统一为 60 Hz。
 - Windows WebView2、移动端和浏览器的主连接断开统一通过
   `playmesh.main.lifecycle.onChange()` 输出 `closed/error`；`transport.status` 仅供 SDK 内部
   重连，不得成为游戏侧平台分支接口。
@@ -317,6 +318,10 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - JSON 字段使用明确、稳定、可读的命名；同一概念只能有一个字段名，例如统一使用 `sessionId`，不混用 `roomId`。
 - 每个跨进程消息必须包含 `type`、协议版本或可推断版本、时间戳和必要的关联 ID。
 - 重要请求使用 `requestId`，跨用户操作使用 `sessionId`、`userId`、`playerId` 和 `deviceId` 关联。
+- 会话 RTT 必须由 App SDK 发起并在当前客户端计算；Game SDK 将探针路由到 Authority SDK
+  并转交其原始回应。Go Core 对主机与加入玩家使用同一 Authority 角色/目标玩家路由，
+  不得为 Authority 自己的探针建立直接 pong 快捷路径，不得写入服务端计时字段，也不得
+  保存或计算 RTT；主机 RTT 必须覆盖完整 Authority JS 回应链路。
 - `main.json` 是游戏包定义的唯一入口；字段变更必须更新示例、校验器、文档和测试。
 - 页面入口只从清单解析：所有游戏必须显式声明 `main.json.entries.game`，
   `single_screen_multiplayer` 必须显式声明 `entries.controller`，`multiplayer`
@@ -324,7 +329,12 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
   `controller/index.html` 与 `static/js/service/index.js`，但运行时不得为缺失字段
   硬编码回退。入口统一相对于外层物理 `app/`；首段 `app` 合法并解析到物理
   `app/app/`，只有 `playmesh`、`bucket` 是保留首段。扫描器、校验器、App WebView、
-  分享网关、Catalog 和 CLI 必须使用同一清单值。
+  分享网关、Catalog 和 CLI 必须使用同一清单值。分享网关收到加入端对
+  `authority.entry` 精确路径的请求时必须返回 HTTP 成功、JavaScript 类型的空响应，
+  不得返回原始权威代码或用加载错误中断玩家页面；Authority 主机本地运行入口不受影响。
+  源码 Chat/Agent 与 GDevelop Chat/Agent 的最终 AI 提示词必须在可自定义模板之外统一注入
+  此隔离规则，明确禁止非 Authority 页面依赖权威模块的导出或副作用；源码共享 ES 模块
+  页面还必须先判断 `isAuthority()` 再动态导入清单声明的精确入口，不得静态命名导入。
 - 对外提供的 SDK、开发者通道和 Go API 必须提供机器可读接口文档；AI 应通过正式 API 契约调用能力，不为单个 AI 客户端编写专用 Agent。
 - HTTP 接口使用 OpenAPI，数据、事件和错误使用 JSON Schema；每个接口记录权限、风险等级、幂等性、重试规则和示例。
 - `main.json.orientation` 必填且只允许 `landscape`、`portrait` 或 `system`；单屏多人还必须声明 `controllerOrientation`，其他模式禁止该字段。固定方向必须在 WebView 创建前按当前页面角色应用；`system` 的自动启动只请求全屏，不向原生宿主或浏览器指定、锁定或解除方向；SDK 主动传入 `system` 时才解除已有方向锁。退出游戏后恢复系统方向。
@@ -382,14 +392,15 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - Flutter App 每次形成新的可分发构建时，除语义版本外还必须递增 `+build`；只修改说明文字且不形成新构建时不递增 App 版本。
 - 纯文档勘误、阶段归档或未改变执行约束的提示词整理，不单独推动运行时版本；一旦提示词、Schema、Manifest 或 OpenAPI 反映了新的运行时契约，必须与对应组件在同一变更中升级。
 
-版本按组件独立维护，不升级没有受到影响的组件。当前工作树实现版本矩阵为：
+版本按组件独立维护，不升级没有受到影响的组件。当前实现已随 5.1.1 build 38 公开预发布；
+发布状态与制品边界以版本日志为准：
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `5.1.0+37` | `pubspec.yaml` |
-| Playmesh Runtime | `2.1.0+12` | `runtime/src/pubspec.yaml` |
-| Go Core | `0.7.0` | `go-core/main.go`、`go-core/mobile/core.go` |
-| Core 协议 | `1.5.0` | Flutter/Go health、会话、玩家、WebRTC 与 RPC 流控制协议定义 |
+| Playmesh App | `5.1.1+38` | `pubspec.yaml` |
+| Playmesh Runtime | `2.1.1+13` | `runtime/src/pubspec.yaml` |
+| Go Core | `0.7.1` | `go-core/main.go`、`go-core/mobile/core.go` |
+| Core 协议 | `1.6.0` | Flutter/Go health、会话、玩家、WebRTC 与 RPC 流控制协议定义 |
 | Game SDK | `4.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
 | App Bridge SDK | `3.5.0` | Dart app feature 注册表及生成的 TS、JS、类型与 App 注入配置 |
 | Developer API / OpenAPI | `5.0.0` | Developer Gateway、安装包导出与临时开发资源会话契约 |
@@ -398,8 +409,8 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 | Relay 协议 | `4.0.0` | WebRTC 信令、Pion TURN/STUN 与 DataChannel 隧道协议 |
 | GDevelop Playmesh 扩展 | `2.1.0` | GDevelop 扩展生成脚本与生成的 `Playmesh.json` |
 
-该矩阵描述当前代码与生成契约；发布状态和历史版本见
-`docs/version/README.md`、`docs/version/5.0.1.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+该矩阵描述当前版本常量与生成契约；发布状态和历史版本见
+`docs/version/README.md`、`docs/version/5.1.1.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `dev/run` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段并与目标 App 精确核对，禁止手工声明不一致版本。CLI 2.0 只接受根 `playmesh-cli.json`；发布内容隔离在 `playmesh/package/`，SDK/类型隔离在 `playmesh/sdk/`，上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根 `icon.png` 和必需物理 `app/`。`outputDirectory` 和入口都相对于外层 `packageRoot/app/`；首段 `app` 合法，例如入口 `app/index.html` 对应物理 `packageRoot/app/app/index.html` 和运行时 `/app/index.html`。项目平台差异只能通过唯一 `adapter.Registry` 中的 `Adapter` 实现，公共命令不得按 Cocos/语言复制分支或维护第二份适配器实例表。
@@ -525,6 +536,7 @@ feat(session): add browser join identity step
 - `required` 非空时，主 SDK 在 App 与浏览器每次加载游戏时都必须展示全部能力并等待用户确认；拒绝则退出，结果不得持久化或写入 Authority 主机。文件缺失或列表为空时不弹窗。
 - 当前平台不支持的能力必须在 SDK 弹窗中标注“本平台暂不支持”，但不能阻止用户同意后进入。游戏应通过 `playmesh.app.capabilities.getAvailable()` 做非阻塞降级；SDK 只允许创建已经声明、用户本次确认且当前设备可用的插件。
 - 浏览器玩家必须由 SDK 读取或生成 `p_...` 玩家 ID 并确认昵称后，才能调用加入接口获得短期凭证。分享 URL 不得携带昵称或玩家 ID；`localStorage` 只允许保存 SDK 管理的 `playmesh.player-id.v1` 与昵称偏好，不得保存玩家凭证或游戏 Bucket。
+- App/Runtime 首次创建本地资料时必须同时生成随机昵称和 `u_` 前缀 UUID v4，并在本次安装且应用数据未清除期间复用。创建会话和加入会话必须向 Core 传入该 ID，不得把局内随机 ID 暴露为 SDK `player.id`。已持久化的旧格式 ID 不做破坏性迁移；换设备、重装或清理应用数据后允许换号。
 - Core 必须保留掉线玩家的稳定 ID 和 `connected: false` 状态；同 ID 在线时拒绝后续 Join 和 WebSocket，旧连接掉线并撤销旧凭据后才允许同 ID 重新签发凭据。游戏通过 SDK 连接事件处理等待、中途加入和状态恢复。
 - `playmesh.main.player.setNickname()` 必须在普通浏览器和 App WebView 的多人 Player 页面保持同一语义：浏览器把偏好写入当前 origin 的 `localStorage`，App 由宿主持久化，两者都同步当前 Core。单机和 `single_screen_multiplayer` 公共 Authority 屏必须拒绝。SDK 仍在普通浏览器提供统一昵称修改悬浮入口；App WebView 不要因此重复创建网页悬浮入口。
 - 外部网页只能访问当前游戏和当前会话，不能访问 App token、用户文件、其他游戏包或任意原生端口。
@@ -622,7 +634,7 @@ Go Core 只校验连接、会话、角色、凭证、消息格式、大小、频
 - Binary WS 单帧上限为 4 MiB，单次定向发送最多 1024 个去重目标，单连接允许每秒 2000 帧和 64 MiB 入站流量，出站队列上限为 32 MiB，每局最多 1024 个 Channel；Authority 审核最多挂起 1024 项或 128 MiB，单次审核 15 秒超时。内部 RPC 每局最多挂起 256 项、每个发送者最多 32 项、总 payload 最多 32 MiB，请求超时为 100～60000 ms；SDK 单值编码上限为 `4 MiB - 64 KiB`。这些是局域网防失控边界，不是建议业务速率。多目标 payload 只能上行一次并由 Core 扇出；广播目标由 Core 按 Channel 当前在线成员展开并排除发送者。可靠帧达到上限时必须返回错误，连续状态应优先使用 `sendLatest` 合并尚未发送的状态帧。
 - 大字节文件不得分片塞入普通 RPC 或 Binary 帧；使用 `rpc.requestStream/onStreamRequest`。
   Binary WS 只承载流控制与小型结果。ReadableStream 或启用发送进度的来源必须使用私有
-  `chunked-v1` 会话，以最多 64 KiB 的普通 HTTP 请求体顺序上传并显式完成/取消；不得把
+  `chunked-v1` 会话，以最多 1 MiB 的普通 HTTP 请求体顺序上传并显式完成/取消；不得把
   ReadableStream 作为 Fetch 请求体或设置 `duplex: "half"`。Core 必须在响应每个分块前把
   字节写入一次性 Authority HTTP 数据面，以有界 pipe、单分块在途和 EOF 保持背压，不得拼接
   完整文件或无界排队；单流上限 512 MiB，每玩家最多 4 个、每局最多 16 个，默认超时 5 分钟

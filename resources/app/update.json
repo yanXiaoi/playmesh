@@ -1,6 +1,6 @@
 {
-  "version": "4.5.0",
-  "releaseNotes": "游戏菜单合并全屏按钮，并为主机 WebView 增加当前游戏局域网加入入口；游戏可在关闭 SDK 兜底面板后接管返回退出；状态同步上限提升到 60 Hz，跨平台连接关闭事件保持一致。",
+  "version": "5.1.1",
+  "releaseNotes": "新增 Windows/Android 系统文件选择与安全文件句柄；本机玩家 ID 持久化；多人状态与流式上传容量提升并按真实 Authority 往返计算延迟；游戏包更新保留数据并隔离 Authority 代码，独立 Runtime 三端底包同步重建。",
   "windows": {
     "downloads": [
       {
@@ -17,7 +17,7 @@
     "downloads": [
       {
         "name": "GitHub",
-        "url": "https://github.com/yanXiaoi/playmesh/releases/download/v4.5.0-build33/Playmesh-4.5.0-build33-android-universal.apk"
+        "url": "https://github.com/yanXiaoi/playmesh/releases/download/v5.1.1-build38/Playmesh-5.1.1-build38-android-universal.apk"
       },
       {
         "name": "临时源",

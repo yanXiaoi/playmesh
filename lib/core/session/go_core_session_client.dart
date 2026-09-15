@@ -34,6 +34,7 @@ class GoCoreSessionClient {
     required String displayMode,
     required int minPlayers,
     required int maxPlayers,
+    required String playerId,
     required String nickname,
   }) async {
     final bootstrap = await _post('v1/sessions', {
@@ -41,6 +42,7 @@ class GoCoreSessionClient {
       'displayMode': displayMode,
       'minPlayers': minPlayers,
       'maxPlayers': maxPlayers,
+      'playerId': playerId,
       'nickname': nickname,
     });
     return _connect(bootstrap);

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:playmesh_file_system_access/playmesh_file_system_access.dart';
 
 import '../core/diagnostics/playmesh_error_diagnostic.dart';
 import 'app_media/app_media_runtime.dart';
@@ -52,6 +53,22 @@ final class RuntimeAppBridge {
     'app.lan.scanQr',
     'app.lan.setPublished',
     'app.lan.getShareLinks',
+    'app.fileSystem.pickOpen',
+    'app.fileSystem.pickSave',
+    'app.fileSystem.pickDirectory',
+    'app.fileSystem.stat',
+    'app.fileSystem.read',
+    'app.fileSystem.createWritable',
+    'app.fileSystem.write',
+    'app.fileSystem.seek',
+    'app.fileSystem.truncate',
+    'app.fileSystem.closeWritable',
+    'app.fileSystem.abortWritable',
+    'app.fileSystem.list',
+    'app.fileSystem.getChild',
+    'app.fileSystem.remove',
+    'app.fileSystem.same',
+    'app.fileSystem.resolve',
   };
 
   factory RuntimeAppBridge({
@@ -72,6 +89,7 @@ final class RuntimeAppBridge {
     RuntimeAppLocalBucketStore? localBucketStore,
     bool autoApproveCapabilities = false,
     http.Client? httpClient,
+    PlaymeshFileSystemAccessHost? fileSystemAccessHost,
   }) {
     final mediaRuntime = createDefaultAppMediaRuntime(
       enabledProtocols: modules.mediaProtocols,
@@ -102,6 +120,8 @@ final class RuntimeAppBridge {
       capabilityRegistry: capabilityRegistry,
       httpClient: httpClient ?? http.Client(),
       ownsHttpClient: httpClient == null,
+      fileSystemAccessHost:
+          fileSystemAccessHost ?? PlaymeshFileSystemAccessHost(),
     );
   }
 
@@ -125,6 +145,7 @@ final class RuntimeAppBridge {
     required this.capabilityRegistry,
     required this._httpClient,
     required this._ownsHttpClient,
+    required this.fileSystemAccessHost,
   }) : _runtimeDeclaredCapabilities = List.unmodifiable(
          game.requiredCapabilities,
        ),
@@ -162,6 +183,7 @@ final class RuntimeAppBridge {
   late CapabilityRuntime _capabilityRuntime;
   final http.Client _httpClient;
   final bool _ownsHttpClient;
+  final PlaymeshFileSystemAccessHost fileSystemAccessHost;
   Future<void> _nicknameUpdateTail = Future<void>.value();
   DateTime? _trustedUserActivationExpiresAt;
   bool _closed = false;
@@ -273,6 +295,9 @@ final class RuntimeAppBridge {
     String sdkVersion,
     RuntimeBridgeSender send,
   ) async {
+    if (name.startsWith('app.fileSystem.')) {
+      return _executeFileSystem(name, payload);
+    }
     switch (name) {
       case 'app.bootstrap':
         _requirePayload(payload, const {});
@@ -441,6 +466,22 @@ final class RuntimeAppBridge {
           'command_unsupported',
           'Runtime 尚未实现 App SDK 命令: $name',
         );
+    }
+  }
+
+  Future<Object?> _executeFileSystem(
+    String name,
+    Map<String, Object?> payload,
+  ) async {
+    final command = name.substring('app.fileSystem.'.length);
+    if ({'pickOpen', 'pickSave', 'pickDirectory'}.contains(command) &&
+        !_consumeUserActivation()) {
+      throw const RuntimeAppSdkException('not_allowed', '文件或目录选择必须由用户操作直接发起');
+    }
+    try {
+      return await fileSystemAccessHost.execute(command, payload);
+    } on PlaymeshFileSystemAccessException catch (error) {
+      throw RuntimeAppSdkException(error.code, error.message);
     }
   }
 
@@ -851,6 +892,7 @@ final class RuntimeAppBridge {
   Future<void> resetDocument() async {
     _trustedUserActivationExpiresAt = null;
     lanHost?.resetDocument();
+    await fileSystemAccessHost.resetDocument();
     await _capabilityRuntime.reset();
     await mediaRuntime.reset();
   }
@@ -877,6 +919,7 @@ final class RuntimeAppBridge {
     _trustedUserActivationExpiresAt = null;
     await _nicknameUpdateTail;
     lanHost?.resetDocument();
+    await fileSystemAccessHost.close();
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
     await mediaRuntime.dispose();

@@ -45,7 +45,7 @@ final class RuntimeAssetServer {
   static const _browserSessionCookie = 'playmesh_runtime_session';
   static const _chunkedUploadPath = '/bucket/_playmesh-stream/v1';
   static const _chunkedUploadTransport = 'chunked-v1';
-  static const _chunkBytes = 64 * 1024;
+  static const _chunkBytes = 1024 * 1024;
 
   final RuntimeGamePackage game;
   final RuntimeStorage storage;
@@ -183,6 +183,15 @@ final class RuntimeAssetServer {
         : request.uri.path.substring(1);
     if (!_safePath(relative)) {
       throw const FormatException('资源路径不安全');
+    }
+    if (!local && relative == game.manifest.authorityEntry) {
+      request.response.headers
+        ..contentType = _contentType(relative)
+        ..set(HttpHeaders.cacheControlHeader, 'no-store')
+        ..set('X-Content-Type-Options', 'nosniff');
+      request.response.contentLength = 0;
+      await request.response.close();
+      return;
     }
     var bytes = game.readWebFile(relative);
     if (bytes == null) {
@@ -750,14 +759,14 @@ final class RuntimeAssetServer {
 Future<Uint8List> _readRuntimeUploadChunk(HttpRequest request) async {
   if (request.contentLength <= 0 ||
       request.contentLength > RuntimeAssetServer._chunkBytes) {
-    throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+    throw const FormatException('存储上传分块必须为 1 字节至 1 MiB');
   }
   final builder = BytesBuilder(copy: false);
   var received = 0;
   await for (final chunk in request) {
     received += chunk.length;
     if (received > RuntimeAssetServer._chunkBytes) {
-      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+      throw const FormatException('存储上传分块必须为 1 字节至 1 MiB');
     }
     builder.add(chunk);
   }
@@ -900,7 +909,7 @@ final class _RuntimeChunkUpload {
       throw const FormatException('存储上传分块顺序无效');
     }
     if (bytes.isEmpty || bytes.length > RuntimeAssetServer._chunkBytes) {
-      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+      throw const FormatException('存储上传分块必须为 1 字节至 1 MiB');
     }
     final next = _written + bytes.length;
     if (next > RuntimeStorage.maxUploadBytes ||

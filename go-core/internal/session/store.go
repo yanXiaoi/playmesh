@@ -63,8 +63,8 @@ type Credentials struct {
 }
 
 type CreateInput struct {
-	GameID, DisplayMode, Nickname string
-	MinPlayers, MaxPlayers        int
+	GameID, DisplayMode, Nickname, PlayerID string
+	MinPlayers, MaxPlayers                  int
 }
 
 type JoinInput struct {
@@ -134,7 +134,7 @@ func (s *Store) Create(input CreateInput) (Snapshot, Credentials, error) {
 	if input.DisplayMode == "single_screen_multiplayer" {
 		authorityName = "公共显示端"
 	}
-	authority, token, tokenHash, err := newIdentity(authorityName, "authority")
+	authority, token, tokenHash, err := newIdentityWithID(authorityName, "authority", input.PlayerID)
 	if err != nil {
 		return Snapshot{}, Credentials{}, err
 	}

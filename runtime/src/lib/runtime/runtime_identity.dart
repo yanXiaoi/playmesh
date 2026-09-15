@@ -52,8 +52,7 @@ final class RuntimeIdentity {
       }
     }
     final random = Random.secure();
-    final token = List<int>.generate(18, (_) => random.nextInt(256));
-    final userId = 'u_${base64UrlEncode(token).replaceAll('=', '')}';
+    final userId = 'u_${_uuidV4(random)}';
     final identity = RuntimeIdentity._(
       userId,
       _randomDefaultNickname(random),
@@ -96,6 +95,18 @@ final class RuntimeIdentity {
       flush: true,
     );
   }
+}
+
+String _uuidV4(Random random) {
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes
+      .map((value) => value.toRadixString(16).padLeft(2, '0'))
+      .join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+      '${hex.substring(20)}';
 }
 
 String _randomDefaultNickname([Random? source]) {

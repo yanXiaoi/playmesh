@@ -313,37 +313,20 @@ class DeveloperProjectValidator {
       };
       for (final match in pattern.allMatches(source)) {
         final reference = match.group(1)!;
-        final resolved = _resolveReference(path, reference);
-        if (resolved == null) continue;
+        if (!_referenceEscapesWebRoot(path, reference)) continue;
         final position = _position(source, match.start);
-        if (resolved.escaped) {
-          diagnostics.add(
-            DeveloperProjectDiagnostic(
-              code: 'resource_path_escape',
-              severity: DeveloperDiagnosticSeverity.error,
-              message: '资源引用越过 app/ 公开目录：$reference',
-              messageArguments: {'reference': reference},
-              path: path,
-              line: position.$1,
-              column: position.$2,
-              hint: '使用 app/ 内相对路径或 /playmesh/ 平台公共资源路径。',
-            ),
-          );
-        } else if (!files.containsKey(resolved.path)) {
-          diagnostics.add(
-            DeveloperProjectDiagnostic(
-              code: 'resource_missing',
-              severity: DeveloperDiagnosticSeverity.error,
-              message: '引用的本地资源不存在：$reference',
-              messageArguments: {'reference': reference},
-              path: path,
-              line: position.$1,
-              column: position.$2,
-              hint: '补充 ${resolved.path}，或修正当前引用路径。',
-              hintArguments: {'resolvedPath': resolved.path},
-            ),
-          );
-        }
+        diagnostics.add(
+          DeveloperProjectDiagnostic(
+            code: 'resource_path_escape',
+            severity: DeveloperDiagnosticSeverity.error,
+            message: '资源引用越过 app/ 公开目录：$reference',
+            messageArguments: {'reference': reference},
+            path: path,
+            line: position.$1,
+            column: position.$2,
+            hint: '使用 app/ 内相对路径或 /playmesh/ 平台公共资源路径。',
+          ),
+        );
       }
     }
 
@@ -507,14 +490,7 @@ class DeveloperProjectValidator {
   );
 }
 
-class _ResolvedReference {
-  const _ResolvedReference(this.path, {this.escaped = false});
-
-  final String path;
-  final bool escaped;
-}
-
-_ResolvedReference? _resolveReference(String sourcePath, String raw) {
+bool _referenceEscapesWebRoot(String sourcePath, String raw) {
   final value = raw.trim();
   final lower = value.toLowerCase();
   if (value.isEmpty ||
@@ -525,12 +501,12 @@ _ResolvedReference? _resolveReference(String sourcePath, String raw) {
       lower.startsWith('https:') ||
       value.startsWith('//') ||
       _isRuntimeReference(value)) {
-    return null;
+    return false;
   }
   final withoutQuery = value.split(RegExp(r'[?#]')).first;
-  if (withoutQuery.isEmpty) return null;
+  if (withoutQuery.isEmpty) return false;
   if (withoutQuery.contains(r'\') || withoutQuery.contains('%')) {
-    return const _ResolvedReference('', escaped: true);
+    return true;
   }
   final sourceWebPath = sourcePath.startsWith('app/')
       ? sourcePath.substring('app/'.length)
@@ -542,20 +518,19 @@ _ResolvedReference? _resolveReference(String sourcePath, String raw) {
   for (final part in candidate.split('/')) {
     if (part.isEmpty || part == '.') continue;
     if (part == '..') {
-      if (parts.isEmpty) return const _ResolvedReference('', escaped: true);
+      if (parts.isEmpty) return true;
       parts.removeLast();
     } else {
       parts.add(part);
     }
   }
-  if (parts.isEmpty) return const _ResolvedReference('', escaped: true);
-  if (playmeshGamePackageLayout.isRuntimeNamespace(parts.first)) return null;
+  if (parts.isEmpty) return true;
+  if (playmeshGamePackageLayout.isRuntimeNamespace(parts.first)) return false;
   try {
-    return _ResolvedReference(
-      playmeshGamePackageLayout.packagePathForWebPath(parts.join('/')),
-    );
+    playmeshGamePackageLayout.packagePathForWebPath(parts.join('/'));
+    return false;
   } on FormatException {
-    return const _ResolvedReference('', escaped: true);
+    return true;
   }
 }
 

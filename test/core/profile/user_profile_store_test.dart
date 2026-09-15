@@ -15,7 +15,14 @@ void main() {
 
     final generated = await store.load(fallback);
     expect(generated.nickname, fallback.nickname);
-    expect(generated.userId, matches(RegExp(r'^u_[a-f0-9]{32}$')));
+    expect(
+      generated.userId,
+      matches(
+        RegExp(
+          r'^u_[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$',
+        ),
+      ),
+    );
     await store.save(updated);
     final restored = await store.load(fallback);
 
@@ -85,17 +92,28 @@ void main() {
     );
     addTearDown(() => firstRoot.delete(recursive: true));
     addTearDown(() => secondRoot.delete(recursive: true));
-    const fallback = UserProfile(userId: 'unused', nickname: '本机玩家');
+    final firstFallback = UserProfileStore.createLocalProfile();
+    final secondFallback = UserProfileStore.createLocalProfile();
 
     final firstStore = UserProfileStore(root: firstRoot);
     final secondStore = UserProfileStore(root: secondRoot);
-    final first = await firstStore.load(fallback);
-    final second = await secondStore.load(fallback);
+    final first = await firstStore.load(firstFallback);
+    final second = await secondStore.load(secondFallback);
 
-    expect(first.userId, matches(RegExp(r'^u_[a-f0-9]{32}$')));
-    expect(second.userId, matches(RegExp(r'^u_[a-f0-9]{32}$')));
+    final uuidPattern = RegExp(
+      r'^u_[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$',
+    );
+    expect(first.userId, matches(uuidPattern));
+    expect(second.userId, matches(uuidPattern));
+    expect(first.nickname, matches(RegExp(r'^玩家[A-Za-z0-9]{4}$')));
+    expect(first.nickname, contains(RegExp(r'[A-Za-z]')));
+    expect(first.nickname, contains(RegExp(r'[0-9]')));
+    expect(first.userId, firstFallback.userId);
+    expect(first.nickname, firstFallback.nickname);
     expect(second.userId, isNot(first.userId));
-    expect((await firstStore.load(fallback)).userId, first.userId);
+    final restored = await firstStore.load(secondFallback);
+    expect(restored.userId, first.userId);
+    expect(restored.nickname, first.nickname);
   });
 
   test('旧 avatarLabel 资料被隔离且不会被读取', () async {

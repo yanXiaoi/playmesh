@@ -16,7 +16,7 @@ import (
 	"go-core/internal/webrtctunnel"
 )
 
-const coreVersion = "0.7.0"
+const coreVersion = "0.7.1"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))

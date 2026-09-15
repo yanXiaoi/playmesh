@@ -84,10 +84,7 @@ class PlaymeshApp extends StatefulWidget {
   @visibleForTesting
   final LanGameDiscoveryService? lanGameDiscoveryService;
 
-  static UserProfile createLocalUser() => UserProfile(
-    userId: UserProfileStore.generateUserId(),
-    nickname: playmeshDefaultLocalNickname,
-  );
+  static UserProfile createLocalUser() => UserProfileStore.createLocalProfile();
 
   @override
   State<PlaymeshApp> createState() => _PlaymeshAppState();

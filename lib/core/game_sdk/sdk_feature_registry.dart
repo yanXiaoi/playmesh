@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:playmesh_database/playmesh_database.dart';
+import 'package:playmesh_file_system_access/playmesh_file_system_access.dart';
 
 import '../capabilities/capability_runtime.dart';
 import '../app_media/app_media_runtime.dart';
@@ -12,6 +13,7 @@ import '../storage/app_local_bucket_store.dart';
 part 'features/app/app_capability_feature.dart';
 part 'features/app/app_core_feature.dart';
 part 'features/app/app_device_feature.dart';
+part 'features/app/app_file_system_access_feature.dart';
 part 'features/app/app_lan_feature.dart';
 part 'features/app/app_media_feature.dart';
 part 'features/app/app_media_webrtc_feature.dart';
@@ -254,6 +256,7 @@ class AppSdkCommandContext {
     required this.syncAvatar,
     required this.updateNickname,
     required this.localBucketStore,
+    required this.fileSystemAccessHost,
   });
 
   final Future<Map<String, Object?>> Function(
@@ -280,6 +283,7 @@ class AppSdkCommandContext {
   final Future<Object?> Function(Map<String, Object?> payload) syncAvatar;
   final Future<Object?> Function(Map<String, Object?> payload) updateNickname;
   final AppLocalBucketStore? localBucketStore;
+  final PlaymeshFileSystemAccessHost fileSystemAccessHost;
 }
 
 /// 唯一 SDK 注册位置。新增功能时在对应 feature 文件实现并在这里注册一次。
@@ -326,6 +330,7 @@ final class SdkFeatureRegistry {
     _AppMediaFeature(),
     _AppUiFeature(),
     _AppLanFeature(),
+    _AppFileSystemAccessFeature(),
     _AppDeviceFeature(),
   ];
 
@@ -366,6 +371,7 @@ final class SdkFeatureRegistry {
     appUiSdkSource,
     appWebRTCSdkSource,
     appLanSdkSource,
+    appFileSystemAccessSdkSource,
     appDeviceSdkSource,
   ];
 

@@ -262,18 +262,39 @@ latencyIntervals[0].callback();
 assert.equal(latencyProbes.length, 2);
 assert.match(latencyProbes[0].probeId, /^latency-\d+-1$/);
 assert.match(latencyProbes[1].probeId, /^latency-\d+-2$/);
+const originalSetTimeout = window.setTimeout;
+const originalClearTimeout = window.clearTimeout;
+const latencyExpiryTimers = [];
+window.setTimeout = (callback, delay) => {
+  const handle = { callback, delay, unref() {} };
+  latencyExpiryTimers.push(handle);
+  return handle;
+};
+window.clearTimeout = () => {};
 appInternal.recordRuntimeLatencyPong({
   probeId: "probe-local",
   clientSentAt: Date.now() - 20,
-  serverReceivedAt: Date.now() - 10,
-  serverSentAt: Date.now() - 5,
-  authorityAvailable: true,
 });
 assert.equal(app.performance.getLatency() >= 0, true);
 assert.equal(
   app.performance.getLatencyDiagnostics().authorityAvailable,
   true,
 );
+assert.equal(
+  "serverReceivedAt" in app.performance.getLatencyDiagnostics(),
+  false,
+);
+assert.equal(
+  "serverSentAt" in app.performance.getLatencyDiagnostics(),
+  false,
+);
+assert.equal(latencyExpiryTimers.length, 1);
+assert.equal(latencyExpiryTimers[0].delay, 7000);
+latencyExpiryTimers[0].callback();
+assert.equal(app.performance.getLatency(), null);
+assert.equal(app.performance.getLatencyDiagnostics(), null);
+window.setTimeout = originalSetTimeout;
+window.clearTimeout = originalClearTimeout;
 assert.equal(
   commands.some((item) => item.command === "performance.fps"),
   false,
@@ -609,6 +630,9 @@ const browserWindow = createBootstrapContractWindow();
 const browserApp = browserWindow[appInternalKey].publicApi;
 const browserBootstrap = await browserApp.ready;
 assert.equal(browserWindow.playmesh, undefined);
+assert.equal(browserWindow.showOpenFilePicker, undefined);
+assert.equal(browserWindow.showSaveFilePicker, undefined);
+assert.equal(browserWindow.showDirectoryPicker, undefined);
 assert.equal(browserBootstrap.available, false);
 assert.equal(browserBootstrap.sdkVersion, "3.5.0");
 assert.equal(browserBootstrap.identity, null);

@@ -210,10 +210,12 @@ void main() {
 
   test('主会话掉线后持续重连并发送掉线期间排队的消息', () async {
     final channels = <_FakeWebSocketChannel>[];
+    late http.Request createRequest;
     final client = GoCoreSessionClient(
       baseUri: Uri.parse('http://127.0.0.1:42000/'),
-      httpClient: MockClient(
-        (_) async => http.Response.bytes(
+      httpClient: MockClient((request) async {
+        createRequest = request;
+        return http.Response.bytes(
           utf8.encode(
             jsonEncode({
               'webSocketPath': '/v1/sessions/s-1/ws',
@@ -250,8 +252,8 @@ void main() {
           ),
           200,
           headers: {'content-type': 'application/json; charset=utf-8'},
-        ),
-      ),
+        );
+      }),
       channelFactory: (_) {
         final channel = _FakeWebSocketChannel(initiallyReady: channels.isEmpty);
         channels.add(channel);
@@ -263,7 +265,12 @@ void main() {
       displayMode: 'multi_screen',
       minPlayers: 1,
       maxPlayers: 4,
+      playerId: 'u_12345678-1234-4234-9234-123456789abc',
       nickname: '主机',
+    );
+    expect(
+      jsonDecode(createRequest.body) as Map<String, Object?>,
+      containsPair('playerId', 'u_12345678-1234-4234-9234-123456789abc'),
     );
     final messages = <Map<String, Object?>>[];
     final subscription = connection.messages.listen(messages.add);

@@ -195,7 +195,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('唯一 ID'), findsOneWidget);
-    expect(find.textContaining(RegExp(r'^u_[a-f0-9]{32}$')), findsOneWidget);
+    expect(
+      find.textContaining(
+        RegExp(
+          r'^u_[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$',
+        ),
+      ),
+      findsOneWidget,
+    );
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
@@ -203,7 +210,7 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 5.1.0'), findsOneWidget);
+    expect(find.text('Playmesh 5.1.1'), findsOneWidget);
     expect(find.text('Core 0.1.0'), findsOneWidget);
   });
 

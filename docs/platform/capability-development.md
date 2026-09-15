@@ -501,8 +501,13 @@ Workspace 按能力 code 写死参数或测试逻辑。
 - 原始加速度计、陀螺仪、设备方向等非敏感能力直接使用标准 Web API，不进入能力
   注册表，也不由 Playmesh WebView 权限执行器处理。基于相机和 ARCore 的
   `sensor.pose6d` 属于明确例外，必须经过能力声明、确认和系统权限。
-- 文件选择由 `<input type="file">` 的用户动作触发，宿主只返回用户当次选择的文件，
-  不声明能力，也不允许静默读取文件。
+- 文件选择由 `<input type="file">` 或标准 `showOpenFilePicker()`、
+  `showSaveFilePicker()`、`showDirectoryPicker()` 的用户动作触发，不声明能力，也不
+  允许静默读取文件。后三者在 Windows/Android App WebView 与独立 Runtime 中使用
+  原生桥：宿主只保存不透明句柄，文件内容以受限大小分块传输，页面重载时撤销句柄并
+  中止未关闭的写入。Android 必须使用 Storage Access Framework 的
+  `ACTION_OPEN_DOCUMENT`、`ACTION_CREATE_DOCUMENT` 与
+  `ACTION_OPEN_DOCUMENT_TREE`，不得把 `content://` URI 或设备路径暴露给网页。
 - 能力声明只用于敏感 WebView 权限和 Playmesh 已做多平台适配的能力，两者均按需
   声明。其他标准 Web API 由 WebView 自身的特性支持和安全策略决定。
 - 自检只允许用默认参数创建真实实例后立即释放，不调用方法；插件创建本身产生的系统

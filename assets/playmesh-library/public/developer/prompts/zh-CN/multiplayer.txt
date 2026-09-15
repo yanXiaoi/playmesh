@@ -4,7 +4,7 @@
 
 强制交付：
 1. `main.json` 必须显式声明 `authority.entry`；它指向的文件必须真实存在，并导出可工作的 Authority 状态规则，不得省略或依赖默认入口。
-2. Authority 页面必须加载该 service，并且只在 playmesh.main.session.isAuthority() 为 true 时调用 playmesh.main.sync.startAuthority。
+2. `authority.entry` 的真实内容只允许 Authority 主机读取和执行。共享 ES 模块页面必须先确认 playmesh.main.session.isAuthority() 为 true，再通过动态 import() 加载清单声明的精确入口并调用 playmesh.main.sync.startAuthority。加入端请求该路径只会收到 HTTP 成功的空 JavaScript 模块，因此非 Authority 玩家页和控制器页不得依赖其导出或副作用，也不得使用会因缺少导出而中断页面模块加载的静态命名导入。
 3. 通过 playmesh.main.sync.submitAction 提交的每种业务输入结构，都在 onInput 中定义对应处理规则；连续输入通过 submitState 提交，并可在 onInput 或 onTick 的 inputs 中处理。
 4. 所有页面必须使用 playmesh.main.sync.observe 展示最新快照，不能把本地预测当作最终结果。
 5. 身份只能使用 context.senderPlayerId 和 context.members[].id；不存在 player.playerId 或 member.playerId。

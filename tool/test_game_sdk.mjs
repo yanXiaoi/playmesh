@@ -548,7 +548,7 @@ globalThis.window = {
         ok: true,
         status: 200,
         async json() {
-          return { uploadPath, chunkBytes: 64 * 1024 };
+          return { uploadPath, chunkBytes: 1024 * 1024 };
         },
       };
     }
@@ -560,7 +560,7 @@ globalThis.window = {
           upload.nextSequence,
         );
         assert.ok(options.body instanceof Uint8Array);
-        assert.ok(options.body.byteLength <= 64 * 1024);
+        assert.ok(options.body.byteLength <= 1024 * 1024);
         upload.streamController.enqueue(new Uint8Array(options.body));
         upload.nextSequence += 1;
         return { ok: true, status: 204 };
@@ -680,7 +680,7 @@ globalThis.window = {
         ok: true,
         status: 200,
         async json() {
-          return { uploadPath, chunkBytes: 64 * 1024 };
+          return { uploadPath, chunkBytes: 1024 * 1024 };
         },
       };
     }
@@ -692,7 +692,7 @@ globalThis.window = {
           upload.nextSequence,
         );
         assert.ok(options.body instanceof Uint8Array);
-        assert.ok(options.body.byteLength <= 64 * 1024);
+        assert.ok(options.body.byteLength <= 1024 * 1024);
         upload.chunks.push(new Uint8Array(options.body));
         upload.nextSequence += 1;
         return { ok: true, status: 204 };
@@ -799,15 +799,10 @@ globalThis.window = {
           type: "transport.message",
           message: {
             type: "session.pong",
-            payload: {
-              ...command.payload,
-              authorityAvailable: true,
-              serverReceivedAt: command.payload.clientSentAt,
-              serverSentAt: command.payload.clientSentAt,
-            },
+            payload: { ...command.payload },
           },
         });
-      } else if (command.command === "authority.result") {
+      } else if (command.command === "performance.pong" || command.command === "authority.result") {
         receiveMain({
           type: "command.result", requestId: command.requestId, result: null,
         });
@@ -919,6 +914,27 @@ assert.equal(window.playmesh.main.version, "4.3.0");
 assert.deepEqual(Object.keys(window.playmesh).sort(), ["app", "main", "ready"]);
 assert.equal(sdkBootstrap.main.sdkVersion, "4.3.0");
 assert.equal(sdkBootstrap.app.sdkVersion, "3.5.0");
+
+receiveMain({
+  type: "transport.message",
+  message: {
+    type: "authority.ping",
+    senderPlayerId: "p-authority",
+    payload: { probeId: "host-full-path", clientSentAt: 1234 },
+  },
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+const hostLatencyPong = commands.find(
+  (command) =>
+    command.command === "performance.pong" &&
+    command.payload?.probeId === "host-full-path",
+);
+assert.ok(hostLatencyPong, "Authority SDK must answer the host latency probe");
+assert.equal(hostLatencyPong.targetPlayerId, "p-authority");
+assert.deepEqual(hostLatencyPong.payload, {
+  probeId: "host-full-path",
+  clientSentAt: 1234,
+});
 
 assert.deepEqual(await window.playmesh.main.db.open(), { file: "_game.db" });
 assert.deepEqual(

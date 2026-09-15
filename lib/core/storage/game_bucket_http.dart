@@ -15,7 +15,7 @@ const playmeshStandardJsonProtocolVersion = '1.0.0';
 const playmeshEndpointBoundStorageGameId = '@playmesh-current-game';
 const playmeshChunkedBucketUploadPath = '/bucket/_playmesh-stream/v1';
 const playmeshChunkedBucketUploadTransport = 'chunked-v1';
-const playmeshChunkedBucketUploadBytes = 64 * 1024;
+const playmeshChunkedBucketUploadBytes = 1024 * 1024;
 const _standardJsonEnvelopeBytes = 128 * 1024;
 const _maxSynchronousGetPayloadBytes = 12 * 1024;
 const _maxSynchronousGetQueryBytes = 16 * 1024;
@@ -241,7 +241,7 @@ class _GameBucketChunkUpload {
       throw const FormatException('存储上传分块顺序无效');
     }
     if (bytes.isEmpty || bytes.length > playmeshChunkedBucketUploadBytes) {
-      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+      throw const FormatException('存储上传分块必须为 1 字节至 1 MiB');
     }
     final next = _written + bytes.length;
     if (next > GameStorageService.maxUploadBytes ||
@@ -531,14 +531,14 @@ Future<void> _handleChunkedBucketUpload(
 Future<Uint8List> _readChunkedBucketBody(HttpRequest request) async {
   if (request.contentLength <= 0 ||
       request.contentLength > playmeshChunkedBucketUploadBytes) {
-    throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+    throw const FormatException('存储上传分块必须为 1 字节至 1 MiB');
   }
   final builder = BytesBuilder(copy: false);
   var received = 0;
   await for (final chunk in request) {
     received += chunk.length;
     if (received > playmeshChunkedBucketUploadBytes) {
-      throw const FormatException('存储上传分块必须为 1 至 65536 字节');
+      throw const FormatException('存储上传分块必须为 1 字节至 1 MiB');
     }
     builder.add(chunk);
   }

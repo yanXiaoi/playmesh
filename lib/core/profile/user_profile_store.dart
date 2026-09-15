@@ -92,17 +92,49 @@ class UserProfileStore {
     }
   }
 
-  static String generateUserId() {
+  static UserProfile createLocalProfile() {
     final random = Random.secure();
-    final hex = List.generate(
-      16,
-      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
-    return 'u_$hex';
+    return UserProfile(
+      userId: generateUserId(random),
+      nickname: generateNickname(random),
+    );
+  }
+
+  static String generateUserId([Random? source]) {
+    final random = source ?? Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes
+        .map((value) => value.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return 'u_${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
+  }
+
+  static String generateNickname([Random? source]) {
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    const digits = '0123456789';
+    const alphabet = '$letters$digits';
+    final random = source ?? Random.secure();
+    final suffix = <String>[
+      letters[random.nextInt(letters.length)],
+      digits[random.nextInt(digits.length)],
+      alphabet[random.nextInt(alphabet.length)],
+      alphabet[random.nextInt(alphabet.length)],
+    ];
+    for (var index = suffix.length - 1; index > 0; index -= 1) {
+      final target = random.nextInt(index + 1);
+      final value = suffix[index];
+      suffix[index] = suffix[target];
+      suffix[target] = value;
+    }
+    return '玩家${suffix.join()}';
   }
 
   Future<UserProfile> _persistGenerated(UserProfile source) async {
-    final generated = RegExp(r'^u_[a-f0-9]{32}$').hasMatch(source.userId)
+    final generated = _isGeneratedUserId(source.userId)
         ? source
         : source.copyWith(userId: generateUserId());
     await save(generated);
@@ -212,4 +244,10 @@ class UserProfileStore {
       '${Platform.pathSeparator}avatar.png',
     );
   }
+
+  static bool _isGeneratedUserId(String value) =>
+      RegExp(r'^u_[a-f0-9]{32}$').hasMatch(value) ||
+      RegExp(
+        r'^u_[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$',
+      ).hasMatch(value);
 }

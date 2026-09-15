@@ -15,7 +15,7 @@ import (
 	"go-core/internal/webrtctunnel"
 )
 
-const coreVersion = "0.7.0"
+const coreVersion = "0.7.1"
 
 var (
 	coreMutex         sync.RWMutex

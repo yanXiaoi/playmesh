@@ -479,6 +479,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  playmesh_file_system_access:
+    dependency: "direct main"
+    description:
+      path: "../../packages/playmesh_file_system_access"
+      relative: true
+    source: path
+    version: "1.0.0"
   playmesh_share_ui:
     dependency: "direct main"
     description:

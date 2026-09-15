@@ -101,6 +101,12 @@ class DeveloperLocalHistoryStore {
   static const mergeWindow = Duration(minutes: 5);
   static const _maxOperations = 100;
   static const _maxTextPreviewBytes = 256 * 1024;
+  static const _snapshotRootEntries = {
+    'app',
+    'main.json',
+    'capabilities.json',
+    'icon.png',
+  };
 
   Future<void> _tail = Future<void>.value();
 
@@ -298,11 +304,21 @@ class DeveloperLocalHistoryStore {
   Future<void> _snapshot(Directory workspace, Directory target) async {
     if (await target.exists()) await target.delete(recursive: true);
     await target.create(recursive: true);
-    await for (final entity in workspace.list()) {
-      if ({'.playmesh', 'cache', 'data'}.contains(_basename(entity.path))) {
-        continue;
+    await _copySnapshotRootEntries(workspace, target);
+  }
+
+  Future<void> _copySnapshotRootEntries(
+    Directory source,
+    Directory target,
+  ) async {
+    for (final name in _snapshotRootEntries) {
+      final path = '${source.path}${Platform.pathSeparator}$name';
+      final type = await FileSystemEntity.type(path, followLinks: false);
+      if (type == FileSystemEntityType.file) {
+        await _copyEntity(File(path), target);
+      } else if (type == FileSystemEntityType.directory) {
+        await _copyEntity(Directory(path), target);
       }
-      await _copyEntity(entity, target);
     }
   }
 
@@ -326,15 +342,19 @@ class DeveloperLocalHistoryStore {
     Directory workspace,
     Directory snapshot,
   ) async {
-    await for (final entity in workspace.list()) {
-      final name = _basename(entity.path);
-      if ({'.playmesh', 'cache', 'data'}.contains(name)) continue;
-      await entity.delete(recursive: true);
+    for (final name in _snapshotRootEntries) {
+      final path = '${workspace.path}${Platform.pathSeparator}$name';
+      final type = await FileSystemEntity.type(path, followLinks: false);
+      if (type == FileSystemEntityType.file) {
+        await File(path).delete();
+      } else if (type == FileSystemEntityType.directory) {
+        await Directory(path).delete(recursive: true);
+      } else if (type == FileSystemEntityType.link) {
+        await Link(path).delete();
+      }
     }
     if (!await snapshot.exists()) return;
-    await for (final entity in snapshot.list()) {
-      await _copyEntity(entity, workspace);
-    }
+    await _copySnapshotRootEntries(snapshot, workspace);
   }
 
   Future<void> _replacePath(
@@ -469,9 +489,7 @@ class DeveloperLocalHistoryStore {
     if (await target.exists()) await target.delete(recursive: true);
     await target.create(recursive: true);
     if (!await source.exists()) return;
-    await for (final entity in source.list()) {
-      await _copyEntity(entity, target);
-    }
+    await _copySnapshotRootEntries(source, target);
   }
 
   Future<Map<String, Object?>?> _readMetadata(Directory operation) async {

@@ -532,6 +532,7 @@ void main() {
   });
 
   test('HTTP/1.1 顺序分块上传保持字节并在完成前不发布文件', () async {
+    expect(playmeshChunkedBucketUploadBytes, 1024 * 1024);
     final payload = List<int>.generate(
       playmeshChunkedBucketUploadBytes * 2 + 17,
       (index) => index % 256,

@@ -430,12 +430,7 @@ function createPage(
         queueMicrotask(() => this.emit("message", {
           data: JSON.stringify({
             type: "session.pong",
-            payload: {
-              ...message.payload,
-              authorityAvailable: true,
-              serverReceivedAt: message.payload.clientSentAt,
-              serverSentAt: message.payload.clientSentAt,
-            },
+            payload: { ...message.payload },
           }),
         }));
       }
@@ -572,7 +567,7 @@ function createPage(
           status: 201,
           json: async () => ({
             uploadPath: `/bucket/_playmesh-stream/v1/${token}`,
-            chunkBytes: 64 * 1024,
+            chunkBytes: 1024 * 1024,
           }),
         };
       }
@@ -586,6 +581,7 @@ function createPage(
             String(upload.chunks.length),
           );
           assert.ok(options.body instanceof Uint8Array);
+          assert.ok(options.body.byteLength <= 1024 * 1024);
           upload.chunks.push(new Uint8Array(options.body));
           return { ok: true, status: 204 };
         }
@@ -630,7 +626,7 @@ function createPage(
           status: 201,
           json: async () => ({
             uploadPath: `/v1/sessions/s-1/rpc-stream-uploads/${token}`,
-            chunkBytes: 64 * 1024,
+            chunkBytes: 1024 * 1024,
           }),
         };
       }
@@ -644,6 +640,7 @@ function createPage(
             String(upload.chunks.length),
           );
           assert.ok(options.body instanceof Uint8Array);
+          assert.ok(options.body.byteLength <= 1024 * 1024);
           upload.chunks.push(new Uint8Array(options.body));
           return { ok: true, status: 204 };
         }

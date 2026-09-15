@@ -1263,6 +1263,7 @@ class GameLibraryDeveloperProjectCatalog implements DeveloperProjectCatalog {
       entry: LocalGameEntry(
         gameEntryPath: manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,
+        authorityEntryPath: manifest.authority?.entry,
         statusLabel: 'Game SDK ${manifest.sdkVersion}',
         packageRootFilePath: directory.path,
       ),

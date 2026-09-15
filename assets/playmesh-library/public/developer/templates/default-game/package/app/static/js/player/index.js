@@ -1,9 +1,8 @@
-import { startAuthoritySync } from "../service/index.js";
-
 await playmesh.ready;
 document.querySelector("#status").textContent = "Ready";
 
 if (playmesh.main.session.isAuthority()) {
+  const { startAuthoritySync } = await import("../service/index.js");
   startAuthoritySync();
 }
 

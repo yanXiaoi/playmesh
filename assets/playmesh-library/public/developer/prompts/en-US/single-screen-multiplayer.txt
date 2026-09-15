@@ -16,7 +16,6 @@ Strictly prohibited:
 
 Minimal public-display structure:
 
-import { startAuthoritySync } from "../service/index.js";
 await playmesh.ready;
 
 function showError(error) {
@@ -28,6 +27,7 @@ function showError(error) {
 
 try {
   if (playmesh.main.session.isAuthority()) {
+    const { startAuthoritySync } = await import("../service/index.js");
     startAuthoritySync();
   }
 } catch (error) {

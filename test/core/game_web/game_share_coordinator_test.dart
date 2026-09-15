@@ -1257,7 +1257,11 @@ const _game = GameSummary(
   displayModeLabel: '多人多屏',
   displayMode: 'multi_screen',
   orientation: GameOrientation.landscape,
-  entry: LocalGameEntry(gameEntryPath: 'index.html', statusLabel: 'Ready'),
+  entry: LocalGameEntry(
+    gameEntryPath: 'index.html',
+    authorityEntryPath: 'service/authority.js',
+    statusLabel: 'Ready',
+  ),
 );
 
 const _soloGame = GameSummary(

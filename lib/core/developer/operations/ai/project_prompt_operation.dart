@@ -230,6 +230,7 @@ class _ProjectPromptOperation implements _DeveloperHttpOperation {
         'authority.entry: '
         '${authorityEntry ?? text('project.notDeclared')}',
       )
+      ..writeln(text('project.authorityEntryIsolation'))
       ..writeln(
         'capabilities.required: '
         '${requiredCapabilities.isEmpty ? text('project.notDeclared') : requiredCapabilities.join(', ')}',

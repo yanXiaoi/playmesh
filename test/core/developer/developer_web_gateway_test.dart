@@ -1071,6 +1071,15 @@ void main() {
     expect(aiPrompt.body, isNot(contains('仅浏览器控制器可用')));
     expect(aiPrompt.body, isNot(contains('重载后 SDK 会自动请求最新快照')));
     expect(aiPrompt.body, contains('static/js/service/index.js'));
+    expect(aiPrompt.body, contains('加入端请求该路径只会收到 HTTP 成功的空 JavaScript 模块'));
+    expect(
+      aiPrompt.body,
+      contains('const { startAuthoritySync } = await import'),
+    );
+    expect(
+      aiPrompt.body,
+      isNot(contains('import { startAuthoritySync } from')),
+    );
     expect(aiPrompt.body, contains('当前项目已声明的平台能力'));
     expect(aiPrompt.body, contains('未声明平台能力。'));
     expect(aiPrompt.body, contains('非敏感能力优先直接使用标准 Web API'));
@@ -1144,6 +1153,7 @@ void main() {
     expect(agentPrompt.body, isNot(contains('===== BEGIN WORKSPACE FILE:')));
     expect(agentPrompt.body, isNot(contains('<title>Demo</title>')));
     expect(agentPrompt.body, isNot(contains('最终回答只能包含可直接粘贴')));
+    expect(agentPrompt.body, contains('加入端请求该路径只会收到 HTTP 成功的空 JavaScript 模块'));
 
     final invalidAgentBaseUrl = await http.get(
       base
@@ -1226,8 +1236,34 @@ void main() {
     expect(englishPrompt.statusCode, HttpStatus.ok);
     expect(englishPrompt.body, contains('Current project'));
     expect(englishPrompt.body, contains('Read project files on demand'));
+    expect(
+      englishPrompt.body,
+      contains(
+        'A joining client receives a successful HTTP response with an empty '
+        'JavaScript module',
+      ),
+    );
     expect(englishPrompt.body, isNot(contains('当前项目')));
     expect(englishPrompt.body, isNot(matches(RegExp(r'[\u3400-\u9fff]'))));
+    final englishAgentPrompt = await http.get(
+      base
+          .resolve('/dev/api/projects/demo/agent-prompt.txt')
+          .replace(
+            queryParameters: {
+              'token': 'custom-dev-token',
+              'locale': 'en-US',
+              'baseUrl': takeoverBaseUrl,
+            },
+          ),
+    );
+    expect(englishAgentPrompt.statusCode, HttpStatus.ok);
+    expect(
+      englishAgentPrompt.body,
+      contains(
+        'A joining client receives a successful HTTP response with an empty '
+        'JavaScript module',
+      ),
+    );
     final customizedEnglish = await http.put(
       base.resolve(
         '/dev/api/ai-prompt-templates/common'
@@ -1269,6 +1305,10 @@ void main() {
       ),
     );
     expect(customizedPrompt.body, contains('CUSTOM_COMMON'));
+    expect(
+      customizedPrompt.body,
+      contains('加入端请求该路径只会收到 HTTP 成功的空 JavaScript 模块'),
+    );
     final reset = await http.delete(
       base.resolve(
         '/dev/api/ai-prompt-templates/common?token=custom-dev-token',
@@ -2331,6 +2371,19 @@ void main() {
       '${Platform.pathSeparator}app${Platform.pathSeparator}index.html',
     );
     await index.writeAsString('<!doctype html><title>Before publish</title>');
+    final projectRoot = index.parent.parent;
+    final simulatorState = File(
+      '${projectRoot.path}${Platform.pathSeparator}simulator-state'
+      '${Platform.pathSeparator}disk.bin',
+    );
+    final savedData = File(
+      '${projectRoot.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.bin',
+    );
+    await simulatorState.parent.create(recursive: true);
+    await savedData.parent.create(recursive: true);
+    await simulatorState.writeAsString('private-simulator-state');
+    await savedData.writeAsString('saved-game-state');
 
     final publishedAt = DateTime.utc(2026, 7, 24, 9, 30);
     await catalog.publishPackage(
@@ -2353,6 +2406,29 @@ void main() {
     );
     final history = await catalog.listLocalHistory(project.id, '');
     expect(history, hasLength(1));
+    final historyRoot = Directory(
+      '${projectRoot.path}${Platform.pathSeparator}cache'
+      '${Platform.pathSeparator}developer'
+      '${Platform.pathSeparator}local-history',
+    );
+    expect(
+      await Directory(
+        '${historyRoot.path}${Platform.pathSeparator}baseline'
+        '${Platform.pathSeparator}simulator-state',
+      ).exists(),
+      isFalse,
+    );
+    expect(
+      await Directory(
+        '${historyRoot.path}${Platform.pathSeparator}operations'
+        '${Platform.pathSeparator}${history.single.id}'
+        '${Platform.pathSeparator}snapshot'
+        '${Platform.pathSeparator}simulator-state',
+      ).exists(),
+      isFalse,
+    );
+    expect(await simulatorState.readAsString(), 'private-simulator-state');
+    expect(await savedData.readAsString(), 'saved-game-state');
 
     await catalog.restoreLocalHistory(
       project.id,
@@ -2374,6 +2450,8 @@ void main() {
       restoredManifest['lastModifiedAt'],
       DateTime.utc(2026, 7, 23).millisecondsSinceEpoch,
     );
+    expect(await simulatorState.readAsString(), 'private-simulator-state');
+    expect(await savedData.readAsString(), 'saved-game-state');
   });
 
   test('锁屏时后台安全接口继续工作并准确拒绝 View 操作', () async {

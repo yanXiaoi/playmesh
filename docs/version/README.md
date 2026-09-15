@@ -28,16 +28,17 @@
 
 ## 当前基线
 
-- 当前工作树：App `5.1.0+37`、Runtime `2.1.0+12`、Game SDK `4.3.0`、App Bridge SDK
-  `3.5.0`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议
+- 最新已公开版本：App `5.1.1+38`（GitHub/Gitee Pre-release）、Runtime `2.1.1+13`、
+  Game SDK `4.3.0`、App Bridge SDK `3.5.0`、Go Core `0.7.1`、Core 协议 `1.6.0`、
+  Catalog API `3.0.0`、Relay 协议
   `4.0.0`、GDevelop Playmesh 扩展 `2.1.0`、Developer API `5.0.0`、Developer CLI
-  `2.0.0`。2026-09-01 已从当前源码重建并验证 GDevelop WebIDE、Runtime 三端固定底包与
+  `2.0.0`。2026-09-15 已从同一源码重建并验证 GDevelop WebIDE、Runtime 三端固定底包与
   主 App Android/Windows 正式包，四份 SDK 在主仓、Runtime 清单与 GDevelop 消费面一致。
-  当前候选尚未完成跨设备手工验收。
-- 当前预发布候选详细日志：`docs/version/5.1.0.md`
-- 最近已归档版本详细日志：`docs/version/5.0.1.md`
-- 最新正式发行详细日志：`docs/version/4.5.0.md`
-- 当前开发临时日志：`docs/version/NEXT.md`（没有未发布变更时只记录发行基线）
+  该预发布版尚未完成跨设备手工验收。
+- 最新已公开版本详细日志：`docs/version/5.1.1.md`
+- 最新稳定正式发行详细日志：`docs/version/4.5.0.md`
+- 当前开发临时日志：`docs/version/NEXT.md`；5.1 build 37 后至本次发布的变更已归档到
+  `docs/version/5.1.1.md`，后续未发布变更必须继续写入 `NEXT.md`。
 - 当前本地实现索引：`docs/implementation/README.md`（3.0.0 文档只作为历史基线）
 - 历史阶段终点：`docs/status/phase-06-complete.md`
 - 当前 App 简略日志：`lib/core/release/playmesh_release_notes.dart`

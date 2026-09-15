@@ -7,7 +7,6 @@
 
 页面最小结构：
 
-import { startAuthoritySync } from "../service/index.js";
 await playmesh.ready;
 
 function showError(error) {
@@ -19,6 +18,7 @@ function showError(error) {
 
 try {
   if (playmesh.main.session.isAuthority()) {
+    const { startAuthoritySync } = await import("../service/index.js");
     startAuthoritySync();
   }
 } catch (error) {
@@ -36,4 +36,4 @@ document.querySelector("#action").addEventListener("click", async () => {
   }
 });
 
-同一个 entries.game 页面必须同时兼容 App 主机玩家和加入者。Authority 同步启动必须有 isAuthority 判断，任何加入端无论进入顺序都不能启动 Authority runtime。
+同一个 entries.game 页面必须同时兼容 App 主机玩家和加入者。Authority 同步启动必须先有 isAuthority 判断，再动态导入 main.json 中 authority.entry 指向的精确模块；不得在共享页面顶层静态命名导入该模块。任何加入端无论进入顺序都不能执行真实权威代码或启动 Authority runtime。

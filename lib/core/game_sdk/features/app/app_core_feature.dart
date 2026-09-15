@@ -68,15 +68,15 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     return null;
   }
 
-  function request(command, payload = {}) {
+  function request(command, payload = {}, timeoutMs = 30000) {
     const send = nativeSender();
     if (!send) return Promise.reject(new Error("当前页面不在 Playmesh App WebView 中"));
     const requestId = `app-sdk-${Date.now()}-${++sequence}`;
     return new Promise((resolve, reject) => {
-      const timer = global.setTimeout(() => {
+      const timer = timeoutMs == null ? null : global.setTimeout(() => {
         pending.delete(requestId);
         reject(new Error(`Playmesh App Bridge 请求超时: ${command}`));
-      }, 30000);
+      }, timeoutMs);
       pending.set(requestId, { resolve, reject, timer });
       try {
         send(JSON.stringify({
@@ -86,7 +86,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
           payload,
         }));
       } catch (error) {
-        global.clearTimeout(timer);
+        if (timer != null) global.clearTimeout(timer);
         pending.delete(requestId);
         reject(error);
       }
@@ -131,7 +131,7 @@ const PLAYMESH_APP_DECLARATION = String.raw`
     const operation = pending.get(message.requestId);
     if (!operation) return;
     pending.delete(message.requestId);
-    global.clearTimeout(operation.timer);
+    if (operation.timer != null) global.clearTimeout(operation.timer);
     if (message.type === "app.command.error") {
       const error = new Error(message.error || "Playmesh App Bridge 调用失败");
       if (typeof message.code === "string") error.code = message.code;

@@ -209,6 +209,7 @@ class DefaultGameShareGatewayFactory implements GameShareGatewayFactory {
       controllerOrientation: game.controllerOrientation,
       gameEntryPath: game.entry.gameEntryPath,
       controllerEntryPath: game.entry.controllerEntryPath,
+      authorityEntryPath: game.entry.authorityEntryPath,
       gameId: game.id,
       gameName: game.name,
       tags: game.tags,

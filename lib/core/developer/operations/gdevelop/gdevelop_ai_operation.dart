@@ -819,7 +819,8 @@ class _GDevelopAiOperation implements _DeveloperHttpOperation {
       ..writeln(const JsonEncoder.withIndent('  ').convert(sceneIndex))
       ..writeln()
       ..writeln('===== ${text('rules')} =====')
-      ..writeln('- ${text('noStore')}');
+      ..writeln('- ${text('noStore')}')
+      ..writeln('- ${text('authorityEntryIsolation')}');
     if (promptMode == GDevelopAiMode.chat) {
       output
         ..writeln()

@@ -3,7 +3,25 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playmesh/core/game_sdk/sdk_feature_registry.dart';
 
+// ignore: avoid_relative_lib_imports
+import '../../../runtime/src/lib/runtime/runtime_app_bridge.dart';
+// ignore: avoid_relative_lib_imports
+import '../../../runtime/src/lib/runtime/runtime_game_bridge.dart';
+
 void main() {
+  test('独立 Runtime 与主程序 SDK 注册表的命令面完全一致', () {
+    expect(
+      RuntimeGameBridge.supportedCommandNames,
+      SdkFeatureRegistry.gameCommandNames,
+      reason: 'Runtime Game Bridge 不得漏实现或私自增加主程序未登记的命令',
+    );
+    expect(
+      RuntimeAppBridge.supportedCommandNames,
+      SdkFeatureRegistry.appCommandNames,
+      reason: 'Runtime App Bridge 不得漏实现或私自增加主程序未登记的命令',
+    );
+  });
+
   test('统一注册表覆盖网页端所有宿主命令且 feature 标识唯一', () {
     expect(SdkFeatureRegistry.gameCommandNames, {
       'sdk.ready',
@@ -59,18 +77,34 @@ void main() {
       'app.game.exit',
       'app.identity.syncAvatar',
       'app.identity.updateNickname',
+      'app.fileSystem.pickOpen',
+      'app.fileSystem.pickSave',
+      'app.fileSystem.pickDirectory',
+      'app.fileSystem.stat',
+      'app.fileSystem.read',
+      'app.fileSystem.createWritable',
+      'app.fileSystem.write',
+      'app.fileSystem.seek',
+      'app.fileSystem.truncate',
+      'app.fileSystem.closeWritable',
+      'app.fileSystem.abortWritable',
+      'app.fileSystem.list',
+      'app.fileSystem.getChild',
+      'app.fileSystem.remove',
+      'app.fileSystem.same',
+      'app.fileSystem.resolve',
     });
 
     final fragments = SdkFeatureRegistry.sourceFragments;
-    expect(fragments, hasLength(21));
-    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(21));
+    expect(fragments, hasLength(22));
+    expect(fragments.map((fragment) => fragment.id).toSet(), hasLength(22));
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.game),
       hasLength(11),
     );
     expect(
       fragments.where((fragment) => fragment.target == SdkSourceTarget.app),
-      hasLength(10),
+      hasLength(11),
     );
     expect(
       fragments.every((fragment) => fragment.typeScript.trim().isNotEmpty),

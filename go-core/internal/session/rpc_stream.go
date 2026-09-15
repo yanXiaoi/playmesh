@@ -21,7 +21,7 @@ const (
 	minRPCStreamTimeout                  = time.Second
 	maxRPCStreamTimeout                  = 30 * time.Minute
 	rpcStreamCopyBufferBytes             = 32 * 1024
-	rpcStreamChunkBytes                  = 64 * 1024
+	rpcStreamChunkBytes                  = 1024 * 1024
 	rpcStreamChunkTransport              = "chunked-v1"
 	rpcStreamUnknownLength        uint64 = ^uint64(0)
 )
@@ -553,13 +553,13 @@ func (h *Handler) appendRPCStreamChunk(
 		return
 	}
 	if request.ContentLength <= 0 || request.ContentLength > rpcStreamChunkBytes {
-		writeError(writer, http.StatusRequestEntityTooLarge, "rpc_stream_chunk_invalid", "RPC 流分块必须为 1 至 65536 字节")
+		writeError(writer, http.StatusRequestEntityTooLarge, "rpc_stream_chunk_invalid", "RPC 流分块必须为 1 字节至 1 MiB")
 		return
 	}
 	request.Body = http.MaxBytesReader(writer, request.Body, rpcStreamChunkBytes+1)
 	payload, err := io.ReadAll(request.Body)
 	if err != nil || len(payload) == 0 || len(payload) > rpcStreamChunkBytes {
-		writeError(writer, http.StatusRequestEntityTooLarge, "rpc_stream_chunk_invalid", "RPC 流分块必须为 1 至 65536 字节")
+		writeError(writer, http.StatusRequestEntityTooLarge, "rpc_stream_chunk_invalid", "RPC 流分块必须为 1 字节至 1 MiB")
 		return
 	}
 	if err := stream.appendChunk(sequence, payload); err != nil {

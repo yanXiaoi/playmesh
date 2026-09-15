@@ -102,7 +102,7 @@ void main() {
     );
   });
 
-  test('同 ID 更新只替换发布文件并保留 data、cache 和平台 sidecar', () async {
+  test('同 ID 更新只移动替换包拥有的文件并原样保留其他根条目', () async {
     final root = await Directory.systemTemp.createTemp('playmesh-update-');
     addTearDown(() => root.delete(recursive: true));
     final source = File('${root.path}${Platform.pathSeparator}source.zip');
@@ -142,7 +142,7 @@ void main() {
     await historyState.parent.create(recursive: true);
     await projectMetadata.writeAsString('{"kind":"gdevelop"}');
     await historyState.writeAsString('{"revision":7}');
-    final removedEntries = <FileSystemEntity>[
+    final preservedEntries = <FileSystemEntity>[
       File(
         '${installed.path}${Platform.pathSeparator}sdk'
         '${Platform.pathSeparator}legacy.js',
@@ -150,7 +150,7 @@ void main() {
       File('${installed.path}${Platform.pathSeparator}arbitrary.txt'),
       Directory('${installed.path}${Platform.pathSeparator}other-root'),
     ];
-    for (final entry in removedEntries) {
+    for (final entry in preservedEntries) {
       if (entry is Directory) {
         await entry.create(recursive: true);
         await File(
@@ -182,9 +182,6 @@ void main() {
 
     await _writeZip(source, {
       'main.json': _manifest('com.example.update', version: '1.1.0'),
-      'capabilities.json': jsonEncode({
-        'required': ['media.microphone'],
-      }),
       'app/index.html': '<!doctype html><title>New</title>',
     });
     await service.importPackage(source);
@@ -193,21 +190,37 @@ void main() {
     expect(await cache.readAsString(), 'cached');
     expect(await projectMetadata.readAsString(), '{"kind":"gdevelop"}');
     expect(await historyState.readAsString(), '{"revision":7}');
-    for (final entry in removedEntries) {
+    expect(
+      await File(
+        '${installed.path}${Platform.pathSeparator}capabilities.json',
+      ).exists(),
+      isFalse,
+    );
+    for (final entry in preservedEntries) {
       expect(
         await FileSystemEntity.type(entry.path, followLinks: false),
-        FileSystemEntityType.notFound,
-        reason: '${entry.path} must not survive a package update',
+        entry is Directory
+            ? FileSystemEntityType.directory
+            : FileSystemEntityType.file,
+        reason: '${entry.path} must survive a package update',
       );
     }
+    expect(await (preservedEntries[0] as File).readAsString(), 'legacy');
+    expect(await (preservedEntries[1] as File).readAsString(), 'legacy');
+    expect(
+      await File(
+        '${preservedEntries[2].path}${Platform.pathSeparator}state.bin',
+      ).readAsString(),
+      'legacy',
+    );
     if (linksCreated) {
       expect(
         await FileSystemEntity.type(rootLink.path, followLinks: false),
-        FileSystemEntityType.notFound,
+        FileSystemEntityType.link,
       );
       expect(
         await FileSystemEntity.type(dataLink.path, followLinks: false),
-        FileSystemEntityType.notFound,
+        FileSystemEntityType.link,
       );
     }
     expect(
@@ -232,9 +245,65 @@ void main() {
       packageEntries.any(
         (path) =>
             path.contains('.playmesh-import-') ||
-            path.contains('.playmesh-backup-'),
+            path.contains('.playmesh-backup-') ||
+            path.contains('.playmesh-retired-'),
       ),
       isFalse,
+    );
+  });
+
+  test('更新期间项目根路径始终存在，存储并发确保目录不会制造空壳冲突', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-stable-update-root-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    final service = GamePackageTransferService(libraryRoot: root);
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.stable-root'),
+      'app/index.html': '<!doctype html><title>Old</title>',
+    });
+    final game = await service.importPackage(source);
+    final installed = Directory(game.entry.packageRootFilePath!);
+    final data = File(
+      '${installed.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.bin',
+    );
+    await data.parent.create(recursive: true);
+    await data.writeAsString('irreplaceable-data');
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.stable-root', version: '2.0.0'),
+      'app/index.html': '<!doctype html><title>New</title>',
+    });
+
+    var monitoring = true;
+    var rootDisappeared = false;
+    Future<void> keepStoragePathAlive() async {
+      while (monitoring) {
+        if (!await installed.exists()) {
+          rootDisappeared = true;
+          await installed.create(recursive: true);
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    final monitor = keepStoragePathAlive();
+    try {
+      await service.importPackage(source);
+    } finally {
+      monitoring = false;
+      await monitor;
+    }
+
+    expect(rootDisappeared, isFalse);
+    expect(await data.readAsString(), 'irreplaceable-data');
+    expect(
+      await File(
+        '${installed.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('New'),
     );
   });
 
@@ -258,23 +327,355 @@ void main() {
     final staging = Directory(
       '${packages.path}${Platform.pathSeparator}.playmesh-import-test',
     );
+    final retired = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-retired-test',
+    );
+    final data = File(
+      '${target.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.json',
+    );
+    final privateState = File(
+      '${target.path}${Platform.pathSeparator}simulator-state'
+      '${Platform.pathSeparator}disk.bin',
+    );
+    await data.parent.create(recursive: true);
+    await privateState.parent.create(recursive: true);
+    await data.writeAsString('important-save');
+    await privateState.writeAsString('large-private-state');
     await target.rename(backup.path);
     await staging.create();
+    await retired.create();
+    final newApp = Directory('${staging.path}${Platform.pathSeparator}app');
+    await newApp.create();
     await File(
-      '${staging.path}${Platform.pathSeparator}partial.tmp',
-    ).writeAsString('partial');
+      '${newApp.path}${Platform.pathSeparator}index.html',
+    ).writeAsString('<!doctype html><title>Interrupted New</title>');
+    await File(
+      '${staging.path}${Platform.pathSeparator}main.json',
+    ).writeAsString(_manifest('com.example.recovery', version: '2.0.0'));
+    await Directory(
+      '${backup.path}${Platform.pathSeparator}app',
+    ).rename('${retired.path}${Platform.pathSeparator}app');
+    await File(
+      '${backup.path}${Platform.pathSeparator}main.json',
+    ).rename('${retired.path}${Platform.pathSeparator}main.json');
+    await File(
+      '${retired.path}${Platform.pathSeparator}transaction.json',
+    ).writeAsString(
+      jsonEncode({
+        'targetName': 'com.example.recovery',
+        'oldEntries': ['app', 'main.json'],
+      }),
+    );
+    await File(
+      '${retired.path}${Platform.pathSeparator}prepared',
+    ).writeAsString('prepared');
+    await newApp.rename('${backup.path}${Platform.pathSeparator}app');
 
     await service.recoverInterruptedImports();
 
     expect(await target.exists(), isTrue);
     expect(await backup.exists(), isFalse);
     expect(await staging.exists(), isFalse);
+    expect(await retired.exists(), isFalse);
     expect(
       await File(
         '${target.path}${Platform.pathSeparator}app'
         '${Platform.pathSeparator}index.html',
       ).readAsString(),
       contains('Stable'),
+    );
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}save.json',
+      ).readAsString(),
+      'important-save',
+    );
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}simulator-state'
+        '${Platform.pathSeparator}disk.bin',
+      ).readAsString(),
+      'large-private-state',
+    );
+  });
+
+  test('旧事务遇到并发重建的空壳目标时优先恢复数据备份并保留冲突目录', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-recreated-target-recovery-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    final service = GamePackageTransferService(libraryRoot: root);
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.recreated-target'),
+      'app/index.html': '<!doctype html><title>Stable</title>',
+    });
+    final game = await service.importPackage(source);
+    final target = Directory(game.entry.packageRootFilePath!);
+    final packages = target.parent;
+    final backup = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-backup-test',
+    );
+    final staging = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-import-test',
+    );
+    final retired = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-retired-test',
+    );
+    final originalData = File(
+      '${target.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.bin',
+    );
+    await originalData.parent.create(recursive: true);
+    await originalData.writeAsString('original-user-data');
+    await target.rename(backup.path);
+    await staging.create();
+    await retired.create();
+    await Directory(
+      '${backup.path}${Platform.pathSeparator}app',
+    ).rename('${retired.path}${Platform.pathSeparator}app');
+    await File(
+      '${backup.path}${Platform.pathSeparator}main.json',
+    ).rename('${retired.path}${Platform.pathSeparator}main.json');
+    await File(
+      '${retired.path}${Platform.pathSeparator}transaction.json',
+    ).writeAsString(
+      jsonEncode({
+        'targetName': 'com.example.recreated-target',
+        'oldEntries': ['app', 'main.json'],
+      }),
+    );
+    await File(
+      '${retired.path}${Platform.pathSeparator}prepared',
+    ).writeAsString('prepared');
+    final newApp = Directory('${backup.path}${Platform.pathSeparator}app');
+    await newApp.create();
+    await File(
+      '${newApp.path}${Platform.pathSeparator}index.html',
+    ).writeAsString('<!doctype html><title>Interrupted New</title>');
+
+    final concurrentWrite = File(
+      '${target.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}json'
+      '${Platform.pathSeparator}late-flush.json',
+    );
+    await concurrentWrite.parent.create(recursive: true);
+    await concurrentWrite.writeAsString('late-runtime-write');
+
+    await service.recoverInterruptedImports();
+
+    expect(await backup.exists(), isFalse);
+    expect(await staging.exists(), isFalse);
+    expect(await retired.exists(), isFalse);
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}save.bin',
+      ).readAsString(),
+      'original-user-data',
+    );
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Stable'),
+    );
+    final conflict = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-conflict-test',
+    );
+    expect(await conflict.exists(), isTrue);
+    expect(
+      await File(
+        '${conflict.path}${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}json'
+        '${Platform.pathSeparator}late-flush.json',
+      ).readAsString(),
+      'late-runtime-write',
+    );
+
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.recreated-target', version: '2.0.0'),
+      'app/index.html': '<!doctype html><title>Recovered Update</title>',
+    });
+    await service.importPackage(source);
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}data'
+        '${Platform.pathSeparator}save.bin',
+      ).readAsString(),
+      'original-user-data',
+    );
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Recovered Update'),
+    );
+  });
+
+  test('新条目事务在部分安装后回滚旧包且不处理数据目录', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-entry-transaction-recovery-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    final service = GamePackageTransferService(libraryRoot: root);
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.entry-transaction'),
+      'app/index.html': '<!doctype html><title>Stable</title>',
+    });
+    final game = await service.importPackage(source);
+    final target = Directory(game.entry.packageRootFilePath!);
+    final packages = target.parent;
+    final staging = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-import-test-v2',
+    );
+    final retired = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-retired-test-v2',
+    );
+    final data = File(
+      '${target.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.bin',
+    );
+    await data.parent.create(recursive: true);
+    await data.writeAsString('stable-user-data');
+    await staging.create();
+    await retired.create();
+    final newApp = Directory('${staging.path}${Platform.pathSeparator}app');
+    await newApp.create();
+    await File(
+      '${newApp.path}${Platform.pathSeparator}index.html',
+    ).writeAsString('<!doctype html><title>Partial New</title>');
+    await File(
+      '${staging.path}${Platform.pathSeparator}main.json',
+    ).writeAsString(
+      _manifest('com.example.entry-transaction', version: '2.0.0'),
+    );
+    await Directory(
+      '${target.path}${Platform.pathSeparator}app',
+    ).rename('${retired.path}${Platform.pathSeparator}app');
+    await File(
+      '${target.path}${Platform.pathSeparator}main.json',
+    ).rename('${retired.path}${Platform.pathSeparator}main.json');
+    await File(
+      '${retired.path}${Platform.pathSeparator}transaction.json',
+    ).writeAsString(
+      jsonEncode({
+        'schemaVersion': 2,
+        'targetName': 'com.example.entry-transaction',
+        'oldEntries': ['app', 'main.json'],
+        'newEntries': ['app', 'main.json'],
+      }),
+    );
+    await File(
+      '${retired.path}${Platform.pathSeparator}prepared',
+    ).writeAsString('prepared');
+    await newApp.rename('${target.path}${Platform.pathSeparator}app');
+
+    await service.recoverInterruptedImports();
+
+    expect(await staging.exists(), isFalse);
+    expect(await retired.exists(), isFalse);
+    expect(await data.readAsString(), 'stable-user-data');
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Stable'),
+    );
+    expect(
+      jsonDecode(
+        await File(
+          '${target.path}${Platform.pathSeparator}main.json',
+        ).readAsString(),
+      )['version'],
+      '1.0.0',
+    );
+  });
+
+  test('新条目事务存在有效提交标记时保留新包并只清理事务目录', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'playmesh-committed-entry-transaction-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final source = File('${root.path}${Platform.pathSeparator}source.zip');
+    final service = GamePackageTransferService(libraryRoot: root);
+    await _writeZip(source, {
+      'main.json': _manifest('com.example.committed-entry'),
+      'app/index.html': '<!doctype html><title>Old</title>',
+    });
+    final game = await service.importPackage(source);
+    final target = Directory(game.entry.packageRootFilePath!);
+    final packages = target.parent;
+    final staging = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-import-committed-v2',
+    );
+    final retired = Directory(
+      '${packages.path}${Platform.pathSeparator}.playmesh-retired-committed-v2',
+    );
+    final data = File(
+      '${target.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.bin',
+    );
+    await data.parent.create(recursive: true);
+    await data.writeAsString('committed-user-data');
+    await staging.create();
+    await retired.create();
+    await Directory(
+      '${target.path}${Platform.pathSeparator}app',
+    ).rename('${retired.path}${Platform.pathSeparator}app');
+    await File(
+      '${target.path}${Platform.pathSeparator}main.json',
+    ).rename('${retired.path}${Platform.pathSeparator}main.json');
+    final newApp = Directory('${target.path}${Platform.pathSeparator}app');
+    await newApp.create();
+    await File(
+      '${newApp.path}${Platform.pathSeparator}index.html',
+    ).writeAsString('<!doctype html><title>Committed New</title>');
+    await File(
+      '${target.path}${Platform.pathSeparator}main.json',
+    ).writeAsString(_manifest('com.example.committed-entry', version: '2.0.0'));
+    await File(
+      '${retired.path}${Platform.pathSeparator}transaction.json',
+    ).writeAsString(
+      jsonEncode({
+        'schemaVersion': 2,
+        'targetName': 'com.example.committed-entry',
+        'oldEntries': ['app', 'main.json'],
+        'newEntries': ['app', 'main.json'],
+      }),
+    );
+    await File(
+      '${retired.path}${Platform.pathSeparator}prepared',
+    ).writeAsString('prepared');
+    await File(
+      '${retired.path}${Platform.pathSeparator}committed',
+    ).writeAsString('committed');
+
+    await service.recoverInterruptedImports();
+
+    expect(await staging.exists(), isFalse);
+    expect(await retired.exists(), isFalse);
+    expect(await data.readAsString(), 'committed-user-data');
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Committed New'),
+    );
+    expect(
+      jsonDecode(
+        await File(
+          '${target.path}${Platform.pathSeparator}main.json',
+        ).readAsString(),
+      )['version'],
+      '2.0.0',
     );
   });
 

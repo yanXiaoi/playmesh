@@ -60,6 +60,7 @@ final class RuntimeSession implements RuntimeSessionConnection {
     required String displayMode,
     required int minPlayers,
     required int maxPlayers,
+    required String playerId,
     required String nickname,
   }) async {
     final client = http.Client();
@@ -73,6 +74,7 @@ final class RuntimeSession implements RuntimeSessionConnection {
               'displayMode': displayMode,
               'minPlayers': minPlayers,
               'maxPlayers': maxPlayers,
+              'playerId': playerId,
               'nickname': nickname,
             }),
           )

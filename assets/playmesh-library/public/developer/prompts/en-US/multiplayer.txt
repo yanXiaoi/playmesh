@@ -4,7 +4,7 @@ The platform transparently handles transport differences between join methods. G
 
 Required deliverables:
 1. `main.json` must explicitly declare `authority.entry`. The referenced file must exist and export working Authority state rules; never omit it or rely on a default entry.
-2. The Authority page must load that service and call `playmesh.main.sync.startAuthority` only when `playmesh.main.session.isAuthority()` is true.
+2. Only the Authority host may read and execute the real contents of `authority.entry`. A shared ES-module page must first confirm that `playmesh.main.session.isAuthority()` is true, then dynamically `import()` the exact entry declared by the manifest and call `playmesh.main.sync.startAuthority`. A joining client receives a successful HTTP response with an empty JavaScript module for that path, so non-Authority player and controller pages must not depend on its exports or side effects, and must not use a static named import that would break page-module loading when the export is absent.
 3. Define an `onInput` rule for every business-input structure submitted through `playmesh.main.sync.submitAction`. Submit continuous input through `submitState` and process it in `onInput` or `onTick` inputs.
 4. Every page must present the latest snapshot through `playmesh.main.sync.observe`; local prediction is never the final result.
 5. Identity comes only from `context.senderPlayerId` and `context.members[].id`; `player.playerId` and `member.playerId` do not exist.

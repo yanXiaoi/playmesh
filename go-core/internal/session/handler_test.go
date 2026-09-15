@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -20,6 +21,19 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+func TestCreateSessionUsesSuppliedPersistentPlayerID(t *testing.T) {
+	server := httptest.NewServer(NewHandler(NewStore(), slog.Default()))
+	defer server.Close()
+	const playerID = "u_12345678-1234-4234-9234-123456789abc"
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "stable-host", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 4, "nickname": "创建者", "playerId": playerID,
+	})
+	if host.Credential.Player.ID != playerID || host.Session.AuthorityClientID != playerID {
+		t.Fatalf("persistent player ID was not returned: %#v", host)
+	}
+}
 
 func TestAvatarUploadCanWaitForAuthorityCommit(t *testing.T) {
 	var logBuffer bytes.Buffer
@@ -173,10 +187,12 @@ func TestHandlerRoutesActionsOnlyThroughAuthority(t *testing.T) {
 	writeWS(t, hostConnection, map[string]any{
 		"type": "authority.pong", "sequence": 3,
 		"targetPlayerIds": []string{guest.Credential.Player.ID},
-		"payload":         json.RawMessage(probe.Payload),
+		"payload": map[string]any{
+			"probeId": "guest-probe", "clientSentAt": 1000,
+		},
 	})
 	guestPong := readType(t, guestConnection, "session.pong")
-	if !bytes.Contains(guestPong.Payload, []byte(`"authorityAvailable":true`)) {
+	if string(guestPong.Payload) != `{"clientSentAt":1000,"probeId":"guest-probe"}` {
 		t.Fatalf("guest latency payload = %s", guestPong.Payload)
 	}
 }
@@ -374,7 +390,7 @@ func TestWebRTCSignalingEndpointLimitsPendingTicketsPerPlayer(t *testing.T) {
 	}
 }
 
-func TestHandlerReturnsLatencyProbeFromAuthorityHost(t *testing.T) {
+func TestHandlerRoutesAuthorityHostLatencyProbeThroughAuthoritySDK(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(NewHandler(NewStore(), logger))
 	defer server.Close()
@@ -390,16 +406,74 @@ func TestHandlerReturnsLatencyProbeFromAuthorityHost(t *testing.T) {
 		"type": "session.ping", "sequence": 1,
 		"payload": map[string]any{"probeId": "probe-1", "clientSentAt": 1000},
 	})
+	probe := readType(t, hostConnection, "authority.ping")
+	if probe.SenderPlayerID != host.Credential.Player.ID {
+		t.Fatalf("latency sender = %q", probe.SenderPlayerID)
+	}
+	if string(probe.Payload) != `{"clientSentAt":1000,"probeId":"probe-1"}` {
+		t.Fatalf("authority latency payload = %s", probe.Payload)
+	}
+
+	writeWS(t, hostConnection, map[string]any{
+		"type": "authority.pong", "sequence": 2,
+		"targetPlayerIds": []string{host.Credential.Player.ID},
+		"payload":         map[string]any{"probeId": "probe-1", "clientSentAt": 1000},
+	})
 	pong := readType(t, hostConnection, "session.pong")
-	var payload map[string]any
-	if err := json.Unmarshal(pong.Payload, &payload); err != nil {
-		t.Fatal(err)
+	if pong.SenderPlayerID != host.Credential.Player.ID {
+		t.Fatalf("latency pong sender = %q", pong.SenderPlayerID)
 	}
-	if payload["probeId"] != "probe-1" || payload["authorityAvailable"] != true {
-		t.Fatalf("latency payload = %#v", payload)
+	if string(pong.Payload) != `{"clientSentAt":1000,"probeId":"probe-1"}` {
+		t.Fatalf("host latency payload = %s", pong.Payload)
 	}
-	if payload["serverReceivedAt"] == nil || payload["serverSentAt"] == nil {
-		t.Fatalf("latency timestamps = %#v", payload)
+}
+
+func TestHandlerDoesNotGenerateLatencyPongWhenAuthorityIsOffline(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "latency-offline", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	hostConnection := dial(t, server.URL, host)
+	guest := postSession(t, server.URL+"/v1/sessions/join", map[string]any{
+		"joinCode": host.Session.JoinCode, "nickname": "玩家二",
+	})
+	guestConnection := dial(t, server.URL, guest)
+	defer guestConnection.CloseNow()
+
+	hostConnection.CloseNow()
+	for {
+		state := readType(t, guestConnection, "session.state")
+		if state.Session == nil {
+			continue
+		}
+		authorityOffline := false
+		for _, player := range state.Session.Players {
+			if player.ID == host.Credential.Player.ID && !player.Connected {
+				authorityOffline = true
+				break
+			}
+		}
+		if authorityOffline {
+			break
+		}
+	}
+
+	writeWS(t, guestConnection, map[string]any{
+		"type": "session.ping", "sequence": 1,
+		"payload": map[string]any{"probeId": "offline-probe", "clientSentAt": 1000},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, data, err := guestConnection.Read(ctx)
+	if err == nil {
+		t.Fatalf("Core generated a latency response while Authority was offline: %s", data)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting for absent latency response failed: %v", err)
 	}
 }
 
@@ -427,10 +501,113 @@ func TestSessionWebSocketDoesNotApplyPerSecondMessageLimit(t *testing.T) {
 		})
 	}
 	for sequence := 1; sequence <= messageCount; sequence++ {
-		message := readType(t, connection, "session.pong")
+		message := readType(t, connection, "authority.ping")
 		if message.Sequence != uint64(sequence) {
-			t.Fatalf("pong sequence = %d, want %d", message.Sequence, sequence)
+			t.Fatalf("ping sequence = %d, want %d", message.Sequence, sequence)
 		}
+	}
+	for sequence := 1; sequence <= messageCount; sequence++ {
+		writeWS(t, connection, map[string]any{
+			"type": "authority.pong", "sequence": messageCount + sequence,
+			"targetPlayerIds": []string{host.Credential.Player.ID},
+			"payload": map[string]any{
+				"probeId":      sequence,
+				"clientSentAt": sequence,
+			},
+		})
+	}
+	for sequence := 1; sequence <= messageCount; sequence++ {
+		message := readType(t, connection, "session.pong")
+		want := uint64(messageCount + sequence)
+		if message.Sequence != want {
+			t.Fatalf("pong sequence = %d, want %d", message.Sequence, want)
+		}
+	}
+}
+
+func TestSessionWebSocketAcceptsMessageLargerThanLegacy64KiBLimit(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "large-session-message", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	connection := dial(t, server.URL, host)
+	defer connection.CloseNow()
+	connection.SetReadLimit(maxMessageBytes)
+	readType(t, connection, "session.state")
+
+	payload := strings.Repeat("x", 128*1024)
+	writeWS(t, connection, map[string]any{
+		"type": "session.ping", "sequence": 1,
+		"payload": map[string]any{"data": payload},
+	})
+	message := readType(t, connection, "authority.ping")
+	var routedPayload map[string]string
+	if err := json.Unmarshal(message.Payload, &routedPayload); err != nil {
+		t.Fatal(err)
+	}
+	if routedPayload["data"] != payload {
+		t.Fatal("large session payload was not routed intact")
+	}
+}
+
+func TestSessionWebSocketRejectsOversizedMessageWithoutDisconnecting(t *testing.T) {
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuffer, nil))
+	server := httptest.NewServer(NewHandler(NewStore(), logger))
+	defer server.Close()
+
+	host := postSession(t, server.URL+"/v1/sessions", map[string]any{
+		"gameId": "oversized-session-message", "displayMode": "multi_screen",
+		"minPlayers": 1, "maxPlayers": 2, "nickname": "房主",
+	})
+	connection := dial(t, server.URL, host)
+	defer connection.CloseNow()
+	readType(t, connection, "session.state")
+
+	writeWS(t, connection, map[string]any{
+		"type": "session.ping", "sequence": 1,
+		"payload": map[string]any{"data": strings.Repeat("x", maxMessageBytes)},
+	})
+	writeWS(t, connection, map[string]any{
+		"type": "session.ping", "sequence": 1,
+		"payload": map[string]any{"probeId": "after-rejection"},
+	})
+	message := readType(t, connection, "authority.ping")
+	if !bytes.Contains(message.Payload, []byte("after-rejection")) {
+		t.Fatalf("valid message after rejection was not routed: %s", message.Payload)
+	}
+	logs := logBuffer.String()
+	for _, expected := range []string{
+		`"event":"session.ws_message_rejected"`,
+		`"reason":"message_too_large"`,
+		`"maxBytes":1048576`,
+	} {
+		if !strings.Contains(logs, expected) {
+			t.Fatalf("missing rejection log %s in %s", expected, logs)
+		}
+	}
+}
+
+func TestSessionHTTPAcceptsBodyLargerThanLegacy64KiBLimit(t *testing.T) {
+	payload := strings.Repeat("x", 128*1024)
+	body, err := json.Marshal(map[string]any{"value": payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	var decoded struct {
+		Value string `json:"value"`
+	}
+	if !decodeBody(response, request, &decoded) {
+		t.Fatalf("128 KiB request was rejected: %s", response.Body.String())
+	}
+	if decoded.Value != payload {
+		t.Fatal("large HTTP request body was not decoded intact")
 	}
 }
 

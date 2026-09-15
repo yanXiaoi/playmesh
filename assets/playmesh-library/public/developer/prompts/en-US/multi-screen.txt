@@ -7,7 +7,6 @@ Strictly prohibited:
 
 Minimal page structure:
 
-import { startAuthoritySync } from "../service/index.js";
 await playmesh.ready;
 
 function showError(error) {
@@ -19,6 +18,7 @@ function showError(error) {
 
 try {
   if (playmesh.main.session.isAuthority()) {
+    const { startAuthoritySync } = await import("../service/index.js");
     startAuthoritySync();
   }
 } catch (error) {
@@ -36,4 +36,4 @@ document.querySelector("#action").addEventListener("click", async () => {
   }
 });
 
-The same `entries.game` page must support both the App host player and joining players. Starting Authority synchronization must be guarded by `isAuthority`; no joining client may start the Authority runtime, regardless of join order.
+The same `entries.game` page must support both the App host player and joining players. Check `isAuthority` first, then dynamically import the exact module referenced by `main.json.authority.entry`; never use a static named import for that module at the top level of the shared page. No joining client may execute real Authority code or start the Authority runtime, regardless of join order.

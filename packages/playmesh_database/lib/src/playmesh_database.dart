@@ -8,6 +8,9 @@ import 'package:sqlite3/sqlite3.dart';
 
 enum PlaymeshDatabaseOperation { select, update, delete, insert }
 
+// Stable SQLite C API value; package:sqlite3 3.5.2 does not export it.
+const _sqliteDbConfigDefensive = 1010;
+
 final class PlaymeshDatabaseException implements Exception {
   const PlaymeshDatabaseException(this.code, this.message);
 
@@ -258,8 +261,8 @@ final class _DatabaseWorker {
 void _initializeDatabase(String filePath) {
   final database = sqlite3.open(filePath, mutex: false);
   try {
-    database.execute('PRAGMA journal_mode = WAL');
     _configureConnection(database);
+    database.execute('PRAGMA journal_mode = WAL');
   } finally {
     database.close();
   }
@@ -348,6 +351,10 @@ void _connectionWorkerMain(Map<Object?, Object?> bootstrap) async {
 }
 
 void _configureConnection(Database database) {
+  // SQLITE_DBCONFIG_DEFENSIVE. Keep the numeric value local until package:sqlite3
+  // exports the constant. setIntConfig throws if the bundled SQLite does not
+  // support the option, so a connection never silently starts without it.
+  database.config.setIntConfig(_sqliteDbConfigDefensive, 1);
   database.config.doubleQuotedStringLiterals = false;
   database.execute('PRAGMA foreign_keys = ON');
   database.execute(
@@ -370,6 +377,14 @@ Object? _executeStatement(
   if (operation == null) {
     throw const PlaymeshDatabaseException('db_request_invalid', '未知数据库操作');
   }
+  final prescanTokens = _statementTokens(sql);
+  if (sql.contains('\u0000') ||
+      !_isPotentiallyAllowedTableStatement(prescanTokens)) {
+    throw const PlaymeshDatabaseException(
+      'db_operation_not_allowed',
+      'SQL 不在表结构与表数据操作白名单中',
+    );
+  }
   final normalizedArguments = _statementParameters(arguments);
   PreparedStatement? statement;
   try {
@@ -379,7 +394,10 @@ Object? _executeStatement(
       vtab: false,
       checkNoTail: true,
     );
-    final tokens = _statementTokens(sql);
+    // Use SQLite's prepared-statement SQL for the second classification pass.
+    // The original SQL pass above is the prepare-time security boundary because
+    // some PRAGMA statements take effect while they are being prepared.
+    final tokens = _statementTokens(statement.sql);
     if (statement.isExplain ||
         !_isAllowedTableStatement(statement.isReadOnly, tokens)) {
       throw const PlaymeshDatabaseException(
@@ -486,12 +504,23 @@ List<Map<String, Object?>> _select(
 }
 
 bool _isAllowedTableStatement(bool readOnly, List<String> tokens) {
-  if (tokens.isEmpty) return false;
+  if (!_isPotentiallyAllowedTableStatement(tokens)) return false;
   final first = tokens.first;
   if (readOnly) return const {'SELECT', 'WITH', 'VALUES'}.contains(first);
+  return !const {'SELECT', 'VALUES'}.contains(first);
+}
+
+/// A deliberately small statement-family allowlist applied to the untouched
+/// SQL text before SQLite compiles it. In particular, PRAGMA, ATTACH, DETACH,
+/// VACUUM, EXPLAIN, transaction-control, virtual-table, trigger and view
+/// statements cannot reach sqlite3_prepare().
+bool _isPotentiallyAllowedTableStatement(List<String> tokens) {
+  if (tokens.isEmpty) return false;
+  final first = tokens.first;
   if (const {'INSERT', 'REPLACE', 'UPDATE', 'DELETE', 'WITH'}.contains(first)) {
     return true;
   }
+  if (const {'SELECT', 'VALUES'}.contains(first)) return true;
   if (first == 'ALTER') return tokens.length > 1 && tokens[1] == 'TABLE';
   if (first == 'DROP') {
     return tokens.length > 1 && const {'TABLE', 'INDEX'}.contains(tokens[1]);
@@ -501,8 +530,8 @@ bool _isAllowedTableStatement(bool readOnly, List<String> tokens) {
   return tokens.length > 2 && tokens[1] == 'UNIQUE' && tokens[2] == 'INDEX';
 }
 
-/// Extracts keywords only after SQLite has successfully prepared the statement.
-/// It does not validate SQL or produce syntax errors; SQLite remains the parser.
+/// Extracts leading SQL keywords while ignoring comments and quoted content.
+/// This scanner only classifies statement families; SQLite remains the parser.
 List<String> _statementTokens(String sql) {
   final tokens = <String>[];
   var index = 0;

@@ -106,12 +106,24 @@ void main() {
     }
   });
 
-  test('Core main WebSocket 保持 64 KiB 且不代理标准存储 HTTP', () {
+  test('Core main WebSocket 上限为 1 MiB 且不代理标准存储 HTTP', () {
     final handler = File(
       'go-core/internal/session/handler.go',
     ).readAsStringSync();
-    expect(handler, contains('const maxMessageBytes = 64 * 1024'));
-    expect(handler, contains('connection.SetReadLimit(maxMessageBytes)'));
+    expect(handler, contains('const maxMessageBytes = 1 * 1024 * 1024'));
+    expect(handler, contains('connection.SetReadLimit(-1)'));
+    expect(
+      handler,
+      contains('io.LimitedReader{R: reader, N: int64(maxMessageBytes) + 1}'),
+    );
+    expect(handler, contains('session.ws_message_rejected'));
+    expect(handler, contains('const maxRequestBodyBytes = 1 * 1024 * 1024'));
+    expect(
+      handler,
+      contains(
+        'http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)',
+      ),
+    );
 
     final coreSources = Directory('go-core')
         .listSync(recursive: true)

@@ -27,6 +27,7 @@ Future<GameWebGateway> startGameWebGateway({
   GameOrientation? controllerOrientation,
   required String gameEntryPath,
   String? controllerEntryPath,
+  String? authorityEntryPath,
   required String gameId,
   String gameName = 'Playmesh 游戏',
   List<String> tags = const [],
@@ -73,6 +74,15 @@ Future<GameWebGateway> startGameWebGateway({
               )
             : null
       : _parseHtmlEntry(controllerEntryPath, field: 'entries.controller');
+  final normalizedAuthorityEntry = authorityEntryPath == null
+      ? null
+      : playmeshGamePackageLayout
+            .parseWebEntry(
+              authorityEntryPath,
+              field: 'authority.entry',
+              kind: GameWebEntryKind.javaScript,
+            )
+            .path;
   final resourceProvider = await createGameWebResourceProvider(source);
   try {
     final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
@@ -88,6 +98,7 @@ Future<GameWebGateway> startGameWebGateway({
       gameEntryQuery: normalizedGameEntry.query,
       controllerEntryPath: normalizedControllerEntry?.path,
       controllerEntryQuery: normalizedControllerEntry?.query,
+      authorityEntryPath: normalizedAuthorityEntry,
       gameId: gameId,
       gameName: gameName,
       tags: List.unmodifiable(tags),
@@ -128,6 +139,7 @@ class _IoGameWebGateway implements GameWebGateway {
     required this.gameEntryQuery,
     required this.controllerEntryPath,
     required this.controllerEntryQuery,
+    required this.authorityEntryPath,
     required this.gameId,
     required this.gameName,
     required this.tags,
@@ -153,6 +165,7 @@ class _IoGameWebGateway implements GameWebGateway {
   final String? gameEntryQuery;
   final String? controllerEntryPath;
   final String? controllerEntryQuery;
+  final String? authorityEntryPath;
   final String gameId;
   final String gameName;
   final List<String> tags;
@@ -562,6 +575,15 @@ class _IoGameWebGateway implements GameWebGateway {
     }
     if (relativePath == null) {
       await _text(request.response, HttpStatus.notFound, '资源不存在');
+      return;
+    }
+    if (relativePath == authorityEntryPath) {
+      request.response.headers
+        ..contentType = gameWebResourceContentType(relativePath)
+        ..set(HttpHeaders.cacheControlHeader, 'no-store')
+        ..set('X-Content-Type-Options', 'nosniff');
+      request.response.contentLength = 0;
+      await request.response.close();
       return;
     }
     await resourceProvider.serve(request, relativePath);

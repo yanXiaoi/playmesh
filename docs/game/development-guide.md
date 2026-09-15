@@ -149,9 +149,11 @@ API Agent 的最小上下文入口是 `/dev/api/ai-context`，其中列出持久
 | 权威处理层 | 验证动作、维护状态、生成题目、计分、定向或广播结果 | 操作 DOM、读取按钮、依赖页面临时变量、创建 WebSocket |
 | 共享数据层 | 类型、常量、序列化结构、纯函数 | 保存会话状态、发送消息、执行权限判断 |
 
-`authority.entry` 是权威代码的清单入口。当前运行方式仍要求主机页面引入该清单
-声明解析出的脚本，并只在 `playmesh.main.session.isAuthority()` 为 `true` 时调用
-`playmesh.main.authority.onService()`；控制器页面不得注册权威服务。入口始终相对
+`authority.entry` 是权威代码的清单入口，只允许 Authority 主机读取和执行。共享主页面
+必须先确认 `playmesh.main.session.isAuthority()` 为 `true`，再用动态 `import()` 加载
+清单声明解析出的精确脚本并注册权威服务；不得在页面顶层静态导入该模块。非 Authority
+玩家页和控制器页不得依赖其导出或副作用。加入端即使请求该路径也只会收到 HTTP 成功的空
+JavaScript 模块，因此静态命名导入仍会因缺少导出而使页面模块加载失败。入口始终相对
 物理 `app/`，不得在代码中硬编码默认文件来覆盖清单。
 
 ## SDK 初始化
@@ -354,7 +356,7 @@ preview.src = imageUrl;
 - 只有 Authority 页面可以读写 Main Bucket；分享浏览器、远程 App 和其他非 Authority
   玩家即使持有有效会话 Cookie 或分享令牌，宿主后台也会拒绝。玩家需要的数据必须由
   Authority 通过正常游戏消息投影，不能把 Main Bucket 当作客户端直连数据库。
-- 浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Main Bucket。
+- 浏览器 `localStorage` 由 SDK 保存 `playmesh.player-id.v1` 和昵称偏好，以便同一 origin 刷新后使用同一玩家 ID 重连；不得保存玩家凭证或 Main Bucket。
 - 浏览器昵称采集、修改和普通浏览器居中游戏菜单由 SDK 统一提供。菜单包含继续、刷新、日志、性能、全屏、信息和退出；分享链接、游戏 URL 和游戏代码都不得携带或自行缓存昵称，游戏也不应重复制作工具入口或昵称控件。
 - 使用 `session.onPlayerJoin`、`session.onPlayerLeave` 和 `session.onPlayerReconnect` 处理首次连接、掉线和同 ID 重连。不要用昵称推断玩家身份。
 - Bucket 不提供 `flush()`。App 会按时间窗口或脏写阈值批量落盘，并在 WebView 重启、退出或会话关闭前等待最终写入完成。
@@ -438,8 +440,12 @@ const stream = await navigator.mediaDevices.getUserMedia({
 `media.microphone@1.1.0` 还可通过能力实例调用
 `toText({localeId, listenFor, pauseFor})`，并监听 `textOnSoundLevelChange` 与
 `textOnResult`。加速度计、陀螺仪和设备方向直接使用标准 Web API，不写
-`capabilities.json`。文件上传使用 `<input type="file">` 让用户当次主动选择文件，
-同样不声明能力，也不能静默读取文件系统。
+`capabilities.json`。文件访问不声明能力：简单上传可继续使用 `<input type="file">`；
+需要读写句柄时可使用标准 `showOpenFilePicker()`、`showSaveFilePicker()` 和
+`showDirectoryPicker()`。Playmesh 在 Windows 与 Android 内置 WebView 中把这三个
+API 桥接到系统选择器，返回的句柄支持 `getFile()`、`createWritable()`、目录枚举、
+创建与删除条目。每次打开系统选择器都必须直接来自用户操作；网页不会获得原生路径，
+也不能绕过选择器静默读取文件系统。
 
 震动是多平台原生适配插件，通过 App SDK 主动调用：
 

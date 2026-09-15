@@ -56,6 +56,10 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
 - 非敏感权限和用户主动文件选择直接使用标准 Web API，不需要能力声明；WebView 敏感
   权限和 Playmesh 多平台适配能力才按需写入 `capabilities.json`。
 - 游戏仍需先等待 `playmesh.ready`，不能因为由 AI 生成就绕过 Player/Authority 分层。
+- 源码 Chat、源码 Agent、GDevelop Chat 和 GDevelop Agent 的最终提示词都强制包含
+  `authority.entry` 隔离规则，且该规则在用户自定义模板之外注入，不能被模板覆盖移除。
+  AI 生成共享多人主页面时必须先判断 `isAuthority()` 再动态导入权威入口；非 Authority
+  页面不得使用静态命名导入，也不得依赖该入口的导出或副作用。
 
 ## 最小披露原则
 
@@ -81,6 +85,8 @@ Agent 和对话控制台都会携带 `X-Playmesh-AI-Channel`。操作定义中
   返回的 `/bucket/**`。用户首段 `app` 合法：物理 `app/app/**` 映射为
   `/app/**`，只有 `playmesh`、`bucket` 是保留首段。
 - 多人最终结果由 Authority 决定。
+- 非 Authority 页面不依赖 `authority.entry` 的任何导出；加入端收到空模块也不会中断
+  页面模块加载。
 - 页面不会根据加入链路分叉协议。
 - 能力先声明、再确认、再创建，并在退出时释放。
 - 日志中没有完整 token、凭证或私有路径。

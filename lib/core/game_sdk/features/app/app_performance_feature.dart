@@ -16,8 +16,10 @@ const appPerformanceSdkSource = SdkSourceFragment(
   let appPerformanceLatency = null;
   let appPerformanceLatencyDiagnostics = null;
   let appPerformanceLatencyTimer = null;
+  let appPerformanceLatencyExpiryTimer = null;
   let appPerformanceProbeSequence = 0;
   let appPerformanceSendLatencyProbe = null;
+  const appPerformanceLatencyExpiryMs = 7000;
   const appPerformanceFpsListeners = new Set();
   const appPerformanceLatencyListeners = new Set();
 
@@ -71,9 +73,18 @@ const appPerformanceSdkSource = SdkSourceFragment(
     }
     appPerformanceLatencyTimer = null;
     appPerformanceSendLatencyProbe = null;
+    clearAppRuntimeLatencyExpiry();
+  }
+
+  function clearAppRuntimeLatencyExpiry() {
+    if (appPerformanceLatencyExpiryTimer) {
+      global.clearTimeout(appPerformanceLatencyExpiryTimer);
+    }
+    appPerformanceLatencyExpiryTimer = null;
   }
 
   function resetAppRuntimeLatency() {
+    clearAppRuntimeLatencyExpiry();
     appPerformanceLatency = null;
     appPerformanceLatencyDiagnostics = null;
     emitAppPerformance(appPerformanceLatencyListeners, null);
@@ -84,32 +95,24 @@ const appPerformanceSdkSource = SdkSourceFragment(
     const receivedAt = Date.now();
     const sentAt = Number(payload?.clientSentAt);
     if (!Number.isFinite(sentAt) || sentAt > receivedAt) return;
-    if (payload.authorityAvailable !== true) {
-      appPerformanceLatency = null;
-      appPerformanceLatencyDiagnostics = {
-        probeId: payload.probeId || null,
-        clientSentAt: sentAt,
-        serverReceivedAt: payload.serverReceivedAt || null,
-        serverSentAt: payload.serverSentAt || null,
-        receivedAt,
-        authorityAvailable: false,
-      };
-    } else {
-      const rawRttMs = Math.max(0, receivedAt - sentAt);
-      const smoothed = appPerformanceLatency == null
-        ? rawRttMs
-        : (appPerformanceLatency * 0.75) + (rawRttMs * 0.25);
-      appPerformanceLatency = Math.max(0, Math.round(smoothed));
-      appPerformanceLatencyDiagnostics = {
-        probeId: payload.probeId || null,
-        clientSentAt: sentAt,
-        serverReceivedAt: payload.serverReceivedAt || null,
-        serverSentAt: payload.serverSentAt || null,
-        receivedAt,
-        authorityAvailable: true,
-        rawRttMs,
-      };
-    }
+    const rawRttMs = Math.max(0, receivedAt - sentAt);
+    const smoothed = appPerformanceLatency == null
+      ? rawRttMs
+      : (appPerformanceLatency * 0.75) + (rawRttMs * 0.25);
+    appPerformanceLatency = Math.max(0, Math.round(smoothed));
+    appPerformanceLatencyDiagnostics = {
+      probeId: payload.probeId || null,
+      clientSentAt: sentAt,
+      receivedAt,
+      authorityAvailable: true,
+      rawRttMs,
+    };
+    clearAppRuntimeLatencyExpiry();
+    appPerformanceLatencyExpiryTimer = global.setTimeout(
+      resetAppRuntimeLatency,
+      appPerformanceLatencyExpiryMs,
+    );
+    appPerformanceLatencyExpiryTimer?.unref?.();
     emitAppPerformance(
       appPerformanceLatencyListeners,
       appPerformanceLatency,

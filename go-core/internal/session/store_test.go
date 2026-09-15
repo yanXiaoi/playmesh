@@ -42,6 +42,23 @@ func TestStoreAuthorityAndCapacity(t *testing.T) {
 	}
 }
 
+func TestStoreCreateUsesSuppliedPersistentPlayerID(t *testing.T) {
+	const playerID = "u_12345678-1234-4234-9234-123456789abc"
+	snapshot, host, err := NewStore().Create(CreateInput{
+		GameID: "stable-host", DisplayMode: "multi_screen",
+		MinPlayers: 1, MaxPlayers: 4, Nickname: "创建者", PlayerID: playerID,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if host.Player.ID != playerID || snapshot.AuthorityClientID != playerID {
+		t.Fatalf("persistent authority ID was not preserved: %#v %#v", snapshot, host)
+	}
+	if len(snapshot.Players) != 1 || snapshot.Players[0].ID != playerID {
+		t.Fatalf("participating host ID was not preserved: %#v", snapshot.Players)
+	}
+}
+
 func TestStoreCreateEnforcesMaximumPlayers(t *testing.T) {
 	if maxSessionPlayers != 32 {
 		t.Fatalf("maxSessionPlayers = %d, want 32", maxSessionPlayers)

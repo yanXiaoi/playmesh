@@ -136,20 +136,33 @@ void main() {
   });
 
   test('rejects control statements and multiple statements', () async {
-    await expectLater(
-      database.execute(
-        PlaymeshDatabaseOperation.select,
-        "ATTACH DATABASE ? AS escaped",
-        const ['outside.db'],
-      ),
-      throwsA(
-        isA<PlaymeshDatabaseException>().having(
-          (error) => error.code,
-          'code',
-          'db_operation_not_allowed',
+    for (final sql in const [
+      '/* leading comment */ PRAGMA writable_schema = ON',
+      'ATTACH DATABASE ? AS escaped',
+      'DETACH DATABASE escaped',
+      'VACUUM',
+      'EXPLAIN PRAGMA writable_schema = ON',
+      'BEGIN',
+      'CREATE VIRTUAL TABLE search USING fts5(content)',
+      'CREATE TRIGGER items_guard BEFORE DELETE ON items BEGIN '
+          "SELECT RAISE(ABORT, 'blocked'); END",
+    ]) {
+      await expectLater(
+        database.execute(
+          PlaymeshDatabaseOperation.select,
+          sql,
+          sql.contains('?') ? const ['outside.db'] : const [],
         ),
-      ),
-    );
+        throwsA(
+          isA<PlaymeshDatabaseException>().having(
+            (error) => error.code,
+            'code',
+            'db_operation_not_allowed',
+          ),
+        ),
+        reason: sql,
+      );
+    }
     await expectLater(
       database.execute(
         PlaymeshDatabaseOperation.insert,
@@ -158,22 +171,23 @@ void main() {
       ),
       throwsA(isA<PlaymeshDatabaseException>()),
     );
-    await expectLater(
-      database.execute(
-        PlaymeshDatabaseOperation.update,
-        'CREATE TRIGGER items_guard BEFORE DELETE ON items BEGIN '
-        "SELECT RAISE(ABORT, 'blocked'); END",
-        const [],
-      ),
-      throwsA(
-        isA<PlaymeshDatabaseException>().having(
-          (error) => error.code,
-          'code',
-          'db_operation_not_allowed',
-        ),
-      ),
-    );
   });
+
+  test(
+    'does not mistake forbidden keywords in quoted data for statements',
+    () async {
+      expect(
+        await database.execute(
+          PlaymeshDatabaseOperation.select,
+          "SELECT 'PRAGMA ATTACH VACUUM EXPLAIN' AS value",
+          const [],
+        ),
+        [
+          {'value': 'PRAGMA ATTACH VACUUM EXPLAIN'},
+        ],
+      );
+    },
+  );
 
   test('returns native table and index DDL', () async {
     await database.execute(

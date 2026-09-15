@@ -31,10 +31,12 @@ Go Server（可选外部服务）
 
 ## 当前实现边界
 
-第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。当前未发布
-App 为 `5.1.0+37`，搭载 Game SDK `4.3.0`、App Bridge SDK `3.5.0` 与 Developer API /
-OpenAPI `5.0.0`；完整组件矩阵和发布状态见
-`docs/version/README.md`、`docs/version/5.0.1.md` 与 `docs/version/NEXT.md`，本地实现
+第一至第六阶段已经完成并作为历史事实归档；第六阶段之后改用版本日志维护。最新已公开
+App 基线为 `5.1.1+38`（GitHub/Gitee Pre-release），搭载 Game SDK `4.3.0`、App Bridge SDK
+`3.5.0` 与 Developer API / OpenAPI `5.0.0`；完整组件矩阵和发布状态见
+`docs/version/README.md`、`docs/version/5.1.1.md` 与 `docs/version/NEXT.md`。Runtime
+`2.1.1+13` 三端底包和主 App Android/Windows 正式安装包均来自同一发布源码并通过门禁；
+本地实现
 基线见 `docs/implementation/playmesh-3.0.0-local-implementation.md`。历史阶段版本不能
 继续作为当前项目、SDK 或 Catalog 的生成基线。
 LAN 发现与 App SDK 已随 4.2.0 发布并完成自动化验证；Android、Windows、macOS、Linux
@@ -212,6 +214,12 @@ CLI 二进制统一命名为 `playmesh-cli`（Windows 使用 `.exe`）。桌面�
 
 Go Core 是通用中转服务器，不是游戏服务器。它只负责连接、会话成员、角色凭证、消息转发，以及消息大小、连接频率、会话带宽和基础序列检查。Go Core 不生成游戏题目，不验证游戏答案，不计算分数，不推进回合，也不决定胜负。
 
+自动 RTT 探针也不得形成例外。任何参与端（包括同时作为 Player 的主机）发出的 ping 都按
+`authorityClientId` 路由到 Authority SDK，再由 Authority SDK 按发送玩家 ID 原样回应；
+主机自回环只是同一角色/玩家路由命中本连接的结果。Go Core 不直接生成 pong、不向探针
+写入服务端时间戳，也不保存或计算 RTT。没有 Authority 回应时，客户端 App SDK 负责让
+本地样本过期。
+
 每个联机会话都必须登记独立的 `authorityClientId`。Authority Client 运行游戏自己的权威逻辑，负责验证动作、生成题目、推进状态和结算分数；Go Core 只路由。`players` 只表示实际参与游戏的玩家，是否包含创建者由显示模式决定：
 
 - `single_screen_multiplayer`：创建会话的 App 主机是公共显示端与 Authority Client，不属于 `players`，不占人数名额，也不能以主屏身份提交玩家动作。所有玩家只能通过 `entries.controller` 声明并解析到物理 `app/` 的控制器页面加入。
@@ -252,9 +260,8 @@ type AuthorityResult =
 创建者启动游戏
   -> App 创建会话并写入 authorityClientId
   -> 根据 displayMode 决定创建者是否同时加入 players
-  -> entries.game（清单显式声明；默认模板写入 index.html）预先引入 service 入口
-  -> 初始化脚本调用 SDK 判断当前客户端是否为 Authority Client
-  -> 只有 Authority Client 初始化 service 监听
+  -> entries.game（清单显式声明；默认模板写入 index.html）先判断当前客户端角色
+  -> 只有 Authority Client 动态引入 authority.entry 并初始化 service 监听
   -> Go Core 转发玩家 action
   -> SDK 调用 playmesh.main.authority.onService()
   -> service 返回 targetPlayerIds 和 payload
@@ -266,8 +273,6 @@ type AuthorityResult =
 默认模板必须在 `app/index.html` 的初始化脚本中预先完成角色判断和权威处理注册。开发者不需要手写这段接入逻辑，只修改标记为 TODO 的业务代码：
 
 ```js
-import { createAuthorityService } from "./static/js/service/index.js";
-
 async function bootstrap() {
   // TODO：初始化主屏玩家界面和本地展示状态
   playmesh.main.game.onMessage((message) => {
@@ -275,6 +280,9 @@ async function bootstrap() {
   });
 
   if (playmesh.main.session.isAuthority()) {
+    const { createAuthorityService } = await import(
+      "./static/js/service/index.js"
+    );
     const service = createAuthorityService();
     playmesh.main.authority.onService((action, context) => {
       // TODO：实现题目、验证、计分、回合和状态分发
@@ -655,6 +663,16 @@ playmesh-library/
 
 `app/`、`data/` 和 `cache/` 必须保持同级，禁止将运行数据或缓存放入 `app/`。运行时将当前物理 `app/` 映射到 `/`，将平台公共资源映射到 `/playmesh/...`，并仅把 `data/data/{bucket}/{timestamp-file}` 映射到 `/bucket/{bucket}/{timestamp-file}`。`data/json` 与 `cache/` 不参与静态资源映射；`/bucket` 不提供目录列表，也不能跨 Bucket 或穿越到 JSON 数据。
 
+同 ID 应用包更新只拥有并替换根 `app/`、`main.json`、可选 `capabilities.json` 与可选
+`icon.png`。安装事务期间 `packages/{gameId}/` 根路径必须始终存在，禁止通过重命名整个
+项目根完成交换；旧发布条目先同卷移动到事务目录，新发布条目再同卷移动到原根目录，
+`main.json` 最后就位。`data/`、`cache/`、`.playmesh/` 及其他非包条目不得被枚举、复制或
+逐项迁移，避免大存储项目临时双倍占用，也避免运行时存储刷新在根路径消失时重建同名
+空壳目录。事务必须持久化 `prepared` 与 `committed` 阶段；无有效提交标记时恢复旧发布
+条目，不得用目标目录是否存在推断提交成功。兼容恢复旧版 `.playmesh-backup-*` 时备份
+优先，若同名目标已被并发重建，先整体移动到隐藏冲突保留目录，再恢复备份，禁止自动
+递归删除任一可能含用户数据的目录。
+
 ### 游戏数据存储 API
 
 SDK 采用 Bucket 分区模型。每个 Bucket 同时可以保存私有 JSON 值和公开运行时文件：
@@ -994,7 +1012,16 @@ SSE 报告 Runtime 下载字节、校验、游戏包构建与原生导出进度�
 
 连续变更按 5 分钟滚动窗口合并为一个时间操作，最多保留 100 个操作。淘汰最旧操作时，先将其变更后快照提升为新基线，确保后续 Diff 仍可还原。保存、上传、新建、删除、结构化批量文件变更和历史恢复都进入同一条项目历史链；手动恢复会创建一个独立且封口的时间操作，不与后续编辑合并。
 
-历史快照排除 `data/` 和 `cache/`，项目树与开发者文件 API 也不允许通过普通路径访问这些内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和删除差异；文本文件以历史版本为左栏、当前工作区为右栏，允许应用单个差异块并经带修订号的正式 API 保存，也可用指定操作的变更前或变更后状态全量替换当前范围。二进制、目录、过大或截断内容只支持全量恢复。单文件接口禁止直接恢复平台管理的 `main.json`，但恢复项目根时会连同当次历史中的完整 `main.json` 一并恢复。浏览器工作区、Agent 和 CLI 发布都必须进入同一项目历史链。恢复完成后通过统一 SSE 通道发送 `workspace.restored`，使其他工作区刷新状态。
+历史快照只包含包拥有的 `app/`、`main.json`、可选 `capabilities.json` 与可选
+`icon.png`；`data/`、`cache/`、`.playmesh/` 和其他非包根条目既不进入快照，也不在
+整项目历史恢复时删除、复制或重建。项目树与开发者文件 API 也不允许通过普通路径访问
+`data/`、`cache/` 等内部目录。工作区可按文件、文件夹或项目根查看结构化新增、修改和
+删除差异；文本文件以历史版本为左栏、当前工作区为右栏，允许应用单个差异块并经带
+修订号的正式 API 保存，也可用指定操作的变更前或变更后状态全量替换当前范围。二进制、
+目录、过大或截断内容只支持全量恢复。单文件接口禁止直接恢复平台管理的 `main.json`，
+但恢复项目根时会连同当次历史中的完整 `main.json` 一并恢复。浏览器工作区、Agent 和
+CLI 发布都必须进入同一项目历史链。恢复完成后通过统一 SSE 通道发送
+`workspace.restored`，使其他工作区刷新状态。
 
 CodeMirror 负责当前编辑缓冲区尚未保存内容的即时撤销与重做。服务端不提供单文件 `/undo` 接口，也不维护独立的文件撤销栈。
 
@@ -1217,11 +1244,13 @@ MVP 建议默认关闭普通浏览器发布，由用户在每次游玩时单独�
 游戏脚本必须等待根 `playmesh.ready`；它复用 `playmesh.main.ready` 初始化链，而
 `main.ready` 内部先等待 `playmesh.app.ready`，最终返回 `{main, app}`。在身份确认和加入完成前不能发送输入，
 旧根级游戏 API 不存在。分享 URL 与宿主注入配置不携带昵称或玩家 ID；浏览器 SDK
-在当前来源的 `localStorage` 中保存 `playmesh.player-id.v1` 和昵称偏好，但不保存
+在当前 origin 的 `localStorage` 中保存 `playmesh.player-id.v1` 和昵称偏好，但不保存
 玩家凭证或游戏 Bucket。刷新后复用同一玩家 ID；旧 WebSocket 在线时同 ID 的后续
 加入与连接直接拒绝，旧连接掉线后才可重新签发凭证并触发 `onPlayerReconnect`。
 SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不重复显示该网页入口，并使用 App 自动
-注入的 `u_...` 用户 ID 和昵称。多人 Player 页面在两种环境都可调用
+注入的 `u_...` 用户 ID 和昵称。App 主机创建会话时也必须把同一用户 ID
+传给 Core，使 `authorityClientId` 和普通多屏主机的 `player.id` 不再使用局内临时 ID。
+多人 Player 页面在两种环境都可调用
 `playmesh.main.player.setNickname()`：浏览器写当前 origin 的 `localStorage`，App 由宿主持久化，
 并在两种路径同步当前 Core。单机和单屏多人公共 Authority 屏不提供该玩家操作。
 
@@ -1231,13 +1260,17 @@ SDK 在浏览器中统一提供悬浮改名按钮；App WebView 不重复显示�
 
 ```json
 {
-  "userId": "u_01JABC...",
-  "nickname": "小明",
-  "avatarPath": "local://avatars/u_01JABC....png"
+  "userId": "u_12345678-1234-4234-9234-123456789abc",
+  "nickname": "玩家A1b2",
+  "avatarPath": "local://avatars/u_12345678-1234-4234-9234-123456789abc.png"
 }
 ```
 
-`userId` 首次创建时由本地安全随机源生成并持久化；昵称不是身份主键，头像路径只在本机有效。
+App/Runtime 首次创建本地资料时，必须用同一次初始化同时生成随机昵称和
+`u_` 前缀的 UUID v4，再将两者写入本地持久化文件。该 `userId` 仅保证在本次安装且
+应用数据未清除期间稳定；换设备、重装或清理应用数据后可以生成新 ID。升级时必须继续复用
+已持久化的旧格式 ID，不做破坏性迁移。昵称不是身份主键，头像路径只在本机有效。
+稳定 ID 只用于成员关联和重连，不是鉴权凭证；鉴权仍使用 Core 签发的短期会话凭证。
 
 每个游戏必须有声明文件 `main.json`：
 

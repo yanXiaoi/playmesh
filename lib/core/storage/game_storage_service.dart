@@ -605,14 +605,15 @@ class GameStorageService {
   }
 
   static String? _safeExtension(String originalName) {
-    if (originalName.isEmpty || originalName.contains('\u0000')) {
+    if (originalName.isEmpty ||
+        originalName.contains('\u0000') ||
+        originalName.contains('/') ||
+        originalName.contains('\\')) {
       throw const FormatException('上传文件名无效');
     }
-    final normalized = originalName.replaceAll('\\', '/');
-    final baseName = normalized.substring(normalized.lastIndexOf('/') + 1);
-    final dot = baseName.lastIndexOf('.');
-    if (dot <= 0 || dot == baseName.length - 1) return null;
-    final extension = baseName.substring(dot + 1);
+    final dot = originalName.lastIndexOf('.');
+    if (dot <= 0 || dot == originalName.length - 1) return null;
+    final extension = originalName.substring(dot + 1);
     if (!_extensionPattern.hasMatch(extension)) {
       throw const FormatException('文件后缀只能包含 1 至 16 个字母或数字');
     }

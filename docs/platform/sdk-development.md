@@ -107,8 +107,13 @@ App WebView 与普通浏览器都必须成对加载 `playmesh-main.js` 和
 浏览器多人身份初始化统一经过 Game SDK 的 `resolveBrowserNickname()`：优先复用有效
 本地昵称；缺失或无效时生成“浏览器”加 4 位随机小写字母或数字，沿用
 `playmesh.nickname.v1` 保存，不创建首次输入层。游戏信息中的手动改名仍经过
-`playmesh.main.player.setNickname()`；App 身份、玩家 ID、重连和单机分享流程不变。
-昵称仅供展示，不保证唯一。Runtime 与 GDevelop 继续消费同一 SDK，不另建昵称实现。
+`playmesh.main.player.setNickname()`。App/Runtime 首次创建本地资料时必须在同一初始化中
+生成随机昵称和 `u_` 前缀 UUID v4，持久化后作为 App SDK 身份；主机创建
+会话和加入端 Join 都必须把同一 ID 交给 Core，不得再为新对局生成 `player.id`。
+旧格式的已持久化 ID 继续复用，禁止升级时强制换号。稳定范围仅是当前安装且应用数据
+未清除的周期；换设备、重装、清理应用数据，或浏览器切换 origin/清理 `localStorage`
+后不保证不变。昵称仅供展示，不保证唯一；稳定 ID 也不是鉴权凭证。Runtime 与
+GDevelop 继续消费同一 SDK，不另建昵称实现。
 
 ## 当前公开 SDK 方法
 
@@ -196,7 +201,7 @@ Game SDK `4.3.0` 的 `requestStream/onStreamRequest` 把大字节源拆成控制
 WebSocket 只通知固定 Authority 并返回小型编码结果。已知长度且未监听发送进度的 File、Blob、
 ArrayBuffer、Uint8Array 可直接使用普通 HTTP body；真正的 `ReadableStream<Uint8Array>`，以及
 需要发送进度的来源，必须使用 SDK 私有的 `chunked-v1` 上传会话：先初始化，再用普通、已知长度、
-最多 64 KiB 的 HTTP 请求体顺序发送分块，最后显式完成或取消。任一时刻只能有一个分块在途，
+最多 1 MiB 的 HTTP 请求体顺序发送分块，最后显式完成或取消。任一时刻只能有一个分块在途，
 不得把 `ReadableStream` 直接作为 Fetch 请求体，也不得依赖 `duplex: "half"`；这是普通浏览器、
 Android WebView 和 Core HTTP/1.1 的共同兼容边界。
 
@@ -223,10 +228,12 @@ ReadableStream 使用相同的顺序分块协议，主 App 与 Runtime 网关必
 网页状态方法只操作 SDK 内存；只有最终调用 `post(command, ...)` 或
 `request(command, ...)` 的路径才进入 Dart Bridge。普通浏览器中的
 `game.submitAction` 走浏览器 WebSocket。性能探针由 App SDK 每 3 秒调度并生成唯一
-probe ID；Game SDK 只把 `performance.ping` 送入既有 Session transport，再把收到的
-`performance.pong` 原样转交 App SDK。FPS 统计、RTT 平滑、缓存、监听器和覆盖层都留在
-App SDK 内存中；Dart 不接收、保存或上报 FPS/延迟指标。性能浮层唯一由 App SDK
-创建和维护，Game SDK 不创建或保留旧浏览器性能 panel。
+probe ID；Game SDK 把 `performance.ping` 经既有 Session transport 路由到 Authority SDK，
+再把 Authority SDK 按原探针回应的 `performance.pong` 原样转交 App SDK。主机与加入玩家
+必须走同一完整链路；Core 只执行 Authority 角色和目标玩家路由，不生成 pong、不增加
+服务端时间戳，也不计算或保存 RTT。FPS 统计、RTT 平滑、无回应样本过期、缓存、监听器和
+覆盖层都留在 App SDK 内存中；Dart 不接收、保存或上报 FPS/延迟指标。性能浮层唯一由
+App SDK 创建和维护，Game SDK 不创建或保留旧浏览器性能 panel。
 
 ## Feature 约定
 
@@ -432,6 +439,12 @@ release.bundleVersion 不是 supportedRequestedVersions 最后一项
 ```
 
 ## 完整调用链与精确分发条件
+
+File System Access 是标准全局 API 的宿主适配，不新增 `playmesh.app.*` 公开命名空间。
+唯一网页实现位于 `app_file_system_access_feature.dart`，内部命令仍通过 App Bridge
+注册表分发；Windows 与 Android 共用 `packages/playmesh_file_system_access`，Android
+插件使用 SAF 保存 URI 授权。新增或修改文件句柄命令时必须同步 Runtime 的
+`supportedCommandNames` 和执行分支，并验证页面重载清理与一次性用户操作票据。
 
 ### 1. 网页封包
 

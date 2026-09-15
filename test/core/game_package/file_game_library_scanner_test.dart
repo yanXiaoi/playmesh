@@ -139,6 +139,7 @@ void main() {
       games.single.entry.controllerEntryPath,
       'remote/pad.html?layout=compact',
     );
+    expect(games.single.entry.authorityEntryPath, 'service/authority.js');
     expect(games.single.manifestError, isNull);
   });
 

@@ -195,6 +195,7 @@ final class RuntimeLaunch {
           displayMode: package.manifest.displayMode,
           minPlayers: package.manifest.minPlayers,
           maxPlayers: package.manifest.maxPlayers,
+          playerId: identity.userId,
           nickname: identity.nickname,
         );
         onProgress?.call('正在建立分享与加入通道…');

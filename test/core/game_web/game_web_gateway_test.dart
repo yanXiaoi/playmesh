@@ -31,6 +31,7 @@ void main() {
       controllerOrientation: GameOrientation.portrait,
       gameEntryPath: 'index.html',
       controllerEntryPath: 'controller/index.html',
+      authorityEntryPath: 'service/authority.js',
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
@@ -210,6 +211,19 @@ void main() {
 
     final appAsset = await http.get(base.resolve('/static/css/game.css'));
     expect(appAsset.statusCode, HttpStatus.ok);
+    final authorityScript = await http.get(
+      base.resolve('/service/authority.js?cacheBust=1'),
+    );
+    expect(authorityScript.statusCode, HttpStatus.ok);
+    expect(authorityScript.bodyBytes, isEmpty);
+    expect(
+      authorityScript.headers[HttpHeaders.contentTypeHeader],
+      startsWith('text/javascript'),
+    );
+    expect(authorityScript.headers[HttpHeaders.cacheControlHeader], 'no-store');
+    final playerScript = await http.get(base.resolve('/static/js/player.js'));
+    expect(playerScript.statusCode, HttpStatus.ok);
+    expect(playerScript.body, 'window.playerLoaded = true;');
     final noImplicitAppAlias = await http.get(
       base.resolve('/app/static/css/game.css'),
     );
@@ -262,6 +276,7 @@ void main() {
       controllerOrientation: GameOrientation.portrait,
       gameEntryPath: 'index.html',
       controllerEntryPath: 'controller/index.html',
+      authorityEntryPath: 'service/authority.js',
       coreEndpoint: Uri.parse('http://127.0.0.1:39001/'),
       joinCode: 'ABC123',
       shareToken: 'share-token',
@@ -291,6 +306,13 @@ void main() {
     );
     final opened = await _openInvitation(tunnelInvitation);
     expect(opened.entry.statusCode, HttpStatus.ok);
+
+    final joinedAuthority = await http.get(
+      tunnel.localBaseUri.resolve('/service/authority.js'),
+      headers: {'Cookie': opened.cookie},
+    );
+    expect(joinedAuthority.statusCode, HttpStatus.ok);
+    expect(joinedAuthority.bodyBytes, isEmpty);
 
     final tunnelInitial = await sendStandardJsonBucketRequest(
       baseUri: tunnel.localBaseUri,
@@ -819,8 +841,15 @@ Future<Directory> _createInstalledPackageRoot() async {
     '${app.path}${Platform.pathSeparator}static'
     '${Platform.pathSeparator}css',
   );
+  final scripts = Directory(
+    '${app.path}${Platform.pathSeparator}static'
+    '${Platform.pathSeparator}js',
+  );
+  final services = Directory('${app.path}${Platform.pathSeparator}service');
   await controller.create(recursive: true);
   await styles.create(recursive: true);
+  await scripts.create(recursive: true);
+  await services.create(recursive: true);
   await File('${app.path}${Platform.pathSeparator}index.html').writeAsString(
     '<!doctype html><html><head></head><body>GAME'
     '<script src="/playmesh/sdk/v1/playmesh-main.js"></script>'
@@ -836,5 +865,11 @@ Future<Directory> _createInstalledPackageRoot() async {
   await File(
     '${styles.path}${Platform.pathSeparator}game.css',
   ).writeAsString('body { color: white; }');
+  await File(
+    '${scripts.path}${Platform.pathSeparator}player.js',
+  ).writeAsString('window.playerLoaded = true;');
+  await File(
+    '${services.path}${Platform.pathSeparator}authority.js',
+  ).writeAsString('throw new Error("Authority code leaked");');
   return root;
 }

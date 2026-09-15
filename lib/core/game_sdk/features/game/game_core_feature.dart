@@ -16,7 +16,11 @@ type PlaymeshDisplayMode = "solo" | "multi_screen" | "single_screen_multiplayer"
 
 /** 当前会话中的玩家。 */
 interface PlaymeshPlayer {
-  /** 平台分配的稳定玩家 ID。不要相信业务消息中自行上报的玩家 ID。 */
+  /**
+   * 平台分配的持久玩家 ID。App/Runtime 在本次安装且应用数据未清除期间稳定；
+   * 普通浏览器在同一 origin 且 localStorage 未清除期间稳定。该值不是鉴权凭证，
+   * 不要相信业务消息中自行上报的玩家 ID。
+   */
   id: string;
   /** 当前展示昵称，长度为 1～32 个字符。 */
   nickname: string;

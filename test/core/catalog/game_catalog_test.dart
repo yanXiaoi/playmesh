@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -327,6 +328,165 @@ void main() {
     expect(
       updates.single.versions.single.sources.single.localSourceName,
       'Local Source Name',
+    );
+  });
+
+  test('应用内在线升级复用包事务且不处理任何非包根条目', () async {
+    final installedRoot = await Directory.systemTemp.createTemp(
+      'playmesh-in-app-update-installed-',
+    );
+    final sourceRoot = await Directory.systemTemp.createTemp(
+      'playmesh-in-app-update-source-',
+    );
+    addTearDown(() async {
+      await installedRoot.delete(recursive: true);
+      await sourceRoot.delete(recursive: true);
+    });
+    final installedManifest = _manifest(version: '1.0.0');
+    final updateManifest = _manifest(version: '2.0.0');
+    final installedPackage = await _writeCatalogTestPackage(
+      installedRoot,
+      installedManifest,
+      title: 'Installed Old',
+    );
+    final sourcePackage = await _writeCatalogTestPackage(
+      sourceRoot,
+      updateManifest,
+      title: 'Catalog Update',
+    );
+    final data = File(
+      '${installedPackage.path}${Platform.pathSeparator}data'
+      '${Platform.pathSeparator}save.bin',
+    );
+    final cache = File(
+      '${installedPackage.path}${Platform.pathSeparator}cache'
+      '${Platform.pathSeparator}simulator.bin',
+    );
+    final sidecar = File(
+      '${installedPackage.path}${Platform.pathSeparator}.playmesh'
+      '${Platform.pathSeparator}project.json',
+    );
+    final futurePrivate = File(
+      '${installedPackage.path}${Platform.pathSeparator}simulator-state'
+      '${Platform.pathSeparator}disk.bin',
+    );
+    for (final entry in {
+      data: 'save-state',
+      cache: 'large-simulator-cache',
+      sidecar: 'platform-sidecar',
+      futurePrivate: 'future-private-state',
+    }.entries) {
+      await entry.key.parent.create(recursive: true);
+      await entry.key.writeAsString(entry.value);
+    }
+    await File(
+      '${installedPackage.path}${Platform.pathSeparator}capabilities.json',
+    ).writeAsString(
+      jsonEncode({
+        'required': ['media.camera'],
+      }),
+    );
+
+    final installed = _summary(
+      installedPackage.path,
+      version: installedManifest.version,
+    );
+    final published = _summary(
+      sourcePackage.path,
+      version: updateManifest.version,
+    );
+    final installedLibrary = GameLibraryRepository(
+      () async => [installed],
+      initialGames: [installed],
+    );
+    final sourceLibrary = GameLibraryRepository(
+      () async => [published],
+      initialGames: [published],
+    );
+    final server = GameCatalogServer(
+      sourceLibrary,
+      GamePackageTransferService(libraryRoot: sourceRoot),
+      nicknameProvider: () => 'Catalog Publisher',
+    );
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = socket.port;
+    await socket.close();
+    await server.start(port: port, token: '');
+    final imported = <GameSummary>[];
+    final queue = GameDownloadQueue(
+      GamePackageTransferService(libraryRoot: installedRoot),
+      (game) async => imported.add(game),
+      library: installedLibrary,
+    );
+    final terminal = Completer<void>();
+    void observeTerminalState() {
+      final tasks = queue.tasks;
+      if (tasks.isEmpty || terminal.isCompleted) return;
+      if ({
+        GameDownloadStatus.completed,
+        GameDownloadStatus.failed,
+        GameDownloadStatus.stopped,
+      }.contains(tasks.single.status)) {
+        terminal.complete();
+      }
+    }
+
+    queue.addListener(observeTerminalState);
+    late final GameDownloadTask task;
+    try {
+      task = queue.start(
+        OnlineCatalogGame(
+          manifest: updateManifest,
+          source: OnlineGameSource(
+            id: 'in-app-update-source',
+            name: 'In-app Update Source',
+            host: Uri.parse('http://127.0.0.1:$port'),
+          ),
+        ),
+      );
+      observeTerminalState();
+      await terminal.future.timeout(const Duration(seconds: 10));
+    } finally {
+      queue.removeListener(observeTerminalState);
+      await queue.close();
+      await server.stop();
+    }
+
+    expect(task.status, GameDownloadStatus.completed, reason: task.error);
+    expect(imported.single.version, '2.0.0');
+    expect(
+      jsonDecode(
+        await File(
+          '${installedPackage.path}${Platform.pathSeparator}main.json',
+        ).readAsString(),
+      )['version'],
+      '2.0.0',
+    );
+    expect(
+      await File(
+        '${installedPackage.path}${Platform.pathSeparator}app'
+        '${Platform.pathSeparator}index.html',
+      ).readAsString(),
+      contains('Catalog Update'),
+    );
+    expect(
+      await File(
+        '${installedPackage.path}${Platform.pathSeparator}capabilities.json',
+      ).exists(),
+      isFalse,
+    );
+    expect(await data.readAsString(), 'save-state');
+    expect(await cache.readAsString(), 'large-simulator-cache');
+    expect(await sidecar.readAsString(), 'platform-sidecar');
+    expect(await futurePrivate.readAsString(), 'future-private-state');
+    expect(
+      await installedPackage.parent.list().any(
+        (entry) =>
+            entry.path.contains('.playmesh-import-') ||
+            entry.path.contains('.playmesh-backup-') ||
+            entry.path.contains('.playmesh-retired-'),
+      ),
+      isFalse,
     );
   });
 
@@ -855,6 +1015,26 @@ GameManifest _manifest({
     controller: 'controller/index.html',
   ),
 );
+
+Future<Directory> _writeCatalogTestPackage(
+  Directory libraryRoot,
+  GameManifest manifest, {
+  required String title,
+}) async {
+  final package = Directory(
+    '${libraryRoot.path}${Platform.pathSeparator}packages'
+    '${Platform.pathSeparator}${manifest.id}',
+  );
+  final app = Directory('${package.path}${Platform.pathSeparator}app');
+  await app.create(recursive: true);
+  await File(
+    '${app.path}${Platform.pathSeparator}index.html',
+  ).writeAsString('<!doctype html><title>$title</title>');
+  await File(
+    '${package.path}${Platform.pathSeparator}main.json',
+  ).writeAsString(jsonEncode(manifest.toJson()));
+  return package;
+}
 
 GameSummary _summary(
   String packagePath, {

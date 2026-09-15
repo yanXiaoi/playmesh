@@ -93,6 +93,7 @@ class DeveloperRuntimeDeclaration {
         statusLabel: 'Game SDK ${manifest.sdkVersion} · development preview',
         gameEntryPath: gameEntryOverride ?? manifest.entries.game,
         controllerEntryPath: manifest.entries.controller,
+        authorityEntryPath: manifest.authority?.entry,
       ),
     );
   }
@@ -125,6 +126,7 @@ class DeveloperRuntimeDeclaration {
         statusLabel: development.entry.statusLabel,
         gameEntryPath: development.entry.gameEntryPath,
         controllerEntryPath: development.entry.controllerEntryPath,
+        authorityEntryPath: development.entry.authorityEntryPath,
         packageRootFilePath: base.entry.packageRootFilePath,
       ),
     );

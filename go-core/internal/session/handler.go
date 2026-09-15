@@ -20,7 +20,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-const maxMessageBytes = 64 * 1024
+const maxMessageBytes = 1 * 1024 * 1024
+const maxRequestBodyBytes = 1 * 1024 * 1024
 const maxAvatarBytes = 512 * 1024
 
 type Handler struct {
@@ -174,6 +175,7 @@ func (h *Handler) create(writer http.ResponseWriter, request *http.Request) {
 		DisplayMode string `json:"displayMode"`
 		MinPlayers  int    `json:"minPlayers"`
 		MaxPlayers  int    `json:"maxPlayers"`
+		PlayerID    string `json:"playerId"`
 		Nickname    string `json:"nickname"`
 	}
 	if !decodeBody(writer, request, &body) {
@@ -181,7 +183,7 @@ func (h *Handler) create(writer http.ResponseWriter, request *http.Request) {
 	}
 	snapshot, credential, err := h.store.Create(CreateInput{
 		GameID: body.GameID, DisplayMode: body.DisplayMode, MinPlayers: body.MinPlayers,
-		MaxPlayers: body.MaxPlayers, Nickname: body.Nickname,
+		MaxPlayers: body.MaxPlayers, PlayerID: body.PlayerID, Nickname: body.Nickname,
 	})
 	if err != nil {
 		writeStoreError(writer, err)
@@ -553,7 +555,9 @@ func (h *Handler) connect(writer http.ResponseWriter, request *http.Request, ses
 		h.logger.Warn("WebSocket 握手失败", "event", "session.ws_rejected", "error", err)
 		return
 	}
-	connection.SetReadLimit(maxMessageBytes)
+	// 主会话容量限制由 readLoop 逐条执行。coder/websocket 的内建
+	// ReadLimit 命中后会关闭连接，不能用于可恢复的应用层消息拒绝。
+	connection.SetReadLimit(-1)
 	client := &peer{player: player, conn: connection}
 	snapshot, connected := h.store.TryConnect(record, player.ID)
 	if !connected {
@@ -578,9 +582,33 @@ func (h *Handler) connect(writer http.ResponseWriter, request *http.Request, ses
 func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 	var lastSequence uint64
 	for {
-		_, data, err := client.conn.Read(ctx)
+		messageType, reader, err := client.conn.Reader(ctx)
 		if err != nil {
 			return
+		}
+		limited := &io.LimitedReader{R: reader, N: int64(maxMessageBytes) + 1}
+		data, err := io.ReadAll(limited)
+		if err != nil {
+			return
+		}
+		if len(data) > maxMessageBytes {
+			remainingBytes, drainErr := io.Copy(io.Discard, reader)
+			h.logger.WarnContext(
+				ctx,
+				"拒绝超过容量上限的主会话消息",
+				"event", "session.ws_message_rejected",
+				"sessionId", record.id,
+				"playerId", client.player.ID,
+				"reason", "message_too_large",
+				"messageType", messageType.String(),
+				"actualBytes", int64(len(data))+remainingBytes,
+				"maxBytes", maxMessageBytes,
+				"drainError", drainErr,
+			)
+			if drainErr != nil {
+				return
+			}
+			continue
 		}
 
 		var message clientMessage
@@ -592,36 +620,7 @@ func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 		snapshot := record.snapshot()
 		switch message.Type {
 		case "session.ping":
-			var probe map[string]any
-			if json.Unmarshal(message.Payload, &probe) != nil {
-				_ = client.conn.Close(websocket.StatusUnsupportedData, "延迟探测格式无效")
-				return
-			}
-			probe["serverReceivedAt"] = time.Now().UnixMilli()
-			payload, err := json.Marshal(probe)
-			if err != nil {
-				return
-			}
-			if client.player.ID == snapshot.AuthorityClientID {
-				probe["authorityAvailable"] = true
-				probe["serverSentAt"] = time.Now().UnixMilli()
-				payload, _ = json.Marshal(probe)
-				h.send(snapshot.ID, client.player.ID, serverMessage{
-					Type: "session.pong", Sequence: message.Sequence, Payload: payload,
-				})
-			} else if record.authorityConnected() {
-				h.send(snapshot.ID, snapshot.AuthorityClientID, serverMessage{
-					Type: "authority.ping", Sequence: message.Sequence,
-					SenderPlayerID: client.player.ID, Payload: payload,
-				})
-			} else {
-				probe["authorityAvailable"] = false
-				probe["serverSentAt"] = time.Now().UnixMilli()
-				payload, _ = json.Marshal(probe)
-				h.send(snapshot.ID, client.player.ID, serverMessage{
-					Type: "session.pong", Sequence: message.Sequence, Payload: payload,
-				})
-			}
+			h.routeToAuthority(snapshot, client.player.ID, message, "authority.ping", false)
 		case "authority.pong":
 			if client.player.ID != snapshot.AuthorityClientID ||
 				len(message.TargetPlayerIDs) != 1 ||
@@ -629,32 +628,15 @@ func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 				_ = client.conn.Close(websocket.StatusPolicyViolation, "延迟探测响应目标无效")
 				return
 			}
-			var probe map[string]any
-			if json.Unmarshal(message.Payload, &probe) != nil {
-				_ = client.conn.Close(websocket.StatusUnsupportedData, "延迟探测响应格式无效")
-				return
-			}
-			probe["authorityAvailable"] = true
-			probe["serverSentAt"] = time.Now().UnixMilli()
-			payload, _ := json.Marshal(probe)
-			h.send(snapshot.ID, message.TargetPlayerIDs[0], serverMessage{
-				Type: "session.pong", Sequence: message.Sequence, Payload: payload,
-			})
+			h.routeToPlayers(snapshot, client.player.ID, message, "session.pong")
 		case "game.action":
-			h.send(snapshot.ID, snapshot.AuthorityClientID, serverMessage{
-				Type: "authority.action", Sequence: message.Sequence,
-				SenderPlayerID: client.player.ID, Payload: message.Payload, Session: &snapshot,
-			})
+			h.routeToAuthority(snapshot, client.player.ID, message, "authority.action", true)
 		case "authority.result":
 			if client.player.ID != snapshot.AuthorityClientID || !validTargets(snapshot, message.TargetPlayerIDs) {
 				_ = client.conn.Close(websocket.StatusPolicyViolation, "权威结果目标无效")
 				return
 			}
-			outgoing := serverMessage{Type: "game.message", Sequence: message.Sequence,
-				SenderPlayerID: client.player.ID, Payload: message.Payload}
-			for _, target := range message.TargetPlayerIDs {
-				h.send(snapshot.ID, target, outgoing)
-			}
+			h.routeToPlayers(snapshot, client.player.ID, message, "game.message")
 		case "platform.avatar.committed":
 			if client.player.ID != snapshot.AuthorityClientID {
 				_ = client.conn.Close(websocket.StatusPolicyViolation, "只有 Authority 可以确认头像写入")
@@ -732,6 +714,42 @@ func (h *Handler) readLoop(ctx context.Context, record *record, client *peer) {
 			_ = client.conn.Close(websocket.StatusUnsupportedData, "未知消息类型")
 			return
 		}
+	}
+}
+
+func (h *Handler) routeToAuthority(
+	snapshot Snapshot,
+	senderPlayerID string,
+	message clientMessage,
+	outgoingType string,
+	includeSession bool,
+) {
+	outgoing := serverMessage{
+		Type:           outgoingType,
+		Sequence:       message.Sequence,
+		SenderPlayerID: senderPlayerID,
+		Payload:        message.Payload,
+	}
+	if includeSession {
+		outgoing.Session = &snapshot
+	}
+	h.send(snapshot.ID, snapshot.AuthorityClientID, outgoing)
+}
+
+func (h *Handler) routeToPlayers(
+	snapshot Snapshot,
+	senderPlayerID string,
+	message clientMessage,
+	outgoingType string,
+) {
+	outgoing := serverMessage{
+		Type:           outgoingType,
+		Sequence:       message.Sequence,
+		SenderPlayerID: senderPlayerID,
+		Payload:        message.Payload,
+	}
+	for _, target := range message.TargetPlayerIDs {
+		h.send(snapshot.ID, target, outgoing)
 	}
 }
 
@@ -850,7 +868,7 @@ func (h *Handler) broadcast(sessionID string, message serverMessage) {
 }
 
 func decodeBody(writer http.ResponseWriter, request *http.Request, target any) bool {
-	request.Body = http.MaxBytesReader(writer, request.Body, maxMessageBytes)
+	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

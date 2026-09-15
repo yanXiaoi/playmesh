@@ -81,7 +81,7 @@ if (playmesh.app.isAvailable()) {
 }
 ```
 
-App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持久化 `{ userId, nickname, source }`。`playmesh.app.capabilities` 提供 `getRegistry()`、`getDeclared()`、`getAvailable()` 与 `create(code, options)`；`device` 只保留平台、触感、全屏和统一输入等非插件宿主操作。普通浏览器中 `isAvailable()` 为 `false`、身份为 `null`、能力列表为空，创建插件实例会返回明确的不可用错误。
+App 环境中 `playmesh.app.identity.getCurrent()` 返回 App 自动注入的持久化 `{ userId, nickname, source }`。首次本地资料创建会同时生成随机昵称和 `u_` 前缀 UUID v4；二者在本次安装且应用数据未清除期间复用，换设备、重装或清理数据后不保证不变。`playmesh.app.capabilities` 提供 `getRegistry()`、`getDeclared()`、`getAvailable()` 与 `create(code, options)`；`device` 只保留平台、触感、全屏和统一输入等非插件宿主操作。普通浏览器中 `isAvailable()` 为 `false`、身份为 `null`、能力列表为空，创建插件实例会返回明确的不可用错误。
 
 ## 运行环境与传输抽象
 
@@ -99,7 +99,7 @@ Authority 面向游戏只公开外层物理 `app/` 映射到运行时 `/` 的普
 SDK 完成。除 SDK 明确返回的短期 WebRTC 信令 URL 外，游戏不得构造内部 HTTP API、
 WebSocket、token 或连接参数。
 
-浏览器玩家由主 SDK 生成 `p_...` ID，并把 ID 写入浏览器 `localStorage` 的 `playmesh.player-id.v1`；昵称写入 `playmesh.nickname.v1`。同一来源刷新后会复用这两项，但不持久化玩家凭证或游戏 Bucket。App 玩家使用 App 自己的 `u_...` ID 和资料，不读写浏览器 ID。服务端只允许同一玩家 ID 存在一条在线 WebSocket；旧连接在线时新连接被拒绝，旧连接掉线后才允许同 ID 重新加入。
+浏览器玩家由主 SDK 生成 `p_...` ID，并把 ID 写入浏览器 `localStorage` 的 `playmesh.player-id.v1`；昵称写入 `playmesh.nickname.v1`。同一 origin 刷新后会复用这两项，但不持久化玩家凭证或游戏 Bucket；切换 origin、清理站点数据或禁用本地存储后不保证 ID 不变。App/Runtime 玩家则使用当前本地安装的 `u_...` ID；创建会话的 Authority 和加入会话的 Player 都必须把这个 ID 交给 Core，SDK 暴露的 `player.id` 不再是每局新建的临时 ID。服务端只允许同一玩家 ID 存在一条在线 WebSocket；旧连接在线时新连接被拒绝，旧连接掉线后才允许同 ID 重新加入。`player.id` 只是稳定标识，不是鉴权凭证；权限仍由 Core 验证的短期会话凭证和连接上下文决定。
 
 ```js
 await playmesh.ready;
@@ -196,8 +196,12 @@ WebView 在权限回调中核对声明，未声明即拒绝，用户仍可在系
 `textOnSoundLevelChange`、`textOnResult` 事件返回输入级别和完整识别结果。
 
 加速度计、陀螺仪和设备方向直接使用 Generic Sensor、Device Motion 或 Device
-Orientation 等标准 Web API，不声明 Playmesh 能力。`<input type="file">` 由用户
-主动选择文件，也不声明能力。
+Orientation 等标准 Web API，不声明 Playmesh 能力。文件访问同样不声明能力：
+`<input type="file">` 以及标准 `showOpenFilePicker()`、`showSaveFilePicker()`、
+`showDirectoryPicker()` 都必须由用户主动触发。Windows 与 Android 的 Playmesh
+WebView 会覆盖平台中“存在但拒绝调用”的 File System Access 实现，转交系统选择器，
+并以不暴露原生路径的临时句柄提供文件读取、分块写入与目录操作。页面导航或退出会使
+句柄和未提交的可写流失效。
 
 有公开方法或事件的能力实例固定提供 `invoke(method, args)`、`on(event, callback)`、
 `addEventListener(event, callback)`、`removeEventListener(event, callback)`、
@@ -794,7 +798,7 @@ TCP ACK 或磁盘落盘；接收端 `onProgress` 表示对应字节已由 handle
 
 字节流不定义也不扫描结束字节，因此所有 0～255 字节值都可原样出现。已知长度且没有发送进度
 监听的 File、Blob、ArrayBuffer、Uint8Array 可以使用普通 HTTP body；真正的 ReadableStream，
-以及启用发送进度的来源，会由 SDK 私有 `chunked-v1` 通道拆成最多 64 KiB 的普通 HTTP 请求体，
+以及启用发送进度的来源，会由 SDK 私有 `chunked-v1` 通道拆成最多 1 MiB 的普通 HTTP 请求体，
 按序逐块发送，完成时关闭 Authority 数据面并由标准 HTTP EOF 结束。SDK 不会把 ReadableStream
 直接交给 Fetch，也不依赖 `duplex: "half"`，因此可运行于普通浏览器、Android WebView 与
 Core 的 HTTP/1.1 服务。
@@ -1057,7 +1061,7 @@ SDK 不启动独立 RAF。Canvas/WebGL 应在实际绘制或提交后调用；�
 
 ### 自动联机延迟
 
-多人会话就绪后，App SDK 每 3 秒生成唯一 probe ID 并调度一次经过 Core 和 Authority 在线状态确认的往返探测。Game SDK 只把 ping 送入既有 Session transport，并把收到的原始 pong 转交 App SDK；RTT 计算和平滑只在 App SDK 内存完成，Dart 不保存或上报指标。单机游戏不探测、不显示延迟。最近的平滑 RTT 由以下接口读取：
+多人会话就绪后，App SDK 每 3 秒生成唯一 probe ID 并调度一次完整往返探测。Game SDK 把 ping 送入既有 Session transport，Core 按 `authorityClientId` 路由到 Authority SDK，Authority SDK 再按发送玩家 ID 原样回应 pong。主机与加入玩家使用同一链路；主机自回环也必须实际经过 Core 和 Authority JS。Core 不生成 pong、不写入计时字段，也不保存或计算 RTT。Game SDK 只把收到的原始 pong 转交 App SDK；RTT 计算、平滑和无回应样本过期只在 App SDK 内存完成，Dart 不保存或上报指标。单机游戏不探测、不显示延迟。最近的平滑 RTT 由以下接口读取：
 
 ```js
 const latencyMs = playmesh.app.performance.getLatency();
@@ -1065,7 +1069,7 @@ const diagnostics = playmesh.app.performance.getLatencyDiagnostics();
 const off = playmesh.app.performance.onLatency((value) => console.log(value));
 ```
 
-`getLatency()` 在尚无有效样本或 Authority 不在线时返回 `null`。诊断对象包含客户端发送/接收时间、Core 接收/发送时间、Authority 可用状态和原始 RTT，供开发诊断使用；游戏规则不得依赖延迟数值决定胜负。
+`getLatency()` 在尚无有效样本、连续未收到 pong 或 Authority 不在线时返回 `null`。诊断对象只包含当前客户端发送/接收时间、由有效 Authority 回应推导的可用状态和原始 RTT；不存在 Core 接收/发送时间。该对象只供开发诊断使用，游戏规则不得依赖延迟数值决定胜负。
 
 FPS、联机延迟、居中游戏菜单、信息和日志覆盖层都由 `playmesh-app.js` 在网页内创建，并使用
 Shadow DOM 与游戏样式隔离。新开、刷新或重连后游戏菜单、性能层、信息层和日志层默认

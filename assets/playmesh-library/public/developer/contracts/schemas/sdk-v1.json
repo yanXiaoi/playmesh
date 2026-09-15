@@ -380,18 +380,6 @@
         "clientSentAt": {
           "type": "integer"
         },
-        "serverReceivedAt": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "serverSentAt": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "receivedAt": {
           "type": "integer"
         },

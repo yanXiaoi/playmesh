@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:playmesh_file_system_access/playmesh_file_system_access.dart';
 
 import 'sdk_feature_registry.dart';
 
@@ -46,6 +47,7 @@ class AppWebViewBridge {
     this.onNicknameChanged,
     this.profileStore = const UserProfileStore(),
     AppLocalBucketStore? localBucketStore,
+    PlaymeshFileSystemAccessHost? fileSystemAccessHost,
     http.Client? httpClient,
   }) : _platformUiConfiguration = _normalizePlatformUiConfiguration(
          platformUiConfiguration,
@@ -55,6 +57,8 @@ class AppWebViewBridge {
        // 保留宿主注入参数名，同时不扩大 Bridge 的公开状态面。
        // ignore: prefer_initializing_formals
        _localBucketStore = localBucketStore,
+       _fileSystemAccessHost =
+           fileSystemAccessHost ?? PlaymeshFileSystemAccessHost(),
        showShareAction = showShareAction ?? onOpenSharePanel != null {
     this.mediaRuntime = mediaRuntime ?? createDefaultAppMediaRuntime();
     this.capabilityRegistry =
@@ -89,6 +93,7 @@ class AppWebViewBridge {
   final http.Client _httpClient;
   final bool _ownsHttpClient;
   final AppLocalBucketStore? _localBucketStore;
+  final PlaymeshFileSystemAccessHost _fileSystemAccessHost;
   Future<AppLocalBucketSyncGateway>? _localBucketSyncGateway;
   late final CapabilityRegistry capabilityRegistry;
   late final AppMediaRuntime mediaRuntime;
@@ -179,6 +184,7 @@ class AppWebViewBridge {
           syncAvatar: _syncAvatar,
           updateNickname: _updateNickname,
           localBucketStore: _localBucketStore,
+          fileSystemAccessHost: _fileSystemAccessHost,
         ),
         SdkCommandEnvelope(
           name: name,
@@ -679,6 +685,7 @@ class AppWebViewBridge {
   Future<void> resetCapabilities() async {
     _trustedUserActivationExpiresAt = null;
     lanHost?.resetDocument();
+    await _fileSystemAccessHost.resetDocument();
     final previousRuntime = _capabilityRuntime;
     if (acceptRuntimeGameDeclaration) {
       _runtimeDeclaredCapabilities = List.unmodifiable(declaredCapabilities);
@@ -694,6 +701,7 @@ class AppWebViewBridge {
   Future<void> close() async {
     _trustedUserActivationExpiresAt = null;
     lanHost?.resetDocument();
+    await _fileSystemAccessHost.close();
     await _capabilityRuntime.reset();
     await capabilityRegistry.dispose();
     await mediaRuntime.dispose();

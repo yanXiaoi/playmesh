@@ -12,16 +12,17 @@
 - `docs/status/phase-06-complete.md`
 
 Playmesh `1.6.1+8`、Go Core `0.2.0`、Game SDK `1.4.2` 等数字仅是第六阶段历史
-归档基线，不再用于当前生成、运行或发布。当前未发布工作版本为 App `5.1.0+37`、Runtime
-`2.1.0+12`、Go Core `0.7.0`、Core 协议 `1.5.0`、Catalog API `3.0.0`、Relay 协议 `4.0.0`、
+归档基线，不再用于当前生成、运行或发布。最新已公开基线为 App `5.1.1+38`（GitHub/Gitee
+Pre-release）、Runtime `2.1.1+13`、Go Core `0.7.1`、Core 协议 `1.6.0`、Catalog API
+`3.0.0`、Relay 协议 `4.0.0`、
 Developer API / OpenAPI `5.0.0`、Developer CLI `2.0.0`、Game SDK `4.3.0`、
 App Bridge SDK `3.5.0`。本轮以 Pion WebRTC/DataChannel + TURN 替换旧 TCP Relay，并新增
-通用 HTML 信令端点；Runtime 三端固定底包已于 2026-08-31 重建为 `v2.1.0-build12`，
-包含当前 WebView 光标修复与浏览器自动昵称，固定文件及真实哈希已同步；主 App 尚未
-打包或完成跨公网实机验收，远端资源也尚未推送。
+通用 HTML 信令端点；Runtime 三端固定底包已重建为 `v2.1.1-build13`，主 App Android 与
+Windows 正式包也已作为 5.1.1 build 38 附件公开。跨公网与平台实机验收仍未完成。
 首页扫码、“加入对局”页扫码与手工链接已经共用唯一的邀请准备方法和动态 Core 地址；加入
-准备与导航期间显示全页遮罩，错误界面保留脱敏后的完整 cause 链。后续必须优先补两台真实
-设备的两个扫码入口、LAN 手工链接与公网 TURN 验收，不能用自动测试或包内标记替代。
+准备与导航期间显示全页遮罩，错误界面保留脱敏后的完整 cause 链。5.1.1 已公开预发布不代表
+这些场景已经验收；后续仍必须补两台真实设备的两个扫码入口、LAN 手工链接与公网 TURN
+验收，不能用自动测试或包内标记替代。
 Game SDK 以 `playmesh.main.*` 公开游戏本体与对局能力，
 App Bridge SDK 以 `playmesh.app.*` 公开当前客户端能力。面向游戏开发者的唯一全局
 对象是 `window.playmesh`，其根级公开成员严格只有 `ready`、`main` 与 `app`；
@@ -101,7 +102,7 @@ Go Core 监听 0.0.0.0:0
 
 第五阶段已于 2026-07-17 完成。`entries.game`、`entries.controller` 与 `authority.entry` 已统一进入 Manifest、游戏库扫描、开发校验、App/浏览器运行、模板和机器契约；状态同步、自动延迟、App SDK 网页性能层、应用包导入/导出与工作区文件整理也已完成。完成归档见 `docs/status/phase-05-complete.md`。
 
-第五阶段把 SDK 升级为 AI 友好的轻量权威状态同步运行时，并加入 SDK 自动联机延迟显示。默认采用状态同步而不是帧同步：游戏或 AI 只维护权威状态、处理玩家输入、编写 tick 规则和渲染表现；SDK 负责连接、输入限频/合并、Authority tick、快照版本、状态分发、重连恢复和基础诊断。FPS 和延迟都由 App SDK 在网页内自动渲染，多人游戏显示当前玩家到权威端并收到返回的往返耗时，和 FPS 共用左上角位置及开关；App 运行时由 App 工具坞控制开关，普通浏览器由 App SDK 提供悬浮组件并放入昵称修改入口；Game SDK 不创建浏览器性能 panel，单人游戏不显示延迟，游戏代码不需要手动创建组件。
+第五阶段把 SDK 升级为 AI 友好的轻量权威状态同步运行时，并加入 SDK 自动联机延迟显示。默认采用状态同步而不是帧同步：游戏或 AI 只维护权威状态、处理玩家输入、编写 tick 规则和渲染表现；SDK 负责连接、输入限频/合并、Authority tick、快照版本、状态分发、重连恢复和基础诊断。FPS 和延迟都由 App SDK 在网页内自动渲染，多人游戏显示当前玩家到 Authority SDK 并收到回应的完整往返耗时；主机也走相同的 Core 路由和 Authority JS 回应链路，不使用服务端自回环。延迟和 FPS 共用左上角位置及开关；App 运行时由 App 工具坞控制开关，普通浏览器由 App SDK 提供悬浮组件并放入昵称修改入口；Game SDK 不创建浏览器性能 panel，单人游戏不显示延迟，游戏代码不需要手动创建组件。
 
 第五阶段同时实现统一 `packages/{gameId}` 游戏库的导入与导出：导入包经过路径、清单和资源校验后原子安装；导出由用户直接选择系统保存位置，因此不产生需要清理的临时分享包。这里“同一目录”只指 App 内 Developer Workspace 新建或编辑的项目与其他已安装游戏都位于 `packages/{gameId}/`。外部 CLI `dev` 使用临时开发资源源，不把网页变更写入正式 `app/`；只有 `playmesh-cli run` 才把 `playmesh/package/` 原子安装为正式包。
 

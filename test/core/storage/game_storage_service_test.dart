@@ -122,6 +122,27 @@ void main() {
     await storage.close();
   });
 
+  test('Bucket 上传拒绝路径型文件名', () async {
+    final storage = await GameStorageService.create(
+      gameId: 'com.playmesh.upload-name',
+      libraryRoot: root,
+    );
+    addTearDown(storage.close);
+
+    for (final name in const ['../escape.png', '..\\escape.png']) {
+      await expectLater(
+        storage.upload(
+          bucket: 'assets',
+          originalName: name,
+          data: Stream.value(const [1]),
+          contentLength: 1,
+        ),
+        throwsFormatException,
+        reason: name,
+      );
+    }
+  });
+
   test('清除游戏数据只删除当前游戏 data', () async {
     final storage = await GameStorageService.create(
       gameId: 'com.playmesh.demo',

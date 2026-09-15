@@ -153,12 +153,14 @@ Go Core 地址。App SDK `3.4.0` 的唯一例外是
 - 完整 HTML 小游戏既可通过开发者工作区上传整理，也可从游戏库导入普通网页 ZIP。普通 ZIP 必须至少包含一个 HTML，全部内容迁入 `app/`；原相对路径、已有根路径、外部 URL 和二进制内容保持不变，再生成 `main.json` 并经过标准包校验。
 - SDK Manifest、JSON Schema、OpenAPI、最小数据流示例和开发者工作区必须暴露状态同步能力，使 AI 能按正式契约生成和修改项目。
 - App SDK 每 3 秒调度带唯一 probe ID 的受控会话探针并在本地平滑 RTT；Game SDK
-  只发送 ping 和转交原始 pong，Dart 只提供既有会话 transport，不保存或上报性能
-  指标。游戏代码没有手动延迟上报接口。
+  把 ping 经既有 Session transport 路由到 Authority SDK，并把 Authority SDK 原样回应的
+  pong 转交 App SDK。包括主机在内的所有参与端都必须走完整 Authority JS 链路；Go Core
+  只按 Authority 角色和目标玩家路由，不生成 pong、不写入服务端时间戳，也不保存或计算
+  RTT。游戏代码没有手动延迟上报接口。
 - 延迟显示与 FPS 使用同一个由 App SDK 创建的左上角网页悬浮层、显示位置和开关；App 运行时开关位于 App 悬浮工具坞，普通浏览器开关位于 App SDK 创建的悬浮组件。Game SDK 不保留旧浏览器性能 panel。
 - 单人游戏不显示延迟信息；多人游戏根据当前会话配置显示当前玩家到权威端并收到返回的往返耗时。
 - 延迟单位使用毫秒，并显示最近值或短时间窗口内的平滑值；无有效样本时显示 `-- ms`。
-- 延迟统计必须区分本地处理、App/SDK 桥接和权威端往返，避免把页面渲染耗时误报为网络延迟；第一版对外只显示最终联机往返值，详细拆分留给诊断日志。
+- 延迟统计必须覆盖 App/SDK 桥接、Core 路由和 Authority SDK 回应，避免把页面渲染耗时误报为网络延迟；第一版对外只显示客户端发送到收到 Authority 回应的最终联机往返值。
 - 权威端断开、会话失效或当前游戏不是多人会话时，延迟显示隐藏或显示无效状态，不显示误导性的旧数据。
 
 AI 心智负担要求：
@@ -235,15 +237,18 @@ AI 心智负担要求：
 
 第六阶段是最后一个阶段。后续更改不再新增阶段、阶段中间状态或阶段完成文档，改为按实际发布版本维护 `docs/version/{MAJOR.MINOR.PATCH}.md` 详细更新日志，并同步 App 内简略更新日志。版本与日志规则见 `docs/version/README.md` 和 `docs/06-engineering-standards.md`。
 
-### Playmesh 5.1.0 Runtime 对齐与 RPC Stream（源码完成，未打包）
+### Playmesh 5.1.0 Runtime 对齐与 RPC Stream（已公开预发布）
 
-- Runtime 源码补齐 App Bucket 同步端点和逻辑 Bucket 同步读写；现有固定 APK/ZIP 尚未重建。
+- Runtime 源码补齐 App Bucket 同步端点和逻辑 Bucket 同步读写；三端固定 APK/ZIP 已重建为
+  `2.1.0+12` 并随 5.1 build 37 基线同步。
 - Game SDK `4.3.0` 增加 `rpc.requestStream/onStreamRequest`，大字节体经一次性鉴权 HTTP
   数据面以 EOF、背压和有界缓冲转发，Binary WS 只承载控制与小型结果。
 - 发送端和接收端均支持 `(transferredBytes, totalBytes)` 进度监听；未知总量为 `null`，
   回调错误不改变传输结果。Authority 可把接收流直接传给 `storage.upload()`。
 - 自动化已覆盖普通局域网浏览器发送、固定 Authority 接收/转存、Core guest-to-host 流转发、
-  版本/声明/Manifest 和 Runtime App Bucket；本轮未构建任何分发包。
+  版本/声明/Manifest 和 Runtime App Bucket。主 App Android universal、Windows x64 portable
+  与 Runtime 三端固定底包均已构建；GitHub `v5.1.0-build37` 作为 Pre-release 公开，跨设备、
+  长时在线与公网 TURN 手工验收仍未完成。
 
 ### Playmesh 5.0.1 扫码加入诊断修复（代码完成，待跨设备验收）
 

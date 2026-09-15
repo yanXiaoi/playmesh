@@ -113,6 +113,10 @@ const developerSources = [
     "assets/playmesh-library/public/developer/templates/default-game/package/app/controller/index.html",
   ].map((path) => fs.readFileSync(path, "utf8")),
 ];
+const defaultPlayerSource = fs.readFileSync(
+  "assets/playmesh-library/public/developer/templates/default-game/package/app/static/js/player/index.js",
+  "utf8",
+);
 
 assert(
   fs.existsSync("assets/playmesh-library/public/sdk/v1/playmesh-main.js"),
@@ -811,7 +815,29 @@ for (const [locale, sources] of promptSourcesByLocale) {
   for (const source of sources) {
     assert(source.trim().length > 0, `${locale} 提示词模板不能为空`);
   }
+  const sourcesById = new Map(
+    promptManifest.templates.map(({ id }, index) => [id, sources[index]]),
+  );
+  for (const id of ["multi-screen", "single-screen-multiplayer"]) {
+    const source = sourcesById.get(id);
+    assert.match(source, /await import\(/, `${locale}/${id} 必须先判断角色再动态导入权威入口`);
+    assert.doesNotMatch(
+      source,
+      /import\s*\{\s*startAuthoritySync\s*\}\s*from/,
+      `${locale}/${id} 不得静态命名导入权威入口`,
+    );
+  }
 }
+assert.match(
+  defaultPlayerSource,
+  /isAuthority\(\)[\s\S]*await import\("\.\.\/service\/index\.js"\)/,
+  "默认多人模板必须先判断 Authority 再动态导入权威入口",
+);
+assert.equal(
+  defaultPlayerSource.includes('from "../service/index.js"'),
+  false,
+  "默认多人模板不得静态导入权威入口",
+);
 const runtimeKeySets = enabledPromptLocales.map(({ id, bundles }) => {
   const messages = JSON.parse(
     fs.readFileSync(`${localizationRoot}/${bundles.app}`, "utf8"),

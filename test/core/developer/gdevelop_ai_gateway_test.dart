@@ -411,6 +411,7 @@ void main() {
     expect(prompt.body, isNot(contains('{"calls":[{"echo":')));
     expect(prompt.body, contains('正安全整数'));
     expect(prompt.body, contains('echo 缺失、不匹配或重复'));
+    expect(prompt.body, contains('加入端请求该路径只会收到 HTTP 成功的空 JavaScript 内容'));
     expect(prompt.body, isNot(contains(fixture.token)));
 
     final selectedAgentBaseUrl = 'http://127.0.0.1:${fixture.port}';
@@ -434,6 +435,28 @@ void main() {
     );
     expect(agentPrompt.body, isNot(contains('仅可调用本合同明确列出的接口')));
     expect(agentPrompt.body, isNot(contains('/event-payload')));
+    expect(agentPrompt.body, contains('加入端请求该路径只会收到 HTTP 成功的空 JavaScript 内容'));
+
+    final englishSession =
+        (await fixture.openSession(
+              mode: 'chat',
+              locale: 'en-US',
+              includeContext: true,
+            ))['session']!
+            as Map;
+    final englishSessionId = englishSession['editorSessionId']! as String;
+    final englishPrompt = await fixture.get(
+      '${fixture.aiBase}/editor-sessions/$englishSessionId/prompt.txt',
+    );
+    expect(englishPrompt.statusCode, HttpStatus.ok, reason: englishPrompt.body);
+    expect(
+      englishPrompt.body,
+      contains(
+        'a joining client receives a successful HTTP response with empty '
+        'JavaScript content',
+      ),
+    );
+    expect(englishPrompt.body, isNot(matches(RegExp(r'[\u3400-\u9fff]'))));
   });
 
   test(
@@ -1145,12 +1168,13 @@ class _AiGatewayFixture {
 
   Future<Map<String, Object?>> openSession({
     required String mode,
+    String locale = 'zh-CN',
     bool includeContext = false,
     String? resumeEditorSessionId,
   }) async {
     final response = await json('POST', '$aiBase/editor-sessions', {
       'mode': mode,
-      'locale': 'zh-CN',
+      'locale': locale,
       if (includeContext) 'context': await projectContext(),
       'resumeEditorSessionId': ?resumeEditorSessionId,
     }, mode);

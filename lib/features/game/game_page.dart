@@ -739,6 +739,7 @@ class _GamePageState extends State<GamePage> with WidgetsBindingObserver {
         displayMode: game.displayMode,
         minPlayers: game.minPlayers,
         maxPlayers: game.maxPlayers,
+        playerId: localUserId,
         nickname: localNickname,
       );
       final storage = await GameStorageService.create(gameId: game.id);

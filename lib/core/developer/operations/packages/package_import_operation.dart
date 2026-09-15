@@ -9,7 +9,7 @@ class _PackageImportOperation implements _DeveloperHttpOperation {
       id: 'packages.import',
       method: 'POST',
       path: '/dev/api/packages/import',
-      summary: '导入或更新标准 Playmesh 游戏包并保留平台目录',
+      summary: '导入或更新标准 Playmesh 游戏包，仅替换包拥有的发布文件',
       description: '请求体是 application/zip 原始字节，不是 JSON；支持定长或 HTTP chunked 流式上传。',
       permission: 'project.write',
       risk: DeveloperOperationRisk.medium,

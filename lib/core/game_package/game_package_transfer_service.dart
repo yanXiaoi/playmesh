@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -20,9 +21,45 @@ class ValidatedGamePackage {
   final Map<String, List<int>> files;
 }
 
+class _ReplacementTransaction {
+  const _ReplacementTransaction({
+    required this.schemaVersion,
+    required this.targetName,
+    required this.oldEntries,
+    required this.newEntries,
+  });
+
+  final int schemaVersion;
+  final String targetName;
+  final Set<String> oldEntries;
+  final Set<String> newEntries;
+}
+
 class GamePackageTransferService {
   GamePackageTransferService({Directory? libraryRoot})
     : _injectedRoot = libraryRoot;
+
+  static const _packageOwnedRootEntries = [
+    'app',
+    'main.json',
+    'capabilities.json',
+    gamePackageIconName,
+  ];
+  static const _packageOwnedRootEntriesManifestLast = [
+    'app',
+    'capabilities.json',
+    gamePackageIconName,
+    'main.json',
+  ];
+  static const _importDirectoryPrefix = '.playmesh-import-';
+  static const _backupDirectoryPrefix = '.playmesh-backup-';
+  static const _retiredDirectoryPrefix = '.playmesh-retired-';
+  static const _replacementTransactionName = 'transaction.json';
+  static const _replacementPreparedName = 'prepared';
+  static const _replacementCommittedName = 'committed';
+  static const _replacementTransactionSchemaVersion = 2;
+  static const _conflictDirectoryPrefix = '.playmesh-conflict-';
+  static const _preservedDirectoryPrefix = '.playmesh-preserved-';
 
   static const maxCompressedBytes = SafeGamePackageArchive.maxCompressedBytes;
   static const maxExpandedBytes = SafeGamePackageArchive.maxExpandedBytes;
@@ -31,6 +68,7 @@ class GamePackageTransferService {
 
   final Directory? _injectedRoot;
   Directory? _resolvedRoot;
+  Future<void> _commitTail = Future<void>.value();
 
   Future<GameSummary> importPackage(
     File source, {
@@ -59,7 +97,6 @@ class GamePackageTransferService {
     final root = await _root();
     final packages = Directory('${root.path}${Platform.pathSeparator}packages');
     await packages.create(recursive: true);
-    await _recoverInterruptedImports(packages);
     final target = Directory(
       '${packages.path}${Platform.pathSeparator}${package.manifest.id}',
     );
@@ -150,17 +187,31 @@ class GamePackageTransferService {
     ValidatedGamePackage package,
     Directory target,
   ) async {
+    final previous = _commitTail;
+    final release = Completer<void>();
+    _commitTail = release.future;
+    await previous;
+    try {
+      await _commitPackage(package, target);
+    } finally {
+      release.complete();
+    }
+  }
+
+  Future<void> _commitPackage(
+    ValidatedGamePackage package,
+    Directory target,
+  ) async {
     final packages = target.parent;
     await packages.create(recursive: true);
+    await _recoverInterruptedImports(packages);
     final nonce =
         '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
     final staging = Directory(
-      '${packages.path}${Platform.pathSeparator}.playmesh-import-$nonce',
-    );
-    final backup = Directory(
-      '${packages.path}${Platform.pathSeparator}.playmesh-backup-$nonce',
+      '${packages.path}${Platform.pathSeparator}$_importDirectoryPrefix$nonce',
     );
     await staging.create(recursive: true);
+    var replacing = false;
     try {
       for (final item in package.files.entries) {
         final output = File(
@@ -170,23 +221,27 @@ class GamePackageTransferService {
         await output.parent.create(recursive: true);
         await output.writeAsBytes(item.value, flush: true);
       }
-      final replacing = await target.exists();
+      replacing = await target.exists();
       if (replacing) {
-        await _replacePackageDirectory(
+        await _replacePackageEntries(
           staging: staging,
           target: target,
-          backup: backup,
+          nonce: nonce,
         );
       } else {
         await staging.rename(target.path);
       }
     } on Object {
-      if (await staging.exists()) await staging.delete(recursive: true);
+      // A replacement owns its transaction cleanup and may need the staged
+      // package for recovery. A failed new install is always safe to discard.
+      if (!replacing && await staging.exists()) {
+        await staging.delete(recursive: true);
+      }
       rethrow;
     }
   }
 
-  /// 若上次进程停在 [commitPackage] 的两次同卷目录重命名之间，则恢复最后一个完整包。
+  /// 恢复未完成的发布条目事务和旧版整目录交换事务。
   Future<void> recoverInterruptedImports() async {
     final root = await _root();
     final packages = Directory('${root.path}${Platform.pathSeparator}packages');
@@ -194,102 +249,514 @@ class GamePackageTransferService {
     await _recoverInterruptedImports(packages);
   }
 
-  Future<void> _replacePackageDirectory({
+  Future<void> _replacePackageEntries({
     required Directory staging,
     required Directory target,
-    required Directory backup,
+    required String nonce,
   }) async {
-    await _copyPreservedEntries(target, staging);
-    await target.rename(backup.path);
+    final retired = Directory(
+      '${target.parent.path}${Platform.pathSeparator}'
+      '$_retiredDirectoryPrefix$nonce',
+    );
+    var transactionWritten = false;
     try {
-      await staging.rename(target.path);
-    } on Object {
-      if (!await target.exists() && await backup.exists()) {
-        await backup.rename(target.path);
-      }
-      rethrow;
-    }
-    try {
-      await backup.delete(recursive: true);
-    } on FileSystemException {
-      // 完整的新目标已可见；启动恢复只删除陈旧备份，不能冒险回滚已提交包。
-    }
-  }
-
-  Future<void> _copyPreservedEntries(
-    Directory target,
-    Directory staging,
-  ) async {
-    for (final name in const ['data', 'cache', '.playmesh']) {
-      final source = Directory('${target.path}${Platform.pathSeparator}$name');
-      if (await FileSystemEntity.type(source.path, followLinks: false) !=
-          FileSystemEntityType.directory) {
-        continue;
-      }
-      await _copyPreservedDirectory(
-        source,
-        Directory('${staging.path}${Platform.pathSeparator}$name'),
+      await retired.create();
+      final oldEntries = await _existingPackageOwnedEntries(target);
+      final newEntries = await _existingPackageOwnedEntries(staging);
+      final targetName = target.path.substring(target.parent.path.length + 1);
+      await File(
+        '${retired.path}${Platform.pathSeparator}$_replacementTransactionName',
+      ).writeAsString(
+        jsonEncode({
+          'schemaVersion': _replacementTransactionSchemaVersion,
+          'targetName': targetName,
+          'oldEntries': oldEntries.toList(),
+          'newEntries': newEntries.toList(),
+        }),
+        flush: true,
       );
+      transactionWritten = true;
+      // The project root never moves or disappears. Runtime storage can keep
+      // writing data while only package-owned entries are retired and installed.
+      await _movePackageOwnedEntries(target, retired, manifestLast: true);
+      await File(
+        '${retired.path}${Platform.pathSeparator}$_replacementPreparedName',
+      ).writeAsString('prepared', flush: true);
+      // main.json is the visibility marker and is installed last.
+      await _movePackageOwnedEntries(staging, target, manifestLast: true);
+      await File(
+        '${retired.path}${Platform.pathSeparator}$_replacementCommittedName',
+      ).writeAsString('committed', flush: true);
+    } on Object catch (error, stackTrace) {
+      var restored = !transactionWritten;
+      if (transactionWritten) {
+        try {
+          final transaction = await _readReplacementTransaction(retired);
+          if (transaction == null ||
+              transaction.schemaVersion !=
+                  _replacementTransactionSchemaVersion) {
+            throw const FormatException('应用包更新事务记录无效');
+          }
+          await _rollbackPackageEntryTransaction(
+            staging: staging,
+            target: target,
+            retired: retired,
+            transaction: transaction,
+          );
+          restored = true;
+        } on Object {
+          // Leave the journal, staged package and retired entries intact. A
+          // later recovery pass can continue without touching non-package data.
+        }
+      }
+      if (restored) {
+        await _deleteDirectoryBestEffort(staging);
+        await _deleteDirectoryBestEffort(retired);
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+    await _deleteDirectoryBestEffort(staging);
+    await _deleteDirectoryBestEffort(retired);
+  }
+
+  Future<void> _movePackageOwnedEntries(
+    Directory source,
+    Directory destination, {
+    bool manifestLast = false,
+  }) async {
+    await destination.create(recursive: true);
+    final names = manifestLast
+        ? _packageOwnedRootEntriesManifestLast
+        : _packageOwnedRootEntries;
+    for (final name in names) {
+      await _movePackageOwnedEntry(source, destination, name);
     }
   }
 
-  Future<void> _copyPreservedDirectory(
+  Future<bool> _movePackageOwnedEntry(
     Directory source,
     Directory destination,
+    String name,
   ) async {
     await destination.create(recursive: true);
-    await for (final child in source.list(followLinks: false)) {
-      final name = child.path.substring(source.path.length + 1);
-      final targetPath = '${destination.path}${Platform.pathSeparator}$name';
-      if (child is File) {
-        await File(targetPath).parent.create(recursive: true);
-        await child.copy(targetPath);
-      } else if (child is Directory) {
-        await _copyPreservedDirectory(child, Directory(targetPath));
+    final sourcePath = '${source.path}${Platform.pathSeparator}$name';
+    final sourceType = await FileSystemEntity.type(
+      sourcePath,
+      followLinks: false,
+    );
+    if (sourceType == FileSystemEntityType.notFound) return false;
+    final destinationPath = '${destination.path}${Platform.pathSeparator}$name';
+    if (await FileSystemEntity.type(destinationPath, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('更新应用包时发布文件发生冲突', destinationPath);
+    }
+    if (sourceType == FileSystemEntityType.file) {
+      await File(sourcePath).rename(destinationPath);
+    } else if (sourceType == FileSystemEntityType.directory) {
+      await Directory(sourcePath).rename(destinationPath);
+    } else if (sourceType == FileSystemEntityType.link) {
+      await Link(sourcePath).rename(destinationPath);
+    } else {
+      throw FileSystemException('更新应用包时发布文件类型无效', sourcePath);
+    }
+    return true;
+  }
+
+  Future<void> _rollbackPackageEntryTransaction({
+    required Directory staging,
+    required Directory target,
+    required Directory retired,
+    required _ReplacementTransaction transaction,
+  }) async {
+    final prepared = await File(
+      '${retired.path}${Platform.pathSeparator}$_replacementPreparedName',
+    ).exists();
+    await target.create(recursive: true);
+    for (final name in _packageOwnedRootEntriesManifestLast.reversed) {
+      final oldRetired =
+          transaction.oldEntries.contains(name) &&
+          await _entryExists(retired, name);
+      final installedByTransaction =
+          oldRetired ||
+          (prepared &&
+              !transaction.oldEntries.contains(name) &&
+              transaction.newEntries.contains(name));
+      if (installedByTransaction && await _entryExists(target, name)) {
+        await _discardOrRestagePackageOwnedEntry(target, staging, name);
       }
+    }
+    for (final name in _packageOwnedRootEntriesManifestLast) {
+      final oldRetired =
+          transaction.oldEntries.contains(name) &&
+          await _entryExists(retired, name);
+      if (oldRetired) {
+        await _movePackageOwnedEntry(retired, target, name);
+      }
+    }
+  }
+
+  Future<void> _discardOrRestagePackageOwnedEntry(
+    Directory source,
+    Directory staging,
+    String name,
+  ) async {
+    if (!await _entryExists(staging, name)) {
+      await _movePackageOwnedEntry(source, staging, name);
+      return;
+    }
+    await _deleteEntry('${source.path}${Platform.pathSeparator}$name');
+  }
+
+  Future<void> _restoreLegacyBackupPackageEntries({
+    required Directory staging,
+    required Directory backup,
+    required Directory retired,
+  }) async {
+    if (!await retired.exists()) return;
+    final prepared = await File(
+      '${retired.path}${Platform.pathSeparator}$_replacementPreparedName',
+    ).exists();
+    if (!prepared) {
+      await _movePackageOwnedEntries(retired, backup);
+      return;
+    }
+    final transaction = await _readReplacementTransaction(retired);
+    if (transaction == null) {
+      throw const FormatException('应用包更新事务记录无效');
+    }
+    for (final name in _packageOwnedRootEntries) {
+      final oldEntryRetired = await _entryExists(retired, name);
+      if (transaction.oldEntries.contains(name)) {
+        if (!oldEntryRetired) continue;
+        if (await _entryExists(backup, name)) {
+          await _discardOrRestagePackageOwnedEntry(backup, staging, name);
+        }
+        await _movePackageOwnedEntry(retired, backup, name);
+      } else if (await _entryExists(backup, name)) {
+        await _discardOrRestagePackageOwnedEntry(backup, staging, name);
+      }
+    }
+  }
+
+  Future<bool> _entryExists(Directory directory, String name) async =>
+      await FileSystemEntity.type(
+        '${directory.path}${Platform.pathSeparator}$name',
+        followLinks: false,
+      ) !=
+      FileSystemEntityType.notFound;
+
+  Future<void> _deleteEntry(String path) async {
+    final type = await FileSystemEntity.type(path, followLinks: false);
+    if (type == FileSystemEntityType.file) {
+      await File(path).delete();
+    } else if (type == FileSystemEntityType.directory) {
+      await Directory(path).delete(recursive: true);
+    } else if (type == FileSystemEntityType.link) {
+      await Link(path).delete();
+    }
+  }
+
+  Future<Set<String>> _existingPackageOwnedEntries(Directory directory) async {
+    final result = <String>{};
+    for (final name in _packageOwnedRootEntries) {
+      if (await FileSystemEntity.type(
+            '${directory.path}${Platform.pathSeparator}$name',
+            followLinks: false,
+          ) !=
+          FileSystemEntityType.notFound) {
+        result.add(name);
+      }
+    }
+    return result;
+  }
+
+  Future<GameManifest> _readInstalledManifest(Directory directory) async {
+    final decoded = jsonDecode(
+      await File(
+        '${directory.path}${Platform.pathSeparator}main.json',
+      ).readAsString(),
+    );
+    if (decoded is! Map) {
+      throw const FormatException('main.json 根节点必须是对象');
+    }
+    return GameManifest.fromJson(Map<String, Object?>.from(decoded));
+  }
+
+  Future<_ReplacementTransaction?> _readReplacementTransaction(
+    Directory retired,
+  ) async {
+    final file = File(
+      '${retired.path}${Platform.pathSeparator}$_replacementTransactionName',
+    );
+    if (!await file.exists()) return null;
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is! Map || decoded['targetName'] is! String) {
+      return null;
+    }
+    final schemaVersion = decoded['schemaVersion'] is int
+        ? decoded['schemaVersion'] as int
+        : 1;
+    final targetName = decoded['targetName'] as String;
+    final rawOldEntries = decoded['oldEntries'];
+    final rawNewEntries = decoded['newEntries'];
+    if (targetName.isEmpty ||
+        targetName == '.' ||
+        targetName == '..' ||
+        targetName.contains('/') ||
+        targetName.contains('\\') ||
+        rawOldEntries is! List ||
+        rawOldEntries.any(
+          (entry) =>
+              entry is! String || !_packageOwnedRootEntries.contains(entry),
+        ) ||
+        (schemaVersion == _replacementTransactionSchemaVersion &&
+            (rawNewEntries is! List ||
+                rawNewEntries.any(
+                  (entry) =>
+                      entry is! String ||
+                      !_packageOwnedRootEntries.contains(entry),
+                ) ||
+                !rawNewEntries.contains('app') ||
+                !rawNewEntries.contains('main.json'))) ||
+        (schemaVersion != 1 &&
+            schemaVersion != _replacementTransactionSchemaVersion)) {
+      return null;
+    }
+    return _ReplacementTransaction(
+      schemaVersion: schemaVersion,
+      targetName: targetName,
+      oldEntries: rawOldEntries.cast<String>().toSet(),
+      newEntries: schemaVersion == _replacementTransactionSchemaVersion
+          ? (rawNewEntries as List).cast<String>().toSet()
+          : const <String>{},
+    );
+  }
+
+  Future<bool> _isCommittedPackageValid(
+    Directory target,
+    _ReplacementTransaction transaction,
+  ) async {
+    if (!await target.exists()) return false;
+    final entries = await _existingPackageOwnedEntries(target);
+    if (entries.length != transaction.newEntries.length ||
+        !entries.containsAll(transaction.newEntries)) {
+      return false;
+    }
+    try {
+      return (await _readInstalledManifest(target)).id ==
+          transaction.targetName;
+    } on Object {
+      return false;
+    }
+  }
+
+  Future<void> _deleteDirectoryBestEffort(Directory directory) async {
+    try {
+      if (await directory.exists()) await directory.delete(recursive: true);
+    } on FileSystemException {
+      // A visible complete package is already available. Startup recovery can
+      // retry cleanup without rolling it back.
     }
   }
 
   Future<void> _recoverInterruptedImports(Directory packages) async {
     final backups = <Directory>[];
     final staging = <Directory>[];
+    final retired = <Directory>[];
+    final stagingByNonce = <String, Directory>{};
+    final retiredByNonce = <String, Directory>{};
     await for (final entity in packages.list(followLinks: false)) {
       if (entity is! Directory) continue;
       final name = entity.path.substring(packages.path.length + 1);
-      if (name.startsWith('.playmesh-backup-')) {
+      if (name.startsWith(_backupDirectoryPrefix)) {
         backups.add(entity);
-      } else if (name.startsWith('.playmesh-import-')) {
+      } else if (name.startsWith(_importDirectoryPrefix)) {
         staging.add(entity);
+        stagingByNonce[name.substring(_importDirectoryPrefix.length)] = entity;
+      } else if (name.startsWith(_retiredDirectoryPrefix)) {
+        retired.add(entity);
+        retiredByNonce[name.substring(_retiredDirectoryPrefix.length)] = entity;
       }
     }
+    final handledRetired = <String>{};
+    for (final directory in retired) {
+      final name = directory.path.substring(packages.path.length + 1);
+      final nonce = name.substring(_retiredDirectoryPrefix.length);
+      try {
+        final transaction = await _readReplacementTransaction(directory);
+        if (transaction == null ||
+            transaction.schemaVersion != _replacementTransactionSchemaVersion) {
+          continue;
+        }
+        final target = Directory(
+          '${packages.path}${Platform.pathSeparator}${transaction.targetName}',
+        );
+        final transactionStaging =
+            stagingByNonce[nonce] ??
+            Directory(
+              '${packages.path}${Platform.pathSeparator}'
+              '$_importDirectoryPrefix$nonce',
+            );
+        final committed = await File(
+          '${directory.path}${Platform.pathSeparator}'
+          '$_replacementCommittedName',
+        ).exists();
+        if (!committed ||
+            !await _isCommittedPackageValid(target, transaction)) {
+          await _rollbackPackageEntryTransaction(
+            staging: transactionStaging,
+            target: target,
+            retired: directory,
+            transaction: transaction,
+          );
+        }
+        await _deleteDirectoryBestEffort(transactionStaging);
+        await _deleteDirectoryBestEffort(directory);
+        handledRetired.add(nonce);
+      } on Object {
+        // Keep every transaction entry for a later recovery or manual repair.
+      }
+    }
+
     backups.sort((left, right) => right.path.compareTo(left.path));
+    final restoredTargets = <String>{};
     for (final backup in backups) {
       try {
-        final manifestFile = File(
-          '${backup.path}${Platform.pathSeparator}main.json',
-        );
-        final decoded = jsonDecode(await manifestFile.readAsString());
-        if (decoded is! Map) continue;
-        final manifest = GameManifest.fromJson(
-          Map<String, Object?>.from(decoded),
-        );
+        final backupName = backup.path.substring(packages.path.length + 1);
+        final nonce = backupName.substring(_backupDirectoryPrefix.length);
+        final matchingStaging = stagingByNonce[nonce];
+        final matchingRetired = retiredByNonce[nonce];
+        final transactionStaging =
+            matchingStaging ??
+            Directory(
+              '${packages.path}${Platform.pathSeparator}'
+              '$_importDirectoryPrefix$nonce',
+            );
+        final transaction = matchingRetired == null
+            ? null
+            : await _readReplacementTransaction(matchingRetired);
+        late final String targetName;
+        if (transaction != null) {
+          targetName = transaction.targetName;
+        } else {
+          final oldManifestRoot =
+              matchingRetired != null &&
+                  await File(
+                    '${matchingRetired.path}${Platform.pathSeparator}main.json',
+                  ).exists()
+              ? matchingRetired
+              : backup;
+          targetName = (await _readInstalledManifest(oldManifestRoot)).id;
+        }
+        if (!restoredTargets.add(targetName)) {
+          await _preserveTransactionDirectory(backup, 'backup-$nonce');
+          if (matchingStaging != null) {
+            await _preserveTransactionDirectory(
+              matchingStaging,
+              'import-$nonce',
+            );
+          }
+          if (matchingRetired != null) {
+            await _preserveTransactionDirectory(
+              matchingRetired,
+              'retired-$nonce',
+            );
+          }
+          continue;
+        }
+        if (matchingRetired != null) {
+          await _restoreLegacyBackupPackageEntries(
+            staging: transactionStaging,
+            backup: backup,
+            retired: matchingRetired,
+          );
+        }
         final target = Directory(
-          '${packages.path}${Platform.pathSeparator}${manifest.id}',
+          '${packages.path}${Platform.pathSeparator}$targetName',
         );
         if (await target.exists()) {
-          await backup.delete(recursive: true);
-        } else {
-          await backup.rename(target.path);
+          final conflict = await _uniqueSiblingDirectory(
+            packages,
+            '$_conflictDirectoryPrefix$nonce',
+          );
+          await target.rename(conflict.path);
+        }
+        await backup.rename(target.path);
+        await _deleteDirectoryBestEffort(transactionStaging);
+        if (matchingRetired != null) {
+          await _deleteDirectoryBestEffort(matchingRetired);
         }
       } on Object {
         // 无法识别的备份保持原样，供人工恢复。
       }
     }
-    for (final directory in staging) {
-      if (await directory.exists()) {
-        await directory.delete(recursive: true);
+    for (final directory in retired) {
+      if (!await directory.exists()) continue;
+      final name = directory.path.substring(packages.path.length + 1);
+      final nonce = name.substring(_retiredDirectoryPrefix.length);
+      if (handledRetired.contains(nonce)) continue;
+      try {
+        final transaction = await _readReplacementTransaction(directory);
+        if (transaction?.schemaVersion ==
+            _replacementTransactionSchemaVersion) {
+          continue;
+        }
+        final matchingBackup = Directory(
+          '${packages.path}${Platform.pathSeparator}'
+          '$_backupDirectoryPrefix$nonce',
+        );
+        if (await matchingBackup.exists()) continue;
+        await _preserveTransactionDirectory(directory, 'retired-$nonce');
+      } on Object {
+        // Unrecognized retired entries stay untouched for manual recovery.
       }
     }
+    for (final directory in staging) {
+      if (!await directory.exists()) continue;
+      final name = directory.path.substring(packages.path.length + 1);
+      final nonce = name.substring(_importDirectoryPrefix.length);
+      final matchingBackup = Directory(
+        '${packages.path}${Platform.pathSeparator}'
+        '$_backupDirectoryPrefix$nonce',
+      );
+      final matchingRetired = Directory(
+        '${packages.path}${Platform.pathSeparator}'
+        '$_retiredDirectoryPrefix$nonce',
+      );
+      if (await matchingBackup.exists() || await matchingRetired.exists()) {
+        continue;
+      }
+      await _deleteDirectoryBestEffort(directory);
+    }
+  }
+
+  Future<Directory> _uniqueSiblingDirectory(
+    Directory parent,
+    String preferredName,
+  ) async {
+    var candidate = Directory(
+      '${parent.path}${Platform.pathSeparator}$preferredName',
+    );
+    var suffix = 0;
+    while (await candidate.exists()) {
+      suffix += 1;
+      candidate = Directory(
+        '${parent.path}${Platform.pathSeparator}$preferredName-$suffix',
+      );
+    }
+    return candidate;
+  }
+
+  Future<void> _preserveTransactionDirectory(
+    Directory directory,
+    String label,
+  ) async {
+    if (!await directory.exists()) return;
+    final destination = await _uniqueSiblingDirectory(
+      directory.parent,
+      '$_preservedDirectoryPrefix$label',
+    );
+    await directory.rename(destination.path);
   }
 
   Future<File> exportPackage(

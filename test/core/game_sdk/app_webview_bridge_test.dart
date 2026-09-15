@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:playmesh_file_system_access/playmesh_file_system_access.dart';
 import 'package:playmesh/core/app_media/app_media_adapter.dart';
 import 'package:playmesh/core/app_media/app_media_runtime.dart';
 import 'package:playmesh/core/capabilities/camera/camera_capability_plugin.dart';
@@ -1023,6 +1024,44 @@ void main() {
       containsPair('nickname', '已提交昵称'),
     );
   });
+
+  test('文件选取桥只接受一次可信用户操作并在文档重载时失效', () async {
+    final fileSystem = _FakeFileSystemAccessHost();
+    final bridge = AppWebViewBridge(
+      userId: 'file-user',
+      nickname: 'File User',
+      fileSystemAccessHost: fileSystem,
+    );
+    addTearDown(bridge.close);
+
+    final denied = await _command(
+      bridge,
+      'app.fileSystem.pickSave',
+      'file-denied',
+    );
+    expect(denied, containsPair('code', 'not_allowed'));
+    expect(fileSystem.commands, isEmpty);
+
+    bridge.recordUserActivation();
+    final selected = await _command(
+      bridge,
+      'app.fileSystem.pickSave',
+      'file-selected',
+      payload: {'suggestedName': 'save.json'},
+    );
+    expect(selected['type'], 'app.command.result');
+    expect(fileSystem.commands, ['pickSave']);
+
+    final consumed = await _command(
+      bridge,
+      'app.fileSystem.pickDirectory',
+      'directory-denied',
+    );
+    expect(consumed, containsPair('code', 'not_allowed'));
+
+    await bridge.resetCapabilities();
+    expect(fileSystem.resetCount, 1);
+  });
 }
 
 Future<Map<String, Object?>> _command(
@@ -1057,6 +1096,22 @@ Future<Map<String, Object?>> _rawCommand(
     response = Map<String, Object?>.from(jsonDecode(message) as Map);
   });
   return response!;
+}
+
+class _FakeFileSystemAccessHost extends PlaymeshFileSystemAccessHost {
+  final List<String> commands = [];
+  int resetCount = 0;
+
+  @override
+  Future<Object?> execute(String command, Map<String, Object?> payload) async {
+    commands.add(command);
+    return {'id': 'file-handle', 'kind': 'file', 'name': 'save.json'};
+  }
+
+  @override
+  Future<void> resetDocument() async {
+    resetCount += 1;
+  }
 }
 
 class _FakeDeviceService extends AppDeviceService {

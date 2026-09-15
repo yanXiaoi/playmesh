@@ -16,7 +16,6 @@ capabilities.json 的 `required` 仅供 entries.game 主画面使用，`controll
 
 公共显示端最小结构：
 
-import { startAuthoritySync } from "../service/index.js";
 await playmesh.ready;
 
 function showError(error) {
@@ -28,6 +27,7 @@ function showError(error) {
 
 try {
   if (playmesh.main.session.isAuthority()) {
+    const { startAuthoritySync } = await import("../service/index.js");
     startAuthoritySync();
   }
 } catch (error) {

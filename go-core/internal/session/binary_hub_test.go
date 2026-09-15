@@ -233,6 +233,9 @@ func TestRPCStreamRoutesHTTPBodyToAuthorityWithoutBinaryPayload(t *testing.T) {
 }
 
 func TestRPCStreamChunkedUploadSupportsHTTP1BrowserTransport(t *testing.T) {
+	if rpcStreamChunkBytes != 1024*1024 {
+		t.Fatalf("rpcStreamChunkBytes = %d, want 1048576", rpcStreamChunkBytes)
+	}
 	server, host, guest, hostSession, guestSession := binaryTestSession(t)
 	defer server.Close()
 	defer hostSession.CloseNow()
@@ -243,7 +246,7 @@ func TestRPCStreamChunkedUploadSupportsHTTP1BrowserTransport(t *testing.T) {
 	guestBinary := dialBinary(t, server.URL, guest)
 	defer guestBinary.CloseNow()
 
-	payload := bytes.Repeat([]byte("browser-http1-stream-"), 8192)
+	payload := bytes.Repeat([]byte("browser-http1-stream-"), 64*1024)
 	query := url.Values{
 		"path":      {"/files/upload"},
 		"timeoutMs": {"5000"},
