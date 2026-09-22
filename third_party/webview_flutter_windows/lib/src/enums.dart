@@ -37,6 +37,15 @@ enum WebviewDownloadEventKind {
 
   /// A download made progress.
   downloadProgress,
+
+  /// Waiting for a system save location.
+  downloadRequested,
+
+  /// The user cancelled the download or save dialog.
+  downloadCancelled,
+
+  /// The browser interrupted the download.
+  downloadFailed,
 }
 
 /// The kind of a forwarded pointer event.

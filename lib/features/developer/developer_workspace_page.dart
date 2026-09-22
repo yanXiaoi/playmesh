@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:playmesh_file_system_access/webview_downloads.dart';
+import 'package:playmesh_file_system_access/webview_download_overlay.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/platform/app_platform.dart';
@@ -36,6 +39,7 @@ class DeveloperWorkspacePage extends StatefulWidget {
 
 class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
   WebViewController? _controller;
+  final _downloads = PlaymeshWebViewDownloads(gameId: null);
   Object? _error;
   int _windowsReloadKey = 0;
   late Uri _windowsEntryUri;
@@ -82,6 +86,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
         )
         ..setNavigationDelegate(
           NavigationDelegate(
+            onPageStarted: (_) => unawaited(_downloads.resetDocument()),
             onNavigationRequest: (request) async {
               final uri = Uri.tryParse(request.url);
               if (uri == null ||
@@ -95,6 +100,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
               return NavigationDecision.prevent;
             },
             onPageFinished: (_) async {
+              await _downloads.installScript();
               await controller.runJavaScript(playmeshExternalNavigationScript);
               await controller.runJavaScript(playmeshNativeFileSaveScript);
               await controller.runJavaScript(playmeshDeveloperFullscreenScript);
@@ -109,6 +115,9 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
             },
           ),
         );
+      if (controller.platform case final AndroidWebViewController android) {
+        await _downloads.attachAndroid(android.webViewIdentifier);
+      }
       await controller.loadRequest(entryUri ?? widget.workspaceUri);
       if (mounted) setState(() => _controller = controller);
     } on Object catch (error) {
@@ -186,7 +195,12 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
       );
     }
     final controller = _controller;
-    if (controller != null) return WebViewWidget(controller: controller);
+    if (controller != null) {
+      return WebViewDownloadOverlay(
+        queue: _downloads.queue,
+        child: WebViewWidget(controller: controller),
+      );
+    }
     if (_usesFlutterWebView) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -359,6 +373,7 @@ class _DeveloperWorkspacePageState extends State<DeveloperWorkspacePage> {
 
   @override
   void dispose() {
+    unawaited(_downloads.dispose());
     if (widget.isGDevelopWorkspace) {
       const releaseScript =
           'void globalThis.__playmeshReleaseGDevelopEditorInstance?.();';

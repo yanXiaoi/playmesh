@@ -10,6 +10,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
     required this.assetPath,
     required this.entryUri,
     required this.title,
+    this.gameId,
     this.bridge,
     this.appBridge,
     this.appSdkInputTakenOver = true,
@@ -26,6 +27,7 @@ class WindowsLocalGameWebView extends StatelessWidget {
   final String assetPath;
   final Uri entryUri;
   final String title;
+  final String? gameId;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
   final bool appSdkInputTakenOver;

@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:playmesh_file_system_access/webview_downloads.dart';
+import 'package:playmesh_file_system_access/webview_download_overlay.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -77,6 +79,7 @@ class RemoteGamePage extends StatefulWidget {
 
 class _RemoteGamePageState extends State<RemoteGamePage> {
   WebViewController? _controller;
+  late final _downloads = PlaymeshWebViewDownloads(gameId: widget.gameId);
   AppWebViewBridge? _appBridge;
   LocalTunnelGateway? _webGateway;
   LocalTunnelGateway? _coreGateway;
@@ -305,6 +308,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
               NavigationDelegate(
                 onNavigationRequest: _handleNavigationRequest,
                 onPageStarted: (_) {
+                  unawaited(_downloads.resetDocument());
                   _handleNavigationStarted();
                   unawaited(
                     _runJavaScript(playmeshGameWindowOpenScript).catchError((
@@ -315,6 +319,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
                   );
                 },
                 onPageFinished: (_) {
+                  unawaited(_downloads.installScript());
                   unawaited(
                     _runJavaScript(playmeshGameWindowOpenScript).catchError((
                       Object error,
@@ -349,6 +354,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
             );
       if (controller.platform case final AndroidWebViewController android) {
         await android.setOnShowFileSelector(_androidFileSelector.select);
+        await _downloads.attachAndroid(android.webViewIdentifier);
       }
       _controller = controller;
       await controller.loadRequest(_launchUri);
@@ -440,6 +446,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
 
   @override
   void dispose() {
+    unawaited(_downloads.dispose());
     _evaluateWindowsJavaScript = null;
     HardwareKeyboard.instance.removeHandler(_recordHardwareUserActivation);
     unawaited(_closeAppLanResources());
@@ -566,6 +573,7 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
         assetPath: _launchUri.path,
         entryUri: _launchUri,
         title: context.tr('game.remote_title'),
+        gameId: widget.gameId,
         appBridge: appBridge,
         gameExternalNavigationEnabled: true,
         onNavigationStarted: _handleNavigationStarted,
@@ -579,7 +587,12 @@ class _RemoteGamePageState extends State<RemoteGamePage> {
       );
     }
     final controller = _controller;
-    if (controller != null) return WebViewWidget(controller: controller);
+    if (controller != null) {
+      return WebViewDownloadOverlay(
+        queue: _downloads.queue,
+        child: WebViewWidget(controller: controller),
+      );
+    }
     if (_usesFlutterWebView) {
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),

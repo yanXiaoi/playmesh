@@ -1,10 +1,13 @@
 #include "webview.h"
 
 #include <wrl.h>
+#include <shobjidl.h>
+#include <winrt/Windows.System.h>
 
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <filesystem>
 #include <iostream>
 
 #include "util/composition.desktop.interop.h"
@@ -108,9 +111,9 @@ Webview::Webview(
   wil::com_ptr<ICoreWebView2Settings> settings;
   const HRESULT settings_result = webview_->get_Settings(settings.put());
 #if defined(PLAYMESH_WEBVIEW_DISABLE_DEVTOOLS)
-  // Opt-in host hardening. The Playmesh standalone Runtime defines this for
-  // its plugin target; other consumers retain the upstream default. Refuse to
-  // create a usable WebView if the setting cannot be enforced.
+  // Opt-in host hardening. Both the Playmesh App and standalone Runtime define
+  // this for their plugin target; other consumers retain the upstream default.
+  // Refuse to create a usable WebView if the setting cannot be enforced.
   if (FAILED(settings_result) || !settings ||
       FAILED(settings->put_AreDevToolsEnabled(FALSE))) {
     return;
@@ -130,6 +133,15 @@ Webview::Webview(
 }
 
 Webview::~Webview() {
+  download_lifetime_.reset();
+  if (download_dialog_) download_dialog_->Close(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+  for (const auto& [id, download] : active_downloads_) download->Cancel();
+  active_downloads_.clear();
+  for (auto& pending : pending_downloads_) {
+    pending.args->put_Cancel(TRUE);
+    pending.deferral->Complete();
+  }
+  pending_downloads_.clear();
   // Drop the focus callback before closing: Close() can synchronously raise
   // LostFocus, and by destruction time the owning bridge's event sink may
   // already be gone.
@@ -493,47 +505,106 @@ void Webview::RegisterEventHandlers() {
         Callback<ICoreWebView2DownloadStartingEventHandler>(
             [this](ICoreWebView2* sender,
                    ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT {
-              // Everything below runs synchronously, so no deferral is taken;
-              // taking one without completing it would leave the event pending.
-              args->put_Handled(TRUE);
-
-              wil::com_ptr<ICoreWebView2DownloadOperation> download;
-              if (FAILED(args->get_DownloadOperation(download.put())) ||
-                  !download) {
-                return S_OK;
-              }
-
-              INT64 totalBytesToReceive = 0;
-              download->get_TotalBytesToReceive(&totalBytesToReceive);
-
-              wil::unique_cotaskmem_string uri;
-              download->get_Uri(&uri);
-
-              wil::unique_cotaskmem_string mimeType;
-              download->get_MimeType(&mimeType);
-
-              wil::unique_cotaskmem_string contentDisposition;
-              download->get_ContentDisposition(&contentDisposition);
-
-              wil::unique_cotaskmem_string resultFilePath;
-              args->get_ResultFilePath(&resultFilePath);
-
-              args->put_ResultFilePath(resultFilePath.get());
-              UpdateDownloadProgress(download.get());
-
-              if (download_event_callback_) {
-                download_event_callback_(
-                    {WebviewDownloadEventKind::DownloadStarted,
-                     util::Utf8FromUtf16(uri.get()),
-                     util::Utf8FromUtf16(resultFilePath.get()), 0,
-                     totalBytesToReceive});
-              }
-
+              ChooseDownloadLocation(args);
               return S_OK;
             })
             .Get(),
         &event_registrations_.download_starting_token_);
   }
+}
+
+void Webview::ChooseDownloadLocation(ICoreWebView2DownloadStartingEventArgs* args) {
+  args->put_Handled(TRUE);
+  args->put_Cancel(TRUE);
+  wil::com_ptr<ICoreWebView2DownloadOperation> download;
+  if (FAILED(args->get_DownloadOperation(download.put()))) return;
+  const auto id = std::to_string(++download_sequence_);
+  active_downloads_[id] = download;
+  EmitDownload(WebviewDownloadEventKind::DownloadRequested, download.get(), id);
+  wil::com_ptr<ICoreWebView2Deferral> deferral;
+  if (FAILED(args->GetDeferral(deferral.put()))) {
+    EmitDownload(WebviewDownloadEventKind::DownloadFailed, download.get(), id, "Cannot defer download");
+    return;
+  }
+  pending_downloads_.push_back({id, args, deferral});
+  ShowNextDownloadDialog();
+}
+
+void Webview::ShowNextDownloadDialog() {
+  if (download_dialog_pending_ || pending_downloads_.empty()) return;
+  const auto item = pending_downloads_.front();
+  pending_downloads_.pop_front();
+  const auto pending = item.args;
+  const auto deferral = item.deferral;
+  const auto id = item.id;
+  const std::weak_ptr<bool> lifetime = download_lifetime_;
+  download_dialog_pending_ = true;
+  try {
+    // Modal UI must run after DownloadStarting returns. The deferral keeps the
+    // original browser download (including cookies, POST and Blob data) alive.
+    const auto queue = winrt::Windows::System::DispatcherQueue::GetForCurrentThread();
+    if (queue && queue.TryEnqueue([this, lifetime, pending, deferral, id]() {
+          bool accepted = false;
+          bool cancelled = false;
+          wil::com_ptr<ICoreWebView2DownloadOperation> download;
+          pending->get_DownloadOperation(download.put());
+          try {
+            if (!lifetime.expired()) {
+              wil::com_ptr<IFileSaveDialog> dialog;
+              wil::unique_cotaskmem_string suggested;
+              pending->get_ResultFilePath(&suggested);
+              if (SUCCEEDED(CoCreateInstance(CLSID_FileSaveDialog, nullptr,
+                      CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put())))) {
+                FILEOPENDIALOGOPTIONS options = 0;
+                dialog->GetOptions(&options);
+                dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST |
+                                   FOS_OVERWRITEPROMPT | FOS_NOCHANGEDIR);
+                const auto filename = suggested
+                    ? std::filesystem::path(suggested.get()).filename().wstring()
+                    : std::wstring(L"download");
+                dialog->SetFileName(filename.c_str());
+                download_dialog_ = dialog;
+                const HRESULT selected = dialog->Show(flutter_view_hwnd_);
+                if (!lifetime.expired()) download_dialog_.reset();
+                cancelled = selected == HRESULT_FROM_WIN32(ERROR_CANCELLED);
+                // Showing a modal dialog pumps messages and may dispose the host.
+                if (SUCCEEDED(selected) && !lifetime.expired()) {
+                  wil::com_ptr<IShellItem> item;
+                  wil::unique_cotaskmem_string path;
+                  if (SUCCEEDED(dialog->GetResult(item.put())) &&
+                      SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) &&
+                      SUCCEEDED(pending->put_ResultFilePath(path.get()))) {
+                    if (download) {
+                      pending->put_Cancel(FALSE);
+                      accepted = true;
+                      UpdateDownloadProgress(download.get(), id);
+                      EmitDownload(WebviewDownloadEventKind::DownloadStarted, download.get(), id);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (...) {
+            pending->put_Cancel(TRUE);
+          }
+          if (!lifetime.expired()) {
+            if (!accepted) EmitDownload(cancelled ? WebviewDownloadEventKind::DownloadCancelled
+                                                 : WebviewDownloadEventKind::DownloadFailed,
+                download.get(), id, cancelled ? "" : "Cannot select download location");
+            download_dialog_pending_ = false;
+          }
+          deferral->Complete();
+          if (!lifetime.expired()) ShowNextDownloadDialog();
+        })) return;
+  } catch (...) {
+    // Failure to create native UI must never silently save to a default path.
+  }
+  download_dialog_pending_ = false;
+  wil::com_ptr<ICoreWebView2DownloadOperation> download;
+  pending->get_DownloadOperation(download.put());
+  EmitDownload(WebviewDownloadEventKind::DownloadFailed, download.get(), id, "Cannot open save dialog");
+  deferral->Complete();
+  ShowNextDownloadDialog();
 }
 
 void Webview::SetSurfaceSize(size_t width, size_t height, float scale_factor) {
@@ -565,11 +636,16 @@ void Webview::SetSurfaceSize(size_t width, size_t height, float scale_factor) {
 }
 
 bool Webview::OpenDevTools() {
+#if defined(PLAYMESH_WEBVIEW_DISABLE_DEVTOOLS)
+  // AreDevToolsEnabled only controls user entry points. Block the native API
+  // as well so callers cannot bypass the host's policy.
+  return false;
+#else
   if (!IsValid()) {
     return false;
   }
-  webview_->OpenDevToolsWindow();
-  return true;
+  return SUCCEEDED(webview_->OpenDevToolsWindow());
+#endif
 }
 
 void Webview::GetCookies(const std::string& uri, GetCookiesCallback callback) {
@@ -1108,26 +1184,34 @@ bool Webview::ClearVirtualHostNameMapping(const std::string& hostName) {
       util::Utf16FromUtf8(hostName).c_str()));
 }
 
-void Webview::UpdateDownloadProgress(ICoreWebView2DownloadOperation* download) {
+void Webview::EmitDownload(WebviewDownloadEventKind kind,
+                          ICoreWebView2DownloadOperation* download,
+                          const std::string& id, const std::string& error) {
+  if (kind == WebviewDownloadEventKind::DownloadCompleted ||
+      kind == WebviewDownloadEventKind::DownloadCancelled ||
+      kind == WebviewDownloadEventKind::DownloadFailed) {
+    active_downloads_.erase(id);
+  }
+  if (!download || !download_event_callback_) return;
+  INT64 received = 0;
+  INT64 total = 0;
+  download->get_BytesReceived(&received);
+  download->get_TotalBytesToReceive(&total);
+  wil::unique_cotaskmem_string uri;
+  wil::unique_cotaskmem_string path;
+  download->get_Uri(&uri);
+  download->get_ResultFilePath(&path);
+  download_event_callback_({kind, uri ? util::Utf8FromUtf16(uri.get()) : "",
+      path ? util::Utf8FromUtf16(path.get()) : "", received, total, id, error});
+}
+
+void Webview::UpdateDownloadProgress(ICoreWebView2DownloadOperation* download, const std::string& id) {
+  const std::weak_ptr<bool> lifetime = download_lifetime_;
   download->add_BytesReceivedChanged(
       Callback<ICoreWebView2BytesReceivedChangedEventHandler>(
-          [this](ICoreWebView2DownloadOperation* download,
+          [this, lifetime, id](ICoreWebView2DownloadOperation* download,
                  IUnknown* args) -> HRESULT {
-            if (download_event_callback_) {
-              INT64 recvd = 0;
-              download->get_BytesReceived(&recvd);
-              INT64 total = 0;
-              download->get_TotalBytesToReceive(&total);
-
-              wil::unique_cotaskmem_string uri;
-              download->get_Uri(&uri);
-              wil::unique_cotaskmem_string resultFilePath;
-              download->get_ResultFilePath(&resultFilePath);
-              download_event_callback_(
-                  {WebviewDownloadEventKind::DownloadProgress,
-                   util::Utf8FromUtf16(uri.get()),
-                   util::Utf8FromUtf16(resultFilePath.get()), recvd, total});
-            }
+            if (!lifetime.expired()) EmitDownload(WebviewDownloadEventKind::DownloadProgress, download, id);
             return S_OK;
           })
           .Get(),
@@ -1135,34 +1219,25 @@ void Webview::UpdateDownloadProgress(ICoreWebView2DownloadOperation* download) {
 
   download->add_StateChanged(
       Callback<ICoreWebView2StateChangedEventHandler>(
-          [this](ICoreWebView2DownloadOperation* download,
+          [this, lifetime, id](ICoreWebView2DownloadOperation* download,
                  IUnknown* args) -> HRESULT {
+            if (lifetime.expired()) return S_OK;
             COREWEBVIEW2_DOWNLOAD_STATE state;
             download->get_State(&state);
             switch (state) {
               case COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS:
                 break;
               case COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED:
-                // Here developer can take different actions based on
-                // `download->InterruptReason`. For example, show an error
-                // message to the end user.
+                {
+                  COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON reason;
+                  download->get_InterruptReason(&reason);
+                  const bool cancelled = reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED;
+                  EmitDownload(cancelled ? WebviewDownloadEventKind::DownloadCancelled : WebviewDownloadEventKind::DownloadFailed,
+                      download, id, cancelled ? "" : "WebView2 download interrupted (reason " + std::to_string(static_cast<int>(reason)) + ")");
+                }
                 break;
               case COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED:
-                if (download_event_callback_) {
-                  wil::unique_cotaskmem_string uri;
-                  download->get_Uri(&uri);
-                  wil::unique_cotaskmem_string resultFilePath;
-                  download->get_ResultFilePath(&resultFilePath);
-                  INT64 recvd = 0;
-                  download->get_BytesReceived(&recvd);
-                  INT64 total = 0;
-                  download->get_TotalBytesToReceive(&total);
-                  download_event_callback_(
-                      {WebviewDownloadEventKind::DownloadCompleted,
-                       util::Utf8FromUtf16(uri.get()),
-                       util::Utf8FromUtf16(resultFilePath.get()), recvd,
-                       total});
-                }
+                EmitDownload(WebviewDownloadEventKind::DownloadCompleted, download, id);
                 break;
             }
             return S_OK;

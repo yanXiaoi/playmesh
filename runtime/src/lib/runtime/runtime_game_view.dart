@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:playmesh_file_system_access/webview_downloads.dart';
+import 'package:playmesh_file_system_access/webview_download_overlay.dart';
 import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -43,6 +45,7 @@ final class RuntimeGameView extends StatefulWidget {
 
 final class _RuntimeGameViewState extends State<RuntimeGameView> {
   WebViewController? _android;
+  late final _downloads = PlaymeshWebViewDownloads(gameId: widget.game.id);
   WebviewController? _windows;
   StreamSubscription<String>? _outbound;
   StreamSubscription<dynamic>? _windowsMessages;
@@ -312,6 +315,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
               NavigationDelegate(
                 onNavigationRequest: _handleNavigationRequest,
                 onPageStarted: (_) {
+                  unawaited(_downloads.resetDocument());
                   _androidNavigationCompleted = false;
                   widget.inputTakenOver.value = false;
                   _resetAndroidWebViewFocus();
@@ -326,6 +330,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
                   );
                 },
                 onPageFinished: (_) {
+                  unawaited(_downloads.installScript());
                   _androidNavigationCompleted = true;
                   unawaited(
                     _executeImmediately(runtimeWindowOpenScript).catchError((
@@ -352,6 +357,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
       if (controller.platform case final AndroidWebViewController android) {
         await android.setMediaPlaybackRequiresUserGesture(false);
         await android.setOnShowFileSelector(_androidFileSelector.select);
+        await _downloads.attachAndroid(android.webViewIdentifier);
       }
       await AndroidWebViewController.enableDebugging(false);
       _android = controller;
@@ -375,6 +381,11 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
       }
       final controller = WebviewController();
       await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      _downloads.attachWindows(controller);
       _windows = controller;
       _windowsExternalNavigation = controller.onExternalNavigationRequested
           .listen((request) {
@@ -508,6 +519,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
 
   @override
   void dispose() {
+    unawaited(_downloads.dispose());
     HardwareKeyboard.instance.removeHandler(_recordHardwareUserActivation);
     widget.inputTakenOver.removeListener(_handleInputOwnershipChanged);
     _androidWebViewFocusRetryTimer?.cancel();
@@ -587,7 +599,7 @@ final class _RuntimeGameViewState extends State<RuntimeGameView> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _handleNativeSystemBack();
       },
-      child: content,
+      child: WebViewDownloadOverlay(queue: _downloads.queue, child: content),
     );
   }
 }

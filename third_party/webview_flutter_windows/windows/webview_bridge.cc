@@ -288,6 +288,8 @@ void WebviewBridge::RegisterEventHandlers() {
              {flutter::EncodableValue("totalBytesToReceive"),
               flutter::EncodableValue(
                   webviewDownloadEvent.totalBytesToReceive)},
+             {flutter::EncodableValue("id"), flutter::EncodableValue(webviewDownloadEvent.id)},
+             {flutter::EncodableValue("error"), flutter::EncodableValue(webviewDownloadEvent.error)},
          })}});
     EmitEvent(event);
   });

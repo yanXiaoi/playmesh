@@ -121,6 +121,11 @@ class PlaymeshFileSystemAccessHost {
         return _same(payload);
       case 'resolve':
         return _resolve(payload);
+      case 'release':
+        _entries.remove(_requiredString(payload, 'id'));
+        return null;
+      case 'downloadDestination':
+        return _entry(payload).path;
       default:
         throw PlaymeshFileSystemAccessException(
           'not_supported',

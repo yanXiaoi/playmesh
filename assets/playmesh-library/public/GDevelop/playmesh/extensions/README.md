@@ -56,6 +56,13 @@ use explicit encoding helpers or opaque handle IDs. Meaningful optional SDK
 arguments always have a separate `Use...` switch because GDevelop's optional
 parameters do not preserve JavaScript `undefined`.
 
+Bucket upload URLs support `GET`, `HEAD` and HTTP byte ranges in both the main
+App and standalone Runtime. Single, open-ended, suffix and multipart ranges
+return `206`; unsatisfiable ranges return `416` with the complete length.
+`HEAD` ignores Range and returns full file metadata without a body. If-Range
+and the existing cache/avatar ETag behavior are preserved. GDevelop uses the
+same URLs; this host bug fix requires no new extension action or SDK version.
+
 Regenerate and verify the extension with:
 
 ```powershell

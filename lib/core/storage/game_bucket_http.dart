@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
+import '../network/http_file_response.dart';
 import 'game_storage_service.dart';
 
 const _standardJsonDigestHeader = 'x-playmesh-content-sha256';
@@ -408,7 +409,8 @@ Future<bool> handleGameBucketRequest(
     return true;
   }
 
-  if (request.method == 'GET' && segments.length == 3) {
+  final isFileRead = request.method == 'GET' || request.method == 'HEAD';
+  if (isFileRead && segments.length == 3) {
     try {
       final file = storage.dataFile(segments[1], segments[2]);
       if (!await file.exists()) {
@@ -435,15 +437,18 @@ Future<bool> handleGameBucketRequest(
           'public, max-age=31536000, immutable',
         );
       }
-      request.response.contentLength = await file.length();
-      await file.openRead().pipe(request.response);
+      await serveHttpFile(
+        request,
+        file,
+        immutable: segments[1] != GameStorageService.systemAvatarBucket,
+      );
     } on FormatException {
       await _text(request.response, HttpStatus.notFound, '文件不存在');
     }
     return true;
   }
 
-  if (request.method != 'GET' && request.method != 'POST') {
+  if (!isFileRead && request.method != 'POST') {
     await _text(request.response, HttpStatus.methodNotAllowed, '不支持的请求');
   } else {
     // 不提供 Bucket 目录枚举，也不暴露 data/json。

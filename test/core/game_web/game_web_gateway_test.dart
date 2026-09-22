@@ -253,6 +253,29 @@ void main() {
       (await http.get(base.resolve('/bucket/replays'))).statusCode,
       HttpStatus.notFound,
     );
+    expect(
+      (await http.head(base.resolve('/bucket/replays'))).statusCode,
+      HttpStatus.notFound,
+    );
+
+    final mediaPath = await storage.upload(
+      bucket: 'replays',
+      originalName: 'round.mp4',
+      data: Stream.value(<int>[1, 2, 255, 4]),
+      contentLength: 4,
+    );
+    final mediaHead = await http.head(base.resolve(mediaPath));
+    expect(mediaHead.statusCode, HttpStatus.ok);
+    expect(mediaHead.bodyBytes, isEmpty);
+    expect(mediaHead.headers[HttpHeaders.contentTypeHeader], 'video/mp4');
+    expect(mediaHead.headers[HttpHeaders.contentLengthHeader], '4');
+    final mediaRange = await http.get(
+      base.resolve(mediaPath),
+      headers: {'Range': 'bytes=-2'},
+    );
+    expect(mediaRange.statusCode, HttpStatus.partialContent);
+    expect(mediaRange.bodyBytes, <int>[255, 4]);
+    expect(mediaRange.headers[HttpHeaders.contentRangeHeader], 'bytes 2-3/4');
 
     final missing = await http.get(base.resolve('/not-found'));
     expect(missing.statusCode, HttpStatus.notFound);

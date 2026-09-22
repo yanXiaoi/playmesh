@@ -33,6 +33,10 @@ LAN 发现、链接/扫码加入、WebRTC 直连或 TURN
 `index.html` 和运行时 `/index.html`；不存在旧的 `/app` URL 前缀。
 `playmesh/` 与 `bucket/` 是 Runtime 保留的根命名空间。
 
+`/bucket/{bucket}/{file}` 与主 App 一致支持 GET、HEAD 和 HTTP 字节 Range；分段读取返回
+206，多段响应使用 multipart/byteranges，全部越界返回 416。HEAD 仍只返回完整文件元数据，
+分享鉴权与私有 JSON 隔离先于范围处理，Game/App SDK 版本不变。
+
 Runtime 覆盖当前 Game SDK 4.3.0（兼容请求 4.1.0–4.3.0）与 App SDK 3.5.0
 （兼容请求 3.2.0–3.5.0）的全部宿主命令。这里的范围按严格语义版本比较且包含端点：
 基线以上的旧 PATCH/MINOR 即使不在历史发行枚举中也会统一使用当前兼容 Bundle；高于当前
@@ -54,6 +58,11 @@ Authority 主机显示。上述实现均位于 Runtime 自有模块，
 等待 App SDK 接管输入期间复用 `packages/playmesh_ui` 的统一黑底加载层，只显示 Playmesh
 标识与转圈。统一加入弹窗发现房间时只在局域网列表内显示扫描动效；分享命令只让菜单中的
 分享按钮进入等待态，并保证宿主分享层先绘制首帧再准备通道。
+
+WebView 文件下载与主 App 共用 `packages/playmesh_file_system_access` 的原生保存链路和
+Flutter 下载叠加层。队列仅存内存、按游戏 ID 隔离；关闭 WebView 取消所有未完成下载，
+保留已完成文件。平台边界与验证说明见
+[WebView 原生下载](../../docs/implementation/webview-downloads.md)。
 
 Runtime 清单方向接受 `landscape`、`portrait`、`system`。固定方向在启动全屏时传给显示
 控制器；`system` 的自动启动只进入全屏并省略方向参数。游戏通过 App SDK 主动传入
@@ -231,6 +240,8 @@ cd runtime/src
 相同版本目录默认禁止覆盖；开发期确认需要重建同一版本时显式传 `-Force`，正式发布应
 提升 `pubspec.yaml` 版本。清单记录真实平台/ABI、文件长度与 SHA-256。Windows 必须以
 完整 ZIP 分发，不能只复制其中的 `playmesh-runtime.exe`。
+Windows 发布门禁同时要求 EXE 文件版本、产品版本与 `pubspec.yaml` 一致，避免生成的
+Flutter 配置残留旧版本号；Ninja 构建使用本次发布参数覆盖生成配置中的版本。
 
 若某个平台构建失败，阶段目录会保留已验证产物。修复原因后使用
 `./tool/build_runtime_packages.ps1 -Resume` 从未完成的平台继续；它会重新验证而不会

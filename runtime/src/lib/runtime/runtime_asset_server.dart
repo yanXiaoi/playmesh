@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../core/game_web/game_web_gateway_contract.dart';
 import '../core/game_web/local_tunnel_gateway_contract.dart';
 import '../core/network/lan_endpoint_resolver.dart';
+import '../core/network/http_file_response.dart';
 import 'runtime_package.dart';
 import 'runtime_platform_ui.dart';
 import 'runtime_storage.dart';
@@ -640,7 +641,8 @@ final class RuntimeAssetServer {
       return;
     }
 
-    if (request.method == 'GET' && segments.length == 3) {
+    final isFileRead = request.method == 'GET' || request.method == 'HEAD';
+    if (isFileRead && segments.length == 3) {
       try {
         final file = storage.dataFile(segments[1], segments[2]);
         if (!await file.exists()) {
@@ -668,8 +670,11 @@ final class RuntimeAssetServer {
             'public, max-age=31536000, immutable',
           );
         }
-        request.response.contentLength = await file.length();
-        await file.openRead().pipe(request.response);
+        await serveHttpFile(
+          request,
+          file,
+          immutable: segments[1] != RuntimeStorage.systemAvatarBucket,
+        );
       } on FormatException {
         request.response.statusCode = HttpStatus.notFound;
         await request.response.close();
@@ -677,8 +682,7 @@ final class RuntimeAssetServer {
       return;
     }
 
-    request.response.statusCode =
-        request.method == 'GET' || request.method == 'POST'
+    request.response.statusCode = isFileRead || request.method == 'POST'
         ? HttpStatus.notFound
         : HttpStatus.methodNotAllowed;
     await request.response.close();

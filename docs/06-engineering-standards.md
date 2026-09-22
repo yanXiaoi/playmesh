@@ -392,13 +392,13 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 - Flutter App 每次形成新的可分发构建时，除语义版本外还必须递增 `+build`；只修改说明文字且不形成新构建时不递增 App 版本。
 - 纯文档勘误、阶段归档或未改变执行约束的提示词整理，不单独推动运行时版本；一旦提示词、Schema、Manifest 或 OpenAPI 反映了新的运行时契约，必须与对应组件在同一变更中升级。
 
-版本按组件独立维护，不升级没有受到影响的组件。当前实现已随 5.1.1 build 38 稳定正式发布；
+版本按组件独立维护，不升级没有受到影响的组件。当前实现为 5.2.0 build 39，
 发布状态与制品边界以版本日志为准：
 
 | 组件 | 当前实现版本 | 版本来源 |
 | --- | --- | --- |
-| Playmesh App | `5.1.1+38` | `pubspec.yaml` |
-| Playmesh Runtime | `2.1.1+13` | `runtime/src/pubspec.yaml` |
+| Playmesh App | `5.2.0+39` | `pubspec.yaml` |
+| Playmesh Runtime | `2.2.0+14` | `runtime/src/pubspec.yaml` |
 | Go Core | `0.7.1` | `go-core/main.go`、`go-core/mobile/core.go` |
 | Core 协议 | `1.6.0` | Flutter/Go health、会话、玩家、WebRTC 与 RPC 流控制协议定义 |
 | Game SDK | `4.3.0` | Dart game feature 注册表及生成的 TS、JS、类型、Manifest 与 Schema |
@@ -410,7 +410,7 @@ the locale prompt directory, and the prompt manifest only—never a language-spe
 | GDevelop Playmesh 扩展 | `2.1.0` | GDevelop 扩展生成脚本与生成的 `Playmesh.json` |
 
 该矩阵描述当前版本常量与生成契约；发布状态和历史版本见
-`docs/version/README.md`、`docs/version/5.1.1.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
+`docs/version/README.md`、`docs/version/5.2.0.md` 与 `docs/version/NEXT.md`，3.0.0 的工程落点见
 `docs/implementation/playmesh-3.0.0-local-implementation.md`。
 
 游戏包的 `main.json.version` 同样使用语义版本，并由游戏开发者在发布内容变化时升级；`sdkVersion` 和 `appSdkVersion` 分别声明 Game SDK 与 App Bridge SDK。CLI 在 `dev/run` 前必须以项目 `playmesh/sdk/` 中实际 SDK 文件的内置版本覆盖这两个字段并与目标 App 精确核对，禁止手工声明不一致版本。CLI 2.0 只接受根 `playmesh-cli.json`；发布内容隔离在 `playmesh/package/`，SDK/类型隔离在 `playmesh/sdk/`，上传只包含必需 `main.json`、可选 `capabilities.json`、可选安全根 `icon.png` 和必需物理 `app/`。`outputDirectory` 和入口都相对于外层 `packageRoot/app/`；首段 `app` 合法，例如入口 `app/index.html` 对应物理 `packageRoot/app/app/index.html` 和运行时 `/app/index.html`。项目平台差异只能通过唯一 `adapter.Registry` 中的 `Adapter` 实现，公共命令不得按 Cocos/语言复制分支或维护第二份适配器实例表。

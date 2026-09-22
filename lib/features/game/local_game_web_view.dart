@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:playmesh_file_system_access/webview_downloads.dart';
+import 'package:playmesh_file_system_access/webview_download_overlay.dart';
 import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -73,6 +75,7 @@ class LocalGameWebView extends StatefulWidget {
 
 class _LocalGameWebViewState extends State<LocalGameWebView> {
   WebViewController? _controller;
+  late final _downloads = PlaymeshWebViewDownloads(gameId: widget.gameId);
   bool _loadFailed = false;
   StreamSubscription<String>? _bridgeSubscription;
   GameAssetGateway? _assetGateway;
@@ -238,6 +241,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   );
                 },
                 onPageStarted: (_) {
+                  unawaited(_downloads.resetDocument());
                   _androidNavigationCompleted = false;
                   _resetAppSdkDocument();
                   widget.onJavaScriptExecutorChanged?.call(null);
@@ -251,6 +255,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   );
                 },
                 onPageFinished: (_) {
+                  unawaited(_downloads.installScript());
                   _androidNavigationCompleted = true;
                   unawaited(
                     _runJavaScript(playmeshGameWindowOpenScript).catchError((
@@ -271,6 +276,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
             );
       if (controller.platform case final AndroidWebViewController android) {
         await android.setOnShowFileSelector(_androidFileSelector.select);
+        await _downloads.attachAndroid(android.webViewIdentifier);
         if (!mounted || generation != _initializationGeneration) {
           if (identical(_assetGateway, gateway)) {
             _assetGateway = null;
@@ -578,6 +584,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
 
   @override
   void dispose() {
+    unawaited(_downloads.dispose());
     _initializationGeneration += 1;
     widget.onSystemBackHandlerChanged?.call(null);
     widget.onJavaScriptExecutorChanged?.call(null);
@@ -611,6 +618,7 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
                   assetPath: widget.entryPath,
                   entryUri: entryUri,
                   title: widget.title,
+                  gameId: widget.gameId,
                   bridge: widget.bridge,
                   appBridge: _appBridge,
                   appSdkInputTakenOver: _appSdkInputTakenOver,
@@ -649,6 +657,9 @@ class _LocalGameWebViewState extends State<LocalGameWebView> {
       onPointerDown: (_) => _appBridge.recordUserActivation(),
       child: content,
     );
+    if (!useWindowsWebView) {
+      content = WebViewDownloadOverlay(queue: _downloads.queue, child: content);
+    }
     if (widget.onSystemBackHandlerChanged != null) return content;
     return PopScope(
       canPop: !_appSdkInputTakenOver,

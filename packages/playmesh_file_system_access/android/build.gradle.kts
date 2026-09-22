@@ -5,6 +5,13 @@ plugins {
     id("com.android.library")
 }
 
+dependencies {
+    implementation(project(":webview_flutter_android"))
+    // Match the version already used by the host's WebView plugin. Its
+    // implementation dependencies are not exported to our compile classpath.
+    implementation("androidx.webkit:webkit:1.15.0")
+}
+
 android {
     namespace = "top.zfjmm.playmesh_file_system_access"
     compileSdk = flutter.compileSdkVersion

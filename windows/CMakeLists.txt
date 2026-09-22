@@ -216,6 +216,13 @@ endif()
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Allow native DevTools in Debug builds; disable them in Profile and Release.
+if(NOT TARGET webview_flutter_windows_plugin)
+  message(FATAL_ERROR "App requires the WebView2 Windows plugin target")
+endif()
+target_compile_definitions(webview_flutter_windows_plugin PRIVATE
+  "$<$<NOT:$<CONFIG:Debug>>:PLAYMESH_WEBVIEW_DISABLE_DEVTOOLS=1>")
+
 # NuGet's WebView2 package exposes its native include/library settings through
 # MSBuild .targets files. Ninja cannot evaluate those files, so mirror the
 # relevant x64 settings when the fallback release builder uses Ninja.

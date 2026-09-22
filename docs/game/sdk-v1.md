@@ -938,7 +938,11 @@ await profile.clearData();
 JSON 数据最终写入开始游戏的 Authority 主机 `packages/{gameId}/data/json/{bucket}.json`，始终保持私有。`upload(...)` 不经过 JSON/Base64，文件以流写入 `packages/{gameId}/data/data/{bucket}/{timestamp-ms}.{ext}`，单文件上限 512 MiB；平台保留安全的字母数字后缀并用毫秒时间戳替换逻辑文件名。
 
 上传返回的 `/bucket/{bucket}/{file}` 是当前游戏运行期间可直接用于 `img/audio/video/fetch`
-的同源地址。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。JSON 网关是
+的同源地址。该文件地址支持 `GET`、`HEAD` 和 HTTP 字节 Range：指定区间、从某位置到末尾、
+末尾若干字节以及多段请求均可读取，成功返回 `206`，无可满足范围返回 `416`。
+`HEAD` 忽略 Range，返回普通 `GET` 的文件类型、完整长度和缓存头，不发送正文；系统头像的
+ETag 条件请求同样适用。`If-Range` 不匹配则返回完整文件。文件不存在或路径无效时返回
+`404`。网页只映射 `data/data`，不提供目录列表，也不会映射 `data/json`。JSON 网关是
 固定绑定当前游戏和会话的 SDK 内部传输，不是游戏可自行构造的公开业务接口；
 `upload(...)` 仍独立使用原始字节：已知长度来源使用普通 `POST`，ReadableStream 使用顺序
 分块会话，并统一写入 `data/data` 目录，绝不与 JSON root 混存。

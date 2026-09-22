@@ -1,6 +1,6 @@
 {
-  "version": "5.1.1",
-  "releaseNotes": "新增 Windows/Android 系统文件选择与安全文件句柄；本机玩家 ID 持久化；多人状态与流式上传容量提升并按真实 Authority 往返计算延迟；游戏包更新保留数据并隔离 Authority 代码，独立 Runtime 三端底包同步重建。",
+  "version": "5.2.0",
+  "releaseNotes": "游戏文件下载自动打开系统保存窗口，新增按游戏区分的下载队列与任务详情；记录仅存内存，关闭游戏停止未完成下载；修复媒体文件 HEAD 与 Range 请求，独立 Runtime 同步更新。",
   "windows": {
     "downloads": [
       {
@@ -17,7 +17,7 @@
     "downloads": [
       {
         "name": "GitHub",
-        "url": "https://github.com/yanXiaoi/playmesh/releases/download/v5.1.1-build38/Playmesh-5.1.1-build38-android-universal.apk"
+        "url": "https://github.com/yanXiaoi/playmesh/releases/download/v5.2.0-build39/Playmesh-5.2.0-build39-android-universal.apk"
       },
       {
         "name": "临时源",

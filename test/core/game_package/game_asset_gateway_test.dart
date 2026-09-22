@@ -89,6 +89,18 @@ void main() {
     final binary = await http.get(gateway.entryUri.resolve(uploadedUrl));
     expect(binary.statusCode, HttpStatus.ok);
     expect(binary.bodyBytes, <int>[0, 1, 255, 7]);
+    final binaryHead = await http.head(gateway.entryUri.resolve(uploadedUrl));
+    expect(binaryHead.statusCode, HttpStatus.ok);
+    expect(binaryHead.bodyBytes, isEmpty);
+    expect(binaryHead.headers[HttpHeaders.contentLengthHeader], '4');
+    final binaryRange = await http.get(
+      gateway.entryUri.resolve(uploadedUrl),
+      headers: {'Range': 'bytes=1-2'},
+    );
+    expect(binaryRange.statusCode, HttpStatus.partialContent);
+    expect(binaryRange.bodyBytes, <int>[1, 255]);
+    expect(binaryRange.headers[HttpHeaders.contentRangeHeader], 'bytes 1-2/4');
+    _expectGameWebViewIsolationHeaders(binaryRange);
 
     final standardInitial = await sendStandardJsonBucketRequest(
       baseUri: gateway.entryUri,

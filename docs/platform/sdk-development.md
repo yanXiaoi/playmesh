@@ -170,6 +170,32 @@ Bucket。App Bucket 只属于调用页面所在的当前设备，其他玩家和
 路径。App Bucket 不提供 `upload()` 或默认跨设备恢复；同步能力也不借道 Authority、Core、
 Relay 或其他设备。本次为 App Bridge SDK `3.3.0` 的兼容补充，不改变 SDK 版本。
 
+Main Bucket 上传后的 `/bucket/{bucket}/{file}` 文件读取由主 App 与 Runtime 的 HTTP
+网关处理。`HEAD` 必须复用普通 `GET` 的路径校验、Content-Type、Content-Length、缓存策略和
+系统头像 ETag 条件请求，只返回响应头，不打开文件内容流；不存在或非法路径继续返回
+`404`，不提供目录枚举或私有 JSON 文件访问。GDevelop 消费同一上传 URL，无需增加扩展
+动作、SDK 方法或桥接命令。此项属于宿主兼容性 Bug 修复，Game/App SDK 版本不变。
+
+该文件接口同时支持 HTTP 字节 Range，用于媒体定位与部分读取。`GET` 的 `bytes=N-M`、
+`bytes=N-`、`bytes=-N` 返回 `206`、准确的 `Content-Range` 与片段 `Content-Length`；
+多段请求返回 `multipart/byteranges`，重叠及相邻范围合并。有效请求中没有可满足范围时
+返回 `416` 与 `Content-Range: bytes */{总长度}`。普通文件响应声明 `Accept-Ranges: bytes`。
+`HEAD` 忽略 Range、返回完整文件元数据；空文件忽略 Range，返回长度为 0 的 `200`。
+
+`If-Range` 使用强 ETag 精确匹配；不可变上传文件另提供 `Last-Modified`，支持日期精确
+匹配。可更新头像继续使用其内容 ETag，不将秒精度日期当作强验证器。验证器不匹配或无效时
+返回完整 `200`；原有头像 `If-None-Match` 命中仍优先返回 `304`。未知单位、格式错误、
+超过 16 个列表元素或 8 KiB 的 Range 忽略并回退完整 `200`，不把请求解析错误当作文件
+不存在。所有片段按文件偏移流式读取，不将完整媒体装入内存。主 App 与 Runtime 保留各自
+网络辅助实现，并通过同一组 HTTP 行为测试验证一致性；不修改公开 SDK 命令或版本。
+协议依据：[RFC 9110 Range](https://www.rfc-editor.org/rfc/rfc9110.html#section-14)、
+[If-Range](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.5)。
+
+WebView 的普通文件下载由宿主自动转交系统保存选择器，并在 Flutter 原生叠加层显示
+下载列表。队列只存内存、按 `gameId` 隔离，关闭 WebView 停止该实例所有未完成任务。
+该能力不走公开 SDK 命令或网页平台覆盖层，Game/App SDK 版本保持不变；主 App 与 Runtime
+共用下载宿主，平台实现与验证边界见 [WebView 原生下载](../implementation/webview-downloads.md)。
+
 `playmesh.app.webrtc.getSignalingEndpoint(identifier)` 是 App Bridge SDK `3.4.0` 的
 通用信令入口。它返回当前会话绑定、单次使用、30 秒过期的 WebSocket URL，以及宿主提供的
 ICE server 配置；`identifier` 用于标识一条由游戏定义的逻辑通道。同一用户可以为不同用途

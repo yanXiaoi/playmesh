@@ -49,6 +49,16 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+# The Ninja release entry point derives these values from pubspec.yaml. Apply
+# them after Flutter's generated configuration, which may contain stale values.
+if(DEFINED PLAYMESH_FLUTTER_VERSION)
+  set(FLUTTER_VERSION "${PLAYMESH_FLUTTER_VERSION}")
+  set(FLUTTER_VERSION_MAJOR "${PLAYMESH_FLUTTER_VERSION_MAJOR}")
+  set(FLUTTER_VERSION_MINOR "${PLAYMESH_FLUTTER_VERSION_MINOR}")
+  set(FLUTTER_VERSION_PATCH "${PLAYMESH_FLUTTER_VERSION_PATCH}")
+  set(FLUTTER_VERSION_BUILD "${PLAYMESH_FLUTTER_VERSION_BUILD}")
+endif()
+
 # The Runtime runner and Go Core build both use the repository Go toolchain.
 # Resolve it once so callers may override GO_EXECUTABLE explicitly.
 find_program(GO_EXECUTABLE go REQUIRED)
@@ -150,14 +160,13 @@ if(TARGET webview_flutter_windows_plugin AND
     "${PLAYMESH_WEBVIEW2_PACKAGE}/build/native/x64/WebView2Loader.dll")
 endif()
 
-# This definition is deliberately applied only by the standalone Runtime's
-# Windows build. The shared WebView plugin remains unchanged for the main App,
-# while every Runtime WebView fails closed unless DevTools can be disabled.
+# Like the main App, allow native DevTools only in Debug builds. Profile and
+# Release WebViews fail closed unless DevTools can be disabled.
 if(NOT TARGET webview_flutter_windows_plugin)
   message(FATAL_ERROR "Runtime requires the WebView2 Windows plugin target")
 endif()
 target_compile_definitions(webview_flutter_windows_plugin PRIVATE
-  PLAYMESH_WEBVIEW_DISABLE_DEVTOOLS=1)
+  "$<$<NOT:$<CONFIG:Debug>>:PLAYMESH_WEBVIEW_DISABLE_DEVTOOLS=1>")
 
 
 # === Installation ===

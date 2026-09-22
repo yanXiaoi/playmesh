@@ -7,8 +7,9 @@
 
 | 版本 | 文档 | 范围 |
 | --- | --- | --- |
+| Playmesh `5.2.0+39` | [5.2.0 版本日志](../version/5.2.0.md) · [WebView 原生下载](webview-downloads.md) | 系统保存、内存下载队列/详情、手动隐藏入口、退出取消、Bucket HEAD/Range；Runtime 2.2.0+14 |
+| Playmesh `5.1.1+38` | [5.1.1 正式版本日志](../version/5.1.1.md) · [WebView File System Access 桥](playmesh-file-system-access-bridge.md) | 原生文件选择、持久玩家 ID、主会话容量、Authority 隔离、流式分块及包更新事务；Runtime 2.1.1+13 |
 | Playmesh `5.1.0+37` | [5.1.0 已公开预发布日志](../version/5.1.0.md) · [SDK 开发约定](../platform/sdk-development.md) | 数据库、流式 RPC、WebRTC、邀请/发现链路、系统方向、项目身份与工具链对齐，Runtime 2.1.0+12 |
-| 未发布 | [WebView File System Access 桥](playmesh-file-system-access-bridge.md) | Windows/Android 打开、保存和目录选择器的标准 API 原生桥接 |
 | Playmesh `4.5.0+33` | [4.5.0 正式版本日志](../version/4.5.0.md) · [SDK 开发约定](../platform/sdk-development.md) | Core 消息条数限制移除、60 Hz 状态同步、主机 WebView 局域网加入菜单、自定义返回和跨平台连接生命周期、Runtime 1.0.2+7 |
 | Playmesh `4.4.0+32` | [4.4.0 正式版本日志](../version/4.4.0.md) · [在线游戏源与 Catalog API](../catalog-api.md) · [SDK 开发约定](../platform/sdk-development.md) | 在线游戏库分页与详情、App 本地同步 JSON Bucket、GDevelop revision 21、Runtime 1.0.2+6 |
 | Playmesh `4.3.1+31` | [4.3.1 正式版本日志](../version/4.3.1.md) · [手动检查 App 更新](playmesh-4.2.0-app-update.md) · [能力插件开发](../platform/capability-development.md) | 语音引擎失败诊断、完整能力自检、紧凑更新弹窗与 Runtime 1.0.2 |
@@ -18,7 +19,7 @@
 
 ## 使用规则
 
-- 已发布基线行为先查 5.1.0 版本文档；当前未发布变化再查 `docs/version/NEXT.md`，随后按
+- 当前发行基线行为先查 5.2.0 版本文档；后续未发布变化再查 `docs/version/NEXT.md`，随后按
   领域查看 `docs/game/`、`docs/platform/` 和
   `docs/catalog-api.md`；3.0.0 实现文档只作为历史基线。
 - 版本状态与升级原因查 `docs/version/`；实际命令和结果查 `docs/verification/`。

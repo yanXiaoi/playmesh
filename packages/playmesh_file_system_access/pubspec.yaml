@@ -11,6 +11,9 @@ dependencies:
   flutter:
     sdk: flutter
   file_selector: ^1.1.0
+  webview_flutter_android: ^4.13.0
+  webview_flutter_windows:
+    path: ../../third_party/webview_flutter_windows
 
 flutter:
   plugin:

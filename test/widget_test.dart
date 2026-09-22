@@ -210,7 +210,7 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Playmesh 5.1.1'), findsOneWidget);
+    expect(find.text('Playmesh 5.2.0'), findsOneWidget);
     expect(find.text('Core 0.1.0'), findsOneWidget);
   });
 

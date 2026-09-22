@@ -6,8 +6,11 @@ import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:playmesh/core/profile/avatar_image.dart';
 import 'package:playmesh/core/storage/game_bucket_http.dart';
 import 'package:playmesh/core/storage/game_storage_service.dart';
+
+import 'bucket_http_range_test_support.dart';
 
 void main() {
   late Directory root;
@@ -64,6 +67,109 @@ void main() {
     await server.close(force: true);
     await storage.close();
     if (await root.exists()) await root.delete(recursive: true);
+  });
+
+  registerBucketHttpRangeTests(
+    upload: (bytes) async => endpoint.resolve(
+      await storage.upload(
+        bucket: 'karaoke-media',
+        originalName: 'video.mp4',
+        data: Stream.value(bytes),
+        contentLength: bytes.length,
+      ),
+    ),
+    uploadAvatar: (bytes, digest) async => endpoint.resolve(
+      await storage.writeUserAvatar(
+        playerId: 'u_range',
+        pngBytes: bytes,
+        sha256: digest,
+      ),
+    ),
+  );
+
+  test('Bucket HEAD 返回与 GET 相同的文件元数据且没有正文', () async {
+    final bytes = <int>[0, 1, 255, 7];
+    final path = await storage.upload(
+      bucket: 'karaoke-media',
+      originalName: 'video.mp4',
+      data: Stream.value(bytes),
+      contentLength: bytes.length,
+    );
+    final uri = endpoint.resolve(path);
+    final get = await http.get(uri);
+    final head = await http.head(uri);
+    expect(get.statusCode, HttpStatus.ok);
+    expect(get.bodyBytes, bytes);
+    expect(head.statusCode, HttpStatus.ok);
+    expect(head.bodyBytes, isEmpty);
+    expect(head.headers[HttpHeaders.contentTypeHeader], 'video/mp4');
+    expect(head.headers[HttpHeaders.contentLengthHeader], '${bytes.length}');
+    for (final header in [
+      HttpHeaders.contentTypeHeader,
+      HttpHeaders.contentLengthHeader,
+      HttpHeaders.cacheControlHeader,
+      'x-content-type-options',
+    ]) {
+      expect(head.headers[header], get.headers[header], reason: header);
+    }
+  });
+
+  test('Bucket HEAD 对不存在、非法和私有路径返回 404', () async {
+    await storage.setData('save', 'secret', 42);
+    await storage.flushAll();
+    for (final path in [
+      '/bucket',
+      '/bucket/karaoke-media',
+      '/bucket/karaoke-media/1790055457170.mp4',
+      '/bucket/karaoke-media/%2Fprivate.mp4',
+      '/bucket/_sys-private/1790055457170.mp4',
+      '/bucket/save/save.json',
+    ]) {
+      final head = await http.head(endpoint.resolve(path));
+      expect(head.statusCode, HttpStatus.notFound, reason: path);
+      expect(head.bodyBytes, isEmpty, reason: path);
+    }
+  });
+
+  test('系统头像 HEAD 保留 ETag 和条件请求语义', () async {
+    final avatar = await AvatarImage.normalize(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0l'
+        'EQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      ),
+    );
+    final path = await storage.writeUserAvatar(
+      playerId: 'u_avatar',
+      pngBytes: avatar.pngBytes,
+      sha256: avatar.sha256,
+    );
+    final uri = endpoint.resolve(path);
+    final get = await http.get(uri);
+    final head = await http.head(uri);
+    expect(head.statusCode, HttpStatus.ok);
+    expect(head.bodyBytes, isEmpty);
+    expect(head.headers[HttpHeaders.contentTypeHeader], 'image/png');
+    expect(
+      head.headers[HttpHeaders.contentLengthHeader],
+      '${avatar.pngBytes.length}',
+    );
+    expect(head.headers[HttpHeaders.cacheControlHeader], 'private, no-cache');
+    expect(
+      head.headers[HttpHeaders.etagHeader],
+      get.headers[HttpHeaders.etagHeader],
+    );
+    final cached = await http.head(
+      uri,
+      headers: {
+        HttpHeaders.ifNoneMatchHeader: get.headers[HttpHeaders.etagHeader]!,
+      },
+    );
+    expect(cached.statusCode, HttpStatus.notModified);
+    expect(cached.bodyBytes, isEmpty);
+    expect(
+      cached.headers[HttpHeaders.etagHeader],
+      head.headers[HttpHeaders.etagHeader],
+    );
   });
 
   test('私有 JSON route fail closed 校验会话、摘要、game 和 bucket', () async {

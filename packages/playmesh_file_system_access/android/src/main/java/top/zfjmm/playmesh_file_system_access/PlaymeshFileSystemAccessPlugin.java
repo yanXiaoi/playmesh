@@ -50,6 +50,7 @@ public final class PlaymeshFileSystemAccessPlugin implements
 
     private Activity activity;
     private MethodChannel channel;
+    private PlaymeshWebViewDownloads downloads;
     private ActivityPluginBinding activityBinding;
     private final Map<String, Entry> entries = new HashMap<>();
     private final Map<String, Writer> writers = new HashMap<>();
@@ -61,12 +62,15 @@ public final class PlaymeshFileSystemAccessPlugin implements
         BinaryMessenger messenger = binding.getBinaryMessenger();
         channel = new MethodChannel(messenger, CHANNEL);
         channel.setMethodCallHandler(this::onMethodCall);
+        downloads = new PlaymeshWebViewDownloads(binding);
     }
 
     @Override
     public void onDetachedFromEngine(FlutterPluginBinding binding) {
         if (channel != null) channel.setMethodCallHandler(null);
         channel = null;
+        if (downloads != null) downloads.close();
+        downloads = null;
         resetDocument();
     }
 
@@ -173,6 +177,13 @@ public final class PlaymeshFileSystemAccessPlugin implements
                 case "resetDocument":
                     resetDocument();
                     result.success(null);
+                    return;
+                case "release":
+                    entries.remove(requiredString(payload, "id"));
+                    result.success(null);
+                    return;
+                case "downloadDestination":
+                    result.success(entry(payload, "id").uri.toString());
                     return;
                 default:
                     result.notImplemented();

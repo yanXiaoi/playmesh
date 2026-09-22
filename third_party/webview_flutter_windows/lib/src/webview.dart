@@ -37,14 +37,22 @@ class WebviewDownloadEvent {
   /// The expected total number of bytes, or 0 if unknown.
   final int totalBytesToReceive;
 
+  /// Stable per-WebView task identity; repeated URLs remain separate tasks.
+  final String id;
+
+  /// Native interruption detail, if any.
+  final String? error;
+
   /// Creates a download event.
   const WebviewDownloadEvent(
     this.kind,
     this.url,
     this.resultFilePath,
     this.bytesReceived,
-    this.totalBytesToReceive,
-  );
+    this.totalBytesToReceive, {
+    this.id = '',
+    this.error,
+  });
 }
 
 /// A top-level navigation that the host should open outside the WebView.
@@ -473,6 +481,8 @@ class WebviewController extends ValueNotifier<WebviewValue> {
           map['value']['resultFilePath'],
           map['value']['bytesReceived'],
           map['value']['totalBytesToReceive'],
+          id: map['value']['id'] as String? ?? '',
+          error: map['value']['error'] as String?,
         );
         _downloadEventStreamController.add(value);
         break;

@@ -653,6 +653,13 @@ function Assert-WindowsRuntimePME1Stream(
 }
 
 function Assert-WindowsRuntimeContract([string]$bundle) {
+    $executablePath = Join-Path $bundle "playmesh-runtime.exe"
+    $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($executablePath)
+    $expectedVersion = "$versionName+$buildNumber"
+    if ($versionInfo.FileVersion -cne $expectedVersion -or
+        $versionInfo.ProductVersion -cne $expectedVersion) {
+        throw "Windows Runtime executable version must be $expectedVersion; got file=$($versionInfo.FileVersion), product=$($versionInfo.ProductVersion)"
+    }
     Assert-RuntimeSdkDirectory $bundle "Windows Runtime bundle"
     $relativePath = "data\flutter_assets\assets\runtime\runtime-contract.json"
     $contractPath = Join-Path $bundle $relativePath

@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:playmesh_file_system_access/webview_downloads.dart';
+import 'package:playmesh_file_system_access/webview_download_overlay.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/developer/developer_event_hub.dart';
@@ -27,6 +30,7 @@ class StandaloneHtmlPage extends StatefulWidget {
 
 class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
   WebViewController? _controller;
+  final _downloads = PlaymeshWebViewDownloads(gameId: null);
   Object? _error;
   int _windowsReloadKey = 0;
 
@@ -62,6 +66,8 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
         })
         ..setNavigationDelegate(
           NavigationDelegate(
+            onPageStarted: (_) => unawaited(_downloads.resetDocument()),
+            onPageFinished: (_) => unawaited(_downloads.installScript()),
             onWebResourceError: (error) {
               recordLocalWebViewConsole(
                 level: 'error',
@@ -77,6 +83,9 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
             },
           ),
         );
+      if (controller.platform case final AndroidWebViewController android) {
+        await _downloads.attachAndroid(android.webViewIdentifier);
+      }
       await controller.loadFile(widget.filePath);
       if (mounted) setState(() => _controller = controller);
     } on Object catch (error) {
@@ -86,6 +95,7 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
 
   @override
   void dispose() {
+    unawaited(_downloads.dispose());
     unawaited(
       const AppDeviceService().setFullscreen(false).catchError((Object _) {}),
     );
@@ -166,7 +176,12 @@ class _StandaloneHtmlPageState extends State<StandaloneHtmlPage> {
       );
     }
     final controller = _controller;
-    if (controller != null) return WebViewWidget(controller: controller);
+    if (controller != null) {
+      return WebViewDownloadOverlay(
+        queue: _downloads.queue,
+        child: WebViewWidget(controller: controller),
+      );
+    }
     if (_usesFlutterWebView) {
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),

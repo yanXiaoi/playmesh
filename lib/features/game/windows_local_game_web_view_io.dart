@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:playmesh_file_system_access/webview_downloads.dart';
+import 'package:playmesh_file_system_access/webview_download_overlay.dart';
 import 'package:playmesh_ui/playmesh_ui.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
@@ -20,6 +22,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
     required this.assetPath,
     required this.entryUri,
     required this.title,
+    this.gameId,
     this.bridge,
     this.appBridge,
     this.appSdkInputTakenOver = true,
@@ -36,6 +39,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
   final String assetPath;
   final Uri entryUri;
   final String title;
+  final String? gameId;
   final GameSdkBridge? bridge;
   final AppWebViewBridge? appBridge;
   final bool appSdkInputTakenOver;
@@ -56,6 +60,7 @@ class WindowsLocalGameWebView extends StatefulWidget {
 
 class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
   final WebviewController _controller = WebviewController();
+  late final _downloads = PlaymeshWebViewDownloads(gameId: widget.gameId);
   Object? _loadError;
   bool _ready = false;
   bool _navigationCompleted = false;
@@ -99,6 +104,8 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       }
 
       await _controller.initialize();
+      if (!mounted) return;
+      _downloads.attachWindows(_controller);
       if (widget.gameExternalNavigationEnabled) {
         _externalNavigationSubscription = _controller
             .onExternalNavigationRequested
@@ -322,10 +329,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
     );
   }
 
-  Future<void> _handleAppBridgeMessage(
-    String message,
-    int generation,
-  ) async {
+  Future<void> _handleAppBridgeMessage(String message, int generation) async {
     final bridge = widget.appBridge;
     if (bridge == null) return;
     // WebView2 是原生子窗口，可信 Enter/Space 可能不会进入 Flutter 的
@@ -388,6 +392,7 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
 
   @override
   void dispose() {
+    unawaited(_downloads.dispose());
     widget.onReloadReady?.call(null);
     widget.onEvaluateJavaScriptReady?.call(null);
     _sdkMessages.dispose();
@@ -412,7 +417,13 @@ class _WindowsLocalGameWebViewState extends State<WindowsLocalGameWebView> {
       return const PlaymeshLoadingView();
     }
 
-    return Webview(_controller, permissionRequested: _handlePermissionRequest);
+    return WebViewDownloadOverlay(
+      queue: _downloads.queue,
+      child: Webview(
+        _controller,
+        permissionRequested: _handlePermissionRequest,
+      ),
+    );
   }
 }
 

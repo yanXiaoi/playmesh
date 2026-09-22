@@ -7,6 +7,10 @@
 #include <winrt/base.h>
 
 #include <functional>
+#include <deque>
+#include <memory>
+#include <map>
+#include <shobjidl.h>
 #include <string>
 #include <vector>
 
@@ -21,7 +25,10 @@ enum class WebviewPointerEventKind { Activate, Down, Enter, Leave, Up, Update };
 enum class WebviewDownloadEventKind {
   DownloadStarted,
   DownloadCompleted,
-  DownloadProgress
+  DownloadProgress,
+  DownloadRequested,
+  DownloadCancelled,
+  DownloadFailed
 };
 
 enum class WebviewPermissionKind {
@@ -67,6 +74,8 @@ struct WebviewDownloadEvent {
   std::string resultFilePath;
   INT64 bytesReceived;
   INT64 totalBytesToReceive;
+  std::string id;
+  std::string error;
 };
 
 struct WebviewExternalNavigationRequest {
@@ -217,7 +226,7 @@ class Webview {
                                  WebviewHostResourceAccessKind accessKind);
   bool ClearVirtualHostNameMapping(const std::string& hostName);
 
-  void UpdateDownloadProgress(ICoreWebView2DownloadOperation* download);
+  void UpdateDownloadProgress(ICoreWebView2DownloadOperation* download, const std::string& id);
 
   void OnUrlChanged(UrlChangedCallback callback) {
     url_changed_callback_ = std::move(callback);
@@ -294,6 +303,17 @@ class Webview {
   WebviewPopupWindowPolicy popup_window_policy_ =
       WebviewPopupWindowPolicy::Allow;
   bool external_navigation_enabled_ = false;
+  std::shared_ptr<bool> download_lifetime_ = std::make_shared<bool>(true);
+  bool download_dialog_pending_ = false;
+  uint64_t download_sequence_ = 0;
+  struct PendingDownload {
+    std::string id;
+    wil::com_ptr<ICoreWebView2DownloadStartingEventArgs> args;
+    wil::com_ptr<ICoreWebView2Deferral> deferral;
+  };
+  std::deque<PendingDownload> pending_downloads_;
+  std::map<std::string, wil::com_ptr<ICoreWebView2DownloadOperation>> active_downloads_;
+  wil::com_ptr<IFileSaveDialog> download_dialog_;
 
   winrt::com_ptr<ABI::Windows::UI::Composition::IVisual> surface_;
   winrt::com_ptr<ABI::Windows::UI::Composition::Desktop::IDesktopWindowTarget>
@@ -327,6 +347,10 @@ class Webview {
       winrt::com_ptr<ABI::Windows::UI::Composition::ICompositor> compositor,
       HWND hwnd, bool offscreen_only);
   void RegisterEventHandlers();
+  void ChooseDownloadLocation(ICoreWebView2DownloadStartingEventArgs* args);
+  void ShowNextDownloadDialog();
+  void EmitDownload(WebviewDownloadEventKind kind, ICoreWebView2DownloadOperation* download,
+                    const std::string& id, const std::string& error = {});
   void EnableSecurityUpdates();
   void SendScroll(double offset, bool horizontal);
 };
